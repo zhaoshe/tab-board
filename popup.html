@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ZipTab</title>
+    <link rel="stylesheet" href="src/styles.css" />
+    <link rel="stylesheet" href="src/popup.css" />
+  </head>
+  <body class="popup-body">
+    <main class="popup-shell">
+      <header class="popup-header">
+        <div class="mark" aria-hidden="true">ZT</div>
+        <div>
+          <h1>ZipTab</h1>
+          <p id="popupStats" class="muted">0 tabs</p>
+        </div>
+      </header>
+      <div class="popup-actions">
+        <button type="button" class="primary" data-action="capture-current-window">Save window</button>
+        <button type="button" data-action="open-manager">Open</button>
+      </div>
+      <label class="search-box popup-search">
+        <span>Search</span>
+        <input id="popupSearch" type="search" autocomplete="off" />
+      </label>
+      <section>
+        <p class="eyebrow">Quick list</p>
+        <ul id="popupQuickList" class="popup-list"></ul>
+      </section>
+    </main>
+    <script type="module" src="src/popup.js"></script>
+  </body>
+</html>

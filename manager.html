@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ZipTab</title>
+    <link rel="stylesheet" href="src/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#groupsList">Skip to saved tabs</a>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navigation">
+        <div class="brand-block">
+          <div class="mark" aria-hidden="true">ZT</div>
+          <div>
+            <h1>ZipTab</h1>
+            <p id="statsLine" class="muted">0 tabs</p>
+          </div>
+        </div>
+
+        <div class="section-heading">
+          <span>Workspace</span>
+          <button type="button" class="small-button" data-action="create-workspace">New</button>
+        </div>
+        <div class="workspace-switcher">
+          <select id="workspaceSelect" data-action="switch-workspace" aria-label="Workspace"></select>
+          <button type="button" class="icon-button" data-action="rename-workspace" title="Rename workspace">Edit</button>
+        </div>
+
+        <label class="search-box">
+          <span>Search</span>
+          <input id="searchInput" type="search" autocomplete="off" />
+        </label>
+
+        <section class="open-tabs-section" aria-label="Open tabs">
+          <div class="section-heading">
+            <span>Open tabs</span>
+            <button type="button" class="small-button" data-action="refresh-open-tabs">Refresh</button>
+          </div>
+          <div id="activeTabsPanel" class="active-tabs-panel"></div>
+        </section>
+
+        <div class="section-heading">
+          <span>Categories</span>
+          <button type="button" class="small-button" data-action="create-folder">New</button>
+        </div>
+        <nav id="folderList" class="folder-list" aria-label="Categories"></nav>
+
+        <div class="button-stack">
+          <button type="button" class="primary" data-action="capture-current-window">Save window</button>
+          <details class="action-menu sidebar-menu">
+            <summary role="button">More</summary>
+            <div class="action-menu-panel">
+              <button type="button" data-action="open-search">Search</button>
+              <button type="button" data-action="restore-all">Restore all</button>
+              <button type="button" data-action="open-bin">Bin</button>
+              <button type="button" data-action="import">Import</button>
+              <button type="button" data-action="import-onetab">Import from OneTab</button>
+              <button type="button" data-action="export-all">Export</button>
+              <button type="button" data-action="open-options">Options</button>
+            </div>
+          </details>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="workspace-header">
+          <div>
+            <p class="eyebrow">Saved sessions</p>
+            <h2 id="viewTitle">All items</h2>
+          </div>
+          <div class="header-actions">
+            <button
+              id="quickPanelToggle"
+              type="button"
+              data-action="toggle-quick-panel"
+              aria-controls="quickPanel"
+              aria-expanded="true"
+            >
+              Hide quick list
+            </button>
+            <button type="button" data-action="collapse-all">Collapse all</button>
+            <button type="button" data-action="expand-all">Expand all</button>
+          </div>
+        </header>
+
+        <div id="selectionBar" class="selection-bar" hidden></div>
+        <section id="groupsList" class="groups-list" data-drop="new-group" aria-label="Saved tab groups"></section>
+      </main>
+
+      <aside id="quickPanel" class="quick-panel" data-drop="quick" aria-label="Quick list"></aside>
+    </div>
+
+    <dialog id="modal" class="modal">
+      <form method="dialog">
+        <header class="modal-header">
+          <h3 id="modalTitle"></h3>
+          <button type="submit" class="icon-button" aria-label="Close">x</button>
+        </header>
+        <div id="modalBody" class="modal-body"></div>
+        <footer id="modalActions" class="modal-actions"></footer>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="src/manager.js"></script>
+  </body>
+</html>

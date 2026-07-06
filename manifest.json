@@ -1,0 +1,59 @@
+{
+  "manifest_version": 3,
+  "name": "ZipTab",
+  "short_name": "ZipTab",
+  "version": "0.1.0",
+  "description": "Save open Chrome tabs into private searchable lists, then restore them one by one or in groups.",
+  "minimum_chrome_version": "115",
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "storage",
+    "unlimitedStorage",
+    "contextMenus",
+    "clipboardRead",
+    "clipboardWrite"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Save tabs to ZipTab",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "options_page": "options.html",
+  "chrome_url_overrides": {
+    "newtab": "manager.html"
+  },
+  "omnibox": {
+    "keyword": "zt"
+  },
+  "commands": {
+    "capture-current-window": {
+      "suggested_key": {
+        "default": "Alt+Shift+1",
+        "mac": "Alt+Shift+1"
+      },
+      "description": "Save all tabs in the current window"
+    },
+    "open-manager": {
+      "suggested_key": {
+        "default": "Alt+Shift+Z",
+        "mac": "Alt+Shift+Z"
+      },
+      "description": "Open ZipTab"
+    }
+  }
+}

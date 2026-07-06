@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ZipTab Options</title>
+    <link rel="stylesheet" href="src/styles.css" />
+    <link rel="stylesheet" href="src/options.css" />
+  </head>
+  <body class="options-body">
+    <main class="options-shell">
+      <header class="options-header">
+        <div>
+          <p class="eyebrow">Preferences</p>
+          <h1>ZipTab Options</h1>
+        </div>
+        <button type="button" data-action="open-manager">Open ZipTab</button>
+      </header>
+
+      <section class="settings-grid" id="settingsGrid"></section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="src/options.js"></script>
+  </body>
+</html>
