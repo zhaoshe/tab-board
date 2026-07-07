@@ -18,12 +18,13 @@
       </header>
       <div class="popup-actions">
         <button type="button" class="primary" data-icon="archive" data-icon-text data-action="capture-current-window">Save window</button>
-        <button type="button" data-icon="external-link" data-icon-text data-action="open-manager">Open</button>
+        <button type="button" data-icon="external-link" data-icon-text data-action="open-manager">Open workspace</button>
       </div>
       <label class="search-box popup-search">
-        <span>Search</span>
-        <input id="popupSearch" type="search" autocomplete="off" />
+        <span class="visually-hidden">Search recent sessions</span>
+        <input id="popupSearch" type="search" autocomplete="off" placeholder="Search recent sessions" />
       </label>
+      <div id="popupFeedback" class="popup-feedback" role="status" aria-live="polite"></div>
       <section>
         <p class="eyebrow">Recent sessions</p>
         <ul id="popupSessionList" class="popup-list"></ul>

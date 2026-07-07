@@ -28,8 +28,14 @@
 
 .popup-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 8px;
+}
+
+.popup-feedback {
+  min-height: 20px;
+  color: var(--muted);
+  font-size: 0.875rem;
 }
 
 .popup-search {

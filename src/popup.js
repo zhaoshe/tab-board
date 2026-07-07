@@ -1,7 +1,9 @@
-import { collectStats, groupMatchesQuery, isRestorableTab, normalizeState } from "./model.js";
+import { collectStats, normalizeState } from "./model.js";
 import { hydrateIconButtons, iconOnlyButton } from "./icons.js";
+import { buildPopupViewModel } from "./popup-view.js";
 import { getState } from "./store.js";
 
+const feedbackNode = document.querySelector("#popupFeedback");
 const statsNode = document.querySelector("#popupStats");
 const listNode = document.querySelector("#popupSessionList");
 const searchInput = document.querySelector("#popupSearch");
@@ -44,15 +46,17 @@ async function handleClick(event) {
 
 function render() {
   const stats = collectStats(state);
+  const model = buildPopupViewModel({ groups: state.groups, query });
   statsNode.textContent = `${stats.savedTabs} saved, ${stats.groups} sessions`;
-  const groups = state.groups.filter((group) => groupMatchesQuery(group, query)).slice(0, 8);
+  feedbackNode.textContent = "";
   listNode.replaceChildren();
-  if (!groups.length) {
-    listNode.append(h("li", { class: "empty-row" }, "No saved sessions"));
+
+  if (!model.groups.length) {
+    listNode.append(h("li", { class: "empty-row" }, model.emptyMessage));
     return;
   }
-  for (const group of groups) {
-    const restorableCount = group.tabs.filter(isRestorableTab).length;
+
+  for (const group of model.groups) {
     listNode.append(
       h(
         "li",
@@ -61,14 +65,14 @@ function render() {
           "span",
           { class: "popup-session-main" },
           h("strong", {}, group.title),
-          h("small", {}, `${restorableCount} links`)
+          h("small", {}, `${group.restorableCount} links`)
         ),
-        restorableCount
+        group.restorableCount
           ? iconOnlyButton("rotate-ccw", "Restore session", {
               "data-action": "restore-group",
               "data-group-id": group.id
             })
-          : h("span", { class: "muted" }, "Empty")
+          : h("span", { class: "muted" }, "No links")
       )
     );
   }
