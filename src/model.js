@@ -33,6 +33,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   theme: "system"
 });
 
+export function isKnownSettingKey(key) {
+  return Object.hasOwn(DEFAULT_SETTINGS, key);
+}
+
 const TASK_NONE = "none";
 export const ITEM_LINK = "link";
 export const ITEM_NOTE = "note";
@@ -106,7 +110,7 @@ export function normalizeState(raw) {
     categoryOrderByWorkspace: normalizeCategoryOrderByWorkspace(raw.categoryOrderByWorkspace, workspaceIds),
     quickList: Array.isArray(raw.quickList) ? raw.quickList.map(normalizeTab).filter(Boolean) : [],
     bin: Array.isArray(raw.bin) ? compactBin(raw.bin.map(normalizeBinEntry).filter(Boolean)) : [],
-    settings: { ...DEFAULT_SETTINGS, ...(raw.settings || {}) },
+    settings: normalizeSettings(raw.settings),
     createdAt: raw.createdAt || base.createdAt,
     updatedAt: raw.updatedAt || raw.createdAt || base.updatedAt
   };
@@ -135,6 +139,19 @@ export function normalizeState(raw) {
   );
 
   return state;
+}
+
+function normalizeSettings(raw) {
+  const settings = { ...DEFAULT_SETTINGS };
+  if (!raw || typeof raw !== "object") {
+    return settings;
+  }
+  for (const key of Object.keys(DEFAULT_SETTINGS)) {
+    if (Object.hasOwn(raw, key)) {
+      settings[key] = raw[key];
+    }
+  }
+  return settings;
 }
 
 function normalizeSessionActionOrder(raw) {

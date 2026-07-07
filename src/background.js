@@ -10,7 +10,7 @@ import {
   sortCapturedTabs,
   tabMatchesQuery
 } from "./model.js";
-import { ensureState, getSettings, getState, setState, updateState } from "./store.js";
+import { ensureState, getSettings, getState, updateState } from "./store.js";
 
 const MANAGER_PAGE = "manager.html";
 const POPUP_PAGE = "popup.html";
@@ -408,12 +408,11 @@ async function restoreTab({ source = "group", groupId = "", tabId = "" }) {
   if (!isRestorableTab(found.tab)) {
     throw new Error("This item is not a restorable link");
   }
-  await createChromeTabs([found.tab], { newWindow: false, settings });
-  if (settings.deleteRestoredTabs && !found.group?.locked) {
-    removeRefsFromState(state, [{ source, groupId, tabId }]);
-    await setState(state);
+  const created = await createChromeTabs([found.tab], { newWindow: false, settings });
+  if (settings.deleteRestoredTabs && !found.group?.locked && created.length) {
+    await removeRestoredRefs([{ source, groupId, tabId }]);
   }
-  return { restoredTabs: 1 };
+  return { restoredTabs: created.length };
 }
 
 async function restoreGroup(groupId) {
@@ -423,18 +422,16 @@ async function restoreGroup(groupId) {
     throw new Error("Saved group not found");
   }
   const tabs = group.tabs.filter(isRestorableTab);
-  await createChromeTabs(tabs, {
+  const created = await createChromeTabs(tabs, {
     newWindow: state.settings.restoreGroupsInNewWindow,
     settings: state.settings
   });
-  if (state.settings.deleteRestoredTabs && !group.locked) {
-    removeRefsFromState(
-      state,
-      tabs.map((tab) => ({ source: "group", groupId, tabId: tab.id }))
+  if (state.settings.deleteRestoredTabs && !group.locked && created.length) {
+    await removeRestoredRefs(
+      created.map(({ record }) => ({ source: "group", groupId, tabId: record.id }))
     );
-    await setState(state);
   }
-  return { restoredTabs: tabs.length };
+  return { restoredTabs: created.length };
 }
 
 async function restoreRefs(refs) {
@@ -443,36 +440,34 @@ async function restoreRefs(refs) {
   const found = refs.map((ref) => findTabRef(state, ref)).filter(Boolean);
   const restorable = found.filter((item) => isRestorableTab(item.tab));
   const tabs = restorable.map((item) => item.tab);
-  await createChromeTabs(tabs, { newWindow: false, settings });
-  if (settings.deleteRestoredTabs) {
+  const created = await createChromeTabs(tabs, { newWindow: false, settings });
+  if (settings.deleteRestoredTabs && created.length) {
+    const createdIds = new Set(created.map(({ record }) => record.id));
     const removableRefs = restorable
-      .filter((item) => !item.group?.locked)
+      .filter((item) => createdIds.has(item.tab.id) && !item.group?.locked)
       .map((item) => ({ source: item.source, groupId: item.group?.id || "", tabId: item.tab.id }));
-    removeRefsFromState(state, removableRefs);
-    await setState(state);
+    await removeRestoredRefs(removableRefs);
   }
-  return { restoredTabs: tabs.length };
+  return { restoredTabs: created.length };
 }
 
 async function restoreAll() {
   const state = await getState();
-  const tabs = state.groups.flatMap((group) => group.tabs).filter(isRestorableTab);
-  await createChromeTabs(tabs, {
+  const restorable = state.groups.flatMap((group) =>
+    group.tabs.filter(isRestorableTab).map((tab) => ({ group, tab }))
+  );
+  const created = await createChromeTabs(restorable.map(({ tab }) => tab), {
     newWindow: state.settings.restoreGroupsInNewWindow,
     settings: state.settings
   });
-  if (state.settings.deleteRestoredTabs) {
-    const refs = state.groups
-      .filter((group) => !group.locked)
-      .flatMap((group) =>
-        group.tabs
-          .filter(isRestorableTab)
-          .map((tab) => ({ source: "group", groupId: group.id, tabId: tab.id }))
-      );
-    removeRefsFromState(state, refs);
-    await setState(state);
+  if (state.settings.deleteRestoredTabs && created.length) {
+    const createdIds = new Set(created.map(({ record }) => record.id));
+    const refs = restorable
+      .filter(({ group, tab }) => createdIds.has(tab.id) && !group.locked)
+      .map(({ group, tab }) => ({ source: "group", groupId: group.id, tabId: tab.id }));
+    await removeRestoredRefs(refs);
   }
-  return { restoredTabs: tabs.length };
+  return { restoredTabs: created.length };
 }
 
 async function createChromeTabs(records, { newWindow, settings }) {
@@ -484,28 +479,37 @@ async function createChromeTabs(records, { newWindow, settings }) {
   const focusFirst = settings.focusRestoredTabs !== false;
 
   if (newWindow) {
-    const first = await chrome.windows.create({ url: records[0].url, focused: true });
-    const firstTab = first.tabs?.[0];
-    if (firstTab) {
-      created.push({ tab: firstTab, record: records[0] });
-    }
-    for (const record of records.slice(1)) {
-      const tab = await chrome.tabs.create({
-        windowId: first.id,
-        url: record.url,
-        active: false
-      });
-      created.push({ tab, record });
+    let windowId = null;
+    for (const record of records) {
+      try {
+        if (!Number.isFinite(windowId)) {
+          const nextWindow = await chrome.windows.create({ url: record.url, focused: focusFirst && !created.length });
+          windowId = nextWindow.id;
+          const firstTab = nextWindow.tabs?.[0];
+          if (firstTab) {
+            created.push({ tab: firstTab, record });
+          }
+          continue;
+        }
+        const tab = await chrome.tabs.create({
+          windowId,
+          url: record.url,
+          active: false
+        });
+        created.push({ tab, record });
+      } catch {
+        // Keep failed records saved so users can retry or copy the URL.
+      }
     }
   } else {
     const activeTab = await getActiveTab();
     let nextIndex = settings.restoreNextToCurrent && Number.isFinite(activeTab?.index)
       ? activeTab.index + 1
       : undefined;
-    for (const [index, record] of records.entries()) {
+    for (const record of records) {
       const createProperties = {
         url: record.url,
-        active: focusFirst && index === 0
+        active: focusFirst && !created.length
       };
       if (activeTab?.windowId) {
         createProperties.windowId = activeTab.windowId;
@@ -513,13 +517,17 @@ async function createChromeTabs(records, { newWindow, settings }) {
       if (Number.isFinite(nextIndex)) {
         createProperties.index = nextIndex++;
       }
-      const tab = await chrome.tabs.create(createProperties);
-      created.push({ tab, record });
+      try {
+        const tab = await chrome.tabs.create(createProperties);
+        created.push({ tab, record });
+      } catch {
+        // Keep failed records saved so users can retry or copy the URL.
+      }
     }
   }
 
   await restoreBrowserGroups(created);
-  return created.map((item) => item.tab);
+  return created;
 }
 
 async function restoreBrowserGroups(created) {
@@ -563,6 +571,16 @@ function findTabRef(state, ref) {
   const group = state.groups.find((item) => item.id === ref.groupId);
   const tab = group?.tabs.find((item) => item.id === ref.tabId);
   return group && tab ? { source: "group", group, tab } : null;
+}
+
+async function removeRestoredRefs(refs) {
+  if (!refs.length) {
+    return;
+  }
+  await updateState((draft) => {
+    removeRefsFromState(draft, refs);
+    return draft;
+  });
 }
 
 function removeRefsFromState(state, refs) {
@@ -619,26 +637,34 @@ async function openManager({ windowId, query = "" } = {}) {
 async function listOpenTabs() {
   const settings = await getSettings();
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
-  return {
-    windows: windows.map((window) => ({
+  const openWindows = [];
+  for (const window of windows) {
+    const tabs = [];
+    for (const tab of window.tabs || []) {
+      if (!canCaptureTab(tab, settings)) {
+        continue;
+      }
+      tabs.push({
+        id: tab.id,
+        windowId: tab.windowId,
+        title: tab.title || tab.url || "Untitled",
+        url: tab.url || "",
+        favIconUrl: tab.favIconUrl || "",
+        active: Boolean(tab.active),
+        pinned: Boolean(tab.pinned),
+        index: tab.index || 0,
+        browserGroup: await readBrowserGroup(tab),
+        storable: true
+      });
+    }
+    openWindows.push({
       id: window.id,
       focused: Boolean(window.focused),
       incognito: Boolean(window.incognito),
-      tabs: (window.tabs || [])
-        .filter((tab) => canCaptureTab(tab, settings))
-        .map((tab) => ({
-          id: tab.id,
-          windowId: tab.windowId,
-          title: tab.title || tab.url || "Untitled",
-          url: tab.url || "",
-          favIconUrl: tab.favIconUrl || "",
-          active: Boolean(tab.active),
-          pinned: Boolean(tab.pinned),
-          index: tab.index || 0,
-          storable: true
-        }))
-    }))
-  };
+      tabs
+    });
+  }
+  return { windows: openWindows };
 }
 
 async function getActiveTab() {

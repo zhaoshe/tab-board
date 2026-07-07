@@ -1,4 +1,4 @@
-import { DEFAULT_SESSION_EXTERNAL_ACTIONS, DEFAULT_SETTINGS, SESSION_ACTION_IDS } from "./model.js";
+import { DEFAULT_SESSION_EXTERNAL_ACTIONS, DEFAULT_SETTINGS, SESSION_ACTION_IDS, isKnownSettingKey } from "./model.js";
 import { hydrateIconButtons, iconOnlyButton, iconTextButton } from "./icons.js";
 import { getState, updateState } from "./store.js";
 
@@ -66,6 +66,9 @@ async function handleChange(event) {
     return;
   }
   const key = target.dataset.setting;
+  if (!isKnownSettingKey(key)) {
+    return;
+  }
   const value = target.type === "checkbox" ? target.checked : target.value;
   await updateState((draft) => {
     draft.settings[key] = value;

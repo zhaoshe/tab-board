@@ -398,12 +398,16 @@ async function handleDrop(event) {
   event.preventDefault();
   const raw = event.dataTransfer.getData("application/json");
   if (!raw) {
-    activeDragKind = "";
-    updateDragUi();
-    removeGroupInsertMarker();
+    handleDragEnd();
     return;
   }
-  const payload = JSON.parse(raw);
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    handleDragEnd();
+    return;
+  }
   const drop = dropTarget.dataset.drop;
   const insertPosition = groupInsertPosition(event, dropTarget);
   const tabPlacement = drop === "tab-before" ? tabPlacementFromEvent(dropTarget, event) : "before";
@@ -2277,7 +2281,7 @@ async function addOpenTabsToNewGroup(tabIds, categoryFilter = activeFilter, posi
   await updateState((draft) => {
     insertGroupAtCategoryPosition(
       draft,
-      createGroupFromTabRecords(tabs.map((tab) => createTabRecord(tab)), {
+      createGroupFromTabRecords(tabs.map((tab) => createTabRecord(tab, { browserGroup: tab.browserGroup })), {
         workspaceId: activeWorkspaceId
       }),
       categoryFilter,
@@ -2304,7 +2308,7 @@ async function addOpenTabsToGroup(tabIds, targetGroupId, targetTabId = "", place
     if (!target) {
       return draft;
     }
-    const records = tabs.map((tab) => createTabRecord(tab));
+    const records = tabs.map((tab) => createTabRecord(tab, { browserGroup: tab.browserGroup }));
     const index = targetTabId ? target.tabs.findIndex((item) => item.id === targetTabId) : -1;
     if (index >= 0) {
       target.tabs.splice(placement === "after" ? index + 1 : index, 0, ...records);
