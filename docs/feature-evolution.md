@@ -415,12 +415,48 @@ Starred 已经是一个内置 category，用户认为 session card 上的金色�
 - New session 不再作为每个 category 尾部的常驻卡片展示，只在拖拽时作为占位出现，避免与拖拽 placeholder 同时出现。
 - 多选 saved tabs 也可以拖到已有 session 中，按源 session 内顺序追加或插入。
 - 拖动 session 时，目标位置会插入 Move here placeholder，松手后 session 就出现在该位置。
+- 拖动 session 一开始就在原位置插入 Move here placeholder，未计算出新目标时默认保持起始位置。
+- 拖动 session 时使用独立拖拽影像跟随鼠标，Move here placeholder 接管原卡片布局位置；鼠标经过 Move here placeholder 时不重新计算位置，减少拖拽抖动。
+- session 本体不再作为“合并到另一个 session”的 drop 结果，只用于计算 Move here placeholder 的前后位置，避免把 A 拖进 B 的误操作。
+- session dragstart 会立即把 Move here placeholder 种在源 session 原位置，避免第一次 dragover 命中 category 空白区时把 placeholder 放到列表尾部。
+- session 拖拽影像使用源卡片原位置的可见 clone 生成，避免浏览器无法截取视口外 drag image 时出现“一拖就消失”。
 - 通过 Current window 或插件图标捕获创建的 session 仍出现在当前 workspace 头部。
 
 判断：
 
 - 拖拽是更高频的创建方式，常驻 New session 会与拖拽 placeholder 同时出现，反而增加判断成本。
 - 捕获创建代表“刚刚保存的当前上下文”，放在头部；拖拽整理要尊重用户手势，按占位位置插入。
+
+### 2026-07-07: 搜索框移入 workspace 顶栏
+
+用户希望将左侧 sidebar 的搜索框移动到 workspace 顶部空白区域。
+
+变化：
+
+- 全局搜索输入框从 sidebar 移到 workspace header 右侧。
+- 搜索 label 改为视觉隐藏，输入框使用 placeholder，避免撑高顶栏。
+- 窄屏下搜索框换行占满 header 宽度，避免挤压 workspace 切换控件。
+
+判断：
+
+- 左侧 sidebar 的核心任务是 open tabs 和 categories，搜索放在主内容顶栏更接近 saved sessions 的过滤结果。
+- 搜索框继续复用原 `#searchInput`，保留 `/` 快捷键聚焦和现有过滤逻辑。
+
+### 2026-07-07: Sidebar 底部动作展开
+
+用户希望底部 More 菜单不再折叠，并移除不常用或重复入口。
+
+变化：
+
+- 底部动作区改为常驻展开按钮。
+- 仅保留 Bin、Import、Export、Options。
+- 移除单独的 Import from OneTab 入口；普通 Import 默认支持 OneTab 导出文本。
+- 调换 sidebar 中 Import 和 Export 的图标方向：Import 使用进入/向下图标，Export 使用出去/向上图标。
+
+判断：
+
+- Search 已移入 workspace 顶栏，Restore all 不再适合占用 sidebar 常驻底部动作。
+- OneTab 只是导入格式之一，能力应并入 Import，而不是作为独立产品入口。
 
 ## 待观察问题
 

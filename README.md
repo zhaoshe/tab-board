@@ -17,6 +17,9 @@ ZipTab also replaces Chrome's new tab page, so every new tab opens the ZipTab ma
 ## Product Docs
 
 - [Docs index](docs/README.md)
+- [Project overview](docs/project-overview.md)
+- [Feature spec](docs/feature-spec.md)
+- [Technical architecture](docs/technical-architecture.md)
 - [Feature evolution](docs/feature-evolution.md)
 - [Product decisions](docs/product-decisions.md)
 - [Product story](docs/product-story.md)

@@ -4,6 +4,9 @@
 
 ## 文档地图
 
+- [Project Overview](project-overview.md): 总结项目定位、目标、边界、当前状态和成功标准。
+- [Feature Spec](feature-spec.md): 描述当前功能面、入口、交互规则和 legacy 能力。
+- [Technical Architecture](technical-architecture.md): 描述 extension 架构、数据模型、关键流程和验证方式。
 - [Feature Evolution](feature-evolution.md): 记录功能从哪里来、什么时候变化、当前状态是什么。
 - [Product Decisions](product-decisions.md): 记录关键决策的背景、取舍、结果和后续观察点。
 - [Product Story](product-story.md): 记录面向用户或评审时怎么介绍 ZipTab。

@@ -19,7 +19,6 @@ import {
   itemTypeLabel,
   normalizeState,
   nowIso,
-  parseImportText,
   parseOneTabText,
   tabMatchesQuery,
   tabsToText
@@ -208,8 +207,6 @@ async function handleClick(event) {
       openExportModal(state.groups);
     } else if (action === "import") {
       openImportModal();
-    } else if (action === "import-onetab") {
-      openOneTabImportModal();
     } else if (action === "create-workspace") {
       await createNewWorkspace();
     } else if (action === "rename-workspace") {
@@ -362,26 +359,26 @@ function handleDragStart(event) {
   updateDragUi();
   event.dataTransfer.effectAllowed = payload.kind === "open-tabs" ? "copy" : "move";
   event.dataTransfer.setData("application/json", JSON.stringify(payload));
-  markDragSources(payload, draggable);
+  markDragSources(payload, draggable, event);
 }
 
 function handleDragOver(event) {
-  const dropTarget = event.target.closest("[data-drop]");
+  const dropTarget = closestSupportedDropTarget(event.target);
   if (!dropTarget) {
     return;
   }
-  if (!canDropActivePayload(dropTarget.dataset.drop)) {
-    return;
-  }
+  const drop = dropTarget.dataset.drop;
   event.preventDefault();
-  dropTarget.classList.add("drag-over");
-  if (dropTarget.dataset.drop === "tab-before") {
+  if (!(activeDragKind === "group" && drop === "group-body")) {
+    dropTarget.classList.add("drag-over");
+  }
+  if (drop === "tab-before") {
     updateTabDropLine(event, dropTarget);
     removeGroupInsertMarker();
-  } else if (dropTarget.dataset.drop === "category-reorder") {
+  } else if (drop === "category-reorder") {
     const rect = dropTarget.getBoundingClientRect();
     dropTarget.classList.toggle("category-drop-after", event.clientY > rect.top + rect.height / 2);
-  } else if (shouldShowGroupInsertMarker(dropTarget.dataset.drop)) {
+  } else if (shouldShowGroupInsertMarker(drop)) {
     updateGroupInsertMarker(event, dropTarget);
   } else {
     removeGroupInsertMarker();
@@ -394,7 +391,7 @@ function handleDragLeave(event) {
 }
 
 async function handleDrop(event) {
-  const dropTarget = event.target.closest("[data-drop]");
+  const dropTarget = closestSupportedDropTarget(event.target);
   if (!dropTarget) {
     return;
   }
@@ -410,9 +407,11 @@ async function handleDrop(event) {
   const drop = dropTarget.dataset.drop;
   const insertPosition = groupInsertPosition(event, dropTarget);
   const tabPlacement = drop === "tab-before" ? tabPlacementFromEvent(dropTarget, event) : "before";
+  const hadGroupInsertMarker =
+    Boolean(groupInsertMarker?.isConnected) || Boolean(dropTarget.closest(".group-insert-marker"));
 
-  document.querySelectorAll(".drag-over, .dragging, .category-drop-after, .tab-drop-before, .tab-drop-after").forEach((node) => {
-    node.classList.remove("drag-over", "dragging", "category-drop-after", "tab-drop-before", "tab-drop-after");
+  document.querySelectorAll(".drag-over, .dragging, .drag-origin, .category-drop-after, .tab-drop-before, .tab-drop-after").forEach((node) => {
+    node.classList.remove("drag-over", "dragging", "drag-origin", "category-drop-after", "tab-drop-before", "tab-drop-after");
   });
   removeGroupInsertMarker();
 
@@ -446,9 +445,7 @@ async function handleDrop(event) {
     await addOpenTabsToGroup(payload.tabIds, dropTarget.dataset.groupId, dropTarget.dataset.tabId, tabPlacement);
   } else if (payload.kind === "group" && drop === "group-before") {
     await moveGroupBefore(payload.groupId, dropTarget.dataset.groupId);
-  } else if (payload.kind === "group" && drop === "group-insert") {
-    await moveGroupToCategory(payload.groupId, insertPosition?.categoryFilter || CATEGORY_INBOX, insertPosition);
-  } else if (payload.kind === "group" && drop === "group-body") {
+  } else if (payload.kind === "group" && (drop === "group-insert" || (drop === "group-body" && hadGroupInsertMarker))) {
     await moveGroupToCategory(payload.groupId, insertPosition?.categoryFilter || CATEGORY_INBOX, insertPosition);
   } else if (payload.kind === "group" && drop === "category-column") {
     await moveGroupToCategory(payload.groupId, dropTarget.dataset.categoryFilter || CATEGORY_INBOX, insertPosition);
@@ -465,8 +462,8 @@ function handleDragEnd() {
   activeDragKind = "";
   updateDragUi();
   removeGroupInsertMarker();
-  document.querySelectorAll(".drag-over, .dragging, .category-drop-after, .tab-drop-before, .tab-drop-after").forEach((node) => {
-    node.classList.remove("drag-over", "dragging", "category-drop-after", "tab-drop-before", "tab-drop-after");
+  document.querySelectorAll(".drag-over, .dragging, .drag-origin, .category-drop-after, .tab-drop-before, .tab-drop-after").forEach((node) => {
+    node.classList.remove("drag-over", "dragging", "drag-origin", "category-drop-after", "tab-drop-before", "tab-drop-after");
   });
 }
 
@@ -486,7 +483,7 @@ function tabPlacementFromEvent(tabRow, event) {
   return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
 }
 
-function markDragSources(payload, fallbackNode) {
+function markDragSources(payload, fallbackNode, event) {
   if (payload.kind === "open-tabs" && payload.tabIds?.length > 1) {
     const ids = new Set(payload.tabIds.map(String));
     document.querySelectorAll(".active-tab-row[data-open-tab-id]").forEach((row) => {
@@ -496,7 +493,49 @@ function markDragSources(payload, fallbackNode) {
     });
     return;
   }
+  if (payload.kind === "group") {
+    fallbackNode.classList.add("drag-origin");
+    setGroupDragImage(event, fallbackNode);
+    seedGroupDragMarker(fallbackNode);
+    requestAnimationFrame(() => fallbackNode.classList.add("dragging"));
+    return;
+  }
   fallbackNode.classList.add("dragging");
+}
+
+function closestSupportedDropTarget(target) {
+  let node = target;
+  if (node && !node.closest) {
+    node = node.parentElement || node.parentNode;
+  }
+  let dropTarget = node?.closest?.("[data-drop]") || null;
+  while (dropTarget && !canDropActivePayload(dropTarget.dataset.drop)) {
+    dropTarget = dropTarget.parentElement?.closest("[data-drop]") || null;
+  }
+  return dropTarget;
+}
+
+function setGroupDragImage(event, sourceCard) {
+  if (!event?.dataTransfer?.setDragImage) {
+    return;
+  }
+  const rect = sourceCard.getBoundingClientRect();
+  const ghost = sourceCard.cloneNode(true);
+  ghost.style.width = `${rect.width}px`;
+  ghost.style.position = "fixed";
+  ghost.style.top = `${Math.max(0, Math.min(rect.top, window.innerHeight - rect.height))}px`;
+  ghost.style.left = `${Math.max(0, Math.min(rect.left, window.innerWidth - rect.width))}px`;
+  ghost.style.zIndex = "1000";
+  ghost.style.pointerEvents = "none";
+  ghost.style.opacity = "0.92";
+  ghost.style.transform = "none";
+  document.body.append(ghost);
+  event.dataTransfer.setDragImage(
+    ghost,
+    Math.max(0, Math.min(rect.width, event.clientX - rect.left)),
+    Math.max(0, Math.min(rect.height, event.clientY - rect.top))
+  );
+  requestAnimationFrame(() => requestAnimationFrame(() => ghost.remove()));
 }
 
 function canDropActivePayload(drop) {
@@ -509,7 +548,10 @@ function canDropActivePayload(drop) {
   if (activeDragKind === "tab" || activeDragKind === "tabs" || activeDragKind === "open-tabs") {
     return ["group-body", "tab-before", "new-group", "category-column", "group-insert"].includes(drop);
   }
-  return drop !== "category-reorder";
+  if (activeDragKind === "group") {
+    return ["group-body", "category-column", "group-insert"].includes(drop);
+  }
+  return false;
 }
 
 function updateDragUi() {
@@ -529,7 +571,27 @@ function shouldShowGroupInsertMarker(drop) {
   return false;
 }
 
+function seedGroupDragMarker(sourceCard) {
+  const section = sourceCard.closest(".category-section");
+  const grid = sourceCard.closest(".category-section-grid");
+  if (!section || !grid) {
+    return;
+  }
+  const marker = ensureGroupInsertMarker();
+  marker.dataset.categoryFilter = section.dataset.categoryFilter || CATEGORY_INBOX;
+  marker.dataset.targetGroupId = sourceCard.dataset.groupId || "";
+  marker.dataset.placement = "before";
+  marker.querySelector("strong").textContent = "Move here";
+  grid.insertBefore(marker, sourceCard);
+}
+
 function updateGroupInsertMarker(event, dropTarget) {
+  if (dropTarget === groupInsertMarker) {
+    return;
+  }
+  if (activeDragKind === "group" && dropTarget.closest(".drag-origin")) {
+    return;
+  }
   const section = dropTarget.closest(".category-section");
   const grid = section?.querySelector(".category-section-grid");
   if (!section || !grid) {
@@ -537,9 +599,9 @@ function updateGroupInsertMarker(event, dropTarget) {
     return;
   }
   const categoryFilter = section.dataset.categoryFilter || CATEGORY_INBOX;
-  const cards = [...grid.querySelectorAll(".group-card:not(.dragging)")];
+  const cards = [...grid.querySelectorAll(".group-card:not(.dragging):not(.drag-origin)")];
   let targetCard = dropTarget.closest(".group-card");
-  if (targetCard?.classList.contains("dragging")) {
+  if (targetCard?.classList.contains("dragging") || targetCard?.classList.contains("drag-origin")) {
     targetCard = null;
   }
 
@@ -2685,8 +2747,16 @@ function openExportModal(groups) {
 }
 
 function openImportModal() {
-  const textarea = h("textarea", { rows: "14", placeholder: "Title | https://example.com" });
-  openModal("Import", [textarea], [iconTextButton("import", "Import", { class: "primary" })]);
+  const textarea = h("textarea", {
+    rows: "14",
+    placeholder: "Paste ZipTab, OneTab, or URL list export text here."
+  });
+  const help = h(
+    "p",
+    { class: "muted" },
+    "Supports ZipTab exports, OneTab export text, and simple URL lists."
+  );
+  openModal("Import", [help, textarea], [iconTextButton("download", "Import", { class: "primary" })]);
   els.modalActions.querySelector("button").addEventListener("click", async () => {
     const groups = parseImportPayload(textarea.value);
     if (!groups.length) {
@@ -2700,63 +2770,6 @@ function openImportModal() {
     els.modal.close();
     toast(`Imported ${groups.reduce((total, group) => total + group.tabs.length, 0)} tabs`);
   });
-}
-
-function openOneTabImportModal() {
-  const textarea = h("textarea", {
-    rows: "14",
-    placeholder: "Paste OneTab export text here. Lists separated by blank lines will become separate ZipTab sessions."
-  });
-  const help = h(
-    "div",
-    { class: "import-help" },
-    h("p", { class: "muted" }, "Chrome does not allow one extension to read another extension's private storage. Export from OneTab, then import the copied text here."),
-    h("ol", {},
-      h("li", {}, "Open OneTab and choose Export / Import URLs."),
-      h("li", {}, "Copy the export text."),
-      h("li", {}, "Click Paste & import, or paste it here and click Import.")
-    )
-  );
-  openModal("Import from OneTab", [help, textarea], [
-    iconTextButton("external-link", "Open OneTab", { "data-modal-action": "open-onetab" }),
-    iconTextButton("copy", "Paste & import", { "data-modal-action": "paste-onetab" }),
-    iconTextButton("import", "Import", { class: "primary", "data-modal-action": "import-onetab-text" })
-  ]);
-
-  els.modalActions.querySelector("[data-modal-action='open-onetab']").addEventListener("click", () => {
-    chrome.tabs.create({ url: "chrome-extension://chphlpgkkbolifaimnlloiipkdnihall/onetab.html" });
-  });
-  els.modalActions.querySelector("[data-modal-action='paste-onetab']").addEventListener("click", async () => {
-    try {
-      textarea.value = await navigator.clipboard.readText();
-    } catch {
-      toast("Clipboard read failed. Paste the OneTab export text manually.", true);
-      textarea.focus();
-      return;
-    }
-    await importOneTabText(textarea.value);
-  });
-  els.modalActions.querySelector("[data-modal-action='import-onetab-text']").addEventListener("click", async () => {
-    await importOneTabText(textarea.value);
-  });
-}
-
-async function importOneTabText(value) {
-  const groups = parseOneTabText(value).map((group) => ({
-    ...group,
-    workspaceId: activeWorkspaceId
-  }));
-  if (!groups.length) {
-    toast("No valid OneTab URLs found", true);
-    return;
-  }
-  await updateState((draft) => {
-    draft.groups.unshift(...groups);
-    return draft;
-  });
-  els.modal.close();
-  const tabCount = groups.reduce((total, group) => total + group.tabs.length, 0);
-  toast(`Imported ${tabCount} tabs from OneTab`);
 }
 
 function parseImportPayload(value) {
@@ -2775,7 +2788,7 @@ function parseImportPayload(value) {
   } catch {
     // Fall back to line based import.
   }
-  return parseImportText(text);
+  return parseOneTabText(text);
 }
 
 function openModal(title, bodyNodes, actionNodes) {

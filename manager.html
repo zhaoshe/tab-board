@@ -18,11 +18,6 @@
           </div>
         </div>
 
-        <label class="search-box">
-          <span>Search</span>
-          <input id="searchInput" type="search" autocomplete="off" />
-        </label>
-
         <section class="open-tabs-section" aria-label="Open tabs">
           <div class="section-heading">
             <span>Open tabs</span>
@@ -39,18 +34,10 @@
         <nav id="folderList" class="folder-list" aria-label="Categories"></nav>
 
         <div class="button-stack">
-          <details class="action-menu sidebar-menu">
-            <summary role="button" data-icon="more-horizontal" aria-label="More actions"></summary>
-            <div class="action-menu-panel">
-              <button type="button" data-icon="search" data-icon-text data-action="open-search">Search</button>
-              <button type="button" data-icon="rotate-ccw" data-icon-text data-action="restore-all">Restore all</button>
-              <button type="button" data-icon="trash-2" data-icon-text data-action="open-bin">Bin</button>
-              <button type="button" data-icon="import" data-icon-text data-action="import">Import</button>
-              <button type="button" data-icon="layers" data-icon-text data-action="import-onetab" aria-label="Import from OneTab">OneTab</button>
-              <button type="button" data-icon="download" data-icon-text data-action="export-all">Export</button>
-              <button type="button" data-icon="settings" data-icon-text data-action="open-options">Options</button>
-            </div>
-          </details>
+          <button type="button" data-icon="trash-2" data-icon-text data-action="open-bin">Bin</button>
+          <button type="button" data-icon="download" data-icon-text data-action="import">Import</button>
+          <button type="button" data-icon="upload" data-icon-text data-action="export-all">Export</button>
+          <button type="button" data-icon="settings" data-icon-text data-action="open-options">Options</button>
         </div>
       </aside>
 
@@ -67,6 +54,10 @@
               </div>
             </div>
           </div>
+          <label class="search-box workspace-search">
+            <span class="visually-hidden">Search</span>
+            <input id="searchInput" type="search" autocomplete="off" placeholder="Search" />
+          </label>
         </header>
 
         <section id="groupsList" class="groups-list" data-drop="new-group" aria-label="Saved tab groups"></section>
