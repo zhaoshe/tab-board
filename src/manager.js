@@ -1144,7 +1144,10 @@ function renderInspector() {
         { class: "inspector-actions" },
         renderInspectorAction("restore", group),
         renderInspectorMenuAction("rename", group),
-        renderInspectorMenuAction("note", group)
+        renderInspectorMenuAction("note", group),
+        renderInspectorMenuAction("lock", group),
+        renderInspectorMenuAction("copy", group),
+        renderInspectorMenuAction("delete", group)
       ),
       model.note ? h("p", { class: "inspector-note" }, model.note) : ""
     )
