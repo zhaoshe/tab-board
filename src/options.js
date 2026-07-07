@@ -1,10 +1,22 @@
-import { DEFAULT_SETTINGS } from "./model.js";
+import { DEFAULT_SESSION_EXTERNAL_ACTIONS, DEFAULT_SETTINGS, SESSION_ACTION_IDS } from "./model.js";
+import { hydrateIconButtons, iconOnlyButton, iconTextButton } from "./icons.js";
 import { getState, updateState } from "./store.js";
 
 const settingsGrid = document.querySelector("#settingsGrid");
 const toastNode = document.querySelector("#toast");
+const SESSION_ACTION_META = {
+  add: { label: "Add item" },
+  collapse: { label: "Collapse / expand" },
+  copy: { label: "Copy" },
+  delete: { label: "Delete" },
+  lock: { label: "Lock" },
+  note: { label: "Note" },
+  rename: { label: "Rename" },
+  restore: { label: "Restore" }
+};
 let state = await getState();
 
+hydrateIconButtons();
 render();
 document.addEventListener("change", handleChange);
 document.addEventListener("click", handleClick);
@@ -34,9 +46,21 @@ async function handleClick(event) {
   if (button.dataset.action === "open-shortcuts") {
     await chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
   }
+  if (button.dataset.action === "session-action-up" || button.dataset.action === "session-action-down") {
+    await moveSessionAction(
+      button.dataset.sessionAction,
+      button.dataset.action === "session-action-up" ? -1 : 1
+    );
+  }
 }
 
 async function handleChange(event) {
+  const sessionAction = event.target.closest("[data-session-toolbar-action]");
+  if (sessionAction) {
+    await toggleSessionAction(sessionAction.dataset.sessionToolbarAction, sessionAction.checked);
+    return;
+  }
+
   const target = event.target.closest("[data-setting]");
   if (!target) {
     return;
@@ -59,7 +83,7 @@ function render() {
       "Extension button behavior",
       radioGroup("actionClick", settings.actionClick, [
         ["store", "Save current window"],
-        ["popup", "Open quick popup"]
+        ["popup", "Open popup"]
       ])
     ),
     settingCard(
@@ -67,6 +91,8 @@ function render() {
       "Which tabs are saved",
       checkbox("closeTabsAfterSave", settings.closeTabsAfterSave, "Close tabs after saving"),
       checkbox("includePinnedTabs", settings.includePinnedTabs, "Include pinned tabs"),
+      checkbox("includeChromeUrls", settings.includeChromeUrls, "Include chrome:// links"),
+      checkbox("includeFileUrls", settings.includeFileUrls, "Include file:// links"),
       checkbox("dedupeOnSave", settings.dedupeOnSave, "Skip URLs already saved"),
       checkbox("openManagerAfterSave", settings.openManagerAfterSave, "Open ZipTab after saving")
     ),
@@ -87,15 +113,109 @@ function render() {
         ["system", "System"],
         ["light", "Light"],
         ["dark", "Dark"]
-      ])
+      ]),
+      sessionToolbarEditor(settings)
     ),
     settingCard(
       "Keyboard",
       "Chrome shortcut settings",
-      h("button", { type: "button", "data-action": "open-shortcuts" }, "Open shortcuts"),
-      h("button", { type: "button", class: "danger", "data-action": "reset-settings" }, "Reset settings")
+      iconTextButton("keyboard", "Open shortcuts", { "data-action": "open-shortcuts" }),
+      iconTextButton("rotate-ccw", "Reset settings", { class: "danger", "data-action": "reset-settings" })
     )
   );
+}
+
+async function moveSessionAction(actionId, delta) {
+  await updateState((draft) => {
+    const order = sessionActionOrder(draft.settings);
+    const index = order.indexOf(actionId);
+    const nextIndex = index + delta;
+    if (index < 0 || nextIndex < 0 || nextIndex >= order.length) {
+      return draft;
+    }
+    const [item] = order.splice(index, 1);
+    order.splice(nextIndex, 0, item);
+    const external = new Set(sessionExternalActions(draft.settings));
+    draft.settings.sessionActionOrder = order;
+    draft.settings.sessionExternalActions = order.filter((id) => external.has(id));
+    return draft;
+  });
+  toast("Saved");
+}
+
+async function toggleSessionAction(actionId, visible) {
+  await updateState((draft) => {
+    const order = sessionActionOrder(draft.settings);
+    const external = new Set(sessionExternalActions(draft.settings));
+    if (visible) {
+      external.add(actionId);
+    } else {
+      external.delete(actionId);
+    }
+    draft.settings.sessionActionOrder = order;
+    draft.settings.sessionExternalActions = order.filter((id) => external.has(id));
+    return draft;
+  });
+  toast("Saved");
+}
+
+function sessionToolbarEditor(settings) {
+  const order = sessionActionOrder(settings);
+  const external = new Set(sessionExternalActions(settings));
+  return h(
+    "div",
+    { class: "session-toolbar-editor" },
+    h("p", { class: "muted" }, "Choose which session actions appear on cards. Hidden actions stay in More."),
+    ...order.map((actionId, index) =>
+      h(
+        "div",
+        { class: "toolbar-action-row" },
+        h(
+          "label",
+          { class: "toolbar-action-check" },
+          h("input", {
+            type: "checkbox",
+            "data-session-toolbar-action": actionId,
+            checked: external.has(actionId)
+          }),
+          h("span", {}, SESSION_ACTION_META[actionId]?.label || actionId)
+        ),
+        h(
+          "div",
+          { class: "toolbar-action-controls" },
+          iconOnlyButton("chevrons-up", "Move earlier", {
+            "data-action": "session-action-up",
+            "data-session-action": actionId,
+            disabled: index === 0
+          }),
+          iconOnlyButton("chevrons-down", "Move later", {
+            "data-action": "session-action-down",
+            "data-session-action": actionId,
+            disabled: index === order.length - 1
+          })
+        )
+      )
+    )
+  );
+}
+
+function sessionActionOrder(settings) {
+  const configured = Array.isArray(settings?.sessionActionOrder)
+    ? settings.sessionActionOrder.map((item) => String(item))
+    : [];
+  return [
+    ...new Set(configured.filter((item) => SESSION_ACTION_IDS.includes(item))),
+    ...SESSION_ACTION_IDS.filter((item) => !configured.includes(item))
+  ];
+}
+
+function sessionExternalActions(settings) {
+  const order = sessionActionOrder(settings);
+  const configured = Array.isArray(settings?.sessionExternalActions)
+    ? settings.sessionExternalActions.map((item) => String(item))
+    : [...DEFAULT_SESSION_EXTERNAL_ACTIONS];
+  const external = new Set(configured.filter((item) => SESSION_ACTION_IDS.includes(item)));
+  return order.filter((item) => external.has(item));
 }
 
 function settingCard(title, subtitle, ...children) {

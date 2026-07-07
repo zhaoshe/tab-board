@@ -1,12 +1,14 @@
-import { collectStats, isRestorableTab, itemTypeLabel, tabMatchesQuery } from "./model.js";
+import { collectStats, groupMatchesQuery, isRestorableTab, normalizeState } from "./model.js";
+import { hydrateIconButtons, iconOnlyButton } from "./icons.js";
 import { getState } from "./store.js";
 
 const statsNode = document.querySelector("#popupStats");
-const listNode = document.querySelector("#popupQuickList");
+const listNode = document.querySelector("#popupSessionList");
 const searchInput = document.querySelector("#popupSearch");
 let state = await getState();
 let query = "";
 
+hydrateIconButtons();
 render();
 document.addEventListener("click", handleClick);
 searchInput.addEventListener("input", () => {
@@ -16,7 +18,7 @@ searchInput.addEventListener("input", () => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.ziptabState) {
-    state = changes.ziptabState.newValue;
+    state = normalizeState(changes.ziptabState.newValue);
     render();
   }
 });
@@ -34,39 +36,39 @@ async function handleClick(event) {
     await chrome.runtime.sendMessage({ type: "open-manager", query });
     window.close();
   }
-  if (button.dataset.action === "restore-tab") {
-    await chrome.runtime.sendMessage({
-      type: "restore-tab",
-      source: "quick",
-      groupId: "",
-      tabId: button.dataset.tabId
-    });
+  if (button.dataset.action === "restore-group") {
+    await chrome.runtime.sendMessage({ type: "restore-group", groupId: button.dataset.groupId });
     window.close();
   }
 }
 
 function render() {
   const stats = collectStats(state);
-  statsNode.textContent = `${stats.savedTabs} saved, ${stats.quickTabs} quick`;
-  const quickTabs = state.quickList.filter((tab) => tabMatchesQuery(tab, query)).slice(0, 20);
+  statsNode.textContent = `${stats.savedTabs} saved, ${stats.groups} sessions`;
+  const groups = state.groups.filter((group) => groupMatchesQuery(group, query)).slice(0, 8);
   listNode.replaceChildren();
-  if (!quickTabs.length) {
-    listNode.append(h("li", { class: "empty-row" }, "No quick tabs"));
+  if (!groups.length) {
+    listNode.append(h("li", { class: "empty-row" }, "No saved sessions"));
     return;
   }
-  for (const tab of quickTabs) {
-    const canOpen = isRestorableTab(tab);
+  for (const group of groups) {
+    const restorableCount = group.tabs.filter(isRestorableTab).length;
     listNode.append(
       h(
         "li",
         { class: "popup-row" },
-        canOpen && tab.favIconUrl
-          ? h("img", { class: "favicon", src: tab.favIconUrl, alt: "" })
-          : h("span", { class: "favicon fallback" }, ""),
-        h("span", {}, tab.title),
-        canOpen
-          ? h("button", { type: "button", "data-action": "restore-tab", "data-tab-id": tab.id }, "Open")
-          : h("span", { class: "muted" }, itemTypeLabel(tab.itemType))
+        h(
+          "span",
+          { class: "popup-session-main" },
+          h("strong", {}, group.title),
+          h("small", {}, `${restorableCount} links`)
+        ),
+        restorableCount
+          ? iconOnlyButton("rotate-ccw", "Restore session", {
+              "data-action": "restore-group",
+              "data-group-id": group.id
+            })
+          : h("span", { class: "muted" }, "Empty")
       )
     );
   }

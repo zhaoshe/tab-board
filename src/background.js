@@ -109,6 +109,7 @@ async function handleMessage(message) {
       return captureTabs(message.mode || "current-window", await getActiveTab(), {
         openAfter: message.openAfter !== false,
         tabId: message.tabId,
+        tabIds: message.tabIds,
         windowId: message.windowId,
         workspaceId: message.workspaceId
       });
@@ -180,7 +181,7 @@ async function applyActionPopup() {
   const settings = await getSettings();
   await chrome.action.setPopup({ popup: settings.actionClick === "popup" ? POPUP_PAGE : "" });
   await chrome.action.setTitle({
-    title: settings.actionClick === "popup" ? "Open ZipTab quick list" : "Save tabs to ZipTab"
+    title: settings.actionClick === "popup" ? "Open ZipTab" : "Save tabs to ZipTab"
   });
 }
 
@@ -282,6 +283,20 @@ async function getTabsForMode(mode, anchorTab, options = {}) {
       return [];
     }
   }
+  if (mode === "tab-ids" && Array.isArray(options.tabIds)) {
+    const tabs = [];
+    for (const tabId of options.tabIds) {
+      if (!Number.isFinite(tabId)) {
+        continue;
+      }
+      try {
+        tabs.push(await chrome.tabs.get(tabId));
+      } catch {
+        // Ignore tabs that closed before the save action completed.
+      }
+    }
+    return tabs;
+  }
 
   const windowId = current?.windowId;
   const tabs = windowId
@@ -335,8 +350,14 @@ function canCaptureTab(tab, settings) {
   if (tab.url.startsWith(ownBase)) {
     return false;
   }
-  if (/^(chrome|edge|brave|vivaldi|opera|devtools):/i.test(tab.url)) {
-    return /^chrome:\/\/newtab\/?$|^edge:\/\/newtab\/?$/i.test(tab.url);
+  if (/^file:/i.test(tab.url)) {
+    return settings.includeFileUrls === true;
+  }
+  if (/^(chrome|edge|brave|vivaldi|opera):/i.test(tab.url)) {
+    return settings.includeChromeUrls === true;
+  }
+  if (/^devtools:/i.test(tab.url)) {
+    return false;
   }
   if (/^about:/i.test(tab.url)) {
     return /^about:blank$/i.test(tab.url);
@@ -358,6 +379,9 @@ function captureTitle(mode, records, windowId) {
   }
   if (mode === "tab-id") {
     return records[0]?.title || base;
+  }
+  if (mode === "tab-ids") {
+    return `${base} - selected tabs`;
   }
   if (mode === "highlighted-tabs") {
     return `${base} - selected tabs`;
@@ -536,21 +560,12 @@ async function restoreBrowserGroups(created) {
 }
 
 function findTabRef(state, ref) {
-  if (ref.source === "quick") {
-    const tab = state.quickList.find((item) => item.id === ref.tabId);
-    return tab ? { source: "quick", tab, group: null } : null;
-  }
   const group = state.groups.find((item) => item.id === ref.groupId);
   const tab = group?.tabs.find((item) => item.id === ref.tabId);
   return group && tab ? { source: "group", group, tab } : null;
 }
 
 function removeRefsFromState(state, refs) {
-  const quickIds = new Set(refs.filter((ref) => ref.source === "quick").map((ref) => ref.tabId));
-  if (quickIds.size) {
-    state.quickList = state.quickList.filter((tab) => !quickIds.has(tab.id));
-  }
-
   const groupRefs = new Map();
   for (const ref of refs) {
     if (ref.source !== "group") {
@@ -603,7 +618,6 @@ async function openManager({ windowId, query = "" } = {}) {
 
 async function listOpenTabs() {
   const settings = await getSettings();
-  const ownBase = chrome.runtime.getURL("");
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
   return {
     windows: windows.map((window) => ({
@@ -611,7 +625,7 @@ async function listOpenTabs() {
       focused: Boolean(window.focused),
       incognito: Boolean(window.incognito),
       tabs: (window.tabs || [])
-        .filter((tab) => !tab.url?.startsWith(ownBase))
+        .filter((tab) => canCaptureTab(tab, settings))
         .map((tab) => ({
           id: tab.id,
           windowId: tab.windowId,
@@ -621,7 +635,7 @@ async function listOpenTabs() {
           active: Boolean(tab.active),
           pinned: Boolean(tab.pinned),
           index: tab.index || 0,
-          storable: canCaptureTab(tab, settings)
+          storable: true
         }))
     }))
   };
@@ -658,22 +672,6 @@ async function getOmniboxSuggestions(text) {
       if (suggestions.length >= 6) {
         return suggestions;
       }
-    }
-  }
-
-  for (const tab of state.quickList) {
-    if (!isRestorableTab(tab)) {
-      continue;
-    }
-    if (!tabMatchesQuery(tab, query)) {
-      continue;
-    }
-    suggestions.push({
-      content: `ziptab://tab/quick//${tab.id}`,
-      description: `${escapeXml(tab.title)} <dim>${escapeXml(tab.url)}</dim>`
-    });
-    if (suggestions.length >= 6) {
-      return suggestions;
     }
   }
 

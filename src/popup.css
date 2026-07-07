@@ -46,7 +46,7 @@
 
 .popup-row {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   padding: 8px;
@@ -54,8 +54,19 @@
   border-radius: 8px;
 }
 
-.popup-row span {
+.popup-session-main {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.popup-session-main strong,
+.popup-session-main small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.popup-session-main small {
+  color: var(--muted);
 }

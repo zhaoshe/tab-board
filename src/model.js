@@ -1,6 +1,19 @@
 export const STATE_KEY = "ziptabState";
 export const SCHEMA_VERSION = 1;
 
+export const SESSION_ACTION_IDS = Object.freeze([
+  "collapse",
+  "restore",
+  "add",
+  "copy",
+  "lock",
+  "rename",
+  "note",
+  "delete"
+]);
+
+export const DEFAULT_SESSION_EXTERNAL_ACTIONS = Object.freeze(["collapse", "restore", "add"]);
+
 export const DEFAULT_SETTINGS = Object.freeze({
   actionClick: "store",
   closeTabsAfterSave: true,
@@ -8,23 +21,25 @@ export const DEFAULT_SETTINGS = Object.freeze({
   dedupeOnSave: false,
   deleteRestoredTabs: true,
   focusRestoredTabs: true,
+  includeChromeUrls: false,
+  includeFileUrls: false,
   includePinnedTabs: false,
   openManagerAfterSave: true,
   restoreGroupsInNewWindow: false,
   restoreNextToCurrent: true,
   showFavicons: true,
+  sessionActionOrder: [...SESSION_ACTION_IDS],
+  sessionExternalActions: [...DEFAULT_SESSION_EXTERNAL_ACTIONS],
   theme: "system"
 });
 
-export const TASK_NONE = "none";
-export const TASK_OPEN = "open";
-export const TASK_DONE = "done";
+const TASK_NONE = "none";
 export const ITEM_LINK = "link";
 export const ITEM_NOTE = "note";
-export const ITEM_TODO = "todo";
 export const DEFAULT_WORKSPACE_ID = "workspace_default";
 export const BIN_LIMIT = 80;
 
+const LEGACY_ITEM_TODO = "todo";
 const URL_PATTERN = /^[a-z][a-z0-9+.-]*:\/\//i;
 const SPECIAL_URL_PATTERN = /^(about|chrome|edge|brave|vivaldi|opera|file|ftp):/i;
 
@@ -54,6 +69,7 @@ export function createEmptyState() {
     activeWorkspaceId: DEFAULT_WORKSPACE_ID,
     groups: [],
     folders: [],
+    categoryOrderByWorkspace: {},
     quickList: [],
     bin: [],
     settings: { ...DEFAULT_SETTINGS },
@@ -87,6 +103,7 @@ export function normalizeState(raw) {
       : defaultWorkspaceId,
     groups: Array.isArray(raw.groups) ? raw.groups.map(normalizeGroup).filter(Boolean) : [],
     folders: Array.isArray(raw.folders) ? raw.folders.map(normalizeFolder).filter(Boolean) : [],
+    categoryOrderByWorkspace: normalizeCategoryOrderByWorkspace(raw.categoryOrderByWorkspace, workspaceIds),
     quickList: Array.isArray(raw.quickList) ? raw.quickList.map(normalizeTab).filter(Boolean) : [],
     bin: Array.isArray(raw.bin) ? compactBin(raw.bin.map(normalizeBinEntry).filter(Boolean)) : [],
     settings: { ...DEFAULT_SETTINGS, ...(raw.settings || {}) },
@@ -102,7 +119,7 @@ export function normalizeState(raw) {
   const workspaceByFolder = new Map(state.folders.map((folder) => [folder.id, folder.workspaceId]));
   state.groups = state.groups.map((group) => ({
     ...group,
-    folderId: folderIds.has(group.folderId) ? group.folderId : null,
+    folderId: group.starred ? null : folderIds.has(group.folderId) ? group.folderId : null,
     workspaceId: workspaceIds.has(group.workspaceId)
       ? group.workspaceId
       : workspaceByFolder.get(group.folderId) || defaultWorkspaceId
@@ -111,8 +128,44 @@ export function normalizeState(raw) {
   state.settings.theme = ["system", "light", "dark"].includes(state.settings.theme)
     ? state.settings.theme
     : "system";
+  state.settings.sessionActionOrder = normalizeSessionActionOrder(state.settings.sessionActionOrder);
+  state.settings.sessionExternalActions = normalizeSessionExternalActions(
+    state.settings.sessionExternalActions,
+    state.settings.sessionActionOrder
+  );
 
   return state;
+}
+
+function normalizeSessionActionOrder(raw) {
+  const order = Array.isArray(raw) ? raw.map((item) => String(item)) : [];
+  const known = new Set(SESSION_ACTION_IDS);
+  return [
+    ...new Set(order.filter((item) => known.has(item))),
+    ...SESSION_ACTION_IDS.filter((item) => !order.includes(item))
+  ];
+}
+
+function normalizeSessionExternalActions(raw, order = SESSION_ACTION_IDS) {
+  const input = Array.isArray(raw)
+    ? raw.map((item) => String(item))
+    : [...DEFAULT_SESSION_EXTERNAL_ACTIONS];
+  const visible = new Set(input.filter((item) => SESSION_ACTION_IDS.includes(item)));
+  return order.filter((item) => visible.has(item));
+}
+
+function normalizeCategoryOrderByWorkspace(raw, workspaceIds) {
+  if (!raw || typeof raw !== "object") {
+    return {};
+  }
+  const result = {};
+  for (const [workspaceId, order] of Object.entries(raw)) {
+    if (!workspaceIds.has(workspaceId) || !Array.isArray(order)) {
+      continue;
+    }
+    result[workspaceId] = [...new Set(order.map((item) => String(item)).filter(Boolean))];
+  }
+  return result;
 }
 
 export function createDefaultWorkspace(timestamp = nowIso()) {
@@ -156,14 +209,15 @@ export function normalizeGroup(group) {
     return null;
   }
   const tabs = Array.isArray(group.tabs) ? group.tabs.map(normalizeTab).filter(Boolean) : [];
+  const starred = Boolean(group.starred);
   return {
     id: String(group.id || createId("group")),
     title: String(group.title || defaultGroupTitle()),
     note: String(group.note || ""),
     workspaceId: group.workspaceId ? String(group.workspaceId) : DEFAULT_WORKSPACE_ID,
-    folderId: group.folderId ? String(group.folderId) : null,
+    folderId: starred ? null : group.folderId ? String(group.folderId) : null,
     locked: Boolean(group.locked),
-    starred: Boolean(group.starred),
+    starred,
     collapsed: Boolean(group.collapsed),
     tabs,
     createdAt: group.createdAt || nowIso(),
@@ -175,9 +229,12 @@ export function normalizeTab(tab) {
   if (!tab || typeof tab !== "object") {
     return null;
   }
-  const itemType = [ITEM_LINK, ITEM_NOTE, ITEM_TODO].includes(tab.itemType)
-    ? tab.itemType
-    : ITEM_LINK;
+  const itemType =
+    tab.itemType === LEGACY_ITEM_TODO
+      ? ITEM_NOTE
+      : [ITEM_LINK, ITEM_NOTE].includes(tab.itemType)
+      ? tab.itemType
+      : ITEM_LINK;
   if (itemType === ITEM_LINK && !tab.url) {
     return null;
   }
@@ -194,7 +251,7 @@ export function normalizeTab(tab) {
     pinned: Boolean(tab.pinned),
     incognito: Boolean(tab.incognito),
     starred: Boolean(tab.starred),
-    taskStatus: normalizeTaskStatus(tab.taskStatus, itemType),
+    taskStatus: TASK_NONE,
     browserGroup: normalizeBrowserGroup(tab.browserGroup),
     sourceWindowId: Number.isFinite(tab.sourceWindowId) ? tab.sourceWindowId : null,
     sourceTabId: Number.isFinite(tab.sourceTabId) ? tab.sourceTabId : null,
@@ -285,10 +342,6 @@ export function createNoteRecord(text, overrides = {}) {
   return createTextRecord(ITEM_NOTE, text, overrides);
 }
 
-export function createTodoRecord(text, overrides = {}) {
-  return createTextRecord(ITEM_TODO, text, overrides);
-}
-
 function createTextRecord(itemType, text, overrides = {}) {
   const timestamp = nowIso();
   const note = String(overrides.note ?? text ?? "").trim();
@@ -304,7 +357,7 @@ function createTextRecord(itemType, text, overrides = {}) {
     sourceTabId: null,
     browserGroup: null,
     starred: Boolean(overrides.starred),
-    taskStatus: overrides.taskStatus || (itemType === ITEM_TODO ? TASK_OPEN : TASK_NONE),
+    taskStatus: TASK_NONE,
     note,
     createdAt: timestamp,
     updatedAt: timestamp
@@ -372,17 +425,11 @@ export function collectStats(state) {
     (total, group) => total + group.tabs.filter(isRestorableTab).length,
     0
   );
-  const quickTabs = state.quickList.filter(isRestorableTab).length;
-  const starredTabs =
-    state.quickList.filter((tab) => tab.starred).length +
-    state.groups.reduce((total, group) => total + group.tabs.filter((tab) => tab.starred).length, 0);
-  const openTasks =
-    state.quickList.filter((tab) => tab.taskStatus === TASK_OPEN).length +
-    state.groups.reduce(
-      (total, group) => total + group.tabs.filter((tab) => tab.taskStatus === TASK_OPEN).length,
-      0
-    );
-  return { groups, savedTabs, quickTabs, starredTabs, openTasks };
+  const starredTabs = state.groups.reduce(
+    (total, group) => total + group.tabs.filter((tab) => tab.starred).length,
+    0
+  );
+  return { groups, savedTabs, starredTabs };
 }
 
 export function tabMatchesQuery(tab, query) {
@@ -417,11 +464,6 @@ export function getAllUrls(state) {
       if (isRestorableTab(tab)) {
         urls.add(tab.url);
       }
-    }
-  }
-  for (const tab of state.quickList) {
-    if (isRestorableTab(tab)) {
-      urls.add(tab.url);
     }
   }
   return urls;
@@ -606,38 +648,22 @@ export function tabToText(tab) {
   if (isRestorableTab(tab)) {
     return `${tab.title} | ${tab.url}`;
   }
-  if (tab.itemType === ITEM_TODO) {
-    return `TODO ${taskMarker(tab.taskStatus)} ${tab.note || tab.title}`.trim();
-  }
   return `NOTE ${tab.note || tab.title}`.trim();
 }
 
 export function isRestorableTab(tab) {
-  return tab?.itemType !== ITEM_NOTE && tab?.itemType !== ITEM_TODO && Boolean(tab?.url);
+  return tab?.itemType === ITEM_LINK && Boolean(tab?.url);
 }
 
 export function itemTypeLabel(itemType) {
   if (itemType === ITEM_NOTE) {
     return "Note";
   }
-  if (itemType === ITEM_TODO) {
-    return "Todo";
-  }
   return "Link";
 }
 
 export function compactBin(entries) {
   return entries.filter(Boolean).slice(0, BIN_LIMIT);
-}
-
-export function cycleTaskStatus(status) {
-  if (status === TASK_NONE) {
-    return TASK_OPEN;
-  }
-  if (status === TASK_OPEN) {
-    return TASK_DONE;
-  }
-  return TASK_NONE;
 }
 
 export function escapeXml(value) {
@@ -649,27 +675,10 @@ export function escapeXml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function normalizeTaskStatus(status, itemType) {
-  if ([TASK_NONE, TASK_OPEN, TASK_DONE].includes(status)) {
-    return status;
-  }
-  return itemType === ITEM_TODO ? TASK_OPEN : TASK_NONE;
-}
-
 function titleFromText(text) {
   return String(text || "")
     .trim()
     .split(/\s+/)
     .slice(0, 8)
     .join(" ");
-}
-
-function taskMarker(status) {
-  if (status === TASK_DONE) {
-    return "[x]";
-  }
-  if (status === TASK_OPEN) {
-    return "[ ]";
-  }
-  return "[-]";
 }

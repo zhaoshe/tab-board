@@ -17,16 +17,16 @@
         </div>
       </header>
       <div class="popup-actions">
-        <button type="button" class="primary" data-action="capture-current-window">Save window</button>
-        <button type="button" data-action="open-manager">Open</button>
+        <button type="button" class="primary" data-icon="archive" data-icon-text data-action="capture-current-window">Save window</button>
+        <button type="button" data-icon="external-link" data-icon-text data-action="open-manager">Open</button>
       </div>
       <label class="search-box popup-search">
         <span>Search</span>
         <input id="popupSearch" type="search" autocomplete="off" />
       </label>
       <section>
-        <p class="eyebrow">Quick list</p>
-        <ul id="popupQuickList" class="popup-list"></ul>
+        <p class="eyebrow">Recent sessions</p>
+        <ul id="popupSessionList" class="popup-list"></ul>
       </section>
     </main>
     <script type="module" src="src/popup.js"></script>

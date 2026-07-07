@@ -2,17 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ITEM_NOTE,
-  ITEM_TODO,
-  TASK_NONE,
-  TASK_OPEN,
   compactBin,
   coerceUrl,
   createBinEntry,
   createGroupFromTabRecords,
   createNoteRecord,
   createTabRecord,
-  createTodoRecord,
-  cycleTaskStatus,
   isRestorableTab,
   normalizeState,
   parseImportText,
@@ -25,6 +20,9 @@ test("normalizes empty state", () => {
   assert.equal(state.version, 1);
   assert.deepEqual(state.groups, []);
   assert.equal(state.settings.closeTabsAfterSave, true);
+  assert.equal(state.settings.includeChromeUrls, false);
+  assert.equal(state.settings.includeFileUrls, false);
+  assert.deepEqual(state.settings.sessionExternalActions, ["collapse", "restore", "add"]);
 });
 
 test("creates groups from browser-like tab records", () => {
@@ -51,34 +49,39 @@ test("exports tab text", () => {
   assert.equal(tabsToText([tab]), "Example | https://example.com");
 });
 
-test("cycles task state", () => {
-  assert.equal(cycleTaskStatus(TASK_NONE), TASK_OPEN);
-  assert.equal(cycleTaskStatus(TASK_OPEN), "done");
-  assert.equal(cycleTaskStatus("done"), TASK_NONE);
-});
-
 test("coerces hostnames to https URLs", () => {
   assert.equal(coerceUrl("example.com/path"), "https://example.com/path");
 });
 
-test("creates note and todo records without restorable URLs", () => {
+test("creates note records without restorable URLs", () => {
   const note = createNoteRecord("Read this later");
-  const todo = createTodoRecord("Follow up tomorrow");
   assert.equal(note.itemType, ITEM_NOTE);
-  assert.equal(todo.itemType, ITEM_TODO);
-  assert.equal(todo.taskStatus, TASK_OPEN);
   assert.equal(isRestorableTab(note), false);
-  assert.equal(isRestorableTab(todo), false);
 });
 
-test("exports mixed link note and todo text", () => {
+test("exports mixed link and note text", () => {
   const link = createTabRecord({ title: "Example", url: "https://example.com" });
   const note = createNoteRecord("A useful note");
-  const todo = createTodoRecord("Ship the first batch");
   assert.equal(
-    tabsToText([link, note, todo]),
-    "Example | https://example.com\nNOTE A useful note\nTODO [ ] Ship the first batch"
+    tabsToText([link, note]),
+    "Example | https://example.com\nNOTE A useful note"
   );
+});
+
+test("normalizes legacy todo items as notes", () => {
+  const state = normalizeState({
+    groups: [
+      {
+        title: "Legacy",
+        tabs: [{ id: "todo_1", itemType: "todo", title: "Follow up", note: "Follow up tomorrow" }]
+      }
+    ]
+  });
+  const tab = state.groups[0].tabs[0];
+  assert.equal(tab.itemType, ITEM_NOTE);
+  assert.equal(tab.title, "Follow up");
+  assert.equal(tab.note, "Follow up tomorrow");
+  assert.equal(isRestorableTab(tab), false);
 });
 
 test("normalizes legacy data into the default workspace", () => {
@@ -89,6 +92,26 @@ test("normalizes legacy data into the default workspace", () => {
   assert.equal(state.workspaces.length, 1);
   assert.equal(state.folders[0].workspaceId, state.workspaces[0].id);
   assert.equal(state.groups[0].workspaceId, state.workspaces[0].id);
+});
+
+test("normalizes starred sessions as a single built-in category", () => {
+  const state = normalizeState({
+    folders: [{ id: "folder_a", name: "Work" }],
+    groups: [{ id: "group_a", title: "Saved", folderId: "folder_a", starred: true, tabs: [] }]
+  });
+  assert.equal(state.groups[0].starred, true);
+  assert.equal(state.groups[0].folderId, null);
+});
+
+test("normalizes session toolbar settings", () => {
+  const state = normalizeState({
+    settings: {
+      sessionActionOrder: ["lock", "unknown", "restore", "lock"],
+      sessionExternalActions: ["restore", "unknown", "lock"]
+    }
+  });
+  assert.deepEqual(state.settings.sessionActionOrder.slice(0, 2), ["lock", "restore"]);
+  assert.deepEqual(state.settings.sessionExternalActions, ["lock", "restore"]);
 });
 
 test("creates bounded bin entries", () => {
