@@ -17,7 +17,21 @@
         <button type="button" data-icon="external-link" data-icon-text data-action="open-manager">Open ZipTab</button>
       </header>
 
-      <section class="settings-grid" id="settingsGrid"></section>
+      <section class="options-section">
+        <div class="options-section-heading">
+          <h2>Basic</h2>
+          <p class="muted">Daily capture, restore, and appearance settings.</p>
+        </div>
+        <div id="basicSettingsGrid" class="settings-grid"></div>
+      </section>
+
+      <section class="options-section options-section-advanced">
+        <div class="options-section-heading">
+          <h2>Advanced</h2>
+          <p class="muted">Less common capture edge cases, confirmation, and toolbar tuning.</p>
+        </div>
+        <div id="advancedSettingsGrid" class="settings-grid"></div>
+      </section>
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>

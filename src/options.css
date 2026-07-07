@@ -16,6 +16,27 @@
   margin-bottom: 20px;
 }
 
+.options-section {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.options-section-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.options-section-heading h2,
+.options-section-heading p {
+  margin: 0;
+}
+
+.options-section-advanced {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
 .settings-grid {
   display: grid;
   gap: 12px;

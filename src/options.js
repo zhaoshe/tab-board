@@ -1,8 +1,10 @@
 import { DEFAULT_SESSION_EXTERNAL_ACTIONS, DEFAULT_SETTINGS, SESSION_ACTION_IDS, isKnownSettingKey } from "./model.js";
 import { hydrateIconButtons, iconOnlyButton, iconTextButton } from "./icons.js";
+import { buildSettingsSections } from "./options-view.js";
 import { getState, updateState } from "./store.js";
 
-const settingsGrid = document.querySelector("#settingsGrid");
+const advancedSettingsGrid = document.querySelector("#advancedSettingsGrid");
+const basicSettingsGrid = document.querySelector("#basicSettingsGrid");
 const toastNode = document.querySelector("#toast");
 const SESSION_ACTION_META = {
   add: { label: "Add item" },
@@ -79,45 +81,81 @@ async function handleChange(event) {
 
 function render() {
   const settings = { ...DEFAULT_SETTINGS, ...state.settings };
+  const sections = buildSettingsSections();
+  const basicKeys = settingKeySet(sections.basic);
+  const advancedKeys = settingKeySet(sections.advanced);
   document.documentElement.dataset.theme = settings.theme === "system" ? "" : settings.theme;
-  settingsGrid.replaceChildren(
+
+  basicSettingsGrid.replaceChildren(
     settingCard(
       "Toolbar",
       "Extension button behavior",
-      radioGroup("actionClick", settings.actionClick, [
-        ["store", "Save current window"],
-        ["popup", "Open popup"]
+      ...settingControls(basicKeys, [
+        {
+          key: "actionClick",
+          control: radioGroup("actionClick", settings.actionClick, [
+            ["store", "Save current window"],
+            ["popup", "Open popup"]
+          ])
+        }
       ])
     ),
     settingCard(
       "Capture",
-      "Which tabs are saved",
-      checkbox("closeTabsAfterSave", settings.closeTabsAfterSave, "Close tabs after saving"),
-      checkbox("includePinnedTabs", settings.includePinnedTabs, "Include pinned tabs"),
-      checkbox("includeChromeUrls", settings.includeChromeUrls, "Include chrome:// links"),
-      checkbox("includeFileUrls", settings.includeFileUrls, "Include file:// links"),
-      checkbox("dedupeOnSave", settings.dedupeOnSave, "Skip URLs already saved"),
-      checkbox("openManagerAfterSave", settings.openManagerAfterSave, "Open ZipTab after saving")
+      "Daily save behavior",
+      ...settingControls(basicKeys, [
+        { key: "closeTabsAfterSave", control: checkbox("closeTabsAfterSave", settings.closeTabsAfterSave, "Close tabs after saving") },
+        { key: "openManagerAfterSave", control: checkbox("openManagerAfterSave", settings.openManagerAfterSave, "Open ZipTab after saving") }
+      ])
     ),
     settingCard(
       "Restore",
       "How saved tabs return",
-      checkbox("deleteRestoredTabs", settings.deleteRestoredTabs, "Remove records after restore"),
-      checkbox("restoreGroupsInNewWindow", settings.restoreGroupsInNewWindow, "Restore groups in a new window"),
-      checkbox("restoreNextToCurrent", settings.restoreNextToCurrent, "Restore next to active tab"),
-      checkbox("focusRestoredTabs", settings.focusRestoredTabs, "Focus first restored tab")
+      ...settingControls(basicKeys, [
+        { key: "deleteRestoredTabs", control: checkbox("deleteRestoredTabs", settings.deleteRestoredTabs, "Remove records after restore") },
+        {
+          key: "restoreGroupsInNewWindow",
+          control: checkbox("restoreGroupsInNewWindow", settings.restoreGroupsInNewWindow, "Restore groups in a new window")
+        },
+        { key: "restoreNextToCurrent", control: checkbox("restoreNextToCurrent", settings.restoreNextToCurrent, "Restore next to active tab") },
+        { key: "focusRestoredTabs", control: checkbox("focusRestoredTabs", settings.focusRestoredTabs, "Focus first restored tab") }
+      ])
+    ),
+    settingCard(
+      "Appearance",
+      "Theme preference",
+      ...settingControls(basicKeys, [
+        {
+          key: "theme",
+          control: radioGroup("theme", settings.theme, [
+            ["system", "System"],
+            ["light", "Light"],
+            ["dark", "Dark"]
+          ])
+        }
+      ])
+    )
+  );
+
+  advancedSettingsGrid.replaceChildren(
+    settingCard(
+      "Capture edge cases",
+      "Rare or restricted tab types",
+      ...settingControls(advancedKeys, [
+        { key: "includePinnedTabs", control: checkbox("includePinnedTabs", settings.includePinnedTabs, "Include pinned tabs") },
+        { key: "includeChromeUrls", control: checkbox("includeChromeUrls", settings.includeChromeUrls, "Include chrome:// links") },
+        { key: "includeFileUrls", control: checkbox("includeFileUrls", settings.includeFileUrls, "Include file:// links") },
+        { key: "dedupeOnSave", control: checkbox("dedupeOnSave", settings.dedupeOnSave, "Skip URLs already saved") }
+      ])
     ),
     settingCard(
       "Interface",
-      "Display preferences",
-      checkbox("showFavicons", settings.showFavicons, "Show favicons"),
-      checkbox("confirmDestructive", settings.confirmDestructive, "Confirm destructive actions"),
-      radioGroup("theme", settings.theme, [
-        ["system", "System"],
-        ["light", "Light"],
-        ["dark", "Dark"]
-      ]),
-      sessionToolbarEditor(settings)
+      "Confirmation and session card tuning",
+      ...settingControls(advancedKeys, [
+        { key: "confirmDestructive", control: checkbox("confirmDestructive", settings.confirmDestructive, "Confirm destructive actions") },
+        { key: "showFavicons", control: checkbox("showFavicons", settings.showFavicons, "Show favicons") },
+        { key: "sessionToolbar", control: sessionToolbarEditor(settings) }
+      ])
     ),
     settingCard(
       "Keyboard",
@@ -219,6 +257,14 @@ function sessionExternalActions(settings) {
     : [...DEFAULT_SESSION_EXTERNAL_ACTIONS];
   const external = new Set(configured.filter((item) => SESSION_ACTION_IDS.includes(item)));
   return order.filter((item) => external.has(item));
+}
+
+function settingKeySet(items) {
+  return new Set(items.map((item) => item.key));
+}
+
+function settingControls(keys, controls) {
+  return controls.filter((item) => keys.has(item.key)).map((item) => item.control);
 }
 
 function settingCard(title, subtitle, ...children) {
