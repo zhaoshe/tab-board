@@ -1,4 +1,5 @@
 import { collectStats, normalizeState } from "./model.js";
+import { formatRestoreFeedback, formatSaveFeedback } from "./feedback-copy.js";
 import { hydrateIconButtons, iconOnlyButton } from "./icons.js";
 import { buildPopupViewModel } from "./popup-view.js";
 import { getState } from "./store.js";
@@ -30,18 +31,33 @@ async function handleClick(event) {
   if (!button) {
     return;
   }
-  if (button.dataset.action === "capture-current-window") {
-    await chrome.runtime.sendMessage({ type: "capture", mode: "current-window" });
-    window.close();
+
+  try {
+    if (button.dataset.action === "capture-current-window") {
+      const result = await sendRuntime({ type: "capture", mode: "current-window" });
+      feedbackNode.textContent = formatSaveFeedback(result.storedTabs || 0);
+      window.close();
+    }
+    if (button.dataset.action === "open-manager") {
+      await sendRuntime({ type: "open-manager", query });
+      window.close();
+    }
+    if (button.dataset.action === "restore-group") {
+      const result = await sendRuntime({ type: "restore-group", groupId: button.dataset.groupId });
+      feedbackNode.textContent = formatRestoreFeedback({ restored: result.restoredTabs || 0 });
+      window.close();
+    }
+  } catch (error) {
+    feedbackNode.textContent = error?.message || String(error);
   }
-  if (button.dataset.action === "open-manager") {
-    await chrome.runtime.sendMessage({ type: "open-manager", query });
-    window.close();
+}
+
+async function sendRuntime(message) {
+  const response = await chrome.runtime.sendMessage(message);
+  if (!response?.ok) {
+    throw new Error(response?.error || "Chrome runtime call failed");
   }
-  if (button.dataset.action === "restore-group") {
-    await chrome.runtime.sendMessage({ type: "restore-group", groupId: button.dataset.groupId });
-    window.close();
-  }
+  return response.result || {};
 }
 
 function render() {

@@ -1,4 +1,5 @@
 import { DEFAULT_SESSION_EXTERNAL_ACTIONS, DEFAULT_SETTINGS, SESSION_ACTION_IDS, isKnownSettingKey } from "./model.js";
+import { formatSettingsSavedMessage } from "./feedback-copy.js";
 import { hydrateIconButtons, iconOnlyButton, iconTextButton } from "./icons.js";
 import { buildSettingsSections } from "./options-view.js";
 import { getState, updateState } from "./store.js";
@@ -76,7 +77,7 @@ async function handleChange(event) {
     draft.settings[key] = value;
     return draft;
   });
-  toast("Saved");
+  toast(formatSettingsSavedMessage());
 }
 
 function render() {
@@ -181,7 +182,7 @@ async function moveSessionAction(actionId, delta) {
     draft.settings.sessionExternalActions = order.filter((id) => external.has(id));
     return draft;
   });
-  toast("Saved");
+  toast(formatSettingsSavedMessage());
 }
 
 async function toggleSessionAction(actionId, visible) {
@@ -197,7 +198,7 @@ async function toggleSessionAction(actionId, visible) {
     draft.settings.sessionExternalActions = order.filter((id) => external.has(id));
     return draft;
   });
-  toast("Saved");
+  toast(formatSettingsSavedMessage());
 }
 
 function sessionToolbarEditor(settings) {

@@ -28,6 +28,7 @@ import {
   buildInspectorModel,
   getSessionActionLayout
 } from "./manager-view.js";
+import { formatRestoreFeedback, formatSaveFeedback } from "./feedback-copy.js";
 import { hydrateIconButtons, iconOnlyButton, iconSummary, iconTextButton } from "./icons.js";
 import { getState, updateState } from "./store.js";
 
@@ -146,7 +147,7 @@ async function handleClick(event) {
   try {
     if (action === "capture-current-window") {
       const result = await sendRuntime({ type: "capture", mode: "current-window", workspaceId: activeWorkspaceId });
-      toast(`Saved ${result.storedTabs || 0} tabs`);
+      toast(formatSaveFeedback(result.storedTabs || 0));
       await loadOpenTabs();
     } else if (action === "capture-selected-open-tabs") {
       await captureSelectedOpenTabs();
@@ -2248,7 +2249,7 @@ async function restoreSelected() {
   }
   const result = await sendRuntime({ type: "restore-refs", refs });
   closeSessionSelection();
-  toast(`Restored ${result.restoredTabs || 0} tabs`);
+  toast(formatRestoreFeedback({ restored: result.restoredTabs || 0 }));
 }
 
 async function copySelected() {
@@ -2306,7 +2307,7 @@ async function captureSelectedOpenTabs() {
   });
   selectedOpenTabIds.clear();
   openTabsSelectMode = false;
-  toast(`Saved ${result.storedTabs || 0} tabs`);
+  toast(formatSaveFeedback(result.storedTabs || 0));
 }
 
 async function moveTabToNewGroup(ref, categoryFilter = activeFilter, position = null) {

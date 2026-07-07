@@ -105,7 +105,11 @@ textarea {
     box-shadow 160ms ease;
 }
 
-:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible,
+.context-chip:focus-visible,
+.popup-row button:focus-visible,
+.settings-card button:focus-visible,
+.settings-card input:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--accent) 58%, transparent);
   outline-offset: 2px;
 }
@@ -695,6 +699,12 @@ textarea {
   border-radius: 8px;
   background: var(--surface);
   box-shadow: var(--shadow);
+}
+
+.inspector-empty {
+  border-style: dashed;
+  border-radius: 10px;
+  background: var(--surface-2);
 }
 
 .inspector-header h2 {
@@ -1309,12 +1319,14 @@ textarea {
 }
 
 .empty-state,
-.empty-row {
+.empty-row,
+.active-tabs-empty {
   display: grid;
   place-items: center;
   min-height: 160px;
   border: 1px dashed var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
+  background: var(--surface-2);
   color: var(--muted);
   text-align: center;
 }
