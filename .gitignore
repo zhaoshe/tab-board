@@ -9,3 +9,5 @@ build/
 *.pem
 *.tmp
 .codegraph/
+.agents/
+skills-lock.json
