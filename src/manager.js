@@ -23,15 +23,22 @@ import {
   tabMatchesQuery,
   tabsToText
 } from "./model.js";
+import {
+  buildContextStripItems,
+  buildInspectorModel,
+  getSessionActionLayout
+} from "./manager-view.js";
 import { hydrateIconButtons, iconOnlyButton, iconSummary, iconTextButton } from "./icons.js";
 import { getState, updateState } from "./store.js";
 
 const els = {
   activeTabsPanel: document.querySelector("#activeTabsPanel"),
   appShell: document.querySelector(".app-shell"),
+  contextStrip: document.querySelector("#contextStrip"),
   folderList: document.querySelector("#folderList"),
   groupsList: document.querySelector("#groupsList"),
   headerActions: document.querySelector("#headerActions"),
+  inspectorPanel: document.querySelector("#inspectorPanel"),
   modal: document.querySelector("#modal"),
   modalActions: document.querySelector("#modalActions"),
   modalBody: document.querySelector("#modalBody"),
@@ -70,6 +77,7 @@ let openTabFilter = null;
 let openTabsSelectMode = false;
 let activeDragKind = "";
 let groupInsertMarker = null;
+let focusedGroupId = "";
 const expandedGroupIds = new Set();
 
 ensureActiveWorkspace();
@@ -722,12 +730,15 @@ function handleKeyboard(event) {
 }
 
 function render() {
+  ensureFocusedGroup();
   renderWorkspaceSwitcher();
   renderStats();
   renderHeaderActions();
+  renderContextStrip();
   renderActiveTabs();
   renderFolders();
   renderGroups();
+  renderInspector();
 }
 
 function renderStats() {
@@ -750,6 +761,21 @@ function renderWorkspaceSwitcher() {
       h("option", { value: workspace.id, selected: workspace.id === activeWorkspaceId }, workspace.name)
     );
   }
+}
+
+function renderContextStrip() {
+  if (!els.contextStrip) {
+    return;
+  }
+  const items = buildContextStripItems({
+    workspaceName: activeWorkspaceName(),
+    categoryLabel: activeCategoryLabel(),
+    searchQuery,
+    openTabTitle: openTabFilter?.title || ""
+  });
+  els.contextStrip.replaceChildren(
+    ...items.map((item) => h("span", { class: `context-chip context-chip-${item.kind}` }, item.label))
+  );
 }
 
 function renderActiveTabs() {
@@ -1077,6 +1103,86 @@ function renderGroups() {
   }
 }
 
+function renderInspector() {
+  if (!els.inspectorPanel) {
+    return;
+  }
+  const group = focusedGroup();
+  const model = buildInspectorModel({
+    group,
+    categoryLabel: activeCategoryLabel(),
+    restorableCount: group ? group.tabs.filter(isRestorableTab).length : 0
+  });
+  els.inspectorPanel.replaceChildren();
+  els.inspectorPanel.dataset.state = model.state;
+
+  if (model.state === "empty") {
+    els.inspectorPanel.append(
+      h(
+        "div",
+        { class: "inspector-empty" },
+        h("h2", { id: "inspectorTitle" }, model.title),
+        h("p", { class: "muted" }, model.message)
+      )
+    );
+    return;
+  }
+
+  els.inspectorPanel.append(
+    h(
+      "div",
+      { class: "inspector-card" },
+      h(
+        "header",
+        { class: "inspector-header" },
+        h("h2", { id: "inspectorTitle" }, model.title),
+        h("p", { class: "muted" }, model.meta)
+      ),
+      h(
+        "div",
+        { class: "inspector-actions" },
+        renderInspectorAction("restore", group),
+        renderInspectorMenuAction("rename", group),
+        renderInspectorMenuAction("note", group)
+      ),
+      model.note ? h("p", { class: "inspector-note" }, model.note) : ""
+    )
+  );
+}
+
+function renderInspectorAction(actionId, group) {
+  if (actionId !== "restore") {
+    return null;
+  }
+  return iconOnlyButton("rotate-ccw", "Restore session", {
+    class: "primary",
+    "data-action": "restore-group",
+    "data-group-id": group.id
+  });
+}
+
+function renderInspectorMenuAction(actionId, group) {
+  if (actionId === "rename") {
+    return iconTextButton("edit-3", "Rename", { "data-action": "rename-group", "data-group-id": group.id });
+  }
+  if (actionId === "note") {
+    return iconTextButton("sticky-note", "Edit note", { "data-action": "edit-group-note", "data-group-id": group.id });
+  }
+  if (actionId === "lock") {
+    return iconTextButton(group.locked ? "unlock" : "lock", group.locked ? "Unlock" : "Lock", {
+      "data-action": "toggle-group-lock",
+      "data-group-id": group.id
+    });
+  }
+  if (actionId === "copy") {
+    return iconTextButton("copy", "Copy", { "data-action": "copy-group", "data-group-id": group.id });
+  }
+  if (actionId === "delete") {
+    return iconTextButton("trash-2", "Delete", { class: "danger", "data-action": "delete-group", "data-group-id": group.id });
+  }
+  return null;
+}
+
 function renderCategorySection(category, groups) {
   const sectionGroups = groupsForCategory(category, groups);
   const categoryGroups = groupsForCategory(category, workspaceGroups());
@@ -1250,6 +1356,47 @@ function sessionExternalActionIds() {
   return sessionActionOrder().filter((item) => visible.has(item));
 }
 
+function ensureFocusedGroup() {
+  const groups = visibleGroups();
+  const visibleIds = new Set(groups.map((group) => group.id));
+  if (focusedGroupId && visibleIds.has(focusedGroupId)) {
+    return;
+  }
+  focusedGroupId = groups[0]?.id || "";
+}
+
+function focusedGroup() {
+  const groups = visibleGroups();
+  if (!focusedGroupId) {
+    return groups[0] || null;
+  }
+  return groups.find((group) => group.id === focusedGroupId) || groups[0] || null;
+}
+
+function focusGroup(groupId) {
+  focusedGroupId = String(groupId || "");
+  renderInspector();
+}
+
+function activeWorkspace() {
+  return state.workspaces.find((workspace) => workspace.id === activeWorkspaceId) || state.workspaces[0] || null;
+}
+
+function activeWorkspaceName() {
+  return activeWorkspace()?.name || "";
+}
+
+function activeCategoryLabel() {
+  if (activeFilter === CATEGORY_STARRED) {
+    return "Starred";
+  }
+  if (activeFilter.startsWith("folder:")) {
+    const folderId = activeFilter.slice("folder:".length);
+    return state.folders.find((folder) => folder.id === folderId)?.name || "Folder";
+  }
+  return "Inbox";
+}
+
 function sessionActionNodes(group, restorableCount) {
   const baseAttrs = { "data-group-id": group.id };
   return {
@@ -1307,14 +1454,11 @@ function sessionActionNodes(group, restorableCount) {
 
 function renderSessionActions(group, restorableCount) {
   const actions = sessionActionNodes(group, restorableCount);
-  const externalIds = new Set(sessionExternalActionIds());
-  const order = sessionActionOrder();
-  const externalNodes = order
-    .filter((id) => externalIds.has(id))
+  const layout = getSessionActionLayout(restorableCount);
+  const externalNodes = layout.external
     .flatMap((id) => [actions[id]?.external?.()].flat())
     .filter(Boolean);
-  const menuNodes = order
-    .filter((id) => !externalIds.has(id))
+  const menuNodes = layout.menu
     .flatMap((id) => [actions[id]?.menu?.()].flat(2))
     .filter(Boolean);
   return [
@@ -1350,6 +1494,7 @@ function renderGroup(group, contextId = "") {
     class: `group-card${group.starred ? " starred" : ""}${group.locked ? " locked" : ""}`,
     id: contextId ? `group-${group.id}-${safeDomId(contextId)}` : `group-${group.id}`,
     draggable: "true",
+    tabindex: "0",
     "data-drag-kind": "group",
     "data-group-id": group.id,
     "data-drop": "group-body"
@@ -1389,6 +1534,8 @@ function renderGroup(group, contextId = "") {
           title,
           h("div", { class: "group-actions" }, ...renderSessionActions(group, restorableCount))
         );
+  card.addEventListener("click", () => focusGroup(group.id));
+  card.addEventListener("focusin", () => focusGroup(group.id));
   card.append(header);
 
   if (group.note) {

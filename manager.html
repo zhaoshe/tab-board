@@ -42,7 +42,7 @@
       </aside>
 
       <main class="workspace">
-        <header class="workspace-header">
+        <header class="workspace-command-bar workspace-header">
           <div class="workspace-title-row">
             <div id="headerActions" class="header-actions"></div>
             <div class="workspace-heading">
@@ -56,11 +56,15 @@
           </div>
           <label class="search-box workspace-search">
             <span class="visually-hidden">Search</span>
-            <input id="searchInput" type="search" autocomplete="off" placeholder="Search" />
+            <input id="searchInput" type="search" autocomplete="off" placeholder="Search sessions, notes, and links" />
           </label>
+          <div id="contextStrip" class="context-strip" aria-live="polite"></div>
         </header>
 
-        <section id="groupsList" class="groups-list" data-drop="new-group" aria-label="Saved tab groups"></section>
+        <div class="workspace-main-shell">
+          <section id="groupsList" class="groups-list" data-drop="new-group" aria-label="Saved tab groups"></section>
+          <aside id="inspectorPanel" class="inspector-panel" aria-labelledby="inspectorTitle"></aside>
+        </div>
       </main>
     </div>
 
