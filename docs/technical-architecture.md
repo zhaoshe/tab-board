@@ -27,11 +27,15 @@ ZipTab 是一个无构建步骤的 Chrome Manifest V3 extension。
 - `src/model.js`: state schema、normalize、数据创建、导入导出、匹配和工具函数。
 - `src/store.js`: `chrome.storage.local` 的 get/set/update 封装。
 - `src/icons.js`: 本地 SVG icon registry、按钮 hydrate、tooltip。
+- `src/manager-view.js`: manager context strip、inspector model、session action layout 的纯 helper。
+- `src/popup-view.js`: popup CTA、recent sessions、empty copy 的纯 helper。
+- `src/options-view.js`: options Basic / Advanced section 分组 helper。
+- `src/feedback-copy.js`: popup、manager、options 共享的反馈文案 helper。
 - `manager.html`: 主工作台。
 - `popup.html` / `src/popup.js`: toolbar popup。
 - `options.html` / `src/options.js`: 设置页。
 - `src/styles.css`: 主要 UI 样式。
-- `tests/model.test.mjs`: 数据模型和导入导出测试。
+- `tests/*.test.mjs`: 数据模型、background hardening 和 UI helper 单元测试。
 - `scripts/check-extension.mjs`: extension 文件存在性、JS 语法和测试聚合检查。
 
 ## Manifest 能力
@@ -54,7 +58,7 @@ ZipTab 是一个无构建步骤的 Chrome Manifest V3 extension。
 - `storage`: 本地持久化。
 - `unlimitedStorage`: 避免 sessions 较多时过早触达 quota。
 - `contextMenus`: 右键菜单保存入口。
-- `clipboardRead` / `clipboardWrite`: 导入/复制等能力。
+- `clipboardWrite`: 复制导出内容和链接。
 
 ## 模块边界
 
@@ -102,16 +106,17 @@ ZipTab 是一个无构建步骤的 Chrome Manifest V3 extension。
 
 负责 manager page：
 
-- 渲染 sidebar、workspace header、categories、session cards、modals。
+- 渲染 sidebar、workspace command bar、context strip、categories、session cards、inspector、modals。
 - manager 页面事件分发。
 - open tabs panel。
 - session/category/tab drag and drop。
+- focused session / inspector 本地 UI 状态。
 - inline rename。
 - bin modal。
 - import/export modal。
 - search modal。
 
-当前 `manager.js` 体量最大，是后续最需要拆分的模块。
+纯 UI 决策尽量放在 `manager-view.js`，避免继续把可测试逻辑塞进 `manager.js`。
 
 ### `icons.js`
 
@@ -450,12 +455,15 @@ UI 使用手写 DOM：
 
 ```text
 render()
+  -> ensureFocusedGroup()
   -> renderWorkspaceSwitcher()
   -> renderStats()
   -> renderHeaderActions()
+  -> renderContextStrip()
   -> renderActiveTabs()
   -> renderFolders()
   -> renderGroups()
+  -> renderInspector()
 ```
 
 状态更新后通常：

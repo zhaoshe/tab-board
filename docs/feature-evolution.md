@@ -458,6 +458,26 @@ Starred 已经是一个内置 category，用户认为 session card 上的金色�
 - Search 已移入 workspace 顶栏，Restore all 不再适合占用 sidebar 常驻底部动作。
 - OneTab 只是导入格式之一，能力应并入 Import，而不是作为独立产品入口。
 
+### 2026-07-07: Manager-first extension UI redesign
+
+使用 `chrome-extension-ui` 规则审查后，确认 ZipTab 的主价值不在 popup 里完成管理，而是在 new tab manager 中稳定整理和恢复 sessions。
+
+变化：
+
+- Popup 收敛为快动作入口：Save window、Open workspace、recent sessions restore。
+- Popup recent sessions 最多展示 5 条，不再像缩小版 manager。
+- Manager 顶部强化为 command bar，并新增 workspace/category/search/open-tab-filter 的 context strip。
+- Manager 增加右侧 inspector，展示 focused session 的 metadata、note 和编辑入口。
+- Session card 默认只保留 Restore 作为主要直接动作，其余管理动作进入 More 或 inspector。
+- Options 分为 Basic 和 Advanced，日常设置和高风险/低频设置分层展示。
+- 反馈文案抽到 `src/feedback-copy.js`，focus-visible 和 empty state 样式统一。
+
+判断：
+
+- Chrome popup 的尺寸和 auto-close 行为不适合承载重管理流程。
+- Manager/new tab 才是重复使用的工作台，应承担搜索、编辑、整理和恢复。
+- Popup 功能变少是有意取舍，换取更清楚的一眼可用入口。
+
 ## 待观察问题
 
 - 右键菜单触发筛选是否足够容易被发现。

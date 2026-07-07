@@ -322,6 +322,30 @@ Trade-offs:
 Status:
 Accepted。
 
+## D015: Manager-first extension UI redesign
+
+Context:
+Popup 和 manager 都暴露 session 操作时，popup 容易变成缩小版 manager；session card 表面动作太多也会降低扫描效率。Chrome popup 尺寸和 auto-close 行为不适合承载复杂整理任务。
+
+Decision:
+保留 popup 作为 trigger surface，只放 Save window、Open workspace、recent sessions restore；把深层 session 管理集中到 manager/new tab，并用 command bar、context strip、session board、inspector 组成主工作台。Options 拆成 Basic 和 Advanced。
+
+Rationale:
+
+- Popup 打开后应快速完成单一动作。
+- Manager/new tab 是稳定页面，更适合搜索、编辑、拖拽和批量整理。
+- Inspector 可以把 Rename、Note、Lock 等次级动作从 card 表面移走，减少视觉噪音。
+- Options 分层能把日常设置和低频/高风险设置分开。
+
+Trade-offs:
+
+- Popup 变得不如以前“全能”，部分管理动作需要进入 manager。
+- Inspector 增加一块 UI 区域，需要继续观察窄屏和键盘路径。
+- Session card 外露动作减少后，新用户需要学习 More 和 inspector 的分工。
+
+Status:
+Accepted, needs UX observation。
+
 ## Decision template
 
 ```md

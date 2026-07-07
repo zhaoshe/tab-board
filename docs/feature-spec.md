@@ -41,27 +41,30 @@ ZipTab 使用 `chrome_url_overrides.newtab` 替换 Chrome 新标签页。
 Manager 是主工作台，分为：
 
 - 左侧 sidebar：品牌和统计、Open Tabs、Categories、底部动作。
-- 顶部 sticky header：workspace 控制、折叠/展开全部、搜索框。
-- 右侧主体：按 category 顺序展示所有 saved sessions。
+- 顶部 command bar：workspace 控制、折叠/展开全部、搜索框和 context strip。
+- 中央 session board：按 category 顺序展示 saved sessions。
+- 右侧 inspector：展示当前 focused session 的 metadata、note 和编辑入口。
+
+Session cards 降噪：Restore 是主要直接动作；Rename、Note、Lock、Copy、Delete 等次级动作进入 More 或 inspector。
 
 ### Popup
 
-Popup 是轻量入口：
+Popup 是快动作入口：
 
-- Save window。
-- Open manager。
+- 主 CTA：Save window。
+- 次 CTA：Open workspace。
 - Search recent sessions。
 - Restore recent session。
+- Recent sessions 最多展示 5 条。
+
+Popup 不承载重命名、分类、编辑、批量操作等管理流程。
 
 ### Options
 
-Options 管理：
+Options 分为 Basic 和 Advanced：
 
-- Toolbar 点击行为。
-- Capture 规则。
-- Restore 规则。
-- Interface 偏好。
-- Session toolbar 外露动作和顺序。
+- Basic：日常 toolbar、capture、restore、theme 设置。
+- Advanced：特殊 URL、dedupe、destructive confirmation、favicons、session toolbar 外露动作和顺序。
 - Chrome shortcuts 入口。
 
 ### Context menu
