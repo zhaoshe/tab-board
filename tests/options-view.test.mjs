@@ -8,6 +8,7 @@ test("places daily-use settings in the Basic section", () => {
     "actionClick",
     "closeTabsAfterSave",
     "openManagerAfterSave",
+    "dedupeOnSave",
     "deleteRestoredTabs",
     "restoreGroupsInNewWindow",
     "restoreNextToCurrent",
@@ -16,15 +17,25 @@ test("places daily-use settings in the Basic section", () => {
   ]);
 });
 
-test("keeps risky and rare settings in the Advanced section", () => {
+test("keeps rare capture settings in the Advanced section", () => {
   const sections = buildSettingsSections();
   assert.deepEqual(sections.advanced.map((item) => item.key), [
     "includePinnedTabs",
-    "includeChromeUrls",
-    "includeFileUrls",
-    "dedupeOnSave",
-    "confirmDestructive",
-    "showFavicons",
-    "sessionToolbar"
+    "excludeUrlPatterns"
   ]);
+});
+
+test("groups capture dedupe and exclude URL patterns", () => {
+  const sections = buildSettingsSections();
+
+  assert.equal(sections.capture.some((item) => item.key === "dedupeOnSave"), true);
+  assert.equal(sections.captureEdgeCases.some((item) => item.key === "excludeUrlPatterns"), true);
+});
+
+test("does not expose removed interface settings", () => {
+  const keys = Object.values(buildSettingsSections()).flat().map((item) => item.key);
+
+  assert.equal(keys.includes("showFavicons"), false);
+  assert.equal(keys.includes("confirmDestructive"), false);
+  assert.equal(keys.includes("sessionToolbar"), false);
 });

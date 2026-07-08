@@ -4,6 +4,7 @@ export function buildSettingsSections() {
       { key: "actionClick", card: "toolbar" },
       { key: "closeTabsAfterSave", card: "capture" },
       { key: "openManagerAfterSave", card: "capture" },
+      { key: "dedupeOnSave", card: "capture" },
       { key: "deleteRestoredTabs", card: "restore" },
       { key: "restoreGroupsInNewWindow", card: "restore" },
       { key: "restoreNextToCurrent", card: "restore" },
@@ -12,12 +13,9 @@ export function buildSettingsSections() {
     ],
     advanced: [
       { key: "includePinnedTabs", card: "capture" },
-      { key: "includeChromeUrls", card: "capture" },
-      { key: "includeFileUrls", card: "capture" },
-      { key: "dedupeOnSave", card: "capture" },
-      { key: "confirmDestructive", card: "interface" },
-      { key: "showFavicons", card: "interface" },
-      { key: "sessionToolbar", card: "interface" }
-    ]
+      { key: "excludeUrlPatterns", card: "capture-edge-cases" }
+    ],
+    capture: [{ key: "dedupeOnSave", card: "capture" }],
+    captureEdgeCases: [{ key: "excludeUrlPatterns", card: "capture-edge-cases" }]
   };
 }

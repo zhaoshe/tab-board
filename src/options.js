@@ -1,4 +1,4 @@
-import { DEFAULT_SESSION_EXTERNAL_ACTIONS, DEFAULT_SETTINGS, SESSION_ACTION_IDS, isKnownSettingKey } from "./model.js";
+import { DEFAULT_SETTINGS, isKnownSettingKey } from "./model.js";
 import { formatSettingsSavedMessage } from "./feedback-copy.js";
 import { hydrateIconButtons, iconOnlyButton, iconTextButton } from "./icons.js";
 import { buildSettingsSections } from "./options-view.js";
@@ -7,16 +7,6 @@ import { getState, updateState } from "./store.js";
 const advancedSettingsGrid = document.querySelector("#advancedSettingsGrid");
 const basicSettingsGrid = document.querySelector("#basicSettingsGrid");
 const toastNode = document.querySelector("#toast");
-const SESSION_ACTION_META = {
-  add: { label: "Add item" },
-  collapse: { label: "Collapse / expand" },
-  copy: { label: "Copy" },
-  delete: { label: "Delete" },
-  lock: { label: "Lock" },
-  note: { label: "Note" },
-  rename: { label: "Rename" },
-  restore: { label: "Restore" }
-};
 let state = await getState();
 
 hydrateIconButtons();
@@ -40,27 +30,28 @@ async function handleClick(event) {
     await chrome.runtime.sendMessage({ type: "open-manager" });
   }
   if (button.dataset.action === "reset-settings") {
-    await updateState((draft) => {
-      draft.settings = { ...DEFAULT_SETTINGS };
-      return draft;
-    });
+    await updateState((draft) => ({ ...draft, settings: { ...DEFAULT_SETTINGS } }));
     toast("Settings reset");
   }
   if (button.dataset.action === "open-shortcuts") {
     await chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
   }
-  if (button.dataset.action === "session-action-up" || button.dataset.action === "session-action-down") {
-    await moveSessionAction(
-      button.dataset.sessionAction,
-      button.dataset.action === "session-action-up" ? -1 : 1
-    );
+  if (button.dataset.action === "add-exclude-url-pattern") {
+    await updateExcludeUrlPatterns((patterns) => [...patterns, "https://example.com/*"]);
+  }
+  if (button.dataset.action === "remove-exclude-url-pattern") {
+    const index = Number(button.dataset.patternIndex);
+    await updateExcludeUrlPatterns((patterns) => patterns.filter((_, itemIndex) => itemIndex !== index));
   }
 }
 
 async function handleChange(event) {
-  const sessionAction = event.target.closest("[data-session-toolbar-action]");
-  if (sessionAction) {
-    await toggleSessionAction(sessionAction.dataset.sessionToolbarAction, sessionAction.checked);
+  const patternInput = event.target.closest("[data-exclude-url-pattern]");
+  if (patternInput) {
+    const index = Number(patternInput.dataset.excludeUrlPattern);
+    await updateExcludeUrlPatterns((patterns) =>
+      patterns.map((pattern, itemIndex) => (itemIndex === index ? patternInput.value.trim() : pattern))
+    );
     return;
   }
 
@@ -73,10 +64,10 @@ async function handleChange(event) {
     return;
   }
   const value = target.type === "checkbox" ? target.checked : target.value;
-  await updateState((draft) => {
-    draft.settings[key] = value;
-    return draft;
-  });
+  await updateState((draft) => ({
+    ...draft,
+    settings: { ...draft.settings, [key]: value }
+  }));
   toast(formatSettingsSavedMessage());
 }
 
@@ -106,7 +97,8 @@ function render() {
       "Daily save behavior",
       ...settingControls(basicKeys, [
         { key: "closeTabsAfterSave", control: checkbox("closeTabsAfterSave", settings.closeTabsAfterSave, "Close tabs after saving") },
-        { key: "openManagerAfterSave", control: checkbox("openManagerAfterSave", settings.openManagerAfterSave, "Open ZipTab after saving") }
+        { key: "openManagerAfterSave", control: checkbox("openManagerAfterSave", settings.openManagerAfterSave, "Open ZipTab after saving") },
+        { key: "dedupeOnSave", control: checkbox("dedupeOnSave", settings.dedupeOnSave, "Deduplicate tabs during capture") }
       ])
     ),
     settingCard(
@@ -144,18 +136,7 @@ function render() {
       "Rare or restricted tab types",
       ...settingControls(advancedKeys, [
         { key: "includePinnedTabs", control: checkbox("includePinnedTabs", settings.includePinnedTabs, "Include pinned tabs") },
-        { key: "includeChromeUrls", control: checkbox("includeChromeUrls", settings.includeChromeUrls, "Include chrome:// links") },
-        { key: "includeFileUrls", control: checkbox("includeFileUrls", settings.includeFileUrls, "Include file:// links") },
-        { key: "dedupeOnSave", control: checkbox("dedupeOnSave", settings.dedupeOnSave, "Skip URLs already saved") }
-      ])
-    ),
-    settingCard(
-      "Interface",
-      "Confirmation and session card tuning",
-      ...settingControls(advancedKeys, [
-        { key: "confirmDestructive", control: checkbox("confirmDestructive", settings.confirmDestructive, "Confirm destructive actions") },
-        { key: "showFavicons", control: checkbox("showFavicons", settings.showFavicons, "Show favicons") },
-        { key: "sessionToolbar", control: sessionToolbarEditor(settings) }
+        { key: "excludeUrlPatterns", control: excludeUrlListEditor(settings.excludeUrlPatterns) }
       ])
     ),
     settingCard(
@@ -167,97 +148,44 @@ function render() {
   );
 }
 
-async function moveSessionAction(actionId, delta) {
+async function updateExcludeUrlPatterns(updater) {
   await updateState((draft) => {
-    const order = sessionActionOrder(draft.settings);
-    const index = order.indexOf(actionId);
-    const nextIndex = index + delta;
-    if (index < 0 || nextIndex < 0 || nextIndex >= order.length) {
-      return draft;
-    }
-    const [item] = order.splice(index, 1);
-    order.splice(nextIndex, 0, item);
-    const external = new Set(sessionExternalActions(draft.settings));
-    draft.settings.sessionActionOrder = order;
-    draft.settings.sessionExternalActions = order.filter((id) => external.has(id));
-    return draft;
+    const current = Array.isArray(draft.settings.excludeUrlPatterns) ? draft.settings.excludeUrlPatterns : [];
+    return {
+      ...draft,
+      settings: {
+        ...draft.settings,
+        excludeUrlPatterns: updater(current).map((pattern) => String(pattern || "").trim()).filter(Boolean)
+      }
+    };
   });
   toast(formatSettingsSavedMessage());
 }
 
-async function toggleSessionAction(actionId, visible) {
-  await updateState((draft) => {
-    const order = sessionActionOrder(draft.settings);
-    const external = new Set(sessionExternalActions(draft.settings));
-    if (visible) {
-      external.add(actionId);
-    } else {
-      external.delete(actionId);
-    }
-    draft.settings.sessionActionOrder = order;
-    draft.settings.sessionExternalActions = order.filter((id) => external.has(id));
-    return draft;
-  });
-  toast(formatSettingsSavedMessage());
-}
-
-function sessionToolbarEditor(settings) {
-  const order = sessionActionOrder(settings);
-  const external = new Set(sessionExternalActions(settings));
+function excludeUrlListEditor(patterns = []) {
+  const safePatterns = Array.isArray(patterns) ? patterns : [];
   return h(
     "div",
-    { class: "session-toolbar-editor" },
-    h("p", { class: "muted" }, "Choose which session actions appear on cards. Hidden actions stay in More."),
-    ...order.map((actionId, index) =>
+    { class: "exclude-url-list" },
+    h("p", { class: "muted" }, "Examples: chrome://*, file://*, about:blank, https://example.com/*"),
+    ...safePatterns.map((pattern, index) =>
       h(
         "div",
-        { class: "toolbar-action-row" },
-        h(
-          "label",
-          { class: "toolbar-action-check" },
-          h("input", {
-            type: "checkbox",
-            "data-session-toolbar-action": actionId,
-            checked: external.has(actionId)
-          }),
-          h("span", {}, SESSION_ACTION_META[actionId]?.label || actionId)
-        ),
-        h(
-          "div",
-          { class: "toolbar-action-controls" },
-          iconOnlyButton("chevrons-up", "Move earlier", {
-            "data-action": "session-action-up",
-            "data-session-action": actionId,
-            disabled: index === 0
-          }),
-          iconOnlyButton("chevrons-down", "Move later", {
-            "data-action": "session-action-down",
-            "data-session-action": actionId,
-            disabled: index === order.length - 1
-          })
-        )
+        { class: "exclude-url-row" },
+        h("input", {
+          value: pattern,
+          "data-exclude-url-pattern": index,
+          "aria-label": "Exclude URL pattern"
+        }),
+        iconOnlyButton("trash-2", "Remove pattern", {
+          class: "danger",
+          "data-action": "remove-exclude-url-pattern",
+          "data-pattern-index": index
+        })
       )
-    )
+    ),
+    iconTextButton("plus", "Add URL pattern", { "data-action": "add-exclude-url-pattern" })
   );
-}
-
-function sessionActionOrder(settings) {
-  const configured = Array.isArray(settings?.sessionActionOrder)
-    ? settings.sessionActionOrder.map((item) => String(item))
-    : [];
-  return [
-    ...new Set(configured.filter((item) => SESSION_ACTION_IDS.includes(item))),
-    ...SESSION_ACTION_IDS.filter((item) => !configured.includes(item))
-  ];
-}
-
-function sessionExternalActions(settings) {
-  const order = sessionActionOrder(settings);
-  const configured = Array.isArray(settings?.sessionExternalActions)
-    ? settings.sessionExternalActions.map((item) => String(item))
-    : [...DEFAULT_SESSION_EXTERNAL_ACTIONS];
-  const external = new Set(configured.filter((item) => SESSION_ACTION_IDS.includes(item)));
-  return order.filter((item) => external.has(item));
 }
 
 function settingKeySet(items) {
@@ -317,6 +245,8 @@ function h(tag, attrs = {}, ...children) {
       node.className = value;
     } else if (key === "checked") {
       node.checked = Boolean(value);
+    } else if (key === "value") {
+      node.value = String(value);
     } else {
       node.setAttribute(key, String(value));
     }

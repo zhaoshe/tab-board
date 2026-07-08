@@ -102,53 +102,25 @@
   padding: 0 12px;
 }
 
-.session-toolbar-editor {
+.exclude-url-list {
   display: grid;
   gap: 8px;
-  margin-top: 4px;
 }
 
-.toolbar-action-row {
+.exclude-url-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
-  min-height: 40px;
-  padding: 6px 8px;
+}
+
+.exclude-url-row input {
+  min-height: 34px;
+  padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface-2);
-}
-
-.toolbar-action-check {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 10px;
-  font-weight: 650;
-}
-
-.toolbar-action-check input {
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-.toolbar-action-controls {
-  display: flex;
-  gap: 4px;
-}
-
-.toolbar-action-controls .icon-button {
-  width: 30px;
-  min-width: 30px;
-  min-height: 30px;
-}
-
-.toolbar-action-controls .icon-button[disabled] {
-  cursor: default;
-  opacity: 0.4;
+  color: var(--ink);
 }
 
 @media (max-width: 700px) {
