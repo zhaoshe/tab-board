@@ -10,16 +10,13 @@
   <body class="popup-body">
     <main class="popup-shell">
       <header class="popup-header">
-        <div class="mark" aria-hidden="true">ZT</div>
         <div>
           <h1>ZipTab</h1>
           <p id="popupStats" class="muted">0 tabs</p>
         </div>
+        <button type="button" class="icon-button" data-icon="settings" data-action="open-options" aria-label="Open settings"></button>
       </header>
-      <div class="popup-actions">
-        <button type="button" class="primary" data-icon="archive" data-icon-text data-action="capture-current-window">Save window</button>
-        <button type="button" data-icon="external-link" data-icon-text data-action="open-manager">Open workspace</button>
-      </div>
+      <div id="popupActions" class="popup-actions" aria-label="Quick actions"></div>
       <label class="search-box popup-search">
         <span class="visually-hidden">Search recent sessions</span>
         <input id="popupSearch" type="search" autocomplete="off" placeholder="Search recent sessions" />

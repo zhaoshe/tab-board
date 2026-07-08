@@ -1,9 +1,9 @@
 import { collectStats, normalizeState } from "./model.js";
-import { formatRestoreFeedback, formatSaveFeedback } from "./feedback-copy.js";
-import { hydrateIconButtons, iconOnlyButton } from "./icons.js";
+import { hydrateIconButtons, iconOnlyButton, iconTextButton } from "./icons.js";
 import { buildPopupViewModel } from "./popup-view.js";
 import { getState } from "./store.js";
 
+const actionsNode = document.querySelector("#popupActions");
 const feedbackNode = document.querySelector("#popupFeedback");
 const statsNode = document.querySelector("#popupStats");
 const listNode = document.querySelector("#popupSessionList");
@@ -34,18 +34,25 @@ async function handleClick(event) {
 
   try {
     if (button.dataset.action === "capture-current-window") {
-      const result = await sendRuntime({ type: "capture", mode: "current-window" });
-      feedbackNode.textContent = formatSaveFeedback(result.storedTabs || 0);
+      await sendRuntime({ type: "capture", mode: "current-window" });
       window.close();
-    }
-    if (button.dataset.action === "open-manager") {
+    } else if (button.dataset.action === "open-manager") {
       await sendRuntime({ type: "open-manager", query });
       window.close();
-    }
-    if (button.dataset.action === "restore-group") {
-      const result = await sendRuntime({ type: "restore-group", groupId: button.dataset.groupId });
-      feedbackNode.textContent = formatRestoreFeedback({ restored: result.restoredTabs || 0 });
+    } else if (button.dataset.action === "dedupe-current-window") {
+      await sendRuntime({ type: "dedupe-window" });
       window.close();
+    } else if (button.dataset.action === "open-options") {
+      await sendRuntime({ type: "open-options" });
+      window.close();
+    } else if (button.dataset.action === "restore-group") {
+      await sendRuntime({ type: "restore-group", groupId: button.dataset.groupId });
+      window.close();
+    } else if (button.dataset.action === "delete-group") {
+      if (!confirm("Delete this session?")) {
+        return;
+      }
+      await sendRuntime({ type: "delete-group", groupId: button.dataset.groupId });
     }
   } catch (error) {
     feedbackNode.textContent = error?.message || String(error);
@@ -65,6 +72,7 @@ function render() {
   const model = buildPopupViewModel({ groups: state.groups, query });
   statsNode.textContent = `${stats.savedTabs} saved, ${stats.groups} sessions`;
   feedbackNode.textContent = "";
+  actionsNode.replaceChildren(...model.quickActions.map(renderQuickAction));
   listNode.replaceChildren();
 
   if (!model.groups.length) {
@@ -73,25 +81,63 @@ function render() {
   }
 
   for (const group of model.groups) {
-    listNode.append(
-      h(
-        "li",
-        { class: "popup-row" },
-        h(
-          "span",
-          { class: "popup-session-main" },
-          h("strong", {}, group.title),
-          h("small", {}, `${group.restorableCount} links`)
-        ),
-        group.restorableCount
-          ? iconOnlyButton("rotate-ccw", "Restore session", {
-              "data-action": "restore-group",
-              "data-group-id": group.id
-            })
-          : h("span", { class: "muted" }, "No links")
-      )
-    );
+    listNode.append(renderGroupRow(group));
   }
+}
+
+function renderQuickAction(action) {
+  return iconTextButton(action.icon, action.label, {
+    class: `popup-quick-action ${action.id === "save" ? "primary" : ""}`,
+    "data-action": action.action
+  });
+}
+
+function renderGroupRow(group) {
+  return h(
+    "li",
+    { class: "popup-row", tabindex: "0" },
+    h(
+      "span",
+      { class: "popup-session-main" },
+      h("strong", {}, group.title),
+      h("small", {}, `${group.restorableCount} link${group.restorableCount === 1 ? "" : "s"}`)
+    ),
+    h(
+      "span",
+      { class: "popup-row-actions" },
+      group.actions.includes("restore")
+        ? iconOnlyButton("external-link", "Restore session", {
+            "data-action": "restore-group",
+            "data-group-id": group.id
+          })
+        : null,
+      iconOnlyButton("trash-2", "Delete session", {
+        class: "danger",
+        "data-action": "delete-group",
+        "data-group-id": group.id
+      })
+    ),
+    renderPreview(group.previewTabs)
+  );
+}
+
+function renderPreview(tabs) {
+  if (!tabs.length) {
+    return null;
+  }
+  return h(
+    "div",
+    { class: "popup-preview", role: "tooltip" },
+    h("div", { class: "popup-preview-title" }, "Tabs"),
+    ...tabs.map((tab) =>
+      h(
+        "div",
+        { class: "popup-preview-tab" },
+        tab.favIconUrl ? h("img", { src: tab.favIconUrl, alt: "" }) : h("span", { class: "popup-preview-favicon" }),
+        h("span", {}, tab.title)
+      )
+    )
+  );
 }
 
 function h(tag, attrs = {}, ...children) {
@@ -107,6 +153,9 @@ function h(tag, attrs = {}, ...children) {
     }
   }
   for (const child of children.flat()) {
+    if (child === null || child === undefined) {
+      continue;
+    }
     node.append(child instanceof Node ? child : document.createTextNode(String(child)));
   }
   return node;

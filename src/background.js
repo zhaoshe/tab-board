@@ -1,4 +1,6 @@
 import {
+  compactBin,
+  createBinEntry,
   createGroupFromTabRecords,
   createTabRecord,
   defaultGroupTitle,
@@ -119,6 +121,10 @@ async function handleMessage(message) {
       return openManager({ query: message.query || "" });
     case "open-options":
       return chrome.runtime.openOptionsPage();
+    case "dedupe-window":
+      return dedupeWindow(message.windowId);
+    case "delete-group":
+      return deleteSavedGroup(message.groupId);
     case "restore-tab":
       return restoreTab(message);
     case "restore-group":
@@ -608,6 +614,35 @@ async function removeTabs(tabIds) {
       // The tab may already be closed by the user or Chrome may refuse an internal page.
     }
   }
+}
+
+async function dedupeWindow(windowId) {
+  const query = Number.isFinite(windowId) ? { windowId } : { currentWindow: true };
+  const tabs = sortCapturedTabs(await chrome.tabs.query(query));
+  const { duplicateTabs } = dedupeSourceTabs(tabs.filter((tab) => !isBlankTab(tab)), { dedupeOnSave: true });
+  await removeTabs(duplicateTabs.map((tab) => tab.id).filter(Number.isFinite));
+  return { removedTabs: duplicateTabs.length };
+}
+
+async function deleteSavedGroup(groupId) {
+  const id = String(groupId || "");
+  if (!id) {
+    return { deleted: false };
+  }
+  let deleted = false;
+  await updateState((draft) => {
+    const group = draft.groups.find((item) => item.id === id);
+    if (!group) {
+      return draft;
+    }
+    deleted = true;
+    return {
+      ...draft,
+      groups: draft.groups.filter((item) => item.id !== id),
+      bin: compactBin([createBinEntry("group", group, { label: group.title }), ...(draft.bin || [])])
+    };
+  });
+  return { deleted };
 }
 
 async function openManager({ windowId, query = "", targetGroupId = "", feedback = null } = {}) {

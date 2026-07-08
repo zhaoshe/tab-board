@@ -19,6 +19,25 @@ test("distinguishes empty library from empty search results", () => {
   assert.equal(buildPopupViewModel({ groups: [], query: "oauth" }).emptyMessage, "No sessions match “oauth”");
 });
 
-test("uses explicit secondary CTA copy", () => {
-  assert.equal(buildPopupViewModel({ groups: [], query: "" }).secondaryActionLabel, "Open workspace");
+test("builds three popup quick actions", () => {
+  const model = buildPopupViewModel({ groups: [] });
+
+  assert.deepEqual(model.quickActions.map((action) => action.id), ["save", "open", "dedupe"]);
+});
+
+test("includes restore and delete actions for recent sessions", () => {
+  const model = buildPopupViewModel({
+    groups: [{ id: "g1", title: "A", tabs: [{ itemType: "link", url: "https://a.test" }] }]
+  });
+
+  assert.deepEqual(model.groups[0].actions, ["restore", "delete"]);
+});
+
+test("builds full hover preview tabs", () => {
+  const model = buildPopupViewModel({
+    groups: [{ id: "g1", title: "A", tabs: [{ title: "One", itemType: "link", url: "https://a.test" }] }]
+  });
+
+  assert.equal(model.groups[0].previewTabs.length, 1);
+  assert.equal(model.groups[0].previewTabs[0].title, "One");
 });
