@@ -1,41 +1,42 @@
 const SESSION_ACTION_MENU_IDS = ["rename", "note", "lock", "copy", "delete"];
 
 /**
- * @param {{ workspaceName?: string, categoryLabel?: string, searchQuery?: string, openTabTitle?: string }} view
- * @returns {{ kind: string, label: string }[]}
+ * @param {{ windows?: Array<{ id: number, focused?: boolean, tabs?: Array<object> }>, selectedWindowId?: number | null }} view
+ * @returns {Array<{ id: number, focused: boolean, expanded: boolean, tabCount: number, tabs: Array<object> }>}
  */
-export function buildContextStripItems(view = {}) {
-  const items = [];
-  appendChip(items, "workspace", view.workspaceName);
-  appendChip(items, "category", view.categoryLabel);
-  appendChip(items, "search", view.searchQuery, "Search");
-  appendChip(items, "open-tab", view.openTabTitle, "Filtered by tab");
-  return items;
+export function buildOpenWindowsModel({ windows = [], selectedWindowId = null } = {}) {
+  const fallbackId = selectedWindowId || windows.find((window) => window.focused)?.id || windows[0]?.id || null;
+  return windows.map((window) => ({
+    id: window.id,
+    focused: Boolean(window.focused),
+    expanded: window.id === fallbackId,
+    tabCount: Array.isArray(window.tabs) ? window.tabs.length : 0,
+    tabs: Array.isArray(window.tabs) ? window.tabs : []
+  }));
 }
 
 /**
- * @param {{ group?: { title?: string, note?: string } | null, categoryLabel?: string, restorableCount?: number }} view
- * @returns {{ state: "empty", title: string, message: string } | { state: "focused", title: string, meta: string, note: string, categoryLabel: string, restorableCount: number }}
+ * @param {number} ratio
+ * @returns {"insert-before" | "add-to-session" | "insert-after"}
  */
-export function buildInspectorModel(view = {}) {
-  if (!view.group) {
-    return {
-      state: "empty",
-      title: "Pick a session",
-      message: "Select a session to inspect, edit, and restore it."
-    };
+export function getSessionDropZone(ratio) {
+  if (ratio < 0.25) {
+    return "insert-before";
   }
+  if (ratio > 0.75) {
+    return "insert-after";
+  }
+  return "add-to-session";
+}
 
-  const categoryLabel = normalizeText(view.categoryLabel) || "Inbox";
-  const restorableCount = Number.isFinite(view.restorableCount) ? view.restorableCount : 0;
-  const title = normalizeText(view.group.title) || "Untitled session";
+/**
+ * @param {{ sourceGroupId?: string, targetGroupId?: string, edge?: string }} indicator
+ * @returns {{ showInsertLine: boolean, edge: string }}
+ */
+export function getGroupDropIndicator({ sourceGroupId = "", targetGroupId = "", edge = "" } = {}) {
   return {
-    state: "focused",
-    title,
-    meta: `${restorableCount} restorable links · ${categoryLabel}`,
-    note: normalizeText(view.group.note),
-    categoryLabel,
-    restorableCount
+    showInsertLine: Boolean(edge) && sourceGroupId !== targetGroupId,
+    edge
   };
 }
 
@@ -48,19 +49,4 @@ export function getSessionActionLayout(restorableCount = 0) {
     external: restorableCount > 0 ? ["restore"] : [],
     menu: [...SESSION_ACTION_MENU_IDS]
   };
-}
-
-function appendChip(items, kind, value, prefix = "") {
-  const label = normalizeText(value);
-  if (!label) {
-    return;
-  }
-  items.push({
-    kind,
-    label: prefix ? `${prefix}: ${label}` : label
-  });
-}
-
-function normalizeText(value) {
-  return String(value || "").trim();
 }

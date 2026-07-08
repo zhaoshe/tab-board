@@ -8,20 +8,32 @@
   </head>
   <body>
     <a class="skip-link" href="#groupsList">Skip to saved tabs</a>
-    <div class="app-shell">
-      <aside class="sidebar" aria-label="Navigation">
-        <div class="brand-block">
+    <div class="app-shell manager-board-shell">
+      <header class="manager-topbar">
+        <div class="brand-block compact-brand">
           <div class="mark" aria-hidden="true">ZT</div>
           <div>
             <h1>ZipTab</h1>
             <p id="statsLine" class="muted">0 tabs</p>
           </div>
         </div>
+        <div class="workspace-switcher manager-workspace-switcher">
+          <select id="workspaceSelect" data-action="switch-workspace" aria-label="Switch workspace"></select>
+          <button type="button" class="small-button" data-icon="plus" data-action="create-workspace" aria-label="New workspace"></button>
+          <button type="button" class="small-button" data-icon="edit-3" data-action="rename-workspace" aria-label="Rename workspace"></button>
+        </div>
+        <label class="search-box workspace-search">
+          <span class="visually-hidden">Search</span>
+          <input id="searchInput" type="search" autocomplete="off" placeholder="Search sessions, notes, and links" />
+        </label>
+        <div id="headerActions" class="header-actions manager-top-actions"></div>
+      </header>
 
+      <aside class="sidebar board-sidebar" aria-label="Navigation">
         <section class="open-tabs-section" aria-label="Open tabs">
           <div class="section-heading">
-            <span>Open tabs</span>
-            <button type="button" class="small-button" data-icon="refresh-cw" data-action="refresh-open-tabs" aria-label="Refresh open tabs"></button>
+            <span>Open tabs · all windows</span>
+            <button type="button" class="small-button" data-icon="archive" data-action="capture-all-windows" aria-label="Save all windows"></button>
           </div>
           <div id="openTabsToolbar" class="active-tab-toolbar" hidden></div>
           <div id="activeTabsPanel" class="active-tabs-panel"></div>
@@ -32,39 +44,10 @@
           <button type="button" class="small-button" data-icon="folder-plus" data-action="create-folder" aria-label="New category"></button>
         </div>
         <nav id="folderList" class="folder-list" aria-label="Categories"></nav>
-
-        <div class="button-stack">
-          <button type="button" data-icon="trash-2" data-icon-text data-action="open-bin">Bin</button>
-          <button type="button" data-icon="download" data-icon-text data-action="import">Import</button>
-          <button type="button" data-icon="upload" data-icon-text data-action="export-all">Export</button>
-          <button type="button" data-icon="settings" data-icon-text data-action="open-options">Options</button>
-        </div>
       </aside>
 
-      <main class="workspace">
-        <header class="workspace-command-bar workspace-header">
-          <div class="workspace-title-row">
-            <div id="headerActions" class="header-actions"></div>
-            <div class="workspace-heading">
-              <p class="eyebrow">Workspace</p>
-              <div class="workspace-switcher">
-                <select id="workspaceSelect" data-action="switch-workspace" aria-label="Switch workspace"></select>
-                <button type="button" class="small-button" data-icon="plus" data-action="create-workspace" aria-label="New workspace"></button>
-                <button type="button" class="small-button" data-icon="edit-3" data-action="rename-workspace" aria-label="Rename workspace"></button>
-              </div>
-            </div>
-          </div>
-          <label class="search-box workspace-search">
-            <span class="visually-hidden">Search</span>
-            <input id="searchInput" type="search" autocomplete="off" placeholder="Search sessions, notes, and links" />
-          </label>
-          <div id="contextStrip" class="context-strip" aria-live="polite"></div>
-        </header>
-
-        <div class="workspace-main-shell">
-          <section id="groupsList" class="groups-list" data-drop="new-group" aria-label="Saved tab groups"></section>
-          <aside id="inspectorPanel" class="inspector-panel" aria-labelledby="inspectorTitle"></aside>
-        </div>
+      <main class="workspace board-workspace">
+        <section id="groupsList" class="groups-list" data-drop="new-group" aria-label="Saved tab groups"></section>
       </main>
     </div>
 

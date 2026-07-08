@@ -24,22 +24,21 @@ import {
   tabsToText
 } from "./model.js";
 import {
-  buildContextStripItems,
-  buildInspectorModel,
-  getSessionActionLayout
+  buildOpenWindowsModel,
+  getGroupDropIndicator,
+  getSessionActionLayout,
+  getSessionDropZone
 } from "./manager-view.js";
-import { formatRestoreFeedback, formatSaveFeedback } from "./feedback-copy.js";
+import { formatCaptureFeedback, formatRestoreFeedback } from "./feedback-copy.js";
 import { hydrateIconButtons, iconOnlyButton, iconSummary, iconTextButton } from "./icons.js";
 import { getState, updateState } from "./store.js";
 
 const els = {
   activeTabsPanel: document.querySelector("#activeTabsPanel"),
   appShell: document.querySelector(".app-shell"),
-  contextStrip: document.querySelector("#contextStrip"),
   folderList: document.querySelector("#folderList"),
   groupsList: document.querySelector("#groupsList"),
   headerActions: document.querySelector("#headerActions"),
-  inspectorPanel: document.querySelector("#inspectorPanel"),
   modal: document.querySelector("#modal"),
   modalActions: document.querySelector("#modalActions"),
   modalBody: document.querySelector("#modalBody"),
@@ -68,7 +67,14 @@ const SESSION_ACTION_META = {
 let state = normalizeState(await getState());
 let activeFilter = normalizeCategoryFilter(localStorage.getItem("ziptab.activeFilter") || CATEGORY_INBOX);
 let activeWorkspaceId = localStorage.getItem("ziptab.activeWorkspaceId") || state.activeWorkspaceId || DEFAULT_WORKSPACE_ID;
-let searchQuery = new URLSearchParams(location.search).get("q") || "";
+const pageParams = new URLSearchParams(location.search);
+let searchQuery = pageParams.get("q") || "";
+const initialTargetGroupId = pageParams.get("targetGroupId") || "";
+const initialCaptureFeedback = {
+  storedTabs: Number(pageParams.get("saved") || 0),
+  cleanedDuplicates: Number(pageParams.get("duplicates") || 0),
+  closedBlankTabs: Number(pageParams.get("blank") || 0)
+};
 let openWindows = [];
 let openTabsLoading = false;
 const selected = new Set();
@@ -76,7 +82,9 @@ const selectedOpenTabIds = new Set();
 let selectionGroupId = "";
 let openTabFilter = null;
 let openTabsSelectMode = false;
+let selectedOpenWindowId = null;
 let activeDragKind = "";
+let activeDragPayload = null;
 let groupInsertMarker = null;
 let focusedGroupId = "";
 const expandedGroupIds = new Set();
@@ -89,6 +97,7 @@ hydrateIconButtons();
 bindEvents();
 render();
 loadOpenTabs();
+handleInitialTargetFeedback();
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.ziptabState) {
@@ -147,11 +156,33 @@ async function handleClick(event) {
   try {
     if (action === "capture-current-window") {
       const result = await sendRuntime({ type: "capture", mode: "current-window", workspaceId: activeWorkspaceId });
-      toast(formatSaveFeedback(result.storedTabs || 0));
+      toast(formatCaptureFeedback(result));
+      await loadOpenTabs();
+    } else if (action === "capture-all-windows") {
+      const result = await sendRuntime({ type: "capture", mode: "all-windows", workspaceId: activeWorkspaceId });
+      toast(formatCaptureFeedback(result));
+      await loadOpenTabs();
+    } else if (action === "capture-open-window") {
+      const result = await sendRuntime({
+        type: "capture",
+        mode: "window-id",
+        windowId: Number(button.dataset.windowId),
+        workspaceId: activeWorkspaceId
+      });
+      toast(formatCaptureFeedback(result));
       await loadOpenTabs();
     } else if (action === "capture-selected-open-tabs") {
       await captureSelectedOpenTabs();
       await loadOpenTabs();
+    } else if (action === "dedupe-open-window") {
+      const result = await sendRuntime({ type: "dedupe-window", windowId: Number(button.dataset.windowId) });
+      toast(`Removed ${result.removedTabs || 0} duplicate tab${result.removedTabs === 1 ? "" : "s"}`);
+      await loadOpenTabs();
+    } else if (action === "select-open-window") {
+      selectedOpenWindowId = Number(button.dataset.windowId);
+      selectedOpenTabIds.clear();
+      openTabsSelectMode = false;
+      renderActiveTabs();
     } else if (action === "toggle-open-tabs-select-mode") {
       toggleOpenTabsSelectMode();
     } else if (action === "toggle-open-tab") {
@@ -365,6 +396,7 @@ function handleDragStart(event) {
         : { kind: "tab", source, groupId, tabId };
   }
   activeDragKind = payload.kind;
+  activeDragPayload = payload;
   updateDragUi();
   event.dataTransfer.effectAllowed = payload.kind === "open-tabs" ? "copy" : "move";
   event.dataTransfer.setData("application/json", JSON.stringify(payload));
@@ -378,18 +410,27 @@ function handleDragOver(event) {
   }
   const drop = dropTarget.dataset.drop;
   event.preventDefault();
-  if (!(activeDragKind === "group" && drop === "group-body")) {
-    dropTarget.classList.add("drag-over");
-  }
   if (drop === "tab-before") {
+    dropTarget.classList.add("drag-over");
     updateTabDropLine(event, dropTarget);
     removeGroupInsertMarker();
   } else if (drop === "category-reorder") {
+    dropTarget.classList.add("drag-over");
     const rect = dropTarget.getBoundingClientRect();
     dropTarget.classList.toggle("category-drop-after", event.clientY > rect.top + rect.height / 2);
+  } else if (drop === "group-body" && ["tab", "tabs", "open-tabs"].includes(activeDragKind)) {
+    const zone = getSessionDropZone(groupHorizontalRatio(dropTarget, event));
+    if (zone === "add-to-session") {
+      dropTarget.classList.add("drag-over");
+      removeGroupInsertMarker();
+    } else {
+      dropTarget.classList.remove("drag-over");
+      updateGroupInsertMarker(event, dropTarget);
+    }
   } else if (shouldShowGroupInsertMarker(drop)) {
     updateGroupInsertMarker(event, dropTarget);
   } else {
+    dropTarget.classList.add("drag-over");
     removeGroupInsertMarker();
   }
 }
@@ -468,11 +509,13 @@ async function handleDrop(event) {
     await moveCategory(payload.categoryId, dropTarget.dataset.categoryId, placement);
   }
   activeDragKind = "";
+  activeDragPayload = null;
   updateDragUi();
 }
 
 function handleDragEnd() {
   activeDragKind = "";
+  activeDragPayload = null;
   updateDragUi();
   removeGroupInsertMarker();
   document.querySelectorAll(".drag-over, .dragging, .drag-origin, .category-drop-after, .tab-drop-before, .tab-drop-after").forEach((node) => {
@@ -509,7 +552,6 @@ function markDragSources(payload, fallbackNode, event) {
   if (payload.kind === "group") {
     fallbackNode.classList.add("drag-origin");
     setGroupDragImage(event, fallbackNode);
-    seedGroupDragMarker(fallbackNode);
     requestAnimationFrame(() => fallbackNode.classList.add("dragging"));
     return;
   }
@@ -599,12 +641,6 @@ function seedGroupDragMarker(sourceCard) {
 }
 
 function updateGroupInsertMarker(event, dropTarget) {
-  if (dropTarget === groupInsertMarker) {
-    return;
-  }
-  if (activeDragKind === "group" && dropTarget.closest(".drag-origin")) {
-    return;
-  }
   const section = dropTarget.closest(".category-section");
   const grid = section?.querySelector(".category-section-grid");
   if (!section || !grid) {
@@ -612,9 +648,9 @@ function updateGroupInsertMarker(event, dropTarget) {
     return;
   }
   const categoryFilter = section.dataset.categoryFilter || CATEGORY_INBOX;
-  const cards = [...grid.querySelectorAll(".group-card:not(.dragging):not(.drag-origin)")];
+  const cards = [...grid.querySelectorAll(".group-card:not(.dragging)")];
   let targetCard = dropTarget.closest(".group-card");
-  if (targetCard?.classList.contains("dragging") || targetCard?.classList.contains("drag-origin")) {
+  if (targetCard?.classList.contains("dragging")) {
     targetCard = null;
   }
 
@@ -626,11 +662,21 @@ function updateGroupInsertMarker(event, dropTarget) {
     placement = groupPlacementFromEvent(targetCard, event);
   }
 
+  const sourceGroupId = activeDragPayload?.kind === "group" ? activeDragPayload.groupId : "";
+  const indicator = getGroupDropIndicator({
+    sourceGroupId,
+    targetGroupId: targetCard?.dataset.groupId || "",
+    edge: targetCard ? placement : "end"
+  });
+  if (!indicator.showInsertLine) {
+    removeGroupInsertMarker();
+    return;
+  }
+
   const marker = ensureGroupInsertMarker();
   marker.dataset.categoryFilter = categoryFilter;
   marker.dataset.targetGroupId = targetCard?.dataset.groupId || "";
   marker.dataset.placement = targetCard ? placement : "end";
-  marker.querySelector("strong").textContent = activeDragKind === "group" ? "Move here" : "New session here";
 
   if (targetCard && placement === "before") {
     grid.insertBefore(marker, targetCard);
@@ -644,12 +690,7 @@ function updateGroupInsertMarker(event, dropTarget) {
 
 function ensureGroupInsertMarker() {
   if (!groupInsertMarker) {
-    groupInsertMarker = h(
-      "div",
-      { class: "group-insert-marker", "data-drop": "group-insert" },
-      h("span", { class: "group-insert-icon", "aria-hidden": "true" }, "+"),
-      h("strong", {}, "Move here")
-    );
+    groupInsertMarker = h("div", { class: "group-insert-marker", "data-drop": "group-insert", "aria-hidden": "true" });
   }
   return groupInsertMarker;
 }
@@ -687,8 +728,15 @@ function groupInsertPosition(event, dropTarget) {
 }
 
 function groupPlacementFromEvent(card, event) {
+  return getSessionDropZone(groupHorizontalRatio(card, event)) === "insert-after" ? "after" : "before";
+}
+
+function groupHorizontalRatio(card, event) {
   const rect = card.getBoundingClientRect();
-  return event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+  if (!rect.width) {
+    return 0.5;
+  }
+  return Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
 }
 
 function nearestGroupCard(event, cards) {
@@ -731,15 +779,12 @@ function handleKeyboard(event) {
 }
 
 function render() {
-  ensureFocusedGroup();
   renderWorkspaceSwitcher();
   renderStats();
   renderHeaderActions();
-  renderContextStrip();
   renderActiveTabs();
   renderFolders();
   renderGroups();
-  renderInspector();
 }
 
 function renderStats() {
@@ -749,9 +794,10 @@ function renderStats() {
 
 function renderHeaderActions() {
   els.headerActions.replaceChildren(
-    collapseToggleButton(workspaceGroups(), {
-      "data-action": "toggle-all-collapse"
-    }, "all sessions")
+    iconTextButton("download", "Import", { "data-action": "import" }),
+    iconTextButton("upload", "Export", { "data-action": "export-all" }),
+    iconTextButton("trash-2", "Bin", { "data-action": "open-bin" }),
+    iconOnlyButton("settings", "Options", { "data-action": "open-options" })
   );
 }
 
@@ -762,21 +808,6 @@ function renderWorkspaceSwitcher() {
       h("option", { value: workspace.id, selected: workspace.id === activeWorkspaceId }, workspace.name)
     );
   }
-}
-
-function renderContextStrip() {
-  if (!els.contextStrip) {
-    return;
-  }
-  const items = buildContextStripItems({
-    workspaceName: activeWorkspaceName(),
-    categoryLabel: activeCategoryLabel(),
-    searchQuery,
-    openTabTitle: openTabFilter?.title || ""
-  });
-  els.contextStrip.replaceChildren(
-    ...items.map((item) => h("span", { class: `context-chip context-chip-${item.kind}` }, item.label))
-  );
 }
 
 function renderActiveTabs() {
@@ -794,99 +825,130 @@ function renderActiveTabs() {
     return;
   }
 
-  const windowInfo = openWindows.find((item) => item.focused) || openWindows[0];
-  const section = h("section", { class: "active-window" });
-  section.append(
+  const windows = buildOpenWindowsModel({ windows: openWindows, selectedWindowId: selectedOpenWindowId });
+  for (const windowInfo of windows) {
+    if (windowInfo.expanded) {
+      selectedOpenWindowId = windowInfo.id;
+      els.activeTabsPanel.append(renderExpandedOpenWindow(windowInfo));
+    } else {
+      els.activeTabsPanel.append(renderCollapsedOpenWindow(windowInfo));
+    }
+  }
+}
+
+function renderCollapsedOpenWindow(windowInfo) {
+  return h(
+    "section",
+    { class: "active-window collapsed" },
     h(
       "header",
       { class: "active-window-header" },
-      h("strong", {}, "Current window"),
-      h(
-        "div",
-        { class: "active-window-actions" },
-        iconOnlyButton("square-check", openTabsSelectMode ? "Exit select mode" : "Select tabs", {
-          class: `small-button open-tabs-select-toggle${openTabsSelectMode ? " active" : ""}`,
-          "data-action": "toggle-open-tabs-select-mode",
-          "aria-pressed": openTabsSelectMode
-        }),
-        iconOnlyButton(
-          "archive",
-          "Save current window",
-          {
-            class: "small-button",
-            "data-action": "capture-current-window"
-          }
-        )
-      )
+      h("strong", {}, windowTitle(windowInfo)),
+      iconOnlyButton("chevrons-down", "Expand window", {
+        class: "small-button",
+        "data-action": "select-open-window",
+        "data-window-id": windowInfo.id
+      })
     )
   );
+}
 
+function renderExpandedOpenWindow(windowInfo) {
   const visibleTabs = (windowInfo.tabs || []).filter((tab) => tab.storable);
   const list = h("ul", { class: "active-tab-list" });
   for (const tab of visibleTabs) {
-    const tabId = String(tab.id);
-    const checked = selectedOpenTabIds.has(tabId);
-    const filtered = openTabFilter?.url && openTabFilter.url === tab.url;
-    const favicon =
-      state.settings.showFavicons && tab.favIconUrl
-        ? h("img", { class: "favicon", src: tab.favIconUrl, alt: "" })
-        : "";
-    list.append(
-      h(
-        "li",
-        {
-          class: `active-tab-row${tab.active ? " active" : ""}${checked ? " selected" : ""}${filtered ? " filtered" : ""}`,
-          draggable: "true",
-          "data-drag-kind": "open-tab",
-          "data-open-tab-id": tabId
-        },
-        h(
-          "div",
-          { class: "active-tab-leading" },
-          openTabsSelectMode
-            ? h("input", {
-                type: "checkbox",
-                class: "open-tab-checkbox",
-                "data-action": "toggle-open-tab",
-                "data-open-tab-id": tabId,
-                checked,
-                "aria-label": `Select ${tab.title}`
-              })
-            : null,
-          favicon
-        ),
-        h("span", { class: "active-tab-title", title: tab.url }, tab.title)
-      )
-    );
+    list.append(renderOpenTabRow(tab));
   }
   if (!visibleTabs.length) {
     list.append(h("li", { class: "active-tabs-empty" }, "No savable tabs"));
   }
-  section.append(list);
-  els.activeTabsPanel.append(section);
+  return h(
+    "section",
+    { class: "active-window expanded" },
+    h(
+      "header",
+      { class: "active-window-header" },
+      h("strong", {}, windowTitle(windowInfo)),
+      h(
+        "div",
+        { class: "active-window-actions" },
+        iconOnlyButton("archive", "Save this window", {
+          class: "small-button",
+          "data-action": "capture-open-window",
+          "data-window-id": windowInfo.id
+        }),
+        iconOnlyButton("copy", "Deduplicate this window", {
+          class: "small-button",
+          "data-action": "dedupe-open-window",
+          "data-window-id": windowInfo.id
+        }),
+        iconOnlyButton("square-check", openTabsSelectMode ? "Exit select mode" : "Select tabs", {
+          class: `small-button open-tabs-select-toggle${openTabsSelectMode ? " active" : ""}`,
+          "data-action": "toggle-open-tabs-select-mode",
+          "aria-pressed": openTabsSelectMode
+        })
+      ),
+      openTabsSelectMode ? renderOpenWindowSelectionOverlay() : null
+    ),
+    list
+  );
+}
+
+function renderOpenWindowSelectionOverlay() {
+  return h(
+    "div",
+    { class: "open-window-selection-overlay" },
+    h("strong", {}, `${selectedOpenTabIds.size} selected`),
+    iconOnlyButton("list-plus", "Create session from selected tabs", {
+      class: "small-button",
+      "data-action": "capture-selected-open-tabs"
+    }),
+    iconOnlyButton("x", "Clear selected tabs", { class: "small-button", "data-action": "clear-open-tabs" })
+  );
+}
+
+function renderOpenTabRow(tab) {
+  const tabId = String(tab.id);
+  const checked = selectedOpenTabIds.has(tabId);
+  const filtered = openTabFilter?.url && openTabFilter.url === tab.url;
+  const favicon = tab.favIconUrl ? h("img", { class: "favicon", src: tab.favIconUrl, alt: "" }) : "";
+  return h(
+    "li",
+    {
+      class: `active-tab-row${tab.active ? " active" : ""}${checked ? " selected" : ""}${filtered ? " filtered" : ""}`,
+      draggable: "true",
+      "data-drag-kind": "open-tab",
+      "data-open-tab-id": tabId
+    },
+    h(
+      "div",
+      { class: "active-tab-leading" },
+      openTabsSelectMode
+        ? h("input", {
+            type: "checkbox",
+            class: "open-tab-checkbox",
+            "data-action": "toggle-open-tab",
+            "data-open-tab-id": tabId,
+            checked,
+            "aria-label": `Select ${tab.title}`
+          })
+        : null,
+      favicon
+    ),
+    h("span", { class: "active-tab-title", title: tab.url }, tab.title)
+  );
+}
+
+function windowTitle(windowInfo) {
+  const prefix = windowInfo.focused ? "Current window" : `Window ${windowInfo.id}`;
+  return `${prefix} · ${windowInfo.tabCount} tabs`;
 }
 
 function renderOpenTabsToolbar() {
   if (!els.openTabsToolbar) {
     return;
   }
-  const selectedTabs = selectedOpenTabRecords();
   const nodes = [];
-  if (selectedTabs.length) {
-    nodes.push(
-      h(
-        "div",
-        { class: "active-tab-toolbar-row" },
-        h("strong", {}, `${selectedTabs.length} selected`),
-        h("span", { class: "muted" }, "Create a session or drag selected tabs into a session"),
-        iconOnlyButton("list-plus", "Create session from selected tabs", {
-          class: "small-button",
-          "data-action": "capture-selected-open-tabs"
-        }),
-        iconOnlyButton("x", "Clear selected tabs", { class: "small-button", "data-action": "clear-open-tabs" })
-      )
-    );
-  }
   if (openTabFilter) {
     nodes.push(
       h(
@@ -912,7 +974,7 @@ function findOpenTabById(tabId) {
 }
 
 function currentWindowOpenTabs() {
-  const windowInfo = openWindows.find((item) => item.focused) || openWindows[0];
+  const windowInfo = openWindows.find((item) => item.id === selectedOpenWindowId) || openWindows.find((item) => item.focused) || openWindows[0];
   return windowInfo?.tabs || [];
 }
 
@@ -1104,7 +1166,7 @@ function renderGroups() {
   }
 }
 
-function renderInspector() {
+function renderInspector_DISABLED() {
   if (!els.inspectorPanel) {
     return;
   }
@@ -1154,7 +1216,7 @@ function renderInspector() {
   );
 }
 
-function renderInspectorAction(actionId, group) {
+function renderInspectorAction_DISABLED(actionId, group) {
   if (actionId !== "restore") {
     return null;
   }
@@ -1165,7 +1227,7 @@ function renderInspectorAction(actionId, group) {
   });
 }
 
-function renderInspectorMenuAction(actionId, group) {
+function renderInspectorMenuAction_DISABLED(actionId, group) {
   if (actionId === "rename") {
     return iconTextButton("edit-3", "Rename", { "data-action": "rename-group", "data-group-id": group.id });
   }
@@ -1379,7 +1441,6 @@ function focusedGroup() {
 
 function focusGroup(groupId) {
   focusedGroupId = String(groupId || "");
-  renderInspector();
 }
 
 function activeWorkspace() {
@@ -1600,7 +1661,7 @@ function renderTabRow(tab, { source, groupId }) {
   const favicon =
     isTextItem
       ? h("span", { class: "favicon item-badge", "aria-hidden": "true" }, "N")
-      : state.settings.showFavicons && tab.favIconUrl
+      : tab.favIconUrl
       ? h("img", { class: "favicon", src: tab.favIconUrl, alt: "" })
       : "";
   const titleNode = canOpen
@@ -1896,6 +1957,27 @@ async function loadOpenTabs() {
   }
 }
 
+
+function handleInitialTargetFeedback() {
+  if (initialCaptureFeedback.storedTabs) {
+    toast(formatCaptureFeedback(initialCaptureFeedback));
+  }
+  if (!initialTargetGroupId) {
+    return;
+  }
+  requestAnimationFrame(() => revealGroup(initialTargetGroupId));
+}
+
+function revealGroup(groupId) {
+  const card = document.querySelector(`[data-group-id="${CSS.escape(groupId)}"]`);
+  if (!card) {
+    return;
+  }
+  card.scrollIntoView({ block: "center", behavior: "smooth" });
+  card.classList.add("target-highlight");
+  window.setTimeout(() => card.classList.remove("target-highlight"), 2400);
+}
+
 async function sendRuntime(message) {
   const response = await chrome.runtime.sendMessage(message);
   if (!response?.ok) {
@@ -1909,7 +1991,7 @@ async function deleteGroup(groupId) {
   if (!group) {
     return;
   }
-  if (state.settings.confirmDestructive && !confirm(`Delete "${group.title}"?`)) {
+  if (!confirm(`Delete "${group.title}"?`)) {
     return;
   }
   await updateState((draft) => {
@@ -1920,7 +2002,7 @@ async function deleteGroup(groupId) {
 }
 
 async function deleteTab(ref) {
-  if (state.settings.confirmDestructive && !confirm("Delete this saved tab?")) {
+  if (!confirm("Delete this saved tab?")) {
     return;
   }
   await updateState((draft) => {
@@ -2184,7 +2266,7 @@ async function deleteFolder(folderId) {
   if (!folder) {
     return;
   }
-  if (state.settings.confirmDestructive && !confirm(`Delete category "${folder.name}"?`)) {
+  if (!confirm(`Delete category "${folder.name}"?`)) {
     return;
   }
   await updateState((draft) => {
@@ -2271,7 +2353,7 @@ async function deleteSelected() {
   if (!refs.length) {
     return;
   }
-  if (state.settings.confirmDestructive && !confirm(`Delete ${refs.length} saved tabs?`)) {
+  if (!confirm(`Delete ${refs.length} saved tabs?`)) {
     return;
   }
   await updateState((draft) => {
@@ -2310,7 +2392,7 @@ async function captureSelectedOpenTabs() {
   });
   selectedOpenTabIds.clear();
   openTabsSelectMode = false;
-  toast(formatSaveFeedback(result.storedTabs || 0));
+  toast(formatCaptureFeedback(result));
 }
 
 async function moveTabToNewGroup(ref, categoryFilter = activeFilter, position = null) {
@@ -2649,7 +2731,7 @@ async function restoreBinItem(binId) {
 }
 
 async function discardBinItem(binId) {
-  if (state.settings.confirmDestructive && !confirm("Permanently remove this bin item?")) {
+  if (!confirm("Permanently remove this bin item?")) {
     return;
   }
   const nextState = await updateState((draft) => {
@@ -2665,7 +2747,7 @@ async function clearBin() {
   if (!state.bin.length) {
     return;
   }
-  if (state.settings.confirmDestructive && !confirm(`Permanently clear ${state.bin.length} bin items?`)) {
+  if (!confirm(`Permanently clear ${state.bin.length} bin items?`)) {
     return;
   }
   await updateState((draft) => {
