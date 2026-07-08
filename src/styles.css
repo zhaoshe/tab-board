@@ -13,6 +13,10 @@
   --red: #a33d3d;
   --shadow: 0 18px 42px rgba(33, 51, 45, 0.12);
   --radius: 8px;
+  --control-height: 36px;
+  --icon-button-size: 34px;
+  --icon-button-small-size: 30px;
+  --radius-control: 10px;
   --workspace-header-height: 72px;
   font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 15px;
@@ -71,9 +75,9 @@ textarea {
 
 button,
 select {
-  min-height: 34px;
+  min-height: var(--control-height);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--ink);
   transition:
@@ -126,16 +130,16 @@ button.danger {
 }
 
 button.icon-button {
-  width: 34px;
-  min-width: 34px;
+  width: var(--icon-button-size);
+  min-width: var(--icon-button-size);
   padding: 0;
 }
 
 button.icon-button.small-button,
 .small-button.icon-button {
-  width: 30px;
-  min-width: 30px;
-  min-height: 30px;
+  width: var(--icon-button-small-size);
+  min-width: var(--icon-button-small-size);
+  min-height: var(--icon-button-small-size);
 }
 
 .icon-text-button {
@@ -167,7 +171,7 @@ button.icon-button.small-button,
 }
 
 .small-button {
-  min-height: 28px;
+  min-height: var(--icon-button-small-size);
   padding: 0 8px;
 }
 
@@ -832,15 +836,15 @@ textarea {
 }
 
 .action-menu summary.icon-summary {
-  width: 34px;
-  min-width: 34px;
+  width: var(--icon-button-size);
+  min-width: var(--icon-button-size);
   padding: 0;
 }
 
 .group-actions > .action-menu > summary.icon-summary {
-  width: 30px;
-  min-width: 30px;
-  min-height: 30px;
+  width: var(--icon-button-small-size);
+  min-width: var(--icon-button-small-size);
+  min-height: var(--icon-button-small-size);
 }
 
 .action-menu summary.icon-summary::after {
