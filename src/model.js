@@ -13,23 +13,19 @@ export const SESSION_ACTION_IDS = Object.freeze([
 ]);
 
 export const DEFAULT_SESSION_EXTERNAL_ACTIONS = Object.freeze(["collapse", "restore", "add"]);
+export const DEFAULT_EXCLUDE_URL_PATTERNS = Object.freeze(["chrome://*", "file://*"]);
 
 export const DEFAULT_SETTINGS = Object.freeze({
   actionClick: "store",
   closeTabsAfterSave: true,
-  confirmDestructive: true,
-  dedupeOnSave: false,
+  dedupeOnSave: true,
   deleteRestoredTabs: true,
+  excludeUrlPatterns: [...DEFAULT_EXCLUDE_URL_PATTERNS],
   focusRestoredTabs: true,
-  includeChromeUrls: false,
-  includeFileUrls: false,
   includePinnedTabs: false,
   openManagerAfterSave: true,
   restoreGroupsInNewWindow: false,
   restoreNextToCurrent: true,
-  showFavicons: true,
-  sessionActionOrder: [...SESSION_ACTION_IDS],
-  sessionExternalActions: [...DEFAULT_SESSION_EXTERNAL_ACTIONS],
   theme: "system"
 });
 
@@ -76,7 +72,7 @@ export function createEmptyState() {
     categoryOrderByWorkspace: {},
     quickList: [],
     bin: [],
-    settings: { ...DEFAULT_SETTINGS },
+    settings: { ...DEFAULT_SETTINGS, excludeUrlPatterns: [...DEFAULT_SETTINGS.excludeUrlPatterns] },
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -132,26 +128,56 @@ export function normalizeState(raw) {
   state.settings.theme = ["system", "light", "dark"].includes(state.settings.theme)
     ? state.settings.theme
     : "system";
-  state.settings.sessionActionOrder = normalizeSessionActionOrder(state.settings.sessionActionOrder);
-  state.settings.sessionExternalActions = normalizeSessionExternalActions(
-    state.settings.sessionExternalActions,
-    state.settings.sessionActionOrder
-  );
-
   return state;
 }
 
 function normalizeSettings(raw) {
-  const settings = { ...DEFAULT_SETTINGS };
+  const settings = { ...DEFAULT_SETTINGS, excludeUrlPatterns: [...DEFAULT_SETTINGS.excludeUrlPatterns] };
   if (!raw || typeof raw !== "object") {
     return settings;
   }
   for (const key of Object.keys(DEFAULT_SETTINGS)) {
     if (Object.hasOwn(raw, key)) {
-      settings[key] = raw[key];
+      settings[key] = key === "excludeUrlPatterns" ? normalizeUrlPatterns(raw[key]) : raw[key];
     }
   }
   return settings;
+}
+
+function normalizeUrlPatterns(value) {
+  if (!Array.isArray(value)) {
+    return [...DEFAULT_EXCLUDE_URL_PATTERNS];
+  }
+  const patterns = [];
+  for (const item of value) {
+    if (typeof item !== "string") {
+      continue;
+    }
+    const pattern = item.trim();
+    if (pattern && !patterns.includes(pattern)) {
+      patterns.push(pattern);
+    }
+  }
+  return patterns.length ? patterns : [...DEFAULT_EXCLUDE_URL_PATTERNS];
+}
+
+export function matchesUrlPattern(url, pattern) {
+  const text = String(url || "").trim();
+  const rule = String(pattern || "").trim();
+  if (!text || !rule) {
+    return false;
+  }
+  if (rule.endsWith("*")) {
+    return text.startsWith(rule.slice(0, -1));
+  }
+  return text === rule;
+}
+
+export function isUrlExcluded(url, settings = DEFAULT_SETTINGS) {
+  const patterns = Array.isArray(settings.excludeUrlPatterns)
+    ? settings.excludeUrlPatterns
+    : DEFAULT_EXCLUDE_URL_PATTERNS;
+  return patterns.some((pattern) => matchesUrlPattern(url, pattern));
 }
 
 function normalizeSessionActionOrder(raw) {

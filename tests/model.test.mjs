@@ -9,6 +9,7 @@ import {
   createNoteRecord,
   createTabRecord,
   isRestorableTab,
+  matchesUrlPattern,
   normalizeState,
   parseImportText,
   parseOneTabText,
@@ -20,9 +21,26 @@ test("normalizes empty state", () => {
   assert.equal(state.version, 1);
   assert.deepEqual(state.groups, []);
   assert.equal(state.settings.closeTabsAfterSave, true);
-  assert.equal(state.settings.includeChromeUrls, false);
-  assert.equal(state.settings.includeFileUrls, false);
-  assert.deepEqual(state.settings.sessionExternalActions, ["collapse", "restore", "add"]);
+  assert.equal(state.settings.dedupeOnSave, true);
+  assert.deepEqual(state.settings.excludeUrlPatterns, ["chrome://*", "file://*"]);
+});
+
+test("matches simple exclude URL patterns", () => {
+  assert.equal(matchesUrlPattern("chrome://extensions", "chrome://*"), true);
+  assert.equal(matchesUrlPattern("file:///Users/me/a.txt", "file://*"), true);
+  assert.equal(matchesUrlPattern("about:blank", "about:blank"), true);
+  assert.equal(matchesUrlPattern("https://example.com/a", "https://example.com/*"), true);
+  assert.equal(matchesUrlPattern("https://other.com/a", "https://example.com/*"), false);
+});
+
+test("normalizes exclude URL patterns", () => {
+  const state = normalizeState({
+    settings: {
+      excludeUrlPatterns: [" chrome://* ", "", "file://*", 7, "chrome://*"]
+    }
+  });
+
+  assert.deepEqual(state.settings.excludeUrlPatterns, ["chrome://*", "file://*"]);
 });
 
 test("creates groups from browser-like tab records", () => {
@@ -101,17 +119,6 @@ test("normalizes starred sessions as a single built-in category", () => {
   });
   assert.equal(state.groups[0].starred, true);
   assert.equal(state.groups[0].folderId, null);
-});
-
-test("normalizes session toolbar settings", () => {
-  const state = normalizeState({
-    settings: {
-      sessionActionOrder: ["lock", "unknown", "restore", "lock"],
-      sessionExternalActions: ["restore", "unknown", "lock"]
-    }
-  });
-  assert.deepEqual(state.settings.sessionActionOrder.slice(0, 2), ["lock", "restore"]);
-  assert.deepEqual(state.settings.sessionExternalActions, ["lock", "restore"]);
 });
 
 test("creates bounded bin entries", () => {
