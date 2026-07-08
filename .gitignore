@@ -10,4 +10,5 @@ build/
 *.tmp
 .codegraph/
 .agents/
+.superpowers/
 skills-lock.json
