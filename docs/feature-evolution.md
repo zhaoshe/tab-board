@@ -18,6 +18,31 @@ ZipTab 是一个 local-first Chrome tab manager。它以 OneTab 的“快速收�
 
 ## 变迁时间线
 
+### 2026-07-08: Board-first UI rework 和 capture cleanup
+
+用户手动验收发现上一轮 manager-first 设计仍有明显问题：context strip 语义不清、inspector 价值低、Open Tabs 只显示 current window、select mode 跳动、DnD 落点不清、popup 缺少 dedupe/settings/delete/preview，Options 中特殊 URL 设置和界面设置也不清晰。
+
+变化：
+
+- Manager 改为 Board-first：顶部 toolbar + 左侧 Open Tabs/Categories + 右侧 session board。
+- 移除 context strip 和常驻 inspector。
+- Open Tabs 展示所有 windows，一次只展开一个 window。
+- Select mode 只覆盖 window title 行，不改变 tab 列表布局。
+- Session DnD 使用竖线插入反馈；拖回原位置不显示插入线；拖起 session 不消失。
+- Popup 改为横排 Save/Open/Dedupe quick actions，并增加 Settings、recent session Delete、hover/focus tabs preview。
+- Save 完成后 popup 关闭，manager 打开/聚焦、定位刚保存 session，并用浮层 toast 提示。
+- Capture 默认按源 tabs URL 去重，清理 about:blank 和重复源 tabs。
+- Options 用 exclude URL patterns 取代 chrome/file 单独开关，默认 `chrome://*`、`file://*`。
+- Favicons 始终展示；危险操作始终确认；session toolbar 外露动作不再可配置。
+- Popup、Manager、Options 统一使用 `src/icons.js` 图标和共享 control sizing tokens。
+
+判断：
+
+- Popup 只做 trigger surface，不做小 manager。
+- Manager 的核心是 session board，不应该把解释性 UI 和低价值 inspector 放在主路径。
+- Drag and drop 反馈必须降低误操作，优先清楚落点而不是提前重排。
+
+
 ### 2026-07-04: OneTab 复刻起点
 
 初始目标是完整复刻 OneTab 的核心体验，让插件能直接安装到 Chrome 使用。

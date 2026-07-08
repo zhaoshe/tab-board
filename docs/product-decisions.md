@@ -346,6 +346,31 @@ Trade-offs:
 Status:
 Accepted, needs UX observation。
 
+
+## D016: Board-first manager and source-tab cleanup
+
+Context:
+上一轮 manager-first redesign 引入 context strip 和 inspector，但用户手动验收认为语义不清、价值低，并且 Open Tabs、Popup、Options、DnD 仍有关键体验缺口。
+
+Decision:
+Manager 改为 Board-first：顶部 toolbar 放 workspace/search/import/export/bin/options；左侧放 Open Tabs all windows 和 Categories；右侧保留 session board。移除 context strip 和常驻 inspector。Popup 保持 trigger surface，使用 Save/Open/Dedupe 三个横排 quick actions。Capture 默认清理 about:blank 和重复源 tabs，并使用 exclude URL patterns 控制特殊 URL。
+
+Rationale:
+
+- 用户核心任务是保存、找回、整理 sessions，board 应该是视觉和交互中心。
+- Open Tabs 是源浏览器状态，展示所有 windows 比只展示 current window 更符合真实使用。
+- Popup 尺寸和 auto-close 适合 quick actions，不适合复杂编辑。
+- 统一 icon 和 control 尺寸能减少按钮大小不一、风格不统一的问题。
+
+Trade-offs:
+
+- 移除 inspector 后，部分编辑入口回到 More 菜单。
+- Exclude URL patterns 比两个布尔开关更灵活，但需要用户理解简单通配符。
+- Manager all-windows Open Tabs 增加了 sidebar 信息量，所以一次只展开一个 window。
+
+Status:
+Accepted。
+
 ## Decision template
 
 ```md

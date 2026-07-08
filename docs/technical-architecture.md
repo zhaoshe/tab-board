@@ -27,10 +27,10 @@ ZipTab 是一个无构建步骤的 Chrome Manifest V3 extension。
 - `src/model.js`: state schema、normalize、数据创建、导入导出、匹配和工具函数。
 - `src/store.js`: `chrome.storage.local` 的 get/set/update 封装。
 - `src/icons.js`: 本地 SVG icon registry、按钮 hydrate、tooltip。
-- `src/manager-view.js`: manager context strip、inspector model、session action layout 的纯 helper。
-- `src/popup-view.js`: popup CTA、recent sessions、empty copy 的纯 helper。
+- `src/manager-view.js`: manager open windows model、DnD zone、session action layout 的纯 helper。
+- `src/popup-view.js`: popup quick actions、recent sessions、hover preview、empty copy 的纯 helper。
 - `src/options-view.js`: options Basic / Advanced section 分组 helper。
-- `src/feedback-copy.js`: popup、manager、options 共享的反馈文案 helper。
+- `src/feedback-copy.js`: popup、manager、options 共享的反馈文案 helper，包括 capture cleanup counts。
 - `manager.html`: 主工作台。
 - `popup.html` / `src/popup.js`: toolbar popup。
 - `options.html` / `src/options.js`: 设置页。
@@ -106,11 +106,11 @@ ZipTab 是一个无构建步骤的 Chrome Manifest V3 extension。
 
 负责 manager page：
 
-- 渲染 sidebar、workspace command bar、context strip、categories、session cards、inspector、modals。
+- 渲染 Board-first shell、top toolbar、Open Tabs all windows、categories、session cards、modals。
 - manager 页面事件分发。
-- open tabs panel。
+- open tabs panel，一次只展开一个 window。
 - session/category/tab drag and drop。
-- focused session / inspector 本地 UI 状态。
+- 保存后 target session 定位和 floating toast。
 - inline rename。
 - bin modal。
 - import/export modal。
@@ -281,19 +281,14 @@ Bin entry 用于恢复删除内容。
 {
   actionClick: "store",
   closeTabsAfterSave: true,
-  confirmDestructive: true,
-  dedupeOnSave: false,
+  dedupeOnSave: true,
   deleteRestoredTabs: true,
+  excludeUrlPatterns: ["chrome://*", "file://*"],
   focusRestoredTabs: true,
-  includeChromeUrls: false,
-  includeFileUrls: false,
   includePinnedTabs: false,
   openManagerAfterSave: true,
   restoreGroupsInNewWindow: false,
   restoreNextToCurrent: true,
-  showFavicons: true,
-  sessionActionOrder,
-  sessionExternalActions,
   theme: "system"
 }
 ```
@@ -314,18 +309,21 @@ Bin entry 用于恢复删除内容。
 
 1. 入口调用 `captureTabs(mode, anchorTab, options)`。
 2. `getTabsForMode()` 根据 mode 取 tabs。
-3. `canCaptureTab()` 按 settings 过滤不可保存 tabs。
-4. `createTabRecord()` 转成 ZipTab tab records。
-5. 按 windowId 分组。
-6. `createGroupFromTabRecords()` 创建 session。
-7. `updateState()` 将新 sessions `unshift` 到 groups 头部。
-8. 根据 settings 打开 manager。
-9. 根据 settings 关闭源 tabs。
+3. 先剔除并关闭 `about:blank`。
+4. 如开启 `dedupeOnSave`，按源 tab URL 去重，重复源 tabs 关闭。
+5. `canCaptureTab()` 按 pinned、ZipTab 自身页、devtools、exclude URL patterns 过滤不可保存 tabs。
+6. `createTabRecord()` 转成 ZipTab tab records。
+7. 按 windowId 分组。
+8. `createGroupFromTabRecords()` 创建 session。
+9. `updateState()` 将新 sessions 放到 groups 头部。
+10. 根据 settings 打开或聚焦最近 manager tab，并带上 target group / feedback URL params。
+11. 根据 settings 关闭已保存源 tabs。
 
 重要边界：
 
-- 如果没有 storable tabs，会返回 `storedTabs: 0`。
-- 如果开启 dedupe，已存在 URL 会跳过。
+- 如果没有 storable tabs，会返回 `storedTabs: 0`，但仍可能清理 blank/duplicate tabs。
+- Source-tab dedupe 只针对本次 capture 的源 tabs，不因为历史 saved sessions 里已有同 URL 而跳过本次 session 内容。
+- Excluded URL 不进入 session，但重复 excluded tabs 会在源窗口中只保留一个。
 - 如果 manager tab 是保存过程中打开的，关闭源 tabs 时会排除 manager tab。
 
 ### Manager Open Tabs
@@ -335,8 +333,10 @@ Bin entry 用于恢复删除内容。
 1. Manager 调用 runtime message `list-open-tabs`。
 2. Background 使用 `chrome.windows.getAll({ populate: true })`。
 3. `canCaptureTab()` 过滤。
-4. Manager 渲染当前 focused window。
-5. Open tab 可勾选、右键筛选、拖拽。
+4. Manager 渲染所有 windows，但一次只展开选中的 window，其它 window 折叠显示 tab count。
+5. 展开 window 可保存该 window、清理重复 tabs、进入 select mode。
+6. Select mode overlay 只覆盖 window title 行，不移动 tab 列表。
+7. Open tab 可勾选、右键筛选、拖拽。
 
 ### Restore
 

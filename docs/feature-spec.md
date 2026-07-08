@@ -38,34 +38,36 @@ ZipTab 使用 `chrome_url_overrides.newtab` 替换 Chrome 新标签页。
 
 ### Manager
 
-Manager 是主工作台，分为：
+Manager 是 Board-first 主工作台，分为：
 
-- 左侧 sidebar：品牌和统计、Open Tabs、Categories、底部动作。
-- 顶部 command bar：workspace 控制、折叠/展开全部、搜索框和 context strip。
-- 中央 session board：按 category 顺序展示 saved sessions。
-- 右侧 inspector：展示当前 focused session 的 metadata、note 和编辑入口。
+- 顶部 toolbar：ZipTab、workspace switcher、search、Import、Export、Bin、Options。
+- 左侧 sidebar：Open Tabs · All windows 和 Categories。
+- 右侧 session board：按 category 顺序展示 saved sessions。
 
-Session cards 降噪：Restore 是主要直接动作；Rename、Note、Lock、Copy、Delete 等次级动作进入 More 或 inspector。
+Manager 不再使用 context strip 和常驻 inspector。Session cards 保留 Restore 和 More；Rename、Note、Lock、Copy、Delete 等次级动作进入 More。
 
 ### Popup
 
 Popup 是快动作入口：
 
-- 主 CTA：Save window。
-- 次 CTA：Open workspace。
+- 横排 quick actions：Save、Open、Dedupe。
+- Settings 按钮进入 Options。
 - Search recent sessions。
-- Restore recent session。
-- Recent sessions 最多展示 5 条。
+- Recent sessions 最多展示 5 条，每行提供 Restore 和 Delete。
+- Hover 或 keyboard focus recent session 时展示该 session 的全部 tabs 预览。
 
-Popup 不承载重命名、分类、编辑、批量操作等管理流程。
+Save 完成后 popup 关闭，打开或聚焦最近访问的 manager，并在 manager 中定位刚保存的 session。Popup 不承载重命名、分类、编辑等管理流程。
 
 ### Options
 
 Options 分为 Basic 和 Advanced：
 
 - Basic：日常 toolbar、capture、restore、theme 设置。
-- Advanced：特殊 URL、dedupe、destructive confirmation、favicons、session toolbar 外露动作和顺序。
-- Chrome shortcuts 入口。
+- Advanced：include pinned tabs、exclude URL patterns、Chrome shortcuts、reset settings。
+- Capture 默认开启 tab 去重。
+- Favicons 始终展示，不再是设置项。
+- 危险操作始终确认，不再提供关闭确认的设置。
+- Session card 外露动作不再可配置。
 
 ### Context menu
 
@@ -126,30 +128,30 @@ Options 分为 Basic 和 Advanced：
 默认不保存：
 
 - ZipTab 自身 extension 页面。
-- `chrome://`、`edge://`、`brave://` 等浏览器内部页。
-- `file://` 本地文件。
 - `devtools://`。
+- `about:blank`。
 - pinned tabs。
+- `excludeUrlPatterns` 命中的 URL，默认包括 `chrome://*` 和 `file://*`。
 
-可在 Options 中打开：
+可在 Options 中调整：
 
 - Include pinned tabs。
-- Include chrome:// links。
-- Include file:// links。
+- Exclude URL patterns，例如 `chrome://*`、`file://*`、`about:blank`、`https://example.com/*`。
 
 特殊说明：
 
 - Open Tabs 列表只展示当前设置下可保存的 tabs。
-- 因此不会出现“列表里能勾选，但保存时被跳过”的体验不一致。
+- Excluded URL 不进入 session，但 Save window 会对源窗口中的重复 excluded URL 做清理，只保留一个。
 
 ### 去重
 
-Options > Capture 中可开启 `Skip URLs already saved`。
+Options > Capture 默认开启 capture 时 tab 去重。
 
 开启后：
 
-- 保存时会跳过已存在于任何 session 的 URL。
-- 本次保存过程中也会避免重复 URL。
+- 本次保存的源窗口 tabs 按 URL 去重。
+- 重复源 tabs 会被关闭。
+- 去重不再因为旧 saved sessions 中已有同 URL 而跳过本次 session 内容。
 
 ## Restore
 
