@@ -3,9 +3,9 @@ import {
   createTabRecord,
   defaultGroupTitle,
   escapeXml,
-  getAllUrls,
   groupMatchesQuery,
   isRestorableTab,
+  isUrlExcluded,
   normalizeState,
   sortCapturedTabs,
   tabMatchesQuery
@@ -187,81 +187,87 @@ async function applyActionPopup() {
 
 async function captureTabs(mode, anchorTab, options = {}) {
   const settings = await getSettings();
-  const tabs = sortCapturedTabs(await getTabsForMode(mode, anchorTab, options));
-  const storableTabs = tabs.filter((tab) => canCaptureTab(tab, settings));
-  const skipped = tabs.length - storableTabs.length;
+  const sourceTabs = sortCapturedTabs(await getTabsForMode(mode, anchorTab, options));
+  const blankTabs = sourceTabs.filter(isBlankTab);
+  const nonBlankTabs = sourceTabs.filter((tab) => !isBlankTab(tab));
+  const { uniqueTabs, duplicateTabs } = dedupeSourceTabs(nonBlankTabs, settings);
+  const storableTabs = uniqueTabs.filter((tab) => canCaptureTab(tab, settings));
+  const skippedByExclude = uniqueTabs.length - storableTabs.length;
 
-  if (!storableTabs.length) {
-    if (options.openAfter !== false && settings.openManagerAfterSave) {
-      await openManager({ windowId: anchorTab?.windowId });
-    }
-    return { storedTabs: 0, storedGroups: 0, skipped };
-  }
-
-  const groupedByWindow = new Map();
+  const recordsByWindow = new Map();
   for (const tab of storableTabs) {
     const record = createTabRecord(tab, { browserGroup: await readBrowserGroup(tab) });
-    if (!groupedByWindow.has(tab.windowId)) {
-      groupedByWindow.set(tab.windowId, []);
-    }
-    groupedByWindow.get(tab.windowId).push(record);
+    recordsByWindow.set(tab.windowId, [...(recordsByWindow.get(tab.windowId) || []), record]);
   }
 
   const state = await getState();
   const targetWorkspaceId = options.workspaceId || state.activeWorkspaceId;
-  const existingUrls = settings.dedupeOnSave ? getAllUrls(state) : new Set();
-  const groups = [];
-  for (const [windowId, records] of groupedByWindow.entries()) {
-    const uniqueRecords = records.filter((record) => {
-      if (!settings.dedupeOnSave) {
-        return true;
-      }
-      if (existingUrls.has(record.url)) {
-        return false;
-      }
-      existingUrls.add(record.url);
-      return true;
-    });
-    if (uniqueRecords.length) {
-      groups.push(
-        createGroupFromTabRecords(uniqueRecords, {
-          title: captureTitle(mode, uniqueRecords, windowId),
-          workspaceId: targetWorkspaceId
-        })
-      );
-    }
-  }
+  const groups = [...recordsByWindow.entries()].map(([windowId, records]) =>
+    createGroupFromTabRecords(records, {
+      title: captureTitle(mode, records, windowId),
+      workspaceId: targetWorkspaceId
+    })
+  );
+  const result = {
+    storedTabs: groups.reduce((total, group) => total + group.tabs.length, 0),
+    storedGroups: groups.length,
+    skipped: skippedByExclude,
+    skippedByExclude,
+    cleanedDuplicates: duplicateTabs.length,
+    closedBlankTabs: blankTabs.length,
+    createdGroupIds: groups.map((group) => group.id)
+  };
 
-  if (!groups.length) {
-    if (options.openAfter !== false && settings.openManagerAfterSave) {
-      await openManager({ windowId: anchorTab?.windowId });
-    }
-    return { storedTabs: 0, storedGroups: 0, skipped: tabs.length };
+  if (groups.length) {
+    await updateState((draft) => ({ ...draft, groups: [...groups, ...draft.groups] }));
   }
-
-  await updateState((draft) => {
-    draft.groups.unshift(...groups);
-    return draft;
-  });
 
   let managerTab = null;
   if (options.openAfter !== false && settings.openManagerAfterSave) {
-    managerTab = await openManager({ windowId: anchorTab?.windowId });
+    managerTab = await openManager({
+      windowId: anchorTab?.windowId,
+      targetGroupId: result.createdGroupIds[0] || "",
+      feedback: result
+    });
   }
 
-  if (settings.closeTabsAfterSave) {
-    const savedSourceIds = new Set(groups.flatMap((group) => group.tabs.map((tab) => tab.sourceTabId)));
-    if (managerTab?.id) {
-      savedSourceIds.delete(managerTab.id);
-    }
-    await removeTabs([...savedSourceIds].filter(Number.isFinite));
+  const idsToClose = new Set([
+    ...blankTabs.map((tab) => tab.id),
+    ...duplicateTabs.map((tab) => tab.id),
+    ...(settings.closeTabsAfterSave ? storableTabs.map((tab) => tab.id) : [])
+  ]);
+  if (managerTab?.id) {
+    idsToClose.delete(managerTab.id);
   }
+  await removeTabs([...idsToClose].filter(Number.isFinite));
 
-  return {
-    storedTabs: groups.reduce((total, group) => total + group.tabs.length, 0),
-    storedGroups: groups.length,
-    skipped
-  };
+  return result;
+}
+
+const BLANK_URL_PATTERN = /^about:blank$/i;
+
+function isBlankTab(tab) {
+  return BLANK_URL_PATTERN.test(tab?.url || "");
+}
+
+function dedupeSourceTabs(tabs, settings) {
+  if (!settings.dedupeOnSave) {
+    return { uniqueTabs: tabs, duplicateTabs: [] };
+  }
+  return tabs.reduce(
+    (result, tab) => {
+      const url = String(tab.url || "");
+      if (!url || !result.seen.has(url)) {
+        return {
+          seen: url ? new Set([...result.seen, url]) : result.seen,
+          uniqueTabs: [...result.uniqueTabs, tab],
+          duplicateTabs: result.duplicateTabs
+        };
+      }
+      return { ...result, duplicateTabs: [...result.duplicateTabs, tab] };
+    },
+    { seen: new Set(), uniqueTabs: [], duplicateTabs: [] }
+  );
 }
 
 async function getTabsForMode(mode, anchorTab, options = {}) {
@@ -350,19 +356,10 @@ function canCaptureTab(tab, settings) {
   if (tab.url.startsWith(ownBase)) {
     return false;
   }
-  if (/^file:/i.test(tab.url)) {
-    return settings.includeFileUrls === true;
-  }
-  if (/^(chrome|edge|brave|vivaldi|opera):/i.test(tab.url)) {
-    return settings.includeChromeUrls === true;
-  }
-  if (/^devtools:/i.test(tab.url)) {
+  if (/^devtools:/i.test(tab.url) || isBlankTab(tab)) {
     return false;
   }
-  if (/^about:/i.test(tab.url)) {
-    return /^about:blank$/i.test(tab.url);
-  }
-  return true;
+  return !isUrlExcluded(tab.url, settings);
 }
 
 function captureTitle(mode, records, windowId) {
@@ -613,11 +610,23 @@ async function removeTabs(tabIds) {
   }
 }
 
-async function openManager({ windowId, query = "" } = {}) {
+async function openManager({ windowId, query = "", targetGroupId = "", feedback = null } = {}) {
   const baseUrl = chrome.runtime.getURL(MANAGER_PAGE);
-  const targetUrl = query ? `${baseUrl}?q=${encodeURIComponent(query)}` : baseUrl;
+  const params = new URLSearchParams();
+  if (query) {
+    params.set("q", query);
+  }
+  if (targetGroupId) {
+    params.set("targetGroupId", targetGroupId);
+  }
+  if (feedback) {
+    params.set("saved", String(feedback.storedTabs || 0));
+    params.set("duplicates", String(feedback.cleanedDuplicates || 0));
+    params.set("blank", String(feedback.closedBlankTabs || 0));
+  }
+  const targetUrl = params.toString() ? `${baseUrl}?${params}` : baseUrl;
   const tabs = await chrome.tabs.query({});
-  const existing = tabs.find((tab) => tab.url?.startsWith(baseUrl));
+  const existing = chooseManagerTab(tabs, baseUrl, windowId);
 
   if (existing?.id) {
     await chrome.tabs.update(existing.id, { active: true, url: targetUrl });
@@ -632,6 +641,17 @@ async function openManager({ windowId, query = "" } = {}) {
     active: true,
     ...(windowId ? { windowId } : {})
   });
+}
+
+function chooseManagerTab(tabs, baseUrl, preferredWindowId) {
+  const managers = tabs.filter((tab) => tab.url?.startsWith(baseUrl));
+  return (
+    managers.find((tab) => tab.active && tab.windowId === preferredWindowId) ||
+    managers.find((tab) => tab.windowId === preferredWindowId) ||
+    managers.find((tab) => tab.active) ||
+    [...managers].sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0] ||
+    null
+  );
 }
 
 async function listOpenTabs() {

@@ -39,11 +39,39 @@ function makeLink(id, url, overrides = {}) {
   };
 }
 
+function makeTab(id, url, overrides = {}) {
+  return {
+    id,
+    windowId: 1,
+    index: id,
+    title: `Tab ${id}`,
+    url,
+    favIconUrl: "",
+    active: false,
+    pinned: false,
+    highlighted: false,
+    ...overrides
+  };
+}
+
+function defaultQueryTabs(query = {}) {
+  if (query.active) {
+    return [{ id: 1, windowId: 1, index: 0, url: "https://active.example" }];
+  }
+  if (Object.keys(query).length === 0) {
+    return [];
+  }
+  return [{ id: 1, windowId: 1, index: 0, url: "https://active.example" }];
+}
+
 function makeChrome(initialState, hooks = {}) {
   let storedState = makeState(initialState);
   const listeners = {};
   const calls = {
     createdTabs: [],
+    focusedWindows: [],
+    removedTabs: [],
+    updatedTabs: [],
     windowCreates: []
   };
   let nextTabId = 100;
@@ -96,10 +124,14 @@ function makeChrome(initialState, hooks = {}) {
         calls.windowCreates.push(properties);
         return { id: 7, tabs: [{ id: nextTabId++, windowId: 7, index: 0 }] };
       },
-      getAll: async () => hooks.openWindows || []
+      getAll: async () => hooks.openWindows || [],
+      update: async (windowId, properties) => {
+        calls.focusedWindows.push({ windowId, properties });
+        return { id: windowId, ...properties };
+      }
     },
     tabs: {
-      query: async () => [{ id: 1, windowId: 1, index: 0, url: "https://active.example" }],
+      query: async (query = {}) => hooks.queryTabs?.(query) || defaultQueryTabs(query),
       get: async (tabId) => ({ id: tabId, windowId: 1, index: 0, url: `https://tab-${tabId}.example` }),
       create: async (properties) => {
         hooks.beforeCreateTab?.(storedState, properties);
@@ -110,7 +142,13 @@ function makeChrome(initialState, hooks = {}) {
         calls.createdTabs.push({ properties, tab });
         return tab;
       },
-      remove: async () => undefined,
+      remove: async (tabIds) => {
+        calls.removedTabs.push(...(Array.isArray(tabIds) ? tabIds : [tabIds]));
+      },
+      update: async (tabId, properties) => {
+        calls.updatedTabs.push({ tabId, properties });
+        return { id: tabId, ...properties };
+      },
       group: async () => 99
     },
     tabGroups: {
@@ -221,4 +259,81 @@ test("list open tabs includes browser group metadata", async () => {
     color: "blue",
     collapsed: true
   });
+});
+
+test("capture closes blank tabs and dedupes source URLs before saving", async () => {
+  const sourceTabs = [
+    makeTab(11, "https://a.example", { active: true, index: 0 }),
+    makeTab(12, "https://a.example", { index: 1 }),
+    makeTab(13, "about:blank", { index: 2 }),
+    makeTab(14, "chrome://extensions", { index: 3 })
+  ];
+  const chrome = makeChrome(makeState(), {
+    queryTabs(query = {}) {
+      if (query.active) {
+        return [sourceTabs[0]];
+      }
+      if (query.windowId === 1) {
+        return sourceTabs;
+      }
+      return [];
+    }
+  });
+  const listener = await loadBackground(chrome);
+
+  const response = await sendMessage(listener, { type: "capture", mode: "current-window" });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.storedTabs, 1);
+  assert.equal(response.result.cleanedDuplicates, 1);
+  assert.equal(response.result.closedBlankTabs, 1);
+  assert.equal(response.result.skippedByExclude, 1);
+  assert.equal(response.result.createdGroupIds.length, 1);
+  assert.deepEqual([...chrome.__calls.removedTabs].sort((a, b) => a - b), [11, 12, 13]);
+  assert.equal(chrome.__calls.removedTabs.includes(14), false);
+});
+
+test("capture passes target group and feedback counts to manager URL", async () => {
+  const sourceTabs = [makeTab(11, "https://a.example", { active: true, index: 0 }), makeTab(12, "about:blank", { index: 1 })];
+  const chrome = makeChrome(makeState(), {
+    queryTabs(query = {}) {
+      if (query.active) {
+        return [sourceTabs[0]];
+      }
+      if (query.windowId === 1) {
+        return sourceTabs;
+      }
+      return [];
+    }
+  });
+  const listener = await loadBackground(chrome);
+
+  const response = await sendMessage(listener, { type: "capture", mode: "current-window" });
+
+  assert.equal(response.ok, true);
+  const managerUrl = chrome.__calls.createdTabs[0].properties.url;
+  assert.match(managerUrl, /targetGroupId=group_/);
+  assert.match(managerUrl, /saved=1/);
+  assert.match(managerUrl, /blank=1/);
+});
+
+test("open manager targets most recently active ZipTab tab", async () => {
+  const managerBase = "chrome-extension://ziptab/manager.html";
+  const chrome = makeChrome(makeState(), {
+    queryTabs(query = {}) {
+      if (Object.keys(query).length === 0) {
+        return [
+          { id: 21, windowId: 1, url: managerBase, active: false, lastAccessed: 10 },
+          { id: 22, windowId: 2, url: managerBase, active: false, lastAccessed: 30 }
+        ];
+      }
+      return defaultQueryTabs(query);
+    }
+  });
+  const listener = await loadBackground(chrome);
+
+  const response = await sendMessage(listener, { type: "open-manager" });
+
+  assert.equal(response.ok, true);
+  assert.equal(chrome.__calls.updatedTabs[0].tabId, 22);
 });
