@@ -232,7 +232,7 @@ Trade-offs:
 - 即使允许保存，恢复是否成功仍取决于 Chrome 和本机权限。
 
 Status:
-Accepted。
+Superseded by D016。当前使用 `excludeUrlPatterns`，默认包含 `chrome://*` 和 `file://*`，不再使用 `includeChromeUrls` / `includeFileUrls` 两个独立设置。
 
 ## D011: Categories are navigation sections, not exclusive filters
 
@@ -320,7 +320,7 @@ Trade-offs:
 - 外露动作过多时仍可能换行，后续可考虑按 card 宽度自动收纳。
 
 Status:
-Accepted。
+Superseded by D016。Session card 当前只外露 Restore，其余动作进入 More；Options 不再提供 session toolbar 外露动作配置。
 
 ## D015: Manager-first extension UI redesign
 
@@ -344,7 +344,7 @@ Trade-offs:
 - Session card 外露动作减少后，新用户需要学习 More 和 inspector 的分工。
 
 Status:
-Accepted, needs UX observation。
+Superseded by D016。Context strip 和常驻 inspector 已移除，popup quick actions 改为 Save/Open/Dedupe。
 
 
 ## D016: Board-first manager and source-tab cleanup
@@ -370,6 +370,28 @@ Trade-offs:
 
 Status:
 Accepted。
+
+## D017: Session drag uses target-slot live reorder
+
+Context:
+Session drag 的简单 before/after placeholder 在 card grid 中体验不稳定：轻微横移就让位、同一目标上下移动会回弹，用户很难判断最终 drop slot。
+
+Decision:
+Session drag 保留源位置 placeholder，但目标 card 使用 25/50/25 规则：左右 25% 表示插入到目标前/后，中间 50% 表示被拖拽 session 占据目标 slot，目标 card 回填源空位。进入目标 slot 后使用 target lock 和 hysteresis margin 降低 Chrome 原生 DnD 与 grid 重排造成的边界回闪。
+
+Rationale:
+
+- 用户拖拽排序时关心“这个 session 最终会占哪个位置”，不是抽象的插入线。
+- 中间 50% 作为 target slot 比全卡触发更稳定，也保留了边缘 before/after 的精细控制。
+- Target lock 用原始目标 rect 判断，避免目标 card 移动后下一帧把自己释放掉。
+
+Trade-offs:
+
+- 原生 HTML DnD 仍可能在边界附近有轻微瑕疵。
+- 代码需要维护 source rect、target rect 和 release margin，复杂度高于简单 nearest-card 算法。
+
+Status:
+Accepted, needs UX observation。
 
 ## Decision template
 

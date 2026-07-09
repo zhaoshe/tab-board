@@ -121,6 +121,8 @@ async function handleMessage(message) {
       return openManager({ query: message.query || "" });
     case "open-options":
       return chrome.runtime.openOptionsPage();
+    case "count-window-duplicates":
+      return countWindowDuplicates(message.windowId);
     case "dedupe-window":
       return dedupeWindow(message.windowId);
     case "delete-group":
@@ -198,11 +200,14 @@ async function captureTabs(mode, anchorTab, options = {}) {
   const nonBlankTabs = sourceTabs.filter((tab) => !isBlankTab(tab));
   const { uniqueTabs, duplicateTabs } = dedupeSourceTabs(nonBlankTabs, settings);
   const storableTabs = uniqueTabs.filter((tab) => canCaptureTab(tab, settings));
-  const skippedByExclude = uniqueTabs.length - storableTabs.length;
+  const skippedByExclude = uniqueTabs.filter((tab) => isUrlExcluded(resolveTabUrl(tab), settings)).length;
 
   const recordsByWindow = new Map();
   for (const tab of storableTabs) {
-    const record = createTabRecord(tab, { browserGroup: await readBrowserGroup(tab) });
+    const record = createTabRecord(tab, {
+      browserGroup: await readBrowserGroup(tab),
+      url: resolveTabUrl(tab)
+    });
     recordsByWindow.set(tab.windowId, [...(recordsByWindow.get(tab.windowId) || []), record]);
   }
 
@@ -252,8 +257,12 @@ async function captureTabs(mode, anchorTab, options = {}) {
 
 const BLANK_URL_PATTERN = /^about:blank$/i;
 
+function resolveTabUrl(tab) {
+  return String(tab?.pendingUrl || tab?.url || "").trim();
+}
+
 function isBlankTab(tab) {
-  return BLANK_URL_PATTERN.test(tab?.url || "");
+  return BLANK_URL_PATTERN.test(resolveTabUrl(tab));
 }
 
 function dedupeSourceTabs(tabs, settings) {
@@ -262,7 +271,7 @@ function dedupeSourceTabs(tabs, settings) {
   }
   return tabs.reduce(
     (result, tab) => {
-      const url = String(tab.url || "");
+      const url = resolveTabUrl(tab);
       if (!url || !result.seen.has(url)) {
         return {
           seen: url ? new Set([...result.seen, url]) : result.seen,
@@ -274,6 +283,22 @@ function dedupeSourceTabs(tabs, settings) {
     },
     { seen: new Set(), uniqueTabs: [], duplicateTabs: [] }
   );
+}
+
+function canDedupeTab(tab) {
+  const url = resolveTabUrl(tab);
+  if (!tab?.id || !url) {
+    return false;
+  }
+  const ownBase = chrome.runtime.getURL("");
+  if (url.startsWith(ownBase)) {
+    return false;
+  }
+  return !/^devtools:/i.test(url) && !isBlankTab(tab);
+}
+
+function collectWindowDuplicates(tabs) {
+  return dedupeSourceTabs(tabs.filter(canDedupeTab), { dedupeOnSave: true }).duplicateTabs;
 }
 
 async function getTabsForMode(mode, anchorTab, options = {}) {
@@ -352,20 +377,21 @@ async function readBrowserGroup(tab) {
 }
 
 function canCaptureTab(tab, settings) {
-  if (!tab?.id || !tab.url) {
+  const url = resolveTabUrl(tab);
+  if (!tab?.id || !url) {
     return false;
   }
   if (!settings.includePinnedTabs && tab.pinned) {
     return false;
   }
   const ownBase = chrome.runtime.getURL("");
-  if (tab.url.startsWith(ownBase)) {
+  if (url.startsWith(ownBase)) {
     return false;
   }
-  if (/^devtools:/i.test(tab.url) || isBlankTab(tab)) {
+  if (/^devtools:/i.test(url) || isBlankTab(tab)) {
     return false;
   }
-  return !isUrlExcluded(tab.url, settings);
+  return !isUrlExcluded(url, settings);
 }
 
 function captureTitle(mode, records, windowId) {
@@ -616,10 +642,16 @@ async function removeTabs(tabIds) {
   }
 }
 
+async function countWindowDuplicates(windowId) {
+  const query = Number.isFinite(windowId) ? { windowId } : { currentWindow: true };
+  const tabs = sortCapturedTabs(await chrome.tabs.query(query));
+  return { duplicateTabCount: collectWindowDuplicates(tabs).length };
+}
+
 async function dedupeWindow(windowId) {
   const query = Number.isFinite(windowId) ? { windowId } : { currentWindow: true };
   const tabs = sortCapturedTabs(await chrome.tabs.query(query));
-  const { duplicateTabs } = dedupeSourceTabs(tabs.filter((tab) => !isBlankTab(tab)), { dedupeOnSave: true });
+  const duplicateTabs = collectWindowDuplicates(tabs);
   await removeTabs(duplicateTabs.map((tab) => tab.id).filter(Number.isFinite));
   return { removedTabs: duplicateTabs.length };
 }
@@ -699,11 +731,12 @@ async function listOpenTabs() {
       if (!canCaptureTab(tab, settings)) {
         continue;
       }
+      const url = resolveTabUrl(tab);
       tabs.push({
         id: tab.id,
         windowId: tab.windowId,
-        title: tab.title || tab.url || "Untitled",
-        url: tab.url || "",
+        title: tab.title || url || "Untitled",
+        url,
         favIconUrl: tab.favIconUrl || "",
         active: Boolean(tab.active),
         pinned: Boolean(tab.pinned),

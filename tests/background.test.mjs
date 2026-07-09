@@ -317,6 +317,79 @@ test("capture passes target group and feedback counts to manager URL", async () 
   assert.match(managerUrl, /blank=1/);
 });
 
+test("count window duplicates includes loading tabs with pending URLs", async () => {
+  const sourceTabs = [
+    makeTab(11, "https://a.example", { active: true, index: 0 }),
+    makeTab(12, "", { index: 1, status: "loading", pendingUrl: "https://a.example" }),
+    makeTab(13, "https://b.example", { index: 2 })
+  ];
+  const chrome = makeChrome(makeState(), {
+    queryTabs(query = {}) {
+      if (query.currentWindow) {
+        return sourceTabs;
+      }
+      return defaultQueryTabs(query);
+    }
+  });
+  const listener = await loadBackground(chrome);
+
+  const response = await sendMessage(listener, { type: "count-window-duplicates" });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.duplicateTabCount, 1);
+});
+
+test("dedupe window ignores loading tabs without usable URLs", async () => {
+  const sourceTabs = [
+    makeTab(11, "https://a.example", { active: true, index: 0 }),
+    makeTab(12, "https://a.example", { index: 1 }),
+    makeTab(13, "", { index: 2, status: "loading" })
+  ];
+  const chrome = makeChrome(makeState(), {
+    queryTabs(query = {}) {
+      if (query.currentWindow) {
+        return sourceTabs;
+      }
+      return defaultQueryTabs(query);
+    }
+  });
+  const listener = await loadBackground(chrome);
+
+  const response = await sendMessage(listener, { type: "dedupe-window" });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.removedTabs, 1);
+  assert.deepEqual(chrome.__calls.removedTabs, [12]);
+});
+
+test("capture stores loading tabs from pending URLs", async () => {
+  const sourceTabs = [
+    makeTab(11, "", { active: true, index: 0, status: "loading", pendingUrl: "https://loading.example" }),
+    makeTab(12, "https://ready.example", { index: 1 })
+  ];
+  const chrome = makeChrome(makeState(), {
+    queryTabs(query = {}) {
+      if (query.active) {
+        return [sourceTabs[0]];
+      }
+      if (query.windowId === 1) {
+        return sourceTabs;
+      }
+      return [];
+    }
+  });
+  const listener = await loadBackground(chrome);
+
+  const response = await sendMessage(listener, { type: "capture", mode: "current-window", openAfter: false });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.storedTabs, 2);
+  assert.deepEqual(chrome.__getStoredState().groups[0].tabs.map((tab) => tab.url), [
+    "https://loading.example",
+    "https://ready.example"
+  ]);
+});
+
 test("open manager targets most recently active ZipTab tab", async () => {
   const managerBase = "chrome-extension://ziptab/manager.html";
   const chrome = makeChrome(makeState(), {

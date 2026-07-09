@@ -25,6 +25,22 @@ test("builds three popup quick actions", () => {
   assert.deepEqual(model.quickActions.map((action) => action.id), ["save", "open", "dedupe"]);
 });
 
+test("shows duplicate count on popup dedupe action", () => {
+  const model = buildPopupViewModel({ groups: [], duplicateTabCount: 2, dedupeReady: true });
+  const dedupeAction = model.quickActions.find((action) => action.id === "dedupe");
+
+  assert.equal(dedupeAction.label, "Dedupe (2)");
+  assert.equal(dedupeAction.disabled, false);
+});
+
+test("disables popup dedupe action when no duplicates exist", () => {
+  const model = buildPopupViewModel({ groups: [], duplicateTabCount: 0, dedupeReady: true });
+  const dedupeAction = model.quickActions.find((action) => action.id === "dedupe");
+
+  assert.equal(dedupeAction.label, "Dedupe (0)");
+  assert.equal(dedupeAction.disabled, true);
+});
+
 test("includes restore and delete actions for recent sessions", () => {
   const model = buildPopupViewModel({
     groups: [{ id: "g1", title: "A", tabs: [{ itemType: "link", url: "https://a.test" }] }]

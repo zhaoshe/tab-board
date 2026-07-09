@@ -173,7 +173,7 @@ Options > Capture 默认开启 capture 时 tab 去重。
 
 入口：
 
-- Session toolbar 的 Restore。
+- Session card 的 Restore。
 - Popup recent sessions 的 restore。
 
 规则：
@@ -250,7 +250,7 @@ Session card 展示：
 - Title。
 - Links/notes 数量。
 - lock/starred 等 meta。
-- 可配置的 session toolbar actions。
+- Restore 直接动作和 More 菜单。
 - 预览的 tab items。
 - Show more / Show fewer。
 
@@ -271,10 +271,11 @@ Session card 展示：
 - Edit session note。
 - Delete。
 
-外露动作：
+动作布局：
 
-- Options > Interface > Session toolbar 中配置外露动作和顺序。
-- 未外露动作保留在 More 菜单中。
+- Restore 在 session card 上直接外露。
+- Rename、Note、Lock、Copy、Delete 等次级动作保留在 More 菜单中。
+- Options 不再提供 session toolbar 外露动作配置。
 
 ### Inline rename
 
@@ -365,9 +366,11 @@ Selection mode：
 Session card 可以拖拽排序：
 
 - 拖动开始时，Move here placeholder 出现在源 session 原位置。
-- 拖动到其它 session 前/后时，placeholder 移动到目标位置。
+- 目标 session 左右 25% 区域表示插入到目标前/后。
+- 目标 session 中间 50% 区域表示被拖拽 session 占据目标 slot；目标 session 会移动到之前空出来的位置。
+- 目标 slot 会在横向中间区域内保持锁定，减少 Chrome 原生 DnD 在重排时的回闪。
 - 拖动到其它 category 时，session 进入对应 category。
-- Session 本体不再表示“合并到另一个 session”，只用于计算插入位置。
+- Session 本体不再表示“合并到另一个 session”，只用于计算插入位置和 target slot。
 
 ### Category 拖拽
 
@@ -470,32 +473,24 @@ Command palette 风格搜索：
 
 ## Settings
 
-Capture：
+Basic：
 
+- Extension button behavior：save current window / open popup。
 - Close tabs after saving。
-- Include pinned tabs。
-- Include chrome:// links。
-- Include file:// links。
-- Skip URLs already saved。
 - Open ZipTab after saving。
-
-Restore：
-
 - Remove records after restore。
 - Restore groups in a new window。
 - Restore next to active tab。
 - Focus first restored tab。
-
-Interface：
-
-- Show favicons。
-- Confirm destructive actions。
 - Theme：system / light / dark。
-- Session toolbar editor。
 
-Toolbar：
+Advanced：
 
-- Extension button behavior：save current window / open popup。
+- Include pinned tabs。
+- Dedupe source tabs during capture。
+- Exclude URL patterns，例如 `chrome://*`、`file://*`、`about:blank`、`https://example.com/*`。
+- Chrome shortcuts entry。
+- Reset settings。
 
 ## Legacy / Removed Features
 

@@ -10,9 +10,12 @@ const listNode = document.querySelector("#popupSessionList");
 const searchInput = document.querySelector("#popupSearch");
 let state = await getState();
 let query = "";
+let duplicateTabCount = 0;
+let dedupeReady = false;
 
 hydrateIconButtons();
 render();
+void loadDuplicateCount();
 document.addEventListener("click", handleClick);
 searchInput.addEventListener("input", () => {
   query = searchInput.value.trim();
@@ -67,9 +70,23 @@ async function sendRuntime(message) {
   return response.result || {};
 }
 
+async function loadDuplicateCount() {
+  dedupeReady = false;
+  render();
+  try {
+    const result = await sendRuntime({ type: "count-window-duplicates" });
+    duplicateTabCount = Number(result.duplicateTabCount || 0);
+  } catch {
+    duplicateTabCount = 0;
+  } finally {
+    dedupeReady = true;
+    render();
+  }
+}
+
 function render() {
   const stats = collectStats(state);
-  const model = buildPopupViewModel({ groups: state.groups, query });
+  const model = buildPopupViewModel({ groups: state.groups, query, duplicateTabCount, dedupeReady });
   statsNode.textContent = `${stats.savedTabs} saved, ${stats.groups} sessions`;
   feedbackNode.textContent = "";
   actionsNode.replaceChildren(...model.quickActions.map(renderQuickAction));
@@ -88,7 +105,8 @@ function render() {
 function renderQuickAction(action) {
   return iconTextButton(action.icon, action.label, {
     class: `popup-quick-action ${action.id === "save" ? "primary" : ""}`,
-    "data-action": action.action
+    "data-action": action.action,
+    disabled: action.disabled
   });
 }
 

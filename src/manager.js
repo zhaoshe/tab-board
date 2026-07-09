@@ -25,9 +25,13 @@ import {
 } from "./model.js";
 import {
   buildOpenWindowsModel,
+  getGroupCardDropPlacement,
   getGroupDropIndicator,
+  getGroupReorderTarget,
   getSessionActionLayout,
-  getSessionDropZone
+  isPointInMiddleHalfWithMargin,
+  getSessionDropZone,
+  shouldRefreshOpenTabsForChange
 } from "./manager-view.js";
 import { formatCaptureFeedback, formatRestoreFeedback } from "./feedback-copy.js";
 import { hydrateIconButtons, iconOnlyButton, iconSummary, iconTextButton } from "./icons.js";
@@ -52,6 +56,8 @@ const els = {
 
 const CATEGORY_INBOX = "inbox";
 const CATEGORY_STARRED = "starred";
+const GROUP_TARGET_LOCK_RELEASE_MARGIN_PX = 24;
+const OPEN_TABS_REFRESH_DELAY_MS = 120;
 const TAB_PREVIEW_LIMIT = 6;
 const SESSION_ACTION_META = {
   add: { icon: "plus", label: "Add item" },
@@ -77,6 +83,8 @@ const initialCaptureFeedback = {
 };
 let openWindows = [];
 let openTabsLoading = false;
+let openTabsRefreshTimer = 0;
+let openTabsRefreshQueued = false;
 const selected = new Set();
 const selectedOpenTabIds = new Set();
 let selectionGroupId = "";
@@ -86,6 +94,11 @@ let selectedOpenWindowId = null;
 let activeDragKind = "";
 let activeDragPayload = null;
 let groupInsertMarker = null;
+let groupDragSourceRect = null;
+let groupDragSourceCategoryFilter = "";
+let groupDragSourceId = "";
+let groupDragTargetRect = null;
+let groupDragTargetId = "";
 let focusedGroupId = "";
 const expandedGroupIds = new Set();
 
@@ -121,10 +134,32 @@ function bindEvents() {
   document.addEventListener("drop", handleDrop);
   document.addEventListener("dragend", handleDragEnd);
   document.addEventListener("keydown", handleKeyboard);
+  bindOpenTabsRefreshEvents();
   els.searchInput.addEventListener("input", () => {
     searchQuery = els.searchInput.value.trim();
     render();
   });
+}
+
+function bindOpenTabsRefreshEvents() {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      scheduleOpenTabsRefresh();
+    }
+  });
+  window.addEventListener("focus", scheduleOpenTabsRefresh);
+  chrome.tabs?.onActivated?.addListener?.(scheduleOpenTabsRefresh);
+  chrome.tabs?.onCreated?.addListener?.(scheduleOpenTabsRefresh);
+  chrome.tabs?.onRemoved?.addListener?.(scheduleOpenTabsRefresh);
+  chrome.tabs?.onMoved?.addListener?.(scheduleOpenTabsRefresh);
+  chrome.tabs?.onAttached?.addListener?.(scheduleOpenTabsRefresh);
+  chrome.tabs?.onDetached?.addListener?.(scheduleOpenTabsRefresh);
+  chrome.tabs?.onUpdated?.addListener?.((tabId, changeInfo) => {
+    if (shouldRefreshOpenTabsForChange(changeInfo)) {
+      scheduleOpenTabsRefresh();
+    }
+  });
+  chrome.windows?.onFocusChanged?.addListener?.(scheduleOpenTabsRefresh);
 }
 
 function handleMenuDismiss(event) {
@@ -516,6 +551,10 @@ async function handleDrop(event) {
 function handleDragEnd() {
   activeDragKind = "";
   activeDragPayload = null;
+  groupDragSourceRect = null;
+  groupDragSourceCategoryFilter = "";
+  groupDragSourceId = "";
+  clearGroupDragTarget();
   updateDragUi();
   removeGroupInsertMarker();
   document.querySelectorAll(".drag-over, .dragging, .drag-origin, .category-drop-after, .tab-drop-before, .tab-drop-after").forEach((node) => {
@@ -550,9 +589,19 @@ function markDragSources(payload, fallbackNode, event) {
     return;
   }
   if (payload.kind === "group") {
+    const section = fallbackNode.closest(".category-section");
+    groupDragSourceRect = copyRectBounds(fallbackNode.getBoundingClientRect());
+    groupDragSourceCategoryFilter = section?.dataset.categoryFilter || CATEGORY_INBOX;
+    groupDragSourceId = payload.groupId;
     fallbackNode.classList.add("drag-origin");
     setGroupDragImage(event, fallbackNode);
-    requestAnimationFrame(() => fallbackNode.classList.add("dragging"));
+    requestAnimationFrame(() => {
+      if (!fallbackNode.isConnected || activeDragPayload?.groupId !== payload.groupId) {
+        return;
+      }
+      seedGroupDragMarker(fallbackNode);
+      fallbackNode.classList.add("dragging");
+    });
     return;
   }
   fallbackNode.classList.add("dragging");
@@ -636,7 +685,7 @@ function seedGroupDragMarker(sourceCard) {
   marker.dataset.categoryFilter = section.dataset.categoryFilter || CATEGORY_INBOX;
   marker.dataset.targetGroupId = sourceCard.dataset.groupId || "";
   marker.dataset.placement = "before";
-  marker.querySelector("strong").textContent = "Move here";
+  marker.style.minHeight = `${Math.round(sourceCard.getBoundingClientRect().height)}px`;
   grid.insertBefore(marker, sourceCard);
 }
 
@@ -648,20 +697,16 @@ function updateGroupInsertMarker(event, dropTarget) {
     return;
   }
   const categoryFilter = section.dataset.categoryFilter || CATEGORY_INBOX;
-  const cards = [...grid.querySelectorAll(".group-card:not(.dragging)")];
-  let targetCard = dropTarget.closest(".group-card");
-  if (targetCard?.classList.contains("dragging")) {
-    targetCard = null;
+  const stickyTarget = activeDragKind === "group" ? resolveStickyGroupCardTarget(grid, event) : null;
+  if (!stickyTarget && activeDragKind === "group" && restoreSourceGroupInsertMarker(grid, event, categoryFilter)) {
+    return;
   }
-
-  let placement = "end";
-  if (targetCard) {
-    placement = groupPlacementFromEvent(targetCard, event);
-  } else if (cards.length) {
-    targetCard = nearestGroupCard(event, cards);
-    placement = groupPlacementFromEvent(targetCard, event);
-  }
-
+  const target =
+    stickyTarget ||
+    (activeDragKind === "group" ? resolveDirectGroupCardTarget(grid, dropTarget, event) : null) ||
+    resolveGroupInsertTarget(grid, event);
+  const targetCard = target?.card || null;
+  const placement = target?.placement || "end";
   const sourceGroupId = activeDragPayload?.kind === "group" ? activeDragPayload.groupId : "";
   const indicator = getGroupDropIndicator({
     sourceGroupId,
@@ -696,7 +741,11 @@ function ensureGroupInsertMarker() {
 }
 
 function removeGroupInsertMarker() {
-  groupInsertMarker?.remove();
+  if (!groupInsertMarker) {
+    return;
+  }
+  groupInsertMarker.style.minHeight = "";
+  groupInsertMarker.remove();
 }
 
 function groupInsertPosition(event, dropTarget) {
@@ -708,51 +757,157 @@ function groupInsertPosition(event, dropTarget) {
       placement: marker.dataset.placement || "end"
     };
   }
-  const card = dropTarget.closest(".group-card");
   const section = dropTarget.closest(".category-section");
-  if (card && section) {
-    return {
-      categoryFilter: section.dataset.categoryFilter || CATEGORY_INBOX,
-      targetGroupId: card.dataset.groupId || "",
-      placement: groupPlacementFromEvent(card, event)
-    };
+  const grid = section?.querySelector(".category-section-grid");
+  if (!section || !grid) {
+    return null;
   }
-  if (section) {
+  const target =
+    (activeDragKind === "group" ? resolveDirectGroupCardTarget(grid, dropTarget, event) : null) ||
+    resolveGroupInsertTarget(grid, event);
+  if (!target?.card) {
     return {
       categoryFilter: section.dataset.categoryFilter || CATEGORY_INBOX,
       targetGroupId: "",
       placement: "end"
     };
   }
-  return null;
+  return {
+    categoryFilter: section.dataset.categoryFilter || CATEGORY_INBOX,
+    targetGroupId: target.card.dataset.groupId || "",
+    placement: target.placement
+  };
 }
 
-function groupPlacementFromEvent(card, event) {
-  return getSessionDropZone(groupHorizontalRatio(card, event)) === "insert-after" ? "after" : "before";
+function resolveDirectGroupCardTarget(grid, dropTarget, event) {
+  const targetCard = dropTarget.closest(".group-card");
+  if (!targetCard || targetCard.classList.contains("dragging")) {
+    return null;
+  }
+  const ratio = groupHorizontalRatio(targetCard, event);
+  const sourceGroupId = activeDragPayload?.groupId || "";
+  const targetGroupId = targetCard.dataset.groupId || "";
+  if (targetGroupId !== sourceGroupId && getSessionDropZone(ratio) === "add-to-session") {
+    groupDragTargetId = targetGroupId;
+    groupDragTargetRect = copyRectBounds(targetCard.getBoundingClientRect());
+  } else {
+    clearGroupDragTarget();
+  }
+  const allCards = [...grid.querySelectorAll(".group-card")];
+  const sourceIndex = allCards.findIndex((card) => card.dataset.groupId === sourceGroupId);
+  const targetIndex = allCards.findIndex((card) => card.dataset.groupId === targetGroupId);
+  return {
+    card: targetCard,
+    placement: getGroupCardDropPlacement(sourceIndex, targetIndex, ratio)
+  };
+}
+
+function resolveStickyGroupCardTarget(grid, event) {
+  const sourceGroupId = activeDragPayload?.groupId || "";
+  if (!groupDragTargetId || groupDragTargetId === sourceGroupId || !groupDragTargetRect) {
+    return null;
+  }
+  if (!pointInsideMiddleHalfWithMargin(groupDragTargetRect, event.clientX)) {
+    clearGroupDragTarget();
+    return null;
+  }
+  const targetCard = [...grid.querySelectorAll(".group-card")].find((card) => card.dataset.groupId === groupDragTargetId);
+  if (!targetCard || targetCard.classList.contains("dragging")) {
+    clearGroupDragTarget();
+    return null;
+  }
+  const allCards = [...grid.querySelectorAll(".group-card")];
+  const sourceIndex = allCards.findIndex((card) => card.dataset.groupId === sourceGroupId);
+  const targetIndex = allCards.findIndex((card) => card.dataset.groupId === groupDragTargetId);
+  return {
+    card: targetCard,
+    placement: getGroupCardDropPlacement(sourceIndex, targetIndex, 0.5)
+  };
+}
+
+function clearGroupDragTarget() {
+  groupDragTargetRect = null;
+  groupDragTargetId = "";
+}
+
+function resolveGroupInsertTarget(grid, event) {
+  const marker = groupInsertMarker?.parentElement === grid ? groupInsertMarker : null;
+  marker?.remove();
+  const cards = [...grid.querySelectorAll(".group-card:not(.dragging)")];
+  if (!cards.length) {
+    return null;
+  }
+  const rects = cards.map((card) => card.getBoundingClientRect());
+  const target = getGroupReorderTarget(
+    rects,
+    { x: event.clientX, y: event.clientY },
+    groupReorderAxis(rects, grid.clientWidth)
+  );
+  if (!target) {
+    return null;
+  }
+  return {
+    card: cards[target.targetIndex] || null,
+    placement: target.placement
+  };
+}
+
+function restoreSourceGroupInsertMarker(grid, event, categoryFilter) {
+  const sourceGroupId = groupDragSourceId || activeDragPayload?.groupId || "";
+  const sourceCard = [...grid.querySelectorAll(".group-card")].find((card) => card.dataset.groupId === sourceGroupId);
+  if (!sourceCard || !groupDragSourceRect) {
+    return false;
+  }
+  if (!pointInsideRect(groupDragSourceRect, event.clientX, event.clientY)) {
+    return false;
+  }
+  const marker = ensureGroupInsertMarker();
+  marker.dataset.categoryFilter = groupDragSourceCategoryFilter || categoryFilter;
+  marker.dataset.targetGroupId = sourceCard.dataset.groupId || "";
+  marker.dataset.placement = "before";
+  grid.insertBefore(marker, sourceCard);
+  return true;
+}
+
+function groupReorderAxis(rects, gridWidth) {
+  if (rects.length > 1) {
+    const [firstRect, secondRect] = rects;
+    return Math.abs(firstRect.top - secondRect.top) < Math.min(firstRect.height, secondRect.height) / 2 ? "x" : "y";
+  }
+  const [firstRect] = rects;
+  if (!firstRect) {
+    return "x";
+  }
+  return gridWidth > firstRect.width * 1.1 ? "x" : "y";
+}
+
+function pointInsideRect(rect, x, y) {
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+function copyRectBounds(rect) {
+  return {
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom
+  };
+}
+
+function horizontalRatioForRect(rect, event) {
+  const width = rect.right - rect.left;
+  if (!width) {
+    return 0.5;
+  }
+  return Math.min(1, Math.max(0, (event.clientX - rect.left) / width));
+}
+
+function pointInsideMiddleHalfWithMargin(rect, x) {
+  return isPointInMiddleHalfWithMargin(rect, x, GROUP_TARGET_LOCK_RELEASE_MARGIN_PX);
 }
 
 function groupHorizontalRatio(card, event) {
-  const rect = card.getBoundingClientRect();
-  if (!rect.width) {
-    return 0.5;
-  }
-  return Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-}
-
-function nearestGroupCard(event, cards) {
-  let nearest = cards[0] || null;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-  for (const card of cards) {
-    const rect = card.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    const distance = (event.clientX - centerX) ** 2 + (event.clientY - centerY) ** 2;
-    if (distance < nearestDistance) {
-      nearest = card;
-      nearestDistance = distance;
-    }
-  }
-  return nearest;
+  return horizontalRatioForRect(card.getBoundingClientRect(), event);
 }
 
 function handleKeyboard(event) {
@@ -1939,7 +2094,31 @@ function workspaceFolders() {
   return state.folders.filter((folder) => folder.workspaceId === activeWorkspaceId);
 }
 
+function clearScheduledOpenTabsRefresh() {
+  if (!openTabsRefreshTimer) {
+    return;
+  }
+  window.clearTimeout(openTabsRefreshTimer);
+  openTabsRefreshTimer = 0;
+}
+
+function scheduleOpenTabsRefresh() {
+  if (document.visibilityState === "hidden") {
+    return;
+  }
+  clearScheduledOpenTabsRefresh();
+  openTabsRefreshTimer = window.setTimeout(() => {
+    openTabsRefreshTimer = 0;
+    void loadOpenTabs();
+  }, OPEN_TABS_REFRESH_DELAY_MS);
+}
+
 async function loadOpenTabs() {
+  clearScheduledOpenTabsRefresh();
+  if (openTabsLoading) {
+    openTabsRefreshQueued = true;
+    return;
+  }
   openTabsLoading = true;
   renderActiveTabs();
   try {
@@ -1954,6 +2133,10 @@ async function loadOpenTabs() {
     renderActiveTabs();
     renderStats();
     renderGroups();
+    if (openTabsRefreshQueued) {
+      openTabsRefreshQueued = false;
+      void loadOpenTabs();
+    }
   }
 }
 

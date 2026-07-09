@@ -27,7 +27,7 @@ ZipTab 是一个无构建步骤的 Chrome Manifest V3 extension。
 - `src/model.js`: state schema、normalize、数据创建、导入导出、匹配和工具函数。
 - `src/store.js`: `chrome.storage.local` 的 get/set/update 封装。
 - `src/icons.js`: 本地 SVG icon registry、按钮 hydrate、tooltip。
-- `src/manager-view.js`: manager open windows model、DnD zone、session action layout 的纯 helper。
+- `src/manager-view.js`: manager open windows model、DnD zone、session reorder/target-lock、session action layout 的纯 helper。
 - `src/popup-view.js`: popup quick actions、recent sessions、hover preview、empty copy 的纯 helper。
 - `src/options-view.js`: options Basic / Advanced section 分组 helper。
 - `src/feedback-copy.js`: popup、manager、options 共享的反馈文案 helper，包括 capture cleanup counts。
@@ -428,8 +428,10 @@ Drop target 类型：
 - `closestSupportedDropTarget()` 会跳过当前 drag kind 不支持的内部 drop target，避免 session drag 被 tab row 抢走。
 - Saved tab 插入使用上/下高亮线。
 - Session 移动使用 `group-insert-marker` 作为 Move here placeholder。
-- Session dragstart 会 seed marker 到源位置。
+- Session dragstart 会 seed marker 到源位置，并记录源卡片 rect，避免隐藏后的源卡片实时 rect 抢回 placeholder。
 - Session drag image 使用源卡片位置的 visible clone，避免浏览器截不到 drag image。
+- Session hover 到目标卡左右 25% 时按 before/after 插入；进入目标卡中间 50% 时使用 target slot 语义，让被拖拽 session 占目标位置、目标卡回填源空位。
+- Target slot 进入后会记录目标卡原始 rect，并用 hysteresis margin 保持锁定，减少原生 DnD 与 grid 重排导致的边界回闪。
 
 已知敏感点：
 
@@ -455,15 +457,12 @@ UI 使用手写 DOM：
 
 ```text
 render()
-  -> ensureFocusedGroup()
   -> renderWorkspaceSwitcher()
   -> renderStats()
   -> renderHeaderActions()
-  -> renderContextStrip()
   -> renderActiveTabs()
   -> renderFolders()
   -> renderGroups()
-  -> renderInspector()
 ```
 
 状态更新后通常：
@@ -513,7 +512,7 @@ node --check src/manager.js
 `npm test`：
 
 - 运行 `node --test`。
-- 当前主要覆盖 `model.js` 的 normalize、import/export、bin、settings 等纯数据逻辑。
+- 当前覆盖 model/import/export、background capture/restore、popup view、manager view helper、options view helper 等纯逻辑。
 
 `npm run check`：
 

@@ -28,7 +28,7 @@ ZipTab 是一个 local-first Chrome tab manager。它以 OneTab 的“快速收�
 - 移除 context strip 和常驻 inspector。
 - Open Tabs 展示所有 windows，一次只展开一个 window。
 - Select mode 只覆盖 window title 行，不改变 tab 列表布局。
-- Session DnD 使用竖线插入反馈；拖回原位置不显示插入线；拖起 session 不消失。
+- Session DnD 改为源位置 placeholder + target slot 预览：左右 25% 插入前/后，中间 50% 让被拖拽 session 占目标位置，目标卡回填源空位。
 - Popup 改为横排 Save/Open/Dedupe quick actions，并增加 Settings、recent session Delete、hover/focus tabs preview。
 - Save 完成后 popup 关闭，manager 打开/聚焦、定位刚保存 session，并用浮层 toast 提示。
 - Capture 默认按源 tabs URL 去重，清理 about:blank 和重复源 tabs。
@@ -40,8 +40,23 @@ ZipTab 是一个 local-first Chrome tab manager。它以 OneTab 的“快速收�
 
 - Popup 只做 trigger surface，不做小 manager。
 - Manager 的核心是 session board，不应该把解释性 UI 和低价值 inspector 放在主路径。
-- Drag and drop 反馈必须降低误操作，优先清楚落点而不是提前重排。
+- Drag and drop 反馈必须清楚表达最终 slot；session 排序允许轻量 live reorder，但不能重新引入 session 合并语义。
 
+### 2026-07-09: Session drag target-slot hardening
+
+用户继续手动验证 session 拖拽，发现跨多个 session 排序时 target card 会在边界附近回闪，尤其是拖第 2 个 session 到第 1/4 个 session 附近时。
+
+变化：
+
+- 目标 card 左右 25% 保留 before/after 插入语义。
+- 目标 card 中间 50% 改为 target slot 语义：被拖拽 session 占据目标位置，目标 card 回填源空位。
+- drag start 记录源卡片 rect，避免隐藏后的源卡片实时 rect 抢回 placeholder。
+- 进入 target slot 后记录目标卡片原始 rect，并用 release margin 保持 target lock，降低 grid 重排造成的回闪。
+
+判断：
+
+- 当前体验仍可能有原生 DnD 瑕疵，但已经达到可用线，先停止继续打磨。
+- 后续如果继续优化，应考虑替换原生 HTML DnD 为 pointer-driven drag，而不是继续叠加边界补丁。
 
 ### 2026-07-04: OneTab 复刻起点
 

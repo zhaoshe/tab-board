@@ -69,7 +69,12 @@
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--panel);
+  background: var(--surface);
+}
+
+.popup-row:hover,
+.popup-row:focus-within {
+  z-index: 1;
 }
 
 .popup-session-main {
@@ -105,9 +110,9 @@
   max-height: 220px;
   overflow: auto;
   padding: 10px;
-  border: 1px solid var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
   border-radius: 12px;
-  background: var(--panel);
+  background: var(--surface);
   box-shadow: var(--shadow);
 }
 
@@ -145,5 +150,5 @@
 }
 
 .popup-preview-favicon {
-  background: var(--line-strong);
+  background: var(--surface-2);
 }

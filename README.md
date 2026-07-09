@@ -44,7 +44,7 @@ ZipTab also replaces Chrome's new tab page, so every new tab opens the ZipTab ma
 - Restore deleted groups and items from the bin.
 - Import and export text or JSON.
 - Import OneTab export text into separate ZipTab sessions.
-- Configure pinned-tab capture, duplicate handling, restore behavior, theme, confirmations, and toolbar behavior.
+- Configure pinned-tab capture, duplicate handling, exclude URL patterns, restore behavior, theme, and toolbar button behavior.
 
 ## Verify
 
