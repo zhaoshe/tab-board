@@ -2,6 +2,8 @@
 node_modules/
 coverage/
 dist/
+!vendor/webawesome/dist/
+!vendor/webawesome/dist/**
 build/
 *.log
 *.zip

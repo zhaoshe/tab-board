@@ -12,6 +12,7 @@ ZipTab 是一个无构建步骤的 Chrome Manifest V3 extension。
 - Manifest V3 service worker。
 - 原生 ES modules。
 - 原生 DOM API。
+- 本地 self-host 的 Web Awesome `3.10.0` Web Components，仅用于稳定的通用 shell controls。
 - `chrome.storage.local`。
 - `chrome.tabs` / `chrome.tabGroups` / `chrome.contextMenus` / `chrome.omnibox`。
 
@@ -27,10 +28,12 @@ ZipTab 是一个无构建步骤的 Chrome Manifest V3 extension。
 - `src/model.js`: state schema、normalize、数据创建、导入导出、匹配和工具函数。
 - `src/store.js`: `chrome.storage.local` 的 get/set/update 封装。
 - `src/icons.js`: 本地 SVG icon registry、按钮 hydrate、tooltip。
-- `src/manager-view.js`: manager open windows model、DnD zone、session reorder/target-lock、session action layout 的纯 helper。
+- `src/webawesome-controls.js`: 设置本地 Web Awesome base path，并静态注册 Manager 使用的 input/select/option/dropdown controls。
+- `vendor/webawesome/`: 固定版本 `3.10.0` 的完整本地 runtime、license、来源说明和最终文件 checksums。
+- `src/manager-view.js`: manager open windows model、sidebar filter/sort、selection reconciliation、DnD zone、session reorder/target-lock、session card view model、floating menu positioning、session action layout 的纯 helper。
 - `src/popup-view.js`: popup quick actions、recent sessions、hover preview、empty copy 的纯 helper。
 - `src/options-view.js`: options Basic / Advanced section 分组 helper。
-- `src/feedback-copy.js`: popup、manager、options 共享的反馈文案 helper，包括 capture cleanup counts。
+- `src/feedback-copy.js`: popup、manager、options 共享的反馈文案 helper，包括 capture result counts。
 - `manager.html`: 主工作台。
 - `popup.html` / `src/popup.js`: toolbar popup。
 - `options.html` / `src/options.js`: 设置页。
@@ -70,6 +73,7 @@ ZipTab 是一个无构建步骤的 Chrome Manifest V3 extension。
 - 默认设置。
 - normalize 旧数据。
 - 创建 workspace/folder/group/tab/note/bin entry。
+- 校验同一 workspace 内 category 名称冲突。
 - import/export text 解析。
 - query matching。
 - restorable 判断。
@@ -106,12 +110,14 @@ ZipTab 是一个无构建步骤的 Chrome Manifest V3 extension。
 
 负责 manager page：
 
-- 渲染 Board-first shell、top toolbar、Open Tabs all windows、categories、session cards、modals。
-- manager 页面事件分发。
-- open tabs panel，一次只展开一个 window。
+- 渲染 tabExtend-style 两栏 shell、右侧 workspace/category topbar、可折叠全高 sidebar、Open Tabs selected window、horizontal active category board、session cards、modals。
+- manager 页面事件分发、compact window selector、workspace dropdown 和 sidebar localStorage UI preference。
+- 稳定 shell controls 使用本地 Web Awesome `wa-input`、`wa-select` / `wa-option`、`wa-dropdown` / `wa-dropdown-item`；session cards、category tabs、saved/open tab rows、DnD targets 和 native context menu 保持 ZipTab 自定义 DOM。
+- open tabs panel 顶部通过 compact window selector 和 actions 选择/操作 window，一次只渲染一个 selected window；所有有 URL 的非 ZipTab tabs 按 `tab.index` 进入单一纵向列表，pinned row 只以内联 badge 标记，底部 Filter tabs 只作用于当前 selected window。
 - session/category/tab drag and drop。
-- 保存后 target session 定位和 floating toast。
+- 保存后 target session 定位和 floating toast；selected open-tab capture 使用 selection snapshot 与 pending guard，只有 snapshot 仍匹配时才清空选择，并在同一 workspace 内切到 Inbox/highlight 新 session。
 - inline rename。
+- category create/rename 在 manager 的 Web Lock（可用时）保护下基于最新 state 做唯一性校验。
 - bin modal。
 - import/export modal。
 - search modal。
@@ -128,7 +134,7 @@ ZipTab 是一个无构建步骤的 Chrome Manifest V3 extension。
 
 ## State Schema
 
-State 存储在 `chrome.storage.local["ziptabState"]`。
+State 存储在 `chrome.storage.local["ziptabState"]`。`quickList` 仍保留为 legacy migration compatibility 字段，用于接收旧数据并迁移成普通 session；当前 UI 不读写 Quick list / Pinned workflow。
 
 顶层结构：
 
@@ -283,9 +289,7 @@ Bin entry 用于恢复删除内容。
   closeTabsAfterSave: true,
   dedupeOnSave: true,
   deleteRestoredTabs: true,
-  excludeUrlPatterns: ["chrome://*", "file://*"],
   focusRestoredTabs: true,
-  includePinnedTabs: false,
   openManagerAfterSave: true,
   restoreGroupsInNewWindow: false,
   restoreNextToCurrent: true,
@@ -309,21 +313,20 @@ Bin entry 用于恢复删除内容。
 
 1. 入口调用 `captureTabs(mode, anchorTab, options)`。
 2. `getTabsForMode()` 根据 mode 取 tabs。
-3. 先剔除并关闭 `about:blank`。
-4. 如开启 `dedupeOnSave`，按源 tab URL 去重，重复源 tabs 关闭。
-5. `canCaptureTab()` 按 pinned、ZipTab 自身页、devtools、exclude URL patterns 过滤不可保存 tabs。
-6. `createTabRecord()` 转成 ZipTab tab records。
-7. 按 windowId 分组。
-8. `createGroupFromTabRecords()` 创建 session。
-9. `updateState()` 将新 sessions 放到 groups 头部。
-10. 根据 settings 打开或聚焦最近 manager tab，并带上 target group / feedback URL params。
-11. 根据 settings 关闭已保存源 tabs。
+3. `canCaptureTab()` 只排除没有 usable URL 或 ZipTab 自身 extension 页；pinned、`about:blank` 和其它特殊 URL 都进入 capture 尝试。
+4. 如开启 `dedupeOnSave`，按符合保存资格的源 tab URL 去重，重复源 tabs 关闭。
+5. `createTabRecord()` 转成 ZipTab tab records。
+6. 按 windowId 分组。
+7. `createGroupFromTabRecords()` 创建 session。
+8. `updateState()` 将新 sessions 放到 groups 头部。
+9. 根据 settings 打开或聚焦最近 manager tab，并带上 target group / feedback URL params。
+10. 根据 settings 关闭已保存源 tabs。
 
 重要边界：
 
-- 如果没有 storable tabs，会返回 `storedTabs: 0`，但仍可能清理 blank/duplicate tabs。
+- 如果没有有 URL 的非 ZipTab tabs，会返回 `storedTabs: 0`；重复源 tabs 仍按 capture dedupe 设置处理。
 - Source-tab dedupe 只针对本次 capture 的源 tabs，不因为历史 saved sessions 里已有同 URL 而跳过本次 session 内容。
-- Excluded URL 不进入 session，但重复 excluded tabs 会在源窗口中只保留一个。
+- Capture 不提供自定义 URL 或 pinned 过滤设置；Chrome 对受限 URL 的实际保存/恢复能力仍是平台边界。
 - 如果 manager tab 是保存过程中打开的，关闭源 tabs 时会排除 manager tab。
 
 ### Manager Open Tabs
@@ -331,12 +334,20 @@ Bin entry 用于恢复删除内容。
 流程：
 
 1. Manager 调用 runtime message `list-open-tabs`。
-2. Background 使用 `chrome.windows.getAll({ populate: true })`。
-3. `canCaptureTab()` 过滤。
-4. Manager 渲染所有 windows，但一次只展开选中的 window，其它 window 折叠显示 tab count。
-5. 展开 window 可保存该 window、清理重复 tabs、进入 select mode。
-6. Select mode overlay 只覆盖 window title 行，不移动 tab 列表。
-7. Open tab 可勾选、右键筛选、拖拽。
+2. Background 使用 `chrome.windows.getAll({ populate: true })`，为 window 返回原始 `tabCount`。
+3. `canCaptureTab()` 只排除没有 URL 或 ZipTab 自身 extension 页；其它有 URL 的 tabs（包括 pinned）都标记为可保存。
+4. Manager 用 compact `wa-select` 展示 window ordinal 和 tab count；Chrome raw window ID 只作为 option value 使用，不显示给用户。一次只渲染 selected window 的 Open Tabs body。
+5. Selected window 先用 `filterOpenTabs()` 过滤 sidebar `wa-input` query，再用 `sortOpenTabs()` 按 Chrome `tab.index` 排成单一纵向列表；pinned row 与普通 row 同处列表，只保留 inline badge。
+6. Selected window 可保存、从 More 清理重复 tabs、进入 select mode；有 URL 的 row 都可进入选择、拖拽和 URL session filter。
+7. Select mode controls 位于 64px header rail 内，不改变 header 高度或移动 tab 列表；selected count 以 numeric badge 呈现并保留 aria-live 文本。
+8. Selected capture 在请求前快照 selected tab ids、window、workspace 和 select mode，并以 pending guard 防止重复提交；返回后仅在 snapshot 与当前选择一致时清空，避免覆盖用户在请求期间的新选择。
+9. `chrome.storage.onChanged` 直接恢复正常 manager render。
+
+### Manager 启动与降级
+
+Manager 启动先同步生成 `normalizeState()` 默认 state，准备并渲染可用 shell，同时发起 Open Tabs 请求；storage state 在后台异步读取，完成后再应用到当前页面。`src/webawesome-controls.js` 作为独立的本地 Web Awesome module boundary 加载，失败只影响通用 shell controls，不应阻断 Manager 空 shell 首屏。
+
+异步 storage apply 记录启动 revision；`chrome.storage.onChanged` 到达时先递增 revision 并应用新 state，旧的 storage 快照完成后若 revision 已变化则丢弃，避免旧快照覆盖新 state。错误按阶段降级：popover 失败只关闭信息浮层，storage 失败保留默认 normalized state，migration 失败保留已加载 sessions，shell 失败停止后续启动，Open Tabs 失败保留空面板并提示；loaded/render 失败则保留已启动的基础界面并提示。
 
 ### Restore
 
@@ -365,7 +376,7 @@ All：
 
 入口：
 
-- Manager sidebar Import。
+- Manager top toolbar Import。
 
 流程：
 
@@ -380,7 +391,7 @@ All：
 
 入口：
 
-- Manager sidebar Export。
+- Manager top toolbar Export。
 
 流程：
 
@@ -405,6 +416,8 @@ otherwise          -> Inbox
 - 目标是 Inbox：`starred = false`, `folderId = null`。
 - 目标是 folder：`starred = false`, `folderId = folder.id`。
 
+创建或重命名 category 时，manager 通过 `withCategoryMutationLock()`（优先使用 `navigator.locks`）包住基于最新 state 的 `validateFolderName()` 检查和写入；normalize 仍不合并历史重复 category。
+
 ### Drag and Drop
 
 Drag payload 类型：
@@ -426,7 +439,15 @@ Drop target 类型：
 重要实现点：
 
 - `closestSupportedDropTarget()` 会跳过当前 drag kind 不支持的内部 drop target，避免 session drag 被 tab row 抢走。
-- Saved tab 插入使用上/下高亮线。
+- Saved tab 插入使用上/下高亮线；单个或批量移动通过 model 的 `moveGroupTabs()` 原子验证目标、移除和插入，避免同 session 移动最后一项时误删 session。
+- 左侧 sidebar 使用 `sidebar-collapsed` shell class 和 `ziptab.sidebarCollapsed` localStorage preference；该状态不进入业务 state。`renderSidebarRail()` 复用 `buildSidebarRailModel()`，只投影 selected window 的 tab identity，不拥有 selection 或 DnD state。collapsed content 通过 absolute hover/focus overlay 显示，因此不改变 board grid geometry。
+- Open Tabs body 使用单一纵向列表和 Filter tabs footer；pinned row 与普通 row共用列表，只显示 inline badge。rail 只聚焦既有 row/filter control，不生成 drag/drop target 或 payload。
+- `managerInfoPopover` 是单例 interactive overlay；来自其 action slot 的 delegated click 在 mutation 前调用 `hide()`，并在下一帧把 focus 恢复到仍可用的 row、session 或 Open Tabs fallback，避免 DOM 重绘后出现断连 trigger、旧内容或隐藏 keyboard focus。active drag 会隐藏 collapsed overlay 并临时禁用其 pointer events，让 board drop target 继续接收 dragover/drop。
+- 顶部 category tabs 复用 `folderList` 和 `category-row`，按 `categoryOrderByWorkspace` 排序，点击后切换 `activeFilter`。
+- 右侧 board 只渲染当前 active category；`category-section-grid` 使用单行 column-flow，sessions 横向滚动。
+- Session card 充满 board 高度，`tab-list` 负责 card 内部纵向滚动。
+- Session card 的视觉数据来自 `buildSessionCardView()`，favicon stack、link/note counts、status chips 和 overflow counts 可在 DOM 外测试。
+- Action menu 使用 fixed positioning 和 `getFloatingMenuPosition()`，避免被 horizontal board overflow 裁切。
 - Session 移动使用 `group-insert-marker` 作为 Move here placeholder。
 - Session dragstart 会 seed marker 到源位置，并记录源卡片 rect，避免隐藏后的源卡片实时 rect 抢回 placeholder。
 - Session drag image 使用源卡片位置的 visible clone，避免浏览器截不到 drag image。
@@ -457,6 +478,7 @@ UI 使用手写 DOM：
 
 ```text
 render()
+  -> renderSidebarState()
   -> renderWorkspaceSwitcher()
   -> renderStats()
   -> renderHeaderActions()
@@ -475,9 +497,11 @@ render()
 
 Manager search：
 
-- `searchQuery` 来自 URL `?q=` 或 input。
-- `visibleGroups()` 先按 workspace 过滤，再按 `groupMatchesQuery()` 和 open tab filter 过滤。
-- `visibleTabsForGroup()` 决定 session 内预览哪些 tabs。
+- `searchQuery` 来自 URL `?q=` 或顶部 input，过滤当前 workspace 的 saved sessions。
+- `openTabsQuery` 来自 sidebar footer，只过滤 selected browser window 的 pinned/regular rows。
+- `openTabFilter` 来自可保存 open tab 的右键菜单，按 URL 过滤 saved sessions；window 切换和 Open Tabs refresh 不自动清除它。
+- `visibleGroups()` 先按 workspace 过滤，再按 `groupMatchesQuery()` 和 `openTabFilter` 过滤。
+- `getVisibleGroupTabs()` 决定 session 内 matching tabs；不做预览数量截断。
 
 Omnibox search：
 
@@ -506,33 +530,51 @@ Icons：
 ```sh
 npm test
 npm run check
+npm run verify:vendor
+npm run check:release
 node --check src/manager.js
 ```
 
 `npm test`：
 
-- 运行 `node --test`。
-- 当前覆盖 model/import/export、background capture/restore、popup view、manager view helper、options view helper 等纯逻辑。
+- 运行 `node --test tests/*.test.mjs`，避免递归发现 vendored declaration files。
+- 当前覆盖 model/import/export、background capture/restore、popup/options view、manager view/DnD helper、Nord token/source contracts、Header/Board CSS contracts、Web Awesome local production wiring、vendor path/checksum contracts。
 
 `npm run check`：
 
-- 检查 manifest 引用文件存在。
-- 对 JS 文件执行 `node --check`。
-- 运行完整测试。
+- 检查 manifest 和页面引用文件存在。
+- 对项目与 vendored runtime JavaScript 执行 `node --check`。
+- 拒绝 vendor symlink、项目根路径逃逸和 checksum mismatch。
+- 校验 Web Awesome 1,066 个最终 vendored 文件 checksums；该清单用于检测 checkout drift，不作为独立供应链信任锚。
+- 运行 `tests/*.test.mjs` 完整测试。
+
+`npm run verify:vendor`：
+
+- 需要网络访问；以 verifier 内的 executable version/URL/SRI/SHA-256 pins 为基线，从 npm registry 获取固定版本的 metadata 与 tarball。
+- 对 response、archive entry 和 extracted tree 设置 timeout、byte、file-count、path、symlink 与 entry-type 边界。
+- 验证 registry SHA-512 integrity 和固定 tarball SHA-256。
+- 只应用已记录的远程字体 import 删除 patch，再比较完整目录、文件类型和文件内容。
+
+`npm run check:release` 串联离线 extension sanity/test 和联网 vendor provenance verification，用于 release/security gate；日常 `npm run check` 保持离线可重复。
 
 当前测试空白：
 
-- Manager DOM render 未自动化覆盖。
-- Drag and drop 未自动化覆盖。
-- Chrome API restore/capture 依赖浏览器环境，当前没有 e2e。
+- Manager 的真实 custom-element lifecycle、Shadow DOM keyboard/focus 和完整 DOM render 未自动化覆盖；当前主要使用纯 helper 与 source-contract tests。
+- 原生 Drag and drop 的浏览器事件时序未自动化覆盖，只有 geometry/helper/source contracts。
+- Chrome API restore/capture 依赖浏览器环境，当前没有 Playwright/Chrome e2e。
 
 建议人工回归：
 
 - 安装 unpacked extension。
-- 保存当前窗口。
-- 搜索、分类、拖拽、restore。
-- 导入 OneTab 文本。
-- 打开 Options 修改 capture/restore 设置。
+- 展开/折叠 sidebar，并刷新确认 UI preference 保留；窄屏下确认 rail、compact window selector 和 toggle 仍可达。
+- 切换多个 compact window selector，确认一次只显示 selected window，tab count 与 Chrome window 原始总数一致；新建 Chrome window 后自动选中。
+- 确认 compact window selector 和 actions 位于 sidebar 顶部，切换 window 后只显示 selected window 的单一纵向 Open Tabs 列表；pinned row 与普通 row 同处列表并显示 inline badge。
+- 确认所有有 URL 的非 ZipTab tabs 都尝试保存，且 pinned tabs 不因 badge 被排除。
+- 输入 sidebar Filter tabs，确认只过滤当前 window rows；切换 window 或刷新 tabs 后，已有 `openTabFilter` 仍保留。
+- 确认 sessions 单行横向滚动、每张 card 全高、tab list 在 card 内滚动。
+- 在横向滚动前后测试 session target-slot、saved/open tabs 和 category DnD。
+- 打开第一张/最后一张 session 的 More，确认 fixed menu 不被裁切。
+- 保存当前窗口、搜索、分类、restore、导入 OneTab 文本。
 
 ## 维护建议
 

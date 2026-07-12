@@ -261,12 +261,140 @@ test("list open tabs includes browser group metadata", async () => {
   });
 });
 
-test("capture closes blank tabs and dedupes source URLs before saving", async () => {
+test("list open tabs returns every tab and preserves raw tab count", async () => {
+  const chrome = makeChrome(makeState(), {
+    openWindows: [
+      {
+        id: 1,
+        focused: true,
+        incognito: false,
+        tabs: [
+          makeTab(11, "https://visible.example"),
+          makeTab(12, "chrome://settings"),
+          makeTab(13, "")
+        ]
+      }
+    ]
+  });
+  const listener = await loadBackground(chrome);
+
+  const response = await sendMessage(listener, { type: "list-open-tabs" });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.windows[0].tabs.length, 3);
+  assert.equal(response.result.windows[0].tabCount, 3);
+  assert.deepEqual(response.result.windows[0].tabs.map((tab) => tab.storable), [true, true, false]);
+});
+
+test("list open tabs marks pinned and special URLs storable", async () => {
+  const chrome = makeChrome(makeState(), {
+    openWindows: [
+      {
+        id: 1,
+        focused: true,
+        incognito: false,
+        tabs: [
+          makeTab(11, "https://pinned.example", { pinned: true, index: 0 }),
+          makeTab(12, "chrome://settings", { pinned: true, index: 1 }),
+          makeTab(13, "file:///tmp/report.html", { pinned: true, index: 2 }),
+          makeTab(14, "devtools://devtools", { pinned: true, index: 3 }),
+          makeTab(15, "about:blank", { pinned: true, index: 4 }),
+          makeTab(16, "chrome-extension://ziptab/manager.html", { pinned: true, index: 5 })
+        ]
+      }
+    ]
+  });
+  const listener = await loadBackground(chrome);
+
+  const response = await sendMessage(listener, { type: "list-open-tabs" });
+
+  assert.equal(response.ok, true);
+  assert.deepEqual(response.result.windows[0].tabs.map((tab) => tab.storable), [true, true, true, true, true, false]);
+});
+
+test("list open tabs gives pinned tabs stable fields without a usable URL", async () => {
+  const chrome = makeChrome(makeState(), {
+    openWindows: [
+      {
+        id: 1,
+        focused: true,
+        incognito: false,
+        tabs: [{ id: 11, windowId: 1, index: 0, pinned: true, title: "Loading pinned" }]
+      }
+    ]
+  });
+  const listener = await loadBackground(chrome);
+
+  const response = await sendMessage(listener, { type: "list-open-tabs" });
+
+  assert.deepEqual(response.result.windows[0].tabs[0], {
+    id: 11,
+    windowId: 1,
+    title: "Loading pinned",
+    url: "",
+    favIconUrl: "",
+    active: false,
+    pinned: true,
+    index: 0,
+    browserGroup: null,
+    storable: false
+  });
+});
+
+test("close open tab message removes the Chrome tab without changing saved state", async () => {
+  const initialState = makeState({
+    groups: [
+      { id: "group_a", title: "Saved", tabs: [makeLink("tab_a", "https://saved.example")], workspaceId: DEFAULT_WORKSPACE_ID }
+    ]
+  });
+  const chrome = makeChrome(initialState);
+  const listener = await loadBackground(chrome);
+
+  const response = await sendMessage(listener, { type: "close-open-tab", tabId: 42 });
+
+  assert.equal(response.ok, true);
+  assert.deepEqual(response.result, { tabId: 42 });
+  assert.deepEqual(chrome.__calls.removedTabs, [42]);
+  assert.deepEqual(chrome.__getStoredState().groups, initialState.groups);
+});
+
+test("create window message opens a focused normal Chrome window", async () => {
+  const chrome = makeChrome(makeState());
+  const listener = await loadBackground(chrome);
+
+  const response = await sendMessage(listener, { type: "create-window" });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.windowId, 7);
+  assert.deepEqual(chrome.__calls.windowCreates[0], { focused: true, type: "normal" });
+});
+
+test("tab-id capture returns the created group id stored in state", async () => {
+  const chrome = makeChrome(makeState());
+  const listener = await loadBackground(chrome);
+
+  const response = await sendMessage(listener, {
+    type: "capture",
+    mode: "tab-ids",
+    tabIds: [11, 12],
+    openAfter: false
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.createdGroupIds.length, 1);
+  assert.equal(response.result.createdGroupIds[0], chrome.__getStoredState().groups[0].id);
+  assert.deepEqual(chrome.__getStoredState().groups[0].tabs.map((tab) => tab.sourceTabId), [11, 12]);
+});
+
+test("capture saves special URLs and dedupes source URLs without blank cleanup", async () => {
   const sourceTabs = [
     makeTab(11, "https://a.example", { active: true, index: 0 }),
     makeTab(12, "https://a.example", { index: 1 }),
     makeTab(13, "about:blank", { index: 2 }),
-    makeTab(14, "chrome://extensions", { index: 3 })
+    makeTab(14, "chrome://extensions", { index: 3 }),
+    makeTab(15, "file:///tmp/report.html", { index: 4 }),
+    makeTab(16, "devtools://devtools", { index: 5 }),
+    makeTab(17, "chrome-extension://ziptab/manager.html", { index: 6 })
   ];
   const chrome = makeChrome(makeState(), {
     queryTabs(query = {}) {
@@ -284,17 +412,59 @@ test("capture closes blank tabs and dedupes source URLs before saving", async ()
   const response = await sendMessage(listener, { type: "capture", mode: "current-window" });
 
   assert.equal(response.ok, true);
-  assert.equal(response.result.storedTabs, 1);
+  assert.equal(response.result.storedTabs, 5);
   assert.equal(response.result.cleanedDuplicates, 1);
-  assert.equal(response.result.closedBlankTabs, 1);
-  assert.equal(response.result.skippedByExclude, 1);
-  assert.equal(response.result.createdGroupIds.length, 1);
-  assert.deepEqual([...chrome.__calls.removedTabs].sort((a, b) => a - b), [11, 12, 13]);
-  assert.equal(chrome.__calls.removedTabs.includes(14), false);
+  assert.equal(Object.hasOwn(response.result, "skippedByExclude"), false);
+  assert.equal(Object.hasOwn(response.result, "closedBlankTabs"), false);
+  assert.deepEqual(chrome.__getStoredState().groups[0].tabs.map((tab) => tab.url), [
+    "https://a.example",
+    "about:blank",
+    "chrome://extensions",
+    "file:///tmp/report.html",
+    "devtools://devtools"
+  ]);
+  assert.deepEqual([...chrome.__calls.removedTabs].sort((a, b) => a - b), [11, 12, 13, 14, 15, 16]);
+  assert.equal(chrome.__calls.removedTabs.includes(17), false);
 });
 
-test("capture passes target group and feedback counts to manager URL", async () => {
-  const sourceTabs = [makeTab(11, "https://a.example", { active: true, index: 0 }), makeTab(12, "about:blank", { index: 1 })];
+test("capture dedupe never closes rejected ZipTab tabs", async () => {
+  const sourceTabs = [
+    makeTab(11, "chrome-extension://ziptab/manager.html", { active: true, index: 0 }),
+    makeTab(12, "chrome-extension://ziptab/manager.html", { index: 1 }),
+    makeTab(13, "https://save.example", { index: 2 })
+  ];
+  const chrome = makeChrome(makeState(), {
+    queryTabs(query = {}) {
+      if (query.active) {
+        return [sourceTabs[0]];
+      }
+      if (query.windowId === 1) {
+        return sourceTabs;
+      }
+      return [];
+    }
+  });
+  const listener = await loadBackground(chrome);
+
+  const response = await sendMessage(listener, {
+    type: "capture",
+    mode: "current-window",
+    openAfter: false
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.storedTabs, 1);
+  assert.equal(response.result.cleanedDuplicates, 0);
+  assert.deepEqual(chrome.__getStoredState().groups[0].tabs.map((tab) => tab.url), ["https://save.example"]);
+  assert.deepEqual(chrome.__calls.removedTabs, [13]);
+});
+
+test("capture passes saved and duplicate feedback without blank fields", async () => {
+  const sourceTabs = [
+    makeTab(11, "https://a.example", { active: true, index: 0 }),
+    makeTab(12, "https://a.example", { index: 1 }),
+    makeTab(13, "about:blank", { index: 2 })
+  ];
   const chrome = makeChrome(makeState(), {
     queryTabs(query = {}) {
       if (query.active) {
@@ -313,8 +483,9 @@ test("capture passes target group and feedback counts to manager URL", async () 
   assert.equal(response.ok, true);
   const managerUrl = chrome.__calls.createdTabs[0].properties.url;
   assert.match(managerUrl, /targetGroupId=group_/);
-  assert.match(managerUrl, /saved=1/);
-  assert.match(managerUrl, /blank=1/);
+  assert.match(managerUrl, /saved=2/);
+  assert.match(managerUrl, /duplicates=1/);
+  assert.doesNotMatch(managerUrl, /(?:blank|excluded|skipped)=/);
 });
 
 test("count window duplicates includes loading tabs with pending URLs", async () => {

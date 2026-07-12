@@ -17,22 +17,13 @@ test("places daily-use settings in the Basic section", () => {
   ]);
 });
 
-test("keeps rare capture settings in the Advanced section", () => {
-  const sections = buildSettingsSections();
-  assert.deepEqual(sections.advanced.map((item) => item.key), [
-    "includePinnedTabs",
-    "excludeUrlPatterns"
-  ]);
-});
-
-test("groups capture dedupe and exclude URL patterns", () => {
+test("keeps Advanced free of removed capture settings", () => {
   const sections = buildSettingsSections();
 
-  assert.equal(sections.capture.some((item) => item.key === "dedupeOnSave"), true);
-  assert.equal(sections.captureEdgeCases.some((item) => item.key === "excludeUrlPatterns"), true);
+  assert.deepEqual(sections.advanced, []);
 });
 
-test("does not expose removed interface settings", () => {
+test("does not expose removed settings", () => {
   const keys = Object.values(buildSettingsSections()).flat().map((item) => item.key);
 
   assert.equal(keys.includes("showFavicons"), false);

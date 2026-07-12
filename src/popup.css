@@ -2,7 +2,7 @@
   width: 380px;
   min-height: 420px;
   margin: 0;
-  background: var(--surface);
+  background: var(--zt-canvas);
 }
 
 .popup-shell {
@@ -33,13 +33,13 @@
   width: 100%;
   min-height: 40px;
   justify-content: center;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
 }
 
 .popup-quick-action.primary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: white;
+  border-color: var(--zt-accent-solid);
+  background: var(--zt-accent-solid);
+  color: var(--zt-on-accent);
 }
 
 .popup-feedback {
@@ -67,9 +67,9 @@
   gap: 8px;
   align-items: center;
   padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
+  border: 1px solid var(--zt-border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--zt-surface-raised);
 }
 
 .popup-row:hover,
@@ -110,9 +110,9 @@
   max-height: 220px;
   overflow: auto;
   padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
-  border-radius: 12px;
-  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--zt-accent) 24%, var(--zt-border-subtle));
+  border-radius: var(--radius-control);
+  background: var(--zt-surface-raised);
   box-shadow: var(--shadow);
 }
 
@@ -137,8 +137,8 @@
   align-items: center;
   min-height: 26px;
   padding: 0 8px;
-  border-radius: 9px;
-  background: var(--surface);
+  border-radius: 8px;
+  background: var(--zt-surface-subtle);
   font-size: 0.78rem;
 }
 
@@ -150,5 +150,5 @@
 }
 
 .popup-preview-favicon {
-  background: var(--surface-2);
+  background: var(--zt-surface-subtle);
 }

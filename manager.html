@@ -4,54 +4,89 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ZipTab</title>
+    <link rel="stylesheet" href="vendor/webawesome/dist/styles/webawesome.css" />
     <link rel="stylesheet" href="src/styles.css" />
   </head>
   <body>
     <a class="skip-link" href="#groupsList">Skip to saved tabs</a>
     <div class="app-shell manager-board-shell">
-      <header class="manager-topbar">
-        <div class="brand-block compact-brand">
-          <div class="mark" aria-hidden="true">ZT</div>
-          <div>
-            <h1>ZipTab</h1>
-            <p id="statsLine" class="muted">0 tabs</p>
+      <aside id="managerSidebar" class="sidebar board-sidebar manager-sidebar" aria-label="Open tabs">
+        <header class="manager-sidebar-header">
+          <h1 class="visually-hidden">ZipTab tab manager</h1>
+          <wa-select
+            id="windowSelect"
+            class="window-selector wa-visually-hidden-label"
+            data-action="switch-open-window"
+            aria-label="Open window"
+          ></wa-select>
+          <div id="windowActions" class="window-actions" aria-label="Selected window actions"></div>
+          <div class="sidebar-header-actions">
+            <button
+              id="sidebarToggle"
+              type="button"
+              class="small-button sidebar-toggle"
+              data-icon="chevrons-left"
+              data-action="toggle-sidebar"
+              aria-controls="sidebarContent"
+              aria-expanded="true"
+              aria-label="Hide sidebar"
+            ></button>
+            <button
+              type="button"
+              class="small-button"
+              data-icon="plus"
+              data-action="create-open-window"
+              aria-label="New Chrome window"
+            ></button>
           </div>
+        </header>
+        <nav id="sidebarRail" class="sidebar-rail" aria-label="Open tabs quick access"></nav>
+        <div id="sidebarContent" class="manager-sidebar-content">
+          <section class="open-tabs-section" aria-label="Open tabs">
+            <div id="openTabsToolbar" class="active-tab-toolbar" hidden></div>
+            <div id="activeTabsPanel" class="active-tabs-panel"></div>
+            <label class="open-tabs-filter" for="openTabsFilterInput">
+              <span>Filter tabs</span>
+              <wa-input id="openTabsFilterInput" type="search" placeholder="Title or URL" autocomplete="off"></wa-input>
+            </label>
+          </section>
         </div>
-        <div class="workspace-switcher manager-workspace-switcher">
-          <select id="workspaceSelect" data-action="switch-workspace" aria-label="Switch workspace"></select>
-          <button type="button" class="small-button" data-icon="plus" data-action="create-workspace" aria-label="New workspace"></button>
-          <button type="button" class="small-button" data-icon="edit-3" data-action="rename-workspace" aria-label="Rename workspace"></button>
-        </div>
-        <label class="search-box workspace-search">
-          <span class="visually-hidden">Search</span>
-          <input id="searchInput" type="search" autocomplete="off" placeholder="Search sessions, notes, and links" />
-        </label>
-        <div id="headerActions" class="header-actions manager-top-actions"></div>
-      </header>
-
-      <aside class="sidebar board-sidebar" aria-label="Navigation">
-        <section class="open-tabs-section" aria-label="Open tabs">
-          <div class="section-heading">
-            <span>Open tabs · all windows</span>
-            <button type="button" class="small-button" data-icon="archive" data-action="capture-all-windows" aria-label="Save all windows"></button>
-          </div>
-          <div id="openTabsToolbar" class="active-tab-toolbar" hidden></div>
-          <div id="activeTabsPanel" class="active-tabs-panel"></div>
-        </section>
-
-        <div class="section-heading">
-          <span>Categories</span>
-          <button type="button" class="small-button" data-icon="folder-plus" data-action="create-folder" aria-label="New category"></button>
-        </div>
-        <nav id="folderList" class="folder-list" aria-label="Categories"></nav>
       </aside>
 
-      <main class="workspace board-workspace">
-        <section id="groupsList" class="groups-list" data-drop="new-group" aria-label="Saved tab groups"></section>
-      </main>
+      <div class="manager-main-shell">
+        <header class="manager-topbar">
+          <wa-dropdown id="workspaceMenu" class="workspace-menu" aria-label="Workspace"></wa-dropdown>
+          <nav class="top-category-nav" aria-label="Categories">
+            <div id="folderList" class="folder-list top-category-list" aria-label="Categories"></div>
+            <button type="button" class="small-button top-category-add" data-icon="folder-plus" data-action="create-folder" aria-label="New category"></button>
+          </nav>
+          <div class="workspace-search">
+            <button
+              type="button"
+              id="searchToggle"
+              class="icon-button search-toggle"
+              data-icon="search"
+              data-action="toggle-search"
+              aria-controls="searchInput"
+              aria-expanded="false"
+              aria-label="Search"
+              data-tooltip="Search"
+            ></button>
+            <label id="searchField" class="search-box workspace-search-field" hidden>
+              <span class="visually-hidden">Search sessions, notes, and links</span>
+              <wa-input id="searchInput" type="search" autocomplete="off" placeholder="Search sessions, notes, and links"></wa-input>
+            </label>
+          </div>
+          <div id="headerActions" class="header-actions manager-top-actions"></div>
+        </header>
+
+        <main class="workspace board-workspace">
+          <section id="groupsList" class="groups-list" data-drop="new-group" aria-label="Saved tab groups" tabindex="-1"></section>
+        </main>
+      </div>
     </div>
 
-    <dialog id="modal" class="modal">
+    <dialog id="modal" class="modal" aria-labelledby="modalTitle">
       <form method="dialog">
         <header class="modal-header">
           <h3 id="modalTitle"></h3>
@@ -63,6 +98,7 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="src/webawesome-controls.js"></script>
     <script type="module" src="src/manager.js"></script>
   </body>
 </html>

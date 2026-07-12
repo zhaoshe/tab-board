@@ -7,7 +7,6 @@ import {
   escapeXml,
   groupMatchesQuery,
   isRestorableTab,
-  isUrlExcluded,
   normalizeState,
   sortCapturedTabs,
   tabMatchesQuery
@@ -117,6 +116,10 @@ async function handleMessage(message) {
       });
     case "list-open-tabs":
       return listOpenTabs();
+    case "create-window":
+      return createWindow();
+    case "close-open-tab":
+      return closeOpenTab(message.tabId);
     case "open-manager":
       return openManager({ query: message.query || "" });
     case "open-options":
@@ -196,11 +199,9 @@ async function applyActionPopup() {
 async function captureTabs(mode, anchorTab, options = {}) {
   const settings = await getSettings();
   const sourceTabs = sortCapturedTabs(await getTabsForMode(mode, anchorTab, options));
-  const blankTabs = sourceTabs.filter(isBlankTab);
-  const nonBlankTabs = sourceTabs.filter((tab) => !isBlankTab(tab));
-  const { uniqueTabs, duplicateTabs } = dedupeSourceTabs(nonBlankTabs, settings);
-  const storableTabs = uniqueTabs.filter((tab) => canCaptureTab(tab, settings));
-  const skippedByExclude = uniqueTabs.filter((tab) => isUrlExcluded(resolveTabUrl(tab), settings)).length;
+  const eligibleTabs = sourceTabs.filter(canCaptureTab);
+  const { uniqueTabs, duplicateTabs } = dedupeSourceTabs(eligibleTabs, settings);
+  const storableTabs = uniqueTabs;
 
   const recordsByWindow = new Map();
   for (const tab of storableTabs) {
@@ -222,10 +223,7 @@ async function captureTabs(mode, anchorTab, options = {}) {
   const result = {
     storedTabs: groups.reduce((total, group) => total + group.tabs.length, 0),
     storedGroups: groups.length,
-    skipped: skippedByExclude,
-    skippedByExclude,
     cleanedDuplicates: duplicateTabs.length,
-    closedBlankTabs: blankTabs.length,
     createdGroupIds: groups.map((group) => group.id)
   };
 
@@ -243,7 +241,6 @@ async function captureTabs(mode, anchorTab, options = {}) {
   }
 
   const idsToClose = new Set([
-    ...blankTabs.map((tab) => tab.id),
     ...duplicateTabs.map((tab) => tab.id),
     ...(settings.closeTabsAfterSave ? storableTabs.map((tab) => tab.id) : [])
   ]);
@@ -376,22 +373,12 @@ async function readBrowserGroup(tab) {
   }
 }
 
-function canCaptureTab(tab, settings) {
+function canCaptureTab(tab) {
   const url = resolveTabUrl(tab);
   if (!tab?.id || !url) {
     return false;
   }
-  if (!settings.includePinnedTabs && tab.pinned) {
-    return false;
-  }
-  const ownBase = chrome.runtime.getURL("");
-  if (url.startsWith(ownBase)) {
-    return false;
-  }
-  if (/^devtools:/i.test(url) || isBlankTab(tab)) {
-    return false;
-  }
-  return !isUrlExcluded(url, settings);
+  return !url.startsWith(chrome.runtime.getURL(""));
 }
 
 function captureTitle(mode, records, windowId) {
@@ -689,7 +676,6 @@ async function openManager({ windowId, query = "", targetGroupId = "", feedback 
   if (feedback) {
     params.set("saved", String(feedback.storedTabs || 0));
     params.set("duplicates", String(feedback.cleanedDuplicates || 0));
-    params.set("blank", String(feedback.closedBlankTabs || 0));
   }
   const targetUrl = params.toString() ? `${baseUrl}?${params}` : baseUrl;
   const tabs = await chrome.tabs.query({});
@@ -721,16 +707,27 @@ function chooseManagerTab(tabs, baseUrl, preferredWindowId) {
   );
 }
 
+async function createWindow() {
+  const window = await chrome.windows.create({ focused: true, type: "normal" });
+  return { windowId: window?.id || null };
+}
+
+async function closeOpenTab(tabId) {
+  const normalizedTabId = Number(tabId);
+  if (!Number.isSafeInteger(normalizedTabId) || normalizedTabId < 0) {
+    throw new Error("A valid tab ID is required");
+  }
+  await chrome.tabs.remove(normalizedTabId);
+  return { tabId: normalizedTabId };
+}
+
 async function listOpenTabs() {
-  const settings = await getSettings();
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
   const openWindows = [];
   for (const window of windows) {
     const tabs = [];
     for (const tab of window.tabs || []) {
-      if (!canCaptureTab(tab, settings)) {
-        continue;
-      }
+      const storable = canCaptureTab(tab);
       const url = resolveTabUrl(tab);
       tabs.push({
         id: tab.id,
@@ -742,13 +739,14 @@ async function listOpenTabs() {
         pinned: Boolean(tab.pinned),
         index: tab.index || 0,
         browserGroup: await readBrowserGroup(tab),
-        storable: true
+        storable
       });
     }
     openWindows.push({
       id: window.id,
       focused: Boolean(window.focused),
       incognito: Boolean(window.incognito),
+      tabCount: Array.isArray(window.tabs) ? window.tabs.length : 0,
       tabs
     });
   }

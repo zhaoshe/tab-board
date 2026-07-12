@@ -99,7 +99,7 @@ ZipTab 避免：
 ## Demo script
 
 1. 打开一个有很多 tabs 的窗口。
-2. 点击 Open Tabs 面板里的 Current window > Save。
+2. 在 Open Tabs header 选择目标 window，点击 Save。
 3. 展示生成的 session，并双击标题 inline rename。
 4. 右键一个当前 open tab，选择 Filter sessions by this tab，右侧筛选出包含它的 sessions。
 5. 勾选多个 open tabs，点击 Create session。

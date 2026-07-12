@@ -9,14 +9,117 @@
 
 ZipTab 是一个 local-first Chrome tab manager。它以 OneTab 的“快速收起和恢复 tabs”为基础，吸收 tabExtend 的 workspace、分类和工作台思路，但保持主流程更轻：
 
-- 当前窗口一键保存为 session。
-- 从当前窗口勾选多个 open tabs 创建 session。
-- 通过 open tab 右键菜单筛选包含该 URL 的 saved sessions。
+- 当前选中的 browser window 一键保存为 session。
+- 从单一 Open Tabs 列表勾选多个有 URL 的 tabs 创建 session。
+- 通过有 URL open tab 的右键菜单筛选包含该 URL 的 saved sessions。
+- 用 sidebar footer Filter tabs 只过滤当前 selected browser window 的单一 Open Tabs 列表。
+- 所有有 URL 的非 ZipTab tabs 都尝试保存，pinned tabs 与普通 tabs 共用列表并以内联 badge 标记。
 - 勾选 open tabs 只用于批量创建 session 或批量拖入已有 session。
 - 拖动 open tab 到已有 session 中追加链接。
 - saved sessions 支持分类、搜索、恢复、拖拽排序、inline rename、笔记、导入导出、回收站。
 
 ## 变迁时间线
+
+### 2026-07-12: Manager interaction cleanup（Phase 1–6 收尾）
+
+本轮把 Manager 的高密度交互收敛为更稳定的可见层级：window selector 使用本地 window icon 与 ordinal/count，selected tabs 用 numeric badge，selected window 与单一 tab list 顶部对齐；collapsed sidebar 保留 rail，并通过 hover/focus overlay 展开而不推动 board；tab metadata 通过 hover/focus preview 提供，不增加 eye 按钮；saved title 保持单行；selected capture 在同一 workspace 切到 Inbox 并高亮新 session；search 默认收起但保留 query。
+
+判断：
+
+- 这些调整只清理 interaction hierarchy 和 progressive disclosure，保留既有保存、恢复、selection 与 DnD 语义。
+- 本轮没有 state schema、Chrome API 或 DnD semantic 变化。
+
+当前状态：自动实现与测试完成；Chrome unpacked、keyboard、screen-reader、rail overlay 和 DnD 人工验收仍待用户执行。
+
+### 2026-07-12: 同一 workspace 的 category 名称唯一性
+
+用户可以保留历史重复 category，但后续新建或重命名时需要避免同一 workspace 内产生更多同名导航项。
+
+变化：
+
+- 新建和重命名 category 统一使用 trim 后、大小写不敏感的纯 model 校验。
+- 同一 workspace 的冲突会被拒绝并通过 toast 提示；不同 workspace 可以使用相同名称。
+- 重命名自身当前名称允许通过 folder id 排除；normalize 不合并、不删除、不迁移已有重复 category。
+
+判断：
+
+- 将规则放在 model helper 并由 manager 两个边界调用，避免创建和重命名行为漂移。
+- 保留历史数据，避免用户升级时 category id、session 归属或排序发生隐式变化。
+
+当前状态：Current。
+
+### 2026-07-11: 移除 board 折叠与 tab preview 截断
+
+用户验收后确认 category/session/global collapse controls 和 Show more / Show fewer 会增加 board 操作噪音；session card 应直接展示匹配 tabs，并由 card 内 tab list 负责纵向滚动。
+
+变化：
+
+- 保留顶部 category tabs 和 category/grid 的 drop 与 DnD 语义，但移除 category section title/count/collapse header。
+- 移除 manager 内 category、session、global collapse handlers/actions；`group.collapsed` 等模型字段保持兼容。
+- Session More 不再显示 Collapse；全部 matching tabs 直接渲染，不再使用 preview limit 或 Show more / Show fewer。
+
+判断：
+
+- Board 结构和拖拽目标继续表达组织关系，折叠控制交给 card 内滚动，减少状态和入口数量。
+- 保留数据字段避免 legacy state migration，后续若需要折叠应重新评估交互收益。
+
+### 2026-07-11: Options 与 capture surface 简化
+
+用户验收后确认 capture eligibility 不需要再通过设置页表达一套可变规则；Open Tabs 应直接反映当前浏览器现场，Options 只保留仍有明确收益的日常和恢复入口。
+
+变化：
+
+- Options 删除 Include pinned tabs、Exclude URL patterns、Capture edge cases card、URL editor 及其增删改路径。
+- Advanced 只保留 Chrome shortcuts 和 Reset settings，并更新说明文案。
+- 所有有 URL 的非 ZipTab tabs 都进入 capture 尝试，pinned tabs 与普通 tabs 在同一纵向列表中以内联 badge 标记。
+- Open Tabs 的选择、拖拽和右键 URL session filter 不再依赖旧的 settings eligibility；仍保留 sidebar Filter tabs 作为当前 window 的临时行过滤。
+- Category board 不恢复 header/collapse/Show more 等结构控制；session card 直接渲染全部 matching items，由 card 内列表滚动。
+
+判断：
+
+- Capture 的默认行为应是“看到有 URL 的 tab 就尝试保存”，而不是把浏览器现场拆成多个设置例外。
+- Options 越短越容易理解，也避免 UI 与已删除的 settings schema 产生漂移。
+- 结构导航和内容滚动分别由 category tabs 与 session card 内部列表承担，减少重复控制。
+
+当前状态：Current。
+
+### 2026-07-10: Pinned tabs 分区与底部 Filter tabs
+
+Open Tabs 需要同时说明“当前存在”与“当前可保存”的边界，并让窗口内 tab 较多时仍能快速定位。
+
+变化：
+
+- Background 保持 capture 过滤语义不变：所有 pinned tabs 都保留可见；普通 pinned tab 可由 Include pinned tabs 开启保存，特殊/排除 URL 仍标记为不可保存。
+- Selected window 的 Open Tabs 固定显示 Pinned 区；大量 pinned tabs 通过单行横向滚动保持可达，regular tabs 作为唯一纵向滚动区域。
+- Sidebar 底部增加独立的 Filter tabs 输入，只过滤当前 selected window 的 pinned/regular rows。
+- 不可保存 pinned row 不提供 checkbox、拖拽或按 URL 筛选 sessions，并显示 `Not saved by current settings`。
+- open-tab URL 筛选 saved sessions 的 `openTabFilter` 与底部 query 分离；切换 window 或刷新 tabs 不会自动清除 saved-session filter。
+- Options 修改 Include pinned tabs 或 exclude URL patterns 后，manager 会重新加载 Open Tabs eligibility，避免旧 `storable` 状态残留。
+
+判断：
+
+- Pinned tab 的可见性帮助用户理解浏览器现场，storable 标记避免把 capture 约束隐藏成“tab 消失”。
+- 两种 filter 服务不同对象：底部 query 负责当前窗口内定位，右键 URL filter 负责反查历史 sessions。
+
+当前状态：Superseded by 2026-07-11 Options 与 capture surface 简化；window chips 和底部 Filter tabs 保留，pinned strip、regular-only scroll 和 settings eligibility 已移除。
+
+### 2026-07-10: Window sidebar 收敛为 tabExtend 风格 chips
+
+用户希望 Open Tabs 更接近 tabExtend 的 window sidebar：workspace 信息不应占据 sidebar header，多个 Chrome window 也不应同时展开。
+
+变化：
+
+- Workspace switcher、stats、新建/重命名 workspace 移到右侧 topbar 的 category tabs 左侧。
+- Sidebar header 改为 window chips、collapse 和新建 Chrome window。
+- Open Tabs 通过 chip 切换 selected window，一次只渲染一个 window；保留当前 window 的 save、dedupe、select 和拖拽流程。
+- 新建 Chrome window 后自动选中该 window 并刷新 Open Tabs。
+
+判断：
+
+- Window 是 Open Tabs 的导航上下文，适合放在 sidebar header；workspace 是 saved sessions 的上下文，适合放在 main topbar。
+- Pinned/regular 分区和底部 Filter tabs 留给后续任务，不在本次引入。
+
+当前状态：Partially superseded by 2026-07-11；window chips、sidebar actions 和单一 selected-window list 保留，pinned 分区方案不再采用。
 
 ### 2026-07-08: Board-first UI rework 和 capture cleanup
 
@@ -41,6 +144,8 @@ ZipTab 是一个 local-first Chrome tab manager。它以 OneTab 的“快速收�
 - Popup 只做 trigger surface，不做小 manager。
 - Manager 的核心是 session board，不应该把解释性 UI 和低价值 inspector 放在主路径。
 - Drag and drop 反馈必须清楚表达最终 slot；session 排序允许轻量 live reorder，但不能重新引入 session 合并语义。
+
+当前状态：Partially superseded by 2026-07-11 Options 与 capture surface 简化；popup、board-first 主线和 DnD 语义保留，`about:blank` cleanup 与 exclude URL patterns 已移除。
 
 ### 2026-07-09: Session drag target-slot hardening
 
@@ -131,6 +236,8 @@ ZipTab 是一个 local-first Chrome tab manager。它以 OneTab 的“快速收�
 - 大量 session 可以横向浏览。
 - 牺牲了一部分完整内容可见性，换取扫描效率。
 
+当前状态：Superseded by 2026-07-11 移除 board 折叠与 tab preview 截断；session card 现在渲染全部 matching items，并由 card 内列表滚动。
+
 ### 2026-07-06: Inline rename
 
 原来只能从 session 的 More 菜单里 Rename，路径太深。
@@ -189,10 +296,11 @@ Quick list 来自 tabExtend 的 Pinned workflow 思路，但在 ZipTab 当前体
 - 单 tab 保存是低价值高噪音操作。
 - 用户更常见的动作是“把一组当前上下文保存下来”或“找之前是否保存过这个 tab”。
 
-当前状态：
+当前状态：Partially superseded by 2026-07-11 Options 与 capture surface 简化。
 
 - Open tab 多选创建 session 会走后台 `tab-ids` capture 模式。
 - 拖动 open tab 到 session 是追加记录，不关闭浏览器里的 tab。
+- Open Tabs 现在展示所有 browser tabs；有 URL 的非 ZipTab tabs 可保存，ZipTab 自身页或无 usable URL rows 保留可见但不可操作。
 
 ### 2026-07-06: Icon-first 操作按钮
 
@@ -244,6 +352,8 @@ Categories 最初按固定顺序展示：All items、Unfiled、Starred，然后�
 - `chrome://` 和 `file://` 不像普通网页，跨机器、跨权限、恢复成功率都不稳定。
 - 如果用户确实需要保存这些链接，应该显式打开对应开关。
 
+当前状态：Superseded by 2026-07-11 Options 与 capture surface 简化；特殊 URL 开关已删除，除 ZipTab 自身页和无 usable URL 外均尝试保存，恢复失败时保留 saved record。
+
 ### 2026-07-06: Categories 从筛选器改为目录导航
 
 用户希望右侧 saved sessions 区域按照左侧 Categories 的顺序展示所有分类，并且点击左侧分类时滚动到对应区域，而不是硬切成单一分类。
@@ -261,6 +371,8 @@ Categories 最初按固定顺序展示：All items、Unfiled、Starred，然后�
 - Categories 更像信息目录，而不是互斥过滤器。
 - 对大量 saved sessions 来说，滚动定位比硬切更利于保持空间记忆。
 - 保留全局 Search / tab filter，可以继续处理“只看匹配项”的明确筛选需求。
+
+当前状态：Superseded by 2026-07-09 tabExtend-style visual board clone；顶部 category tabs 现在切换单一 active category board，不再滚动全部 category sections。
 
 ### 2026-07-06: Saved sessions 顶部标题精简
 
@@ -313,6 +425,8 @@ Categories 最初按固定顺序展示：All items、Unfiled、Starred，然后�
 - “按钮表示下一次点击动作”比同时展示折叠/展开两个按钮更省空间。
 - category 级按钮让用户能快速整理大块内容，而不用先滚动到每个 session。
 
+当前状态：Superseded by 2026-07-11 移除 board 折叠与 tab preview 截断；manager 不再提供 global、category 或 session 内容折叠。
+
 ### 2026-07-06: Session 外露动作可配置
 
 用户希望 session card 上的动作尽量和 title 在同一层，同时能够自行决定哪些动作外露、外露顺序如何。
@@ -329,6 +443,8 @@ Categories 最初按固定顺序展示：All items、Unfiled、Starred，然后�
 
 - 不同用户对高频动作的定义不同，不应该把 Restore/Add/More 固定死。
 - More 继续作为兜底，避免配置外露动作后丢失低频功能。
+
+当前状态：Superseded by 2026-07-08 Board-first UI rework 和 2026-07-11 移除 board 折叠与 tab preview 截断；session toolbar 配置已删除，Restore 固定外露，其余动作进入 More，Collapse 已从 manager 移除。
 
 ### 2026-07-06: 移除 saved tab 级 Star/Todo 动作
 
@@ -392,6 +508,8 @@ Categories 最初按固定顺序展示：All items、Unfiled、Starred，然后�
 
 - Workspace 是当前页面的最高层上下文，比静态的 Saved sessions 标题更适合放在顶部锚点。
 - 左侧 sidebar 应优先承载当前窗口 tabs 和 categories，减少重复导航层级。
+
+当前状态：Partially superseded by 2026-07-10 Window sidebar 收敛和 2026-07-11 移除 board 折叠与 tab preview 截断；workspace 仍在主 topbar，sidebar 现在承载 window chips 和 Open Tabs，全局折叠入口由后续 board 简化移除。
 
 ### 2026-07-06: 移除 starred session 卡片侧边强调
 
@@ -518,6 +636,109 @@ Starred 已经是一个内置 category，用户认为 session card 上的金色�
 - Manager/new tab 才是重复使用的工作台，应承担搜索、编辑、整理和恢复。
 - Popup 功能变少是有意取舍，换取更清楚的一眼可用入口。
 
+当前状态：Partially superseded by 2026-07-08 Board-first UI rework；manager-first 定位、popup 和 Options 分层保留，context strip 与常驻 inspector 已移除。
+
+### 2026-07-09: tabExtend-style visual board clone
+
+用户选择先复刻 tabExtend 的 visual board 思路，再基于实际使用慢慢微调。随后根据截图反馈，category 改为顶部 segmented tabs，workspace 切换入口放在顶部最左侧。
+
+变化：
+
+- 顶部 toolbar 最左侧展示 workspace switcher。
+- Categories 从左侧 sidebar 移到顶部，使用 tabExtend 风格 segmented tabs。
+- 点击 category tab 会切换右侧 active category board，而不是展示所有 category sections。
+- Session card 增加 favicon stack、link/note meta、locked/starred chips 和 note preview。
+- Session、saved tabs、open tabs 可拖到顶部 category tab，把内容移入该 category。
+- Popup、Options、数据模型和现有 DnD target-slot 语义保持不变。
+
+判断：
+
+- 这次优先复制 tabExtend 的顶部 category 切换和 visual card 组织方式，而不是继续做极简调整。
+- 先用原生 DOM/CSS 实现现代 board，不引入 React、bundler 或新依赖。
+- 后续再基于手动验证决定是否加入 inspector、view toggle、onboarding 或更完整的 workspace rail。
+
+当前状态：Partially superseded by 2026-07-11 Options 与 capture surface 简化；top category tabs、active board 和 session card 视觉保留，Options/capture eligibility 已改变。
+
+### 2026-07-10: Full-height collapsible sidebar and horizontal sessions
+
+用户继续要求整体布局向 tabExtend 靠齐：manager 明确切成左右两栏，Open Tabs 使用全高 sidebar，右侧 sessions 变成全高横向列表。
+
+变化：
+
+- Workspace switcher 移入左侧 sidebar header。
+- Sidebar 可折叠成窄 rail，折叠状态保存在 manager localStorage。
+- Open Tabs 占满 sidebar 剩余高度，并使用单一内部纵向滚动容器。
+- 右侧 active category board 改为单行 horizontal track。
+- 每张 session card 充满 board 高度，tab list 在 card 内独立滚动。
+- Session action menu 使用 fixed positioning，避免被横向 board 裁切。
+- Popup、Options、数据模型、capture/restore 和 target-slot DnD 语义保持不变。
+
+判断：
+
+- Sidebar、category strip、session columns 形成更接近 tabExtend 的稳定桌面工作台。
+- 横向 board 优先服务大屏和重复整理场景，不再让 sessions 自动换成多行 grid。
+- 后续继续观察横向拖拽边缘滚动、窄屏表现和 sidebar 折叠入口的可发现性。
+
+当前状态：Partially superseded by 2026-07-10 Window sidebar 收敛和 2026-07-11 Options 与 capture surface 简化；全高双栏和横向 session board 保留，workspace 已移回主 topbar，sidebar 顶部改为 window chips，Options/capture eligibility 已改变。
+
+### 2026-07-12: Nord visual system and local Web Awesome shell controls
+
+用户确认继续参考 tabExtend 的紧凑工作台思路，但将视觉语言统一到 Nord，并允许引入适合原生 DOM/MV3 的设计系统。
+
+变化：
+
+- 建立 Nord0-Nord15 primitives 和 light/dark `--zt-*` semantic tokens，删除旧 teal、硬编码蓝色、Manager radial gradient 和 glass surface。
+- Sidebar 与 main topbar 使用 64px shared header rail；main controls 统一 40px，sidebar controls 统一 32px。
+- Window chips 收敛为只显示 ordinal/tab count 的 compact selector，不再显示 `Current window` 或 raw Chrome window ID；Dedupe 进入 window More。
+- Workspace switch/create/rename/stats 收进单一 dropdown；顶部 category tabs、search 和 utilities 对齐同一 control line。
+- 删除 category outer frame 和多余 board padding；session cards 直接位于 Nord canvas 上，并使用 card 内纵向滚动。
+- 本地 vendoring Web Awesome `3.10.0`，保留 license、来源、integrity、1,066 个 checksums 和 remote-font patch；Manager 的 search、window selector、workspace dropdown 使用静态本地 Web Components。
+- Session/category/tab rows、DnD hierarchy、context menu、本地图标 registry 和 shared tooltip service 继续保持 ZipTab 自定义实现。
+- Popup 与 Options 复用 Nord tokens 和统一 control sizing，不改变 quick actions 或 Basic/Advanced 信息架构。
+
+判断：
+
+- Web Awesome 只接管稳定通用 controls，避免 Shadow DOM 或 shared button migration 扩大到脆弱 DnD surface。
+- Nord semantic tokens 同时约束自定义产品组件和 Web Awesome，避免出现两套视觉语言。
+- Global button/tooltip/dialog、session/window action menu 和 settings checkbox/radio migration 延期；需要浏览器级 keyboard/focus/DnD 验证后再逐 family 推进。
+
+当前状态：该阶段的基线开发已完成；Chrome unpacked visual、keyboard 和 DnD 人工回归待用户执行。
+
+### 2026-07-12: Progressive disclosure rail and popover lifecycle
+
+用户继续以 tabExtend 的 hover 模式优化高密度 Manager：默认界面应保持内容优先，完整 sidebar 和对象级操作只在用户表现出意图时出现。
+
+变化：
+
+- collapsed sidebar 现在显示 selected-window icon rail、tab favicon projection 和 Filter tabs 入口；hover 或 keyboard focus 以 absolute overlay 展开完整 sidebar，不改变 board 宽度或 selection payload。active drag 暂时禁用 overlay pointer events，防止它遮挡 board drop target。
+- rail 只复用当前 Open Tabs 的 model 并聚焦现有 row/filter；不创建第二份 tabs state，也不参与 drag/drop。
+- info popover 内的 Filter、Close、Edit、Copy、Delete、Select 等动作在业务 mutation 前统一关闭浮层，并在下一帧恢复仍可用的 row/session/filter focus fallback，避免页面重绘后保留旧内容或隐藏 keyboard focus。
+- hover/focus/coarse-pointer 渐进披露、右置 selection checkbox、stable favicon fallback 与本地 Heroicons Solid 均保持为 Manager 自定义 DOM contract。
+
+判断：
+
+- hover 是增强层，不替代 keyboard、touch 或 context-menu 路径。
+- absolute overlay 比扩张 grid 更安全，因为不会移动 session card、target slot 或 insert marker。
+
+当前状态：`npm test` 与 `npm run check` 自动验证通过；Chrome manual gate 仍包括 rail hover/focus、coarse pointer、200% zoom、screen reader 与全部 DnD 路径。
+
+### 2026-07-12: Manager empty-shell resilience 与 wa-select event repair
+
+Manager 启动阶段出现依赖或异步顺序问题时，页面不应停在空白页，也不能让旧 storage 快照覆盖刚到达的新 state。
+
+变化：
+
+- 先同步准备 normalized 默认 state、渲染 Manager shell，并发起 Open Tabs request；storage state 改为异步 apply。
+- 将本地 Web Awesome module 放在独立 failure boundary；修复 `wa-select` window event 接收路径，保持 window 切换可用。
+- 增加 startup revision guard，并按 popover、storage、migration、shell 等阶段分别降级和提示。
+
+判断：
+
+- 这是启动可靠性修复，不改变 state schema、DnD 语义或 Chrome API contract。
+- 空 shell 比等待所有依赖后再首屏更可恢复，也让单个 control/module 故障不会拖垮 Manager 主路径。
+
+当前状态：开发、spec review、quality review 与自动验证已完成；Chrome manual regression 仍待用户执行。
+
 ## 待观察问题
 
 - 右键菜单触发筛选是否足够容易被发现。
@@ -527,4 +748,3 @@ Starred 已经是一个内置 category，用户认为 session card 上的金色�
 - Kanban/grid 在 session 数量很大时是否需要虚拟列表或分页。
 - icon-only 动作在新用户第一次使用时是否足够清晰。
 - `Inbox` 是否比 `Unfiled` 更符合用户对“没有 category”的直觉。
-- Session toolbar 如果外露动作过多，是否需要按 card 宽度自动收纳。

@@ -1,5 +1,6 @@
 .options-body {
-  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--zt-canvas);
 }
 
 .options-shell {
@@ -34,7 +35,7 @@
 
 .options-section-advanced {
   padding-top: 8px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--zt-border-subtle);
 }
 
 .settings-grid {
@@ -47,10 +48,10 @@
   grid-template-columns: minmax(180px, 260px) 1fr;
   gap: 20px;
   padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  border: 1px solid var(--zt-border-subtle);
+  border-radius: 12px;
+  background: var(--zt-surface-raised);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--nord0) 12%, transparent);
 }
 
 .settings-controls {
@@ -63,7 +64,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 34px;
+  min-height: var(--manager-control-height);
 }
 
 .check-row input {
@@ -78,18 +79,20 @@
 }
 
 .segmented label {
-  min-height: 34px;
+  min-height: var(--manager-control-height);
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface-2);
+  border: 1px solid var(--zt-border-control);
+  border-radius: var(--radius-control);
+  background: var(--zt-surface-subtle);
+  color: var(--zt-text);
   overflow: hidden;
 }
 
 .segmented label.active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  border-color: var(--zt-accent-solid);
+  background: var(--zt-accent-solid);
+  color: var(--zt-on-accent);
 }
 
 .segmented input {
@@ -98,29 +101,13 @@
   pointer-events: none;
 }
 
+.segmented label:has(input:focus-visible) {
+  outline: 3px solid var(--zt-focus-inner);
+  outline-offset: 2px;
+}
+
 .segmented span {
   padding: 0 12px;
-}
-
-.exclude-url-list {
-  display: grid;
-  gap: 8px;
-}
-
-.exclude-url-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.exclude-url-row input {
-  min-height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--ink);
 }
 
 @media (max-width: 700px) {

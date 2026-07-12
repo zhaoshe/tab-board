@@ -10,6 +10,7 @@
 - [Feature Evolution](feature-evolution.md): 记录功能从哪里来、什么时候变化、当前状态是什么。
 - [Product Decisions](product-decisions.md): 记录关键决策的背景、取舍、结果和后续观察点。
 - [Product Story](product-story.md): 记录面向用户或评审时怎么介绍 ZipTab。
+- [Nord UI Redesign](nord-ui-redesign.md): 当前 Web Awesome + Nord UI 改造的设计准则、实施状态和防漂移检查表。
 
 ## 维护规则
 

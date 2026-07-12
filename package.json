@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "check": "node scripts/check-extension.mjs",
+    "check:release": "npm run check && npm run verify:vendor",
     "icons": "node scripts/generate-icons.mjs",
-    "test": "node --test"
+    "test": "node --test tests/*.test.mjs",
+    "verify:vendor": "node scripts/verify-webawesome-provenance.mjs"
   }
 }

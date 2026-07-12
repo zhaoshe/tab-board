@@ -11,11 +11,6 @@ export function buildSettingsSections() {
       { key: "focusRestoredTabs", card: "restore" },
       { key: "theme", card: "interface" }
     ],
-    advanced: [
-      { key: "includePinnedTabs", card: "capture" },
-      { key: "excludeUrlPatterns", card: "capture-edge-cases" }
-    ],
-    capture: [{ key: "dedupeOnSave", card: "capture" }],
-    captureEdgeCases: [{ key: "excludeUrlPatterns", card: "capture-edge-cases" }]
+    advanced: []
   };
 }

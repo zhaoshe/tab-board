@@ -1,6 +1,6 @@
 import { DEFAULT_SETTINGS, isKnownSettingKey } from "./model.js";
 import { formatSettingsSavedMessage } from "./feedback-copy.js";
-import { hydrateIconButtons, iconOnlyButton, iconTextButton } from "./icons.js";
+import { hydrateIconButtons, iconTextButton } from "./icons.js";
 import { buildSettingsSections } from "./options-view.js";
 import { getState, updateState } from "./store.js";
 
@@ -36,25 +36,9 @@ async function handleClick(event) {
   if (button.dataset.action === "open-shortcuts") {
     await chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
   }
-  if (button.dataset.action === "add-exclude-url-pattern") {
-    await updateExcludeUrlPatterns((patterns) => [...patterns, "https://example.com/*"]);
-  }
-  if (button.dataset.action === "remove-exclude-url-pattern") {
-    const index = Number(button.dataset.patternIndex);
-    await updateExcludeUrlPatterns((patterns) => patterns.filter((_, itemIndex) => itemIndex !== index));
-  }
 }
 
 async function handleChange(event) {
-  const patternInput = event.target.closest("[data-exclude-url-pattern]");
-  if (patternInput) {
-    const index = Number(patternInput.dataset.excludeUrlPattern);
-    await updateExcludeUrlPatterns((patterns) =>
-      patterns.map((pattern, itemIndex) => (itemIndex === index ? patternInput.value.trim() : pattern))
-    );
-    return;
-  }
-
   const target = event.target.closest("[data-setting]");
   if (!target) {
     return;
@@ -75,7 +59,6 @@ function render() {
   const settings = { ...DEFAULT_SETTINGS, ...state.settings };
   const sections = buildSettingsSections();
   const basicKeys = settingKeySet(sections.basic);
-  const advancedKeys = settingKeySet(sections.advanced);
   document.documentElement.dataset.theme = settings.theme === "system" ? "" : settings.theme;
 
   basicSettingsGrid.replaceChildren(
@@ -132,59 +115,11 @@ function render() {
 
   advancedSettingsGrid.replaceChildren(
     settingCard(
-      "Capture edge cases",
-      "Rare or restricted tab types",
-      ...settingControls(advancedKeys, [
-        { key: "includePinnedTabs", control: checkbox("includePinnedTabs", settings.includePinnedTabs, "Include pinned tabs") },
-        { key: "excludeUrlPatterns", control: excludeUrlListEditor(settings.excludeUrlPatterns) }
-      ])
-    ),
-    settingCard(
       "Keyboard",
       "Chrome shortcut settings",
       iconTextButton("keyboard", "Open shortcuts", { "data-action": "open-shortcuts" }),
       iconTextButton("rotate-ccw", "Reset settings", { class: "danger", "data-action": "reset-settings" })
     )
-  );
-}
-
-async function updateExcludeUrlPatterns(updater) {
-  await updateState((draft) => {
-    const current = Array.isArray(draft.settings.excludeUrlPatterns) ? draft.settings.excludeUrlPatterns : [];
-    return {
-      ...draft,
-      settings: {
-        ...draft.settings,
-        excludeUrlPatterns: updater(current).map((pattern) => String(pattern || "").trim()).filter(Boolean)
-      }
-    };
-  });
-  toast(formatSettingsSavedMessage());
-}
-
-function excludeUrlListEditor(patterns = []) {
-  const safePatterns = Array.isArray(patterns) ? patterns : [];
-  return h(
-    "div",
-    { class: "exclude-url-list" },
-    h("p", { class: "muted" }, "Examples: chrome://*, file://*, about:blank, https://example.com/*"),
-    ...safePatterns.map((pattern, index) =>
-      h(
-        "div",
-        { class: "exclude-url-row" },
-        h("input", {
-          value: pattern,
-          "data-exclude-url-pattern": index,
-          "aria-label": "Exclude URL pattern"
-        }),
-        iconOnlyButton("trash-2", "Remove pattern", {
-          class: "danger",
-          "data-action": "remove-exclude-url-pattern",
-          "data-pattern-index": index
-        })
-      )
-    ),
-    iconTextButton("plus", "Add URL pattern", { "data-action": "add-exclude-url-pattern" })
   );
 }
 

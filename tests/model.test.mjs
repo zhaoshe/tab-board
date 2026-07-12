@@ -9,38 +9,37 @@ import {
   createNoteRecord,
   createTabRecord,
   isRestorableTab,
-  matchesUrlPattern,
+  moveGroupTabs,
   normalizeState,
   parseImportText,
   parseOneTabText,
-  tabsToText
+  tabsToText,
+  validateFolderName
 } from "../src/model.js";
 
-test("normalizes empty state", () => {
+test("normalizes empty state without removed capture settings", () => {
   const state = normalizeState();
   assert.equal(state.version, 1);
   assert.deepEqual(state.groups, []);
   assert.equal(state.settings.closeTabsAfterSave, true);
   assert.equal(state.settings.dedupeOnSave, true);
-  assert.deepEqual(state.settings.excludeUrlPatterns, ["chrome://*", "file://*"]);
+  assert.equal(Object.hasOwn(state.settings, "includePinnedTabs"), false);
+  assert.equal(Object.hasOwn(state.settings, "excludeUrlPatterns"), false);
 });
 
-test("matches simple exclude URL patterns", () => {
-  assert.equal(matchesUrlPattern("chrome://extensions", "chrome://*"), true);
-  assert.equal(matchesUrlPattern("file:///Users/me/a.txt", "file://*"), true);
-  assert.equal(matchesUrlPattern("about:blank", "about:blank"), true);
-  assert.equal(matchesUrlPattern("https://example.com/a", "https://example.com/*"), true);
-  assert.equal(matchesUrlPattern("https://other.com/a", "https://example.com/*"), false);
-});
-
-test("normalizes exclude URL patterns", () => {
+test("normalizes legacy capture settings away without bumping schema", () => {
   const state = normalizeState({
     settings: {
-      excludeUrlPatterns: [" chrome://* ", "", "file://*", 7, "chrome://*"]
+      theme: "dark",
+      includePinnedTabs: true,
+      excludeUrlPatterns: ["chrome://*"]
     }
   });
 
-  assert.deepEqual(state.settings.excludeUrlPatterns, ["chrome://*", "file://*"]);
+  assert.equal(state.version, 1);
+  assert.equal(state.settings.theme, "dark");
+  assert.equal(Object.hasOwn(state.settings, "includePinnedTabs"), false);
+  assert.equal(Object.hasOwn(state.settings, "excludeUrlPatterns"), false);
 });
 
 test("creates groups from browser-like tab records", () => {
@@ -121,6 +120,60 @@ test("normalizes starred sessions as a single built-in category", () => {
   assert.equal(state.groups[0].folderId, null);
 });
 
+test("rejects trimmed case-insensitive duplicate category names in one workspace", () => {
+  const folders = [{ id: "folder_a", name: "  Work  ", workspaceId: "workspace_a" }];
+
+  const result = validateFolderName(folders, "workspace_a", " work ");
+
+  assert.equal(result.valid, false);
+  assert.equal(result.reason, "duplicate");
+  assert.equal(result.conflict.id, "folder_a");
+});
+
+test("rejects canonically equivalent Unicode category names", () => {
+  const folders = [{ id: "folder_a", name: "Café", workspaceId: "workspace_a" }];
+
+  const result = validateFolderName(folders, "workspace_a", "Café");
+
+  assert.equal(result.valid, false);
+  assert.equal(result.reason, "duplicate");
+});
+
+test("allows category names across workspaces and when renaming itself", () => {
+  const folders = [
+    { id: "folder_a", name: "Work", workspaceId: "workspace_a" },
+    { id: "folder_b", name: "Research", workspaceId: "workspace_b" }
+  ];
+
+  assert.equal(validateFolderName(folders, "workspace_b", " work ").valid, true);
+  assert.equal(validateFolderName(folders, "workspace_a", " WORK ", "folder_a").valid, true);
+});
+
+test("preserves existing duplicate categories during normalization", () => {
+  const state = normalizeState({
+    workspaces: [{ id: "workspace_a", name: "Personal" }],
+    folders: [
+      { id: "folder_a", name: "Work", workspaceId: "workspace_a" },
+      { id: "folder_b", name: " work ", workspaceId: "workspace_a" }
+    ]
+  });
+
+  assert.deepEqual(
+    state.folders.map(({ id, name }) => ({ id, name })),
+    [
+      { id: "folder_a", name: "Work" },
+      { id: "folder_b", name: " work " }
+    ]
+  );
+});
+
+test("rejects empty category names after trimming", () => {
+  const result = validateFolderName([], "workspace_a", "   ");
+
+  assert.equal(result.valid, false);
+  assert.equal(result.reason, "empty");
+});
+
 test("creates bounded bin entries", () => {
   const tab = createTabRecord({ title: "Example", url: "https://example.com" });
   const entry = createBinEntry("tab", tab, { groupTitle: "Saved" });
@@ -141,4 +194,80 @@ https://one-tab.com OneTab`);
   assert.equal(groups[0].tabs.length, 2);
   assert.equal(groups[1].tabs.length, 2);
   assert.equal(groups[1].tabs[0].title, "Docs");
+});
+
+test("moves the last saved tab within its session without deleting the session", () => {
+  const groups = [
+    {
+      id: "group_a",
+      title: "Saved",
+      locked: false,
+      note: "",
+      updatedAt: "old",
+      tabs: [{ id: "tab_a", title: "A", url: "https://a.example" }]
+    }
+  ];
+
+  const result = moveGroupTabs(
+    groups,
+    [{ source: "group", groupId: "group_a", tabId: "tab_a" }],
+    "group_a",
+    "",
+    "before",
+    "new"
+  );
+
+  assert.equal(result.length, 1);
+  assert.deepEqual(result[0].tabs.map((tab) => tab.id), ["tab_a"]);
+  assert.equal(result[0].updatedAt, "new");
+  assert.deepEqual(groups[0].tabs.map((tab) => tab.id), ["tab_a"]);
+});
+
+test("moves all selected saved tabs within one session atomically", () => {
+  const groups = [
+    {
+      id: "group_a",
+      title: "Saved",
+      locked: false,
+      note: "",
+      updatedAt: "old",
+      tabs: [
+        { id: "tab_a", title: "A", url: "https://a.example" },
+        { id: "tab_b", title: "B", url: "https://b.example" }
+      ]
+    }
+  ];
+
+  const result = moveGroupTabs(
+    groups,
+    [
+      { source: "group", groupId: "group_a", tabId: "tab_a" },
+      { source: "group", groupId: "group_a", tabId: "tab_b" }
+    ],
+    "group_a"
+  );
+
+  assert.equal(result.length, 1);
+  assert.deepEqual(result[0].tabs.map((tab) => tab.id), ["tab_a", "tab_b"]);
+});
+
+test("keeps saved tabs unchanged when the target session no longer exists", () => {
+  const groups = [
+    {
+      id: "group_a",
+      title: "Saved",
+      locked: false,
+      note: "",
+      tabs: [{ id: "tab_a", title: "A", url: "https://a.example" }]
+    }
+  ];
+
+  const result = moveGroupTabs(
+    groups,
+    [{ source: "group", groupId: "group_a", tabId: "tab_a" }],
+    "missing_group"
+  );
+
+  assert.equal(result, groups);
+  assert.deepEqual(result[0].tabs.map((tab) => tab.id), ["tab_a"]);
 });

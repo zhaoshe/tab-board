@@ -1,28 +1,12 @@
 export const STATE_KEY = "ziptabState";
 export const SCHEMA_VERSION = 1;
 
-export const SESSION_ACTION_IDS = Object.freeze([
-  "collapse",
-  "restore",
-  "add",
-  "copy",
-  "lock",
-  "rename",
-  "note",
-  "delete"
-]);
-
-export const DEFAULT_SESSION_EXTERNAL_ACTIONS = Object.freeze(["collapse", "restore", "add"]);
-export const DEFAULT_EXCLUDE_URL_PATTERNS = Object.freeze(["chrome://*", "file://*"]);
-
 export const DEFAULT_SETTINGS = Object.freeze({
   actionClick: "store",
   closeTabsAfterSave: true,
   dedupeOnSave: true,
   deleteRestoredTabs: true,
-  excludeUrlPatterns: [...DEFAULT_EXCLUDE_URL_PATTERNS],
   focusRestoredTabs: true,
-  includePinnedTabs: false,
   openManagerAfterSave: true,
   restoreGroupsInNewWindow: false,
   restoreNextToCurrent: true,
@@ -72,7 +56,7 @@ export function createEmptyState() {
     categoryOrderByWorkspace: {},
     quickList: [],
     bin: [],
-    settings: { ...DEFAULT_SETTINGS, excludeUrlPatterns: [...DEFAULT_SETTINGS.excludeUrlPatterns] },
+    settings: { ...DEFAULT_SETTINGS },
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -132,69 +116,16 @@ export function normalizeState(raw) {
 }
 
 function normalizeSettings(raw) {
-  const settings = { ...DEFAULT_SETTINGS, excludeUrlPatterns: [...DEFAULT_SETTINGS.excludeUrlPatterns] };
+  const settings = { ...DEFAULT_SETTINGS };
   if (!raw || typeof raw !== "object") {
     return settings;
   }
   for (const key of Object.keys(DEFAULT_SETTINGS)) {
     if (Object.hasOwn(raw, key)) {
-      settings[key] = key === "excludeUrlPatterns" ? normalizeUrlPatterns(raw[key]) : raw[key];
+      settings[key] = raw[key];
     }
   }
   return settings;
-}
-
-function normalizeUrlPatterns(value) {
-  if (!Array.isArray(value)) {
-    return [...DEFAULT_EXCLUDE_URL_PATTERNS];
-  }
-  const patterns = [];
-  for (const item of value) {
-    if (typeof item !== "string") {
-      continue;
-    }
-    const pattern = item.trim();
-    if (pattern && !patterns.includes(pattern)) {
-      patterns.push(pattern);
-    }
-  }
-  return patterns.length ? patterns : [...DEFAULT_EXCLUDE_URL_PATTERNS];
-}
-
-export function matchesUrlPattern(url, pattern) {
-  const text = String(url || "").trim();
-  const rule = String(pattern || "").trim();
-  if (!text || !rule) {
-    return false;
-  }
-  if (rule.endsWith("*")) {
-    return text.startsWith(rule.slice(0, -1));
-  }
-  return text === rule;
-}
-
-export function isUrlExcluded(url, settings = DEFAULT_SETTINGS) {
-  const patterns = Array.isArray(settings.excludeUrlPatterns)
-    ? settings.excludeUrlPatterns
-    : DEFAULT_EXCLUDE_URL_PATTERNS;
-  return patterns.some((pattern) => matchesUrlPattern(url, pattern));
-}
-
-function normalizeSessionActionOrder(raw) {
-  const order = Array.isArray(raw) ? raw.map((item) => String(item)) : [];
-  const known = new Set(SESSION_ACTION_IDS);
-  return [
-    ...new Set(order.filter((item) => known.has(item))),
-    ...SESSION_ACTION_IDS.filter((item) => !order.includes(item))
-  ];
-}
-
-function normalizeSessionExternalActions(raw, order = SESSION_ACTION_IDS) {
-  const input = Array.isArray(raw)
-    ? raw.map((item) => String(item))
-    : [...DEFAULT_SESSION_EXTERNAL_ACTIONS];
-  const visible = new Set(input.filter((item) => SESSION_ACTION_IDS.includes(item)));
-  return order.filter((item) => visible.has(item));
 }
 
 function normalizeCategoryOrderByWorkspace(raw, workspaceIds) {
@@ -359,6 +290,29 @@ export function createFolder(name, color = "slate", workspaceId = DEFAULT_WORKSP
   };
 }
 
+export function validateFolderName(folders, workspaceId, name, excludeFolderId = "") {
+  const normalizedName = String(name ?? "").trim();
+  if (!normalizedName) {
+    return { valid: false, reason: "empty", name: normalizedName };
+  }
+
+  const normalizedKey = normalizeFolderNameKey(normalizedName);
+  const conflict = (Array.isArray(folders) ? folders : []).find(
+    (folder) =>
+      folder?.workspaceId === workspaceId &&
+      folder.id !== excludeFolderId &&
+      normalizeFolderNameKey(folder.name) === normalizedKey
+  );
+  if (conflict) {
+    return { valid: false, reason: "duplicate", name: normalizedName, conflict };
+  }
+  return { valid: true, name: normalizedName };
+}
+
+function normalizeFolderNameKey(name) {
+  return String(name ?? "").normalize("NFC").trim().toLocaleLowerCase("en-US");
+}
+
 export function createTabRecord(tab, overrides = {}) {
   const timestamp = nowIso();
   const url = String(overrides.url || tab.url || "");
@@ -498,6 +452,64 @@ export function groupMatchesQuery(group, query) {
 
 export function normalizeSearch(query) {
   return String(query || "").trim().toLowerCase();
+}
+
+/**
+ * @param {Array<object>} groups
+ * @param {Array<{ source: string, groupId: string, tabId: string }>} refs
+ * @param {string} targetGroupId
+ * @param {string} [targetTabId]
+ * @param {"before" | "after"} [placement]
+ * @param {string} [updatedAt]
+ * @returns {Array<object>}
+ */
+export function moveGroupTabs(
+  groups,
+  refs,
+  targetGroupId,
+  targetTabId = "",
+  placement = "before",
+  updatedAt = nowIso()
+) {
+  const sourceGroups = Array.isArray(groups) ? groups : [];
+  if (!sourceGroups.some((group) => group.id === targetGroupId)) {
+    return groups;
+  }
+
+  const refsByGroup = new Map();
+  for (const ref of refs || []) {
+    if (ref?.source !== "group" || !ref.groupId || !ref.tabId) {
+      continue;
+    }
+    const tabIds = refsByGroup.get(ref.groupId) || new Set();
+    refsByGroup.set(ref.groupId, new Set([...tabIds, ref.tabId]));
+  }
+
+  const movedTabs = sourceGroups.flatMap((group) => {
+    const tabIds = refsByGroup.get(group.id);
+    return tabIds ? group.tabs.filter((tab) => tabIds.has(tab.id)) : [];
+  });
+  if (!movedTabs.length) {
+    return groups;
+  }
+
+  const groupsWithoutMovedTabs = sourceGroups.map((group) => {
+    const tabIds = refsByGroup.get(group.id);
+    return tabIds ? { ...group, tabs: group.tabs.filter((tab) => !tabIds.has(tab.id)) } : group;
+  });
+  const target = groupsWithoutMovedTabs.find((group) => group.id === targetGroupId);
+  const targetIndex = targetTabId ? target.tabs.findIndex((tab) => tab.id === targetTabId) : -1;
+  const insertAt = targetIndex < 0 ? target.tabs.length : targetIndex + (placement === "after" ? 1 : 0);
+  const nextGroups = groupsWithoutMovedTabs.map((group) =>
+    group.id === targetGroupId
+      ? {
+          ...group,
+          tabs: [...group.tabs.slice(0, insertAt), ...movedTabs, ...group.tabs.slice(insertAt)],
+          updatedAt
+        }
+      : group
+  );
+  return nextGroups.filter((group) => group.tabs.length || group.locked || group.note);
 }
 
 export function getAllUrls(state) {

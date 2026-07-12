@@ -38,13 +38,13 @@ ZipTab 使用 `chrome_url_overrides.newtab` 替换 Chrome 新标签页。
 
 ### Manager
 
-Manager 是 Board-first 主工作台，分为：
+Manager 是 tabExtend-style visual board 主工作台，分为：
 
-- 顶部 toolbar：ZipTab、workspace switcher、search、Import、Export、Bin、Options。
-- 左侧 sidebar：Open Tabs · All windows 和 Categories。
-- 右侧 session board：按 category 顺序展示 saved sessions。
+- 左侧可折叠 sidebar：64px header rail 内是带 window icon 的 compact window selector、Save/Select/More 和 sidebar actions，下面是单一 Open Tabs 纵向列表。Sidebar 展开时占满视口高度；折叠后显示当前 window、tab favicon 和 Filter tabs 的窄 rail。hover 或 keyboard focus 会把完整 sidebar 作为覆盖层打开，不推动右侧 board；触控入口仍通过 rail/toggle 可达。
+- 右侧 64px toolbar：workspace dropdown、40px category tabs、search、Import、Export、Bin、Options；workspace 控制位于 category tabs 左侧，全部 controls 对齐同一基线。
+- 右侧 active category board：只展示当前 category 的 saved sessions；sessions 直接位于 Nord canvas 上，单行横向排列并滚动，不再有 category outer frame。
 
-Manager 不再使用 context strip 和常驻 inspector。Session cards 保留 Restore 和 More；Rename、Note、Lock、Copy、Delete 等次级动作进入 More。
+Window selector 展示 Chrome normal windows 的 ordinal 和原始 tab 总数，不显示 `Current window` 或 raw Chrome window ID；window icon 作为 selector 的 start icon，一次只渲染 selected window 的 Open Tabs。所有有 URL 的非 ZipTab tabs 按 Chrome tab.index 排成一个纵向列表；pinned row 与普通 row 同处列表，只以内联 badge 标记 pinned。Sidebar 底部的 Filter tabs 输入只过滤当前 selected window 的 rows。Selected window 与单一 tab list 共用同一 top edge；Open/saved tab 的完整本地 metadata 通过 hover 或 focus 进入 interactive popover，不显示 eye/preview 按钮，动作执行前关闭 popover，随后将 keyboard focus 归还仍可用的 row、session 或 filter fallback，避免重绘后保留旧 trigger 或隐藏焦点。Session cards 保留 Restore 和 More；Add、Rename、Note、Lock、Copy、Delete 等次级动作进入 More。Card 充满 board 高度，全部 matching tabs 在 card 内部纵向滚动。Manager 使用 Nord semantic tokens；search、window selector 和 workspace dropdown 使用本地 Web Awesome controls，DnD product surfaces 保持自定义 DOM。
 
 ### Popup
 
@@ -62,9 +62,9 @@ Save 完成后 popup 关闭，打开或聚焦最近访问的 manager，并在 ma
 
 Options 分为 Basic 和 Advanced：
 
-- Basic：日常 toolbar、capture、restore、theme 设置。
-- Advanced：include pinned tabs、exclude URL patterns、Chrome shortcuts、reset settings。
-- Capture 默认开启 tab 去重。
+- Basic：日常 toolbar、capture（包括 tab 去重）、restore、theme 设置。
+- Advanced：Chrome shortcuts、reset settings。
+- Capture 默认开启 tab 去重；不提供自定义 URL 或 pinned capture 过滤设置。
 - Favicons 始终展示，不再是设置项。
 - 危险操作始终确认，不再提供关闭确认的设置。
 - Session card 外露动作不再可配置。
@@ -97,15 +97,16 @@ Options 分为 Basic 和 Advanced：
 入口：
 
 - Toolbar action 默认点击。
-- Manager > Open Tabs > Current window > Save。
+- Manager > Open Tabs > selected window > Save。
 - Popup > Save window。
 - Context menu > Save all tabs in this window。
 - Command `capture-current-window`。
 
 结果：
 
-- 当前窗口内可保存 tabs 被创建为一个 session。
+- 当前 selected window 中有 URL 的非 ZipTab tabs 被创建为一个 session。
 - 新 session 插入当前 workspace 的最前面。
+- 通过 Select tabs 创建的 session 会切到当前 workspace 的 Inbox，并在 board 中高亮刚创建的 session；若用户已切换 workspace，则不强行改变当前 workspace。
 - 如果开启 `closeTabsAfterSave`，保存成功后关闭源 tabs。
 - 如果开启 `openManagerAfterSave`，保存后打开 manager。
 
@@ -119,29 +120,16 @@ Options 分为 Basic 和 Advanced：
 
 结果：
 
-- 选中 tabs 被创建为一个新 session。
+- 选中 tabs 被创建为一个新 session；selection toolbar 以 numeric badge 展示当前 selected 数量，并保留可读的辅助文本。
 - 如果拖到已有 session，会追加或插入到该 session。
 - 从任一已选 tab 开始拖动，会携带当前选中的所有 open tabs。
 
-### Capture 过滤规则
+### Capture 规则
 
-默认不保存：
-
-- ZipTab 自身 extension 页面。
-- `devtools://`。
-- `about:blank`。
-- pinned tabs。
-- `excludeUrlPatterns` 命中的 URL，默认包括 `chrome://*` 和 `file://*`。
-
-可在 Options 中调整：
-
-- Include pinned tabs。
-- Exclude URL patterns，例如 `chrome://*`、`file://*`、`about:blank`、`https://example.com/*`。
-
-特殊说明：
-
-- Open Tabs 列表只展示当前设置下可保存的 tabs。
-- Excluded URL 不进入 session，但 Save window 会对源窗口中的重复 excluded URL 做清理，只保留一个。
+- Open Tabs 展示所有有 URL 的非 ZipTab tabs，并按 Chrome `tab.index` 排序。
+- Capture 会尝试保存这些 tabs，包括 pinned tabs；pinned 只以内联 badge 表示，不改变保存资格。
+- ZipTab 自身 extension 页面没有保存资格。
+- 没有自定义 URL pattern、pinned capture 或特殊 URL 开关；Chrome 对受限 URL 的实际保存/恢复能力仍是平台边界。
 
 ### 去重
 
@@ -206,8 +194,8 @@ Workspace 是最高层上下文。
 
 UI：
 
-- Workspace 控制在顶部 sticky header。
-- 左侧 sidebar 不再显示 workspace 区块。
+- Workspace switch/create/rename/stats 位于右侧 topbar 的单一 dropdown，处于 category tabs 左侧。
+- Sidebar header 展示 compact window selector；折叠状态保存在 manager 页面的 localStorage，不进入业务 state。
 
 ## Categories
 
@@ -227,6 +215,9 @@ Categories 是 session 的导航目录。
 关键规则：
 
 - 每个 session 最多只有一个 category。
+- 同一 workspace 内新建或重命名 category 时，名称经 trim、NFC 规范化并按大小写不敏感比较后，不得与其他 category 重复；不同 workspace 可以同名。
+- 重命名自身当前名称允许；已有重复 category 保留，不由 normalize 自动合并或删除。
+- 冲突会被拒绝并显示 toast。
 - Starred 是内置 category，不是额外叠加的视觉状态。
 - 移动到 Starred 会设置 `starred: true` 并清空 `folderId`。
 - 移动到 Inbox 或自定义 category 会取消 Starred。
@@ -235,34 +226,34 @@ Categories 是 session 的导航目录。
 
 - Categories 支持拖拽排序。
 - 排序保存在 `categoryOrderByWorkspace[workspaceId]`。
-- 左侧 categories 和右侧 category sections 使用同一顺序。
+- 顶部 category tabs 和右侧 active category board 使用同一顺序。
 
 导航：
 
-- 点击左侧 category 平滑滚动到右侧对应 section。
-- 不会硬切成单一 category 列表。
-- 右侧 category title 吸顶。
+- 点击顶部 category tab 会切换右侧 active category board。
+- 右侧只展示当前 category，search 和 open tab filter 继续在当前 workspace 内叠加过滤。
+- Category tabs 位于 topbar；active category board 不再依赖 section title 吸顶。
 
 ## Saved Sessions
 
 Session card 展示：
 
 - Title。
+- Favicon stack 和剩余 link 数量。
 - Links/notes 数量。
-- lock/starred 等 meta。
+- lock/starred chips。
 - Restore 直接动作和 More 菜单。
-- 预览的 tab items。
-- Show more / Show fewer。
+- Session note。
+- 全部 matching tab items。
 
 默认展示：
 
-- 每个 session 默认只展示前 N 个 tab item。
-- 搜索时预览数量会略增。
-- 可展开查看更多。
+- Active category 的 sessions 在单行 horizontal track 中排列。
+- 每张 session card 充满 board 的可用高度。
+- 全部 matching tab items 在 card 内的 tab list 中渲染，内容过长时纵向滚动。
 
 支持动作：
 
-- Collapse / expand。
 - Restore。
 - Add link/note。
 - Copy session links。
@@ -274,7 +265,7 @@ Session card 展示：
 动作布局：
 
 - Restore 在 session card 上直接外露。
-- Rename、Note、Lock、Copy、Delete 等次级动作保留在 More 菜单中。
+- Add、Rename、Note、Lock、Copy、Delete 等次级动作保留在 More 菜单中。
 - Options 不再提供 session toolbar 外露动作配置。
 
 ### Inline rename
@@ -310,7 +301,7 @@ Lock 表示该 session 是固定模板或常用工作流。
 Link：
 
 - 点击 title 直接打开 URL。
-- URL 显示在副标题行。
+- Saved title 保持单行，过长时省略；URL 显示在副标题行。
 - 支持复制 URL、编辑 note、删除、进入 select mode。
 
 Note：
@@ -363,9 +354,9 @@ Selection mode：
 
 ### Session 拖拽
 
-Session card 可以拖拽排序：
+Session card 可以在 horizontal track 中拖拽排序：
 
-- 拖动开始时，Move here placeholder 出现在源 session 原位置。
+- 拖动开始时，Move here placeholder 出现在源 session 原位置，并占据相同的横向 track 宽度。
 - 目标 session 左右 25% 区域表示插入到目标前/后。
 - 目标 session 中间 50% 区域表示被拖拽 session 占据目标 slot；目标 session 会移动到之前空出来的位置。
 - 目标 slot 会在横向中间区域内保持锁定，减少 Chrome 原生 DnD 在重排时的回闪。
@@ -374,18 +365,20 @@ Session card 可以拖拽排序：
 
 ### Category 拖拽
 
-左侧 category row 可拖拽排序。
+顶部 category tab 可拖拽排序。
 
 规则：
 
 - 系统 category 和自定义 category 都参与排序。
 - 自定义 category 的 rename/delete 在右键菜单中。
+- 点击顶部 category tab 会切换当前 board。
+- Session、saved tabs、open tabs 可拖到顶部 category tab，把内容移入该 category。
 
 ## Search and Filter
 
 ### 顶部搜索
 
-Workspace header 右侧搜索框过滤当前 workspace 的 sessions。
+Workspace header 右侧搜索框过滤当前 workspace 的 sessions。搜索默认收起为 icon button；已有 query 时仍保留 query，收起状态通过 active indicator 表明筛选仍在生效，再次展开可继续编辑。
 
 匹配范围：
 
@@ -406,16 +399,28 @@ Command palette 风格搜索：
 - 显示匹配的 tab results。
 - 可 restore 或 reveal。
 
-### Open tab filter
+### Sidebar Filter tabs
 
 入口：
 
-- Open Tabs 面板中右键 open tab。
+- Open Tabs sidebar 底部的 Filter tabs 输入。
+
+行为：
+
+- 只过滤当前 selected window 的 pinned/regular browser tab rows。
+- 不改变右侧 saved sessions，也不写入 extension state。
+
+### Open tab URL filter
+
+入口：
+
+- Open Tabs 面板中右键有 URL 的 open tab。
 
 行为：
 
 - 右侧只显示包含该 tab URL 的 sessions。
-- Open Tabs 工具条显示 filtered 状态。
+- Open Tabs 工具条显示 filtered 状态；这与 Options 中不存在的自定义 URL capture filter 无关。
+- 切换 browser window 或刷新 Open Tabs 不会自动清除该 filter。
 - 可一键清除 filter。
 
 ## Import / Export
@@ -424,7 +429,7 @@ Command palette 风格搜索：
 
 入口：
 
-- Sidebar 底部 Import。
+- 右侧顶部 toolbar 的 Import。
 
 支持格式：
 
@@ -442,7 +447,7 @@ Command palette 风格搜索：
 
 入口：
 
-- Sidebar 底部 Export。
+- 右侧顶部 toolbar 的 Export。
 
 支持：
 
@@ -458,7 +463,7 @@ Command palette 风格搜索：
 
 入口：
 
-- Sidebar 底部 Bin。
+- 右侧顶部 toolbar 的 Bin。
 
 能力：
 
@@ -482,13 +487,11 @@ Basic：
 - Restore groups in a new window。
 - Restore next to active tab。
 - Focus first restored tab。
+- Dedupe source tabs during capture。
 - Theme：system / light / dark。
 
 Advanced：
 
-- Include pinned tabs。
-- Dedupe source tabs during capture。
-- Exclude URL patterns，例如 `chrome://*`、`file://*`、`about:blank`、`https://example.com/*`。
 - Chrome shortcuts entry。
 - Reset settings。
 
@@ -507,4 +510,4 @@ Todo：
 All items category：
 
 - 已移除。
-- 右侧始终展示所有 categories；搜索和 open tab filter 才是全局筛选。
+- 顶部 category tabs 切换单一 active category；搜索和 open tab filter 在当前 category 内继续筛选。

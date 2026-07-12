@@ -4,7 +4,7 @@
 
 ## 一句话定位
 
-ZipTab 是一个 local-first 的 Chrome tab manager：用 OneTab 式的一键收纳清理窗口，再用 workspace、category、session grid 和拖拽整理，把临时浏览上下文变成可恢复的工作记忆。
+ZipTab 是一个 local-first 的 Chrome tab manager：用 OneTab 式的一键收纳清理窗口，再用 workspace、顶部 category navigation、横向 session board 和拖拽整理，把临时浏览上下文变成可恢复的工作记忆。
 
 ## 项目目标
 
@@ -69,7 +69,7 @@ Workspace：
 最高层上下文。每个 workspace 有自己的 sessions、categories 和 category order。
 
 Session：
-一次保存下来的浏览上下文。session 包含 title、tabs/notes、category 归属、lock/collapse 等状态。
+一次保存下来的浏览上下文。session 包含 title、tabs/notes、category 归属和 lock 状态；legacy `collapsed` 字段保留兼容，但当前 manager 不使用。
 
 Tab item：
 session 内的条目。当前支持 link 和 note。旧 todo 会被 normalize 成 note。
@@ -135,7 +135,8 @@ Bin：
 
 - 核心 extension 页面：`manager.html`、`popup.html`、`options.html`。
 - 核心 JS 模块：`background.js`、`manager.js`、`model.js`、`store.js`、`icons.js`。
-- 测试入口：`node --test` 和 `npm run check`。
+- 测试入口：`npm test`（显式运行 `tests/*.test.mjs`）、`npm run check` 和 `git diff --check`。
+- UI foundation：Nord semantic tokens；Manager 稳定 shell controls 使用本地 self-host Web Awesome `3.10.0`，产品/DnD surfaces 保持自定义 DOM。
 
 主要风险：
 
