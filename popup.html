@@ -1,32 +1,12 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ZipTab</title>
-    <link rel="stylesheet" href="src/styles.css" />
-    <link rel="stylesheet" href="src/popup.css" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TabBoard</title>
   </head>
-  <body class="popup-body">
-    <main class="popup-shell">
-      <header class="popup-header">
-        <div>
-          <h1>ZipTab</h1>
-          <p id="popupStats" class="muted">0 tabs</p>
-        </div>
-        <button type="button" class="icon-button" data-icon="settings" data-action="open-options" aria-label="Open settings"></button>
-      </header>
-      <div id="popupActions" class="popup-actions" aria-label="Quick actions"></div>
-      <label class="search-box popup-search">
-        <span class="visually-hidden">Search recent sessions</span>
-        <input id="popupSearch" type="search" autocomplete="off" placeholder="Search recent sessions" />
-      </label>
-      <div id="popupFeedback" class="popup-feedback" role="status" aria-live="polite"></div>
-      <section>
-        <p class="eyebrow">Recent sessions</p>
-        <ul id="popupSessionList" class="popup-list"></ul>
-      </section>
-    </main>
-    <script type="module" src="src/popup.js"></script>
+  <body style="margin: 0; padding: 0; width: 380px; min-height: 400px; overflow: hidden;">
+    <div id="root"></div>
+    <script type="module" src="/src/popup/main.tsx"></script>
   </body>
 </html>

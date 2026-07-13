@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "ZipTab",
-  "short_name": "ZipTab",
+  "name": "TabBoard",
+  "short_name": "TabBoard",
   "version": "0.1.0",
-  "description": "Save open Chrome tabs into private searchable lists, then restore them one by one or in groups.",
+  "description": "Save open Chrome tabs into private searchable sessions, then restore them one by one or in groups.",
   "minimum_chrome_version": "115",
   "permissions": [
     "tabs",
@@ -14,11 +14,12 @@
     "clipboardWrite"
   ],
   "background": {
-    "service_worker": "src/background.js",
+    "service_worker": "src/background/service-worker.ts",
     "type": "module"
   },
   "action": {
-    "default_title": "Save tabs to ZipTab",
+    "default_title": "TabBoard",
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",
@@ -37,7 +38,7 @@
     "newtab": "manager.html"
   },
   "omnibox": {
-    "keyword": "zt"
+    "keyword": "tb"
   },
   "commands": {
     "capture-current-window": {
@@ -49,10 +50,10 @@
     },
     "open-manager": {
       "suggested_key": {
-        "default": "Alt+Shift+Z",
-        "mac": "Alt+Shift+Z"
+        "default": "Alt+Shift+B",
+        "mac": "Alt+Shift+B"
       },
-      "description": "Open ZipTab"
+      "description": "Open TabBoard"
     }
   }
 }

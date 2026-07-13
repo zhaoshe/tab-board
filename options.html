@@ -1,40 +1,12 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ZipTab Options</title>
-    <link rel="stylesheet" href="src/styles.css" />
-    <link rel="stylesheet" href="src/options.css" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TabBoard Options</title>
   </head>
-  <body class="options-body">
-    <main class="options-shell">
-      <header class="options-header">
-        <div>
-          <p class="eyebrow">Preferences</p>
-          <h1>ZipTab Options</h1>
-        </div>
-        <button type="button" data-icon="external-link" data-icon-text data-action="open-manager">Open ZipTab</button>
-      </header>
-
-      <section class="options-section">
-        <div class="options-section-heading">
-          <h2>Basic</h2>
-          <p class="muted">Daily capture, restore, and appearance settings.</p>
-        </div>
-        <div id="basicSettingsGrid" class="settings-grid"></div>
-      </section>
-
-      <section class="options-section options-section-advanced">
-        <div class="options-section-heading">
-          <h2>Advanced</h2>
-          <p class="muted">Keyboard shortcuts and settings recovery.</p>
-        </div>
-        <div id="advancedSettingsGrid" class="settings-grid"></div>
-      </section>
-    </main>
-
-    <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="src/options.js"></script>
+  <body style="margin: 0; padding: 0;">
+    <div id="root"></div>
+    <script type="module" src="/src/options/main.tsx"></script>
   </body>
 </html>
