@@ -5,7 +5,6 @@ import {
   ITEM_LINK,
   STATE_KEY,
   normalizeState,
-  compactBin,
   isRestorableTab,
   tabMatchesQuery,
   groupMatchesQuery,
@@ -14,6 +13,9 @@ import {
   normalizeGroup,
   normalizeBinEntry,
   normalizeBrowserGroup,
+  getCaptureCandidateReason,
+  matchesCustomUrlFilter,
+  type CaptureCandidateReason,
   type TabItem,
   type Group,
   type TabBoardState,
@@ -21,13 +23,35 @@ import {
   type Settings,
   type TabRef,
 } from '../shared/model';
-import { getState, setState, updateState, getSettings, ensureState } from '../shared/store/chromeStorage';
+import { getState, setState, getSettings, ensureState } from '../shared/store/chromeStorage';
+import { createStatePersistence } from './statePersistence';
+import {
+  applyStateMutation,
+  createDropMutationBatchContext,
+  InvalidDropMutationError,
+  markInvalidDropMutationForBatch,
+  prepareDropMutationForBatch,
+  validateMutationBatch,
+  type StateMutation,
+} from '../shared/store/stateMutations';
+import {
+  getDropOperationDigest,
+  isDropIntentAlreadyApplied,
+} from '../manager/core/commands';
 
 const MANAGER_PAGE = 'manager.html';
 const POPUP_PAGE = 'popup.html';
+const statePersistence = createStatePersistence({ getState, setState, ensureState });
+let restoreQueue: Promise<unknown> = Promise.resolve();
+
+function enqueueRestore<T>(operation: () => Promise<T>): Promise<T> {
+  const run = restoreQueue.then(operation);
+  restoreQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
 
 chrome.runtime.onInstalled.addListener(async ({ reason }) => {
-  await ensureState();
+  await enqueueRestore(() => statePersistence.ensureState());
   await refreshContextMenus();
   await applyActionPopup();
   if (reason === 'install') {
@@ -41,12 +65,12 @@ chrome.runtime.onStartup.addListener(async () => {
 });
 
 chrome.action.onClicked.addListener(async (tab) => {
-  await captureTabs('current-window', tab);
+  await enqueueRestore(() => captureTabs('current-window', tab));
 });
 
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === 'capture-current-window') {
-    await captureTabs('current-window', await getActiveTab());
+    await enqueueRestore(async () => captureTabs('current-window', await getActiveTab()));
   }
   if (command === 'open-manager') {
     await openManager();
@@ -59,25 +83,25 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       await openManager();
       break;
     case 'store-current-tab':
-      await captureTabs('current-tab', tab);
+      await enqueueRestore(() => captureTabs('current-tab', tab));
       break;
     case 'store-current-window':
-      await captureTabs('current-window', tab);
+      await enqueueRestore(() => captureTabs('current-window', tab));
       break;
     case 'store-all-windows':
-      await captureTabs('all-windows', tab);
+      await enqueueRestore(() => captureTabs('all-windows', tab));
       break;
     case 'store-highlighted-tabs':
-      await captureTabs('highlighted-tabs', tab);
+      await enqueueRestore(() => captureTabs('highlighted-tabs', tab));
       break;
     case 'store-tabs-left':
-      await captureTabs('tabs-left', tab);
+      await enqueueRestore(() => captureTabs('tabs-left', tab));
       break;
     case 'store-tabs-right':
-      await captureTabs('tabs-right', tab);
+      await enqueueRestore(() => captureTabs('tabs-right', tab));
       break;
     case 'store-other-tabs':
-      await captureTabs('other-tabs', tab);
+      await enqueueRestore(() => captureTabs('other-tabs', tab));
       break;
     default:
       break;
@@ -107,37 +131,301 @@ chrome.omnibox.onInputEntered.addListener(async (text) => {
   await openManager({ query: text });
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  handleMessage(message)
+interface LiveOpenTabRequest {
+  tabIds: readonly number[];
+  windowId: number;
+}
+
+function getLiveOpenTabRequest(mutation: StateMutation): LiveOpenTabRequest | null {
+  if (mutation.type !== 'drop-intent') return null;
+  if (mutation.intent.kind === 'copy-open-tabs') {
+    return { tabIds: mutation.intent.tabIds, windowId: mutation.intent.windowId };
+  }
+  if (mutation.intent.kind === 'create-session' && mutation.intent.source.kind === 'open-tabs') {
+    return { tabIds: mutation.intent.source.tabIds, windowId: mutation.intent.source.windowId };
+  }
+  return null;
+}
+
+function recoverRecordedDropSnapshot(
+  state: TabBoardState,
+  mutation: StateMutation,
+): StateMutation {
+  if (mutation.type !== 'drop-intent' || mutation.openTabs.length !== 0) return mutation;
+  const entry = state.dropOperationLedger.find((item) => item.operationId === mutation.operationId);
+  if (!entry) return mutation;
+  try {
+    const parsed = JSON.parse(entry.digest) as { intent?: unknown; openTabs?: unknown };
+    if (!Array.isArray(parsed.openTabs)
+      || getDropOperationDigest(mutation.intent, parsed.openTabs as OpenTabInfo[]) !== entry.digest) {
+      return mutation;
+    }
+    return { ...mutation, openTabs: parsed.openTabs as OpenTabInfo[] };
+  } catch {
+    return mutation;
+  }
+}
+
+async function getVerifiedLiveOpenTabs(
+  request: LiveOpenTabRequest,
+  settings: Settings,
+): Promise<OpenTabInfo[]> {
+  if (!Number.isSafeInteger(request.windowId) || request.windowId <= 0
+    || !Array.isArray(request.tabIds)
+    || !request.tabIds.length
+    || new Set(request.tabIds).size !== request.tabIds.length
+    || request.tabIds.some((tabId) => !Number.isSafeInteger(tabId) || tabId <= 0)) {
+    throw new Error('Open Tabs selection is invalid.');
+  }
+  let sourceWindow: chrome.windows.Window | undefined;
+  try {
+    if (typeof chrome.windows.get === 'function') {
+      sourceWindow = await chrome.windows.get(request.windowId);
+    } else {
+      sourceWindow = (await chrome.windows.getAll()).find((item) => item.id === request.windowId);
+    }
+  } catch {
+    sourceWindow = undefined;
+  }
+  if (!sourceWindow || sourceWindow.type !== 'normal' || sourceWindow.incognito === true) {
+    throw new Error('Open Tabs window is unavailable or cannot be saved.');
+  }
+
+  const records: OpenTabInfo[] = [];
+  for (const tabId of request.tabIds) {
+    let tab: chrome.tabs.Tab | undefined;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch {
+      tab = undefined;
+    }
+    const url = tab ? resolveTabUrl(tab) : '';
+    if (!tab || tab.id !== tabId || tab.windowId !== request.windowId || tab.incognito === true
+      || !canCaptureTab(tab, settings)) {
+      throw new Error(`Open tab ${tabId} is unavailable or cannot be saved.`);
+    }
+    records.push({
+      id: tabId,
+      windowId: request.windowId,
+      title: String(tab.title || url || 'Untitled'),
+      url,
+      favIconUrl: String(tab.favIconUrl || ''),
+      active: Boolean(tab.active),
+      pinned: Boolean(tab.pinned),
+      index: Number.isSafeInteger(tab.index) ? tab.index : 0,
+      browserGroup: await readBrowserGroup(tab),
+      storable: true,
+      reason: null,
+    });
+  }
+  return records;
+}
+
+interface VerifiedMutationBatch {
+  mutations: StateMutation[];
+  originalIndexes: number[];
+  invalidMutationIndexes: number[];
+}
+
+function sortIndexes(indexes: readonly number[]): number[] {
+  return [...new Set(indexes)].sort((left, right) => left - right);
+}
+
+async function verifyDropMutations(
+  state: TabBoardState,
+  mutations: readonly StateMutation[],
+  originalMutationIndexes: readonly number[] = mutations.map((_, index) => index),
+  invalidDropIndexes: readonly number[] = [],
+): Promise<VerifiedMutationBatch> {
+  let workingState = state;
+  let revisionContext = createDropMutationBatchContext(invalidDropIndexes);
+  const invalidMutationIndexes: number[] = [];
+  const verifiedMutations: StateMutation[] = [];
+  const originalIndexes: number[] = [];
+  for (const [index, rawMutation] of mutations.entries()) {
+    const originalIndex = originalMutationIndexes[index] ?? index;
+    const recoveredMutation = recoverRecordedDropSnapshot(workingState, rawMutation);
+    const prepared = prepareDropMutationForBatch(workingState, recoveredMutation, revisionContext, originalIndex);
+    revisionContext = prepared.context;
+    const mutation = prepared.mutation;
+    if (mutation.type === 'drop-intent'
+      && isDropIntentAlreadyApplied(workingState, mutation.intent, mutation.openTabs, mutation.operationId)) {
+      verifiedMutations.push(mutation);
+      originalIndexes.push(index);
+      continue;
+    }
+    const request = getLiveOpenTabRequest(mutation);
+    try {
+      if (prepared.stale) throw new InvalidDropMutationError('Drop mutation revision is stale.');
+      const verifiedMutation = request && mutation.type === 'drop-intent'
+        ? { ...mutation, openTabs: await getVerifiedLiveOpenTabs(request, workingState.settings) }
+        : mutation;
+      workingState = applyStateMutation(workingState, verifiedMutation);
+      verifiedMutations.push(verifiedMutation);
+      originalIndexes.push(index);
+    } catch (error: unknown) {
+      if (mutation.type === 'drop-intent') {
+        invalidMutationIndexes.push(index);
+        if (!prepared.stale) {
+          revisionContext = markInvalidDropMutationForBatch(revisionContext);
+        }
+        continue;
+      }
+      throw error;
+    }
+  }
+  return { mutations: verifiedMutations, originalIndexes, invalidMutationIndexes };
+}
+
+async function applyWorkerMutations(input: unknown): Promise<TabBoardState> {
+  const validated = validateMutationBatch(input);
+  const state = await getState();
+  const verified = await verifyDropMutations(
+    state,
+    validated.mutations,
+    validated.originalIndexes,
+    validated.invalidDropIndexes,
+  );
+  const verifiedOriginalIndexes = verified.originalIndexes.map((index) => validated.originalIndexes[index]);
+  const persistableMutations = verified.mutations;
+  const persistableOriginalIndexes = verifiedOriginalIndexes;
+  const invalidMutationIndexes = sortIndexes([
+    ...validated.invalidDropIndexes,
+    ...verified.invalidMutationIndexes.map((index) => validated.originalIndexes[index]),
+  ]);
+  let persisted = state;
+  if (persistableMutations.length) {
+    try {
+      persisted = await statePersistence.applyMutations(persistableMutations);
+    } catch (error: unknown) {
+      if (!(error instanceof InvalidDropMutationError)) throw error;
+      const mapIndexes = (indexes: readonly number[]): number[] => indexes.flatMap((index) => {
+        const originalIndex = persistableOriginalIndexes[index];
+        return originalIndex === undefined ? [] : [originalIndex];
+      });
+      throw new InvalidDropMutationError(
+        error.message,
+        sortIndexes([...invalidMutationIndexes, ...mapIndexes(error.invalidMutationIndexes)]),
+        sortIndexes(mapIndexes(error.committedMutationIndexes)),
+        error.committedState,
+      );
+    }
+  }
+  if (invalidMutationIndexes.length) {
+    throw new InvalidDropMutationError(
+      'Open Tabs selection is unavailable or cannot be saved.',
+      invalidMutationIndexes,
+      persistableOriginalIndexes,
+      persisted,
+    );
+  }
+  return persisted;
+}
+
+const UNTRUSTED_RUNTIME_SENDER = 'UNTRUSTED_RUNTIME_SENDER';
+
+class UntrustedRuntimeSenderError extends Error {
+  readonly code = UNTRUSTED_RUNTIME_SENDER;
+
+  constructor() {
+    super('Runtime sender is not trusted.');
+    this.name = 'UntrustedRuntimeSenderError';
+  }
+}
+
+function isTrustedRuntimeSender(sender: chrome.runtime.MessageSender | undefined): boolean {
+  const extensionId = chrome.runtime.id;
+  if (!sender || !extensionId || sender.id !== extensionId) return false;
+  if (sender.url === undefined) return true;
+  return typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const result = isTrustedRuntimeSender(sender)
+    ? handleMessage(message)
+    : Promise.reject(new UntrustedRuntimeSenderError());
+  result
     .then((result) => sendResponse({ ok: true, result }))
-    .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+    .catch((error: unknown) => {
+      const structured = error && typeof error === 'object' ? error as {
+        code?: unknown;
+        invalidMutationIndexes?: unknown;
+        committedMutationIndexes?: unknown;
+        committedState?: unknown;
+      } : {};
+      sendResponse({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+        ...(typeof structured.code === 'string' ? { code: structured.code } : {}),
+        ...(Array.isArray(structured.invalidMutationIndexes)
+          ? { invalidMutationIndexes: structured.invalidMutationIndexes }
+          : {}),
+        ...(Array.isArray(structured.committedMutationIndexes)
+          ? { committedMutationIndexes: structured.committedMutationIndexes }
+          : {}),
+        ...(structured.committedState && typeof structured.committedState === 'object'
+          ? { state: structured.committedState }
+          : {}),
+      });
+    });
   return true;
 });
 
 async function handleMessage(message: { type?: string; action?: string; [key: string]: unknown }) {
   const action = message?.type || message?.action;
   switch (action) {
+    case 'tabboard-state-mutations':
+      return enqueueRestore(() => applyWorkerMutations(message.mutations));
+    case 'tabboard-ensure-state':
+      return enqueueRestore(() => statePersistence.ensureState());
     case 'capture':
-    case 'saveCurrentWindow':
-      return captureTabs(
-        (message.mode as string) || 'current-window',
+    case 'saveCurrentWindow': {
+      const request = validateCaptureRequest(message, action === 'saveCurrentWindow');
+      return enqueueRestore(async () => captureTabs(
+        request.mode,
         await getActiveTab(),
-        {
-          openAfter: message.openAfter !== false,
-          tabId: message.tabId as number | undefined,
-          tabIds: message.tabIds as number[] | undefined,
-          windowId: message.windowId as number | undefined,
-          workspaceId: message.workspaceId as string | undefined,
-        }
-      );
-    case 'saveSelectedTabs':
-      return saveSelectedTabs(message.tabIds as number[]);
+        request.options,
+      ));
+    }
+    case 'saveSelectedTabs': {
+      if (
+        message.workspaceId !== undefined
+        && (
+          typeof message.workspaceId !== 'string'
+          || !message.workspaceId.trim()
+          || message.workspaceId.trim() !== message.workspaceId
+        )
+      ) {
+        throw new Error('workspaceId must be a canonical non-empty string.');
+      }
+      if (
+        message.selectedWindowId !== undefined
+        && (typeof message.selectedWindowId !== 'number'
+          || !Number.isSafeInteger(message.selectedWindowId)
+          || message.selectedWindowId <= 0)
+      ) {
+        throw new Error('selectedWindowId must be a positive safe integer.');
+      }
+      return enqueueRestore(() => saveSelectedTabs(
+        message.tabIds as number[],
+        message.selectedWindowId as number | undefined,
+        message.workspaceId as string | undefined,
+      ));
+    }
     case 'list-open-tabs':
       return listOpenTabs();
     case 'create-window':
       return createWindow();
     case 'close-open-tab':
       return closeOpenTab(message.tabId as number);
+    case 'close-open-tabs':
+      return closeOpenTabs(message.tabIds as number[]);
+    case 'pin-open-tab':
+      return pinOpenTab(message.tabId as number);
+    case 'pin-open-tabs':
+      return pinOpenTabs(message.tabIds as number[]);
+    case 'focus-open-tab':
+      return focusOpenTab(message.tabId as number, message.windowId as number);
     case 'open-manager':
       return openManager({ query: (message.query as string) || '' });
     case 'open-options':
@@ -235,10 +523,24 @@ type CaptureMode =
   | 'tab-id'
   | 'window-id';
 
+const CAPTURE_MODES = new Set<CaptureMode>([
+  'current-window',
+  'current-tab',
+  'all-windows',
+  'highlighted-tabs',
+  'tabs-left',
+  'tabs-right',
+  'other-tabs',
+  'tab-ids',
+  'tab-id',
+  'window-id',
+]);
+
 interface CaptureOptions {
   openAfter?: boolean;
   tabId?: number;
   tabIds?: number[];
+  tabSnapshots?: chrome.tabs.Tab[];
   windowId?: number;
   workspaceId?: string;
 }
@@ -250,16 +552,75 @@ interface CaptureResult {
   createdGroupIds: string[];
 }
 
+function requireSafeInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`A valid ${field} is required for capture mode.`);
+  }
+  return value;
+}
+
+function validateCaptureRequest(
+  message: { [key: string]: unknown },
+  allowDefaultMode = false,
+): { mode: CaptureMode; options: CaptureOptions } {
+  const rawMode = message.mode === undefined && allowDefaultMode ? 'current-window' : message.mode;
+  if (typeof rawMode !== 'string' || !CAPTURE_MODES.has(rawMode as CaptureMode)) {
+    throw new Error(`Unknown capture mode: ${String(rawMode)}`);
+  }
+  if (message.openAfter !== undefined && typeof message.openAfter !== 'boolean') {
+    throw new Error('openAfter must be a boolean.');
+  }
+  if (
+    message.workspaceId !== undefined
+    && (
+      typeof message.workspaceId !== 'string'
+      || !message.workspaceId.trim()
+      || message.workspaceId.trim() !== message.workspaceId
+    )
+  ) {
+    throw new Error('workspaceId must be a canonical non-empty string.');
+  }
+
+  const mode = rawMode as CaptureMode;
+  const options: CaptureOptions = {
+    openAfter: message.openAfter !== false,
+    workspaceId: message.workspaceId as string | undefined,
+  };
+  switch (mode) {
+    case 'tab-id':
+      options.tabId = requireSafeInteger(message.tabId, 'tabId');
+      break;
+    case 'tab-ids':
+      if (!Array.isArray(message.tabIds) || !message.tabIds.length) {
+        throw new Error('A non-empty tabIds array is required for capture mode.');
+      }
+      if (!message.tabIds.every((tabId) => typeof tabId === 'number' && Number.isSafeInteger(tabId) && tabId > 0)) {
+        throw new Error('tabIds must contain only positive safe integer IDs.');
+      }
+      options.tabIds = [...message.tabIds] as number[];
+      break;
+    case 'window-id':
+      options.windowId = requireSafeInteger(message.windowId, 'windowId');
+      break;
+    default:
+      break;
+  }
+  return { mode, options };
+}
+
 async function captureTabs(
-  mode: string,
+  mode: CaptureMode,
   anchorTab: chrome.tabs.Tab | null | undefined,
   options: CaptureOptions = {}
 ): Promise<CaptureResult> {
   const settings = await getSettings();
-  const sourceTabs = sortCapturedTabs(await getTabsForMode(mode as CaptureMode, anchorTab, options));
-  const eligibleTabs = sourceTabs.filter(canCaptureTab);
+  const sourceTabs = sortCapturedTabs(await getTabsForMode(mode, anchorTab, options));
+  const eligibleTabs = sourceTabs.filter((tab) => canCaptureTab(tab, settings));
   const { uniqueTabs, duplicateTabs } = dedupeSourceTabs(eligibleTabs, settings);
   const storableTabs = uniqueTabs;
+  if (!storableTabs.length) {
+    throw new Error('No capturable tabs were found.');
+  }
 
   const recordsByWindow = new Map<number, TabItem[]>();
   for (const tab of storableTabs) {
@@ -273,46 +634,65 @@ async function captureTabs(
 
   const state = await getState();
   const targetWorkspaceId = options.workspaceId || state.activeWorkspaceId;
+  if (!state.workspaces.some((workspace) => workspace.id === targetWorkspaceId)) {
+    throw new Error('The capture workspace is no longer available.');
+  }
   const groups: Group[] = [...recordsByWindow.entries()].map(([windowId, records]) =>
     createGroupFromTabRecords(records, {
       title: captureTitle(mode, records, windowId),
       workspaceId: targetWorkspaceId,
     })
   );
-  const result: CaptureResult = {
-    storedTabs: groups.reduce((total, group) => total + group.tabs.length, 0),
-    storedGroups: groups.length,
-    cleanedDuplicates: duplicateTabs.length,
-    createdGroupIds: groups.map((group) => group.id),
-  };
-
+  let persistedGroupIds = new Set<string>();
   if (groups.length) {
-    await updateState((draft) => ({
-      ...draft,
-      groups: [...groups, ...draft.groups],
-      updatedAt: nowIso(),
-    }));
+    const persistedState = await statePersistence.applyMutations([
+      { type: 'prepend-groups', groups, updatedAt: nowIso() },
+    ]);
+    const targetWorkspacePersisted = persistedState.workspaces.some(
+      (workspace) => workspace.id === targetWorkspaceId,
+    );
+    const groupsPersistedInTarget = groups.every((group) =>
+      persistedState.groups.some(
+        (persistedGroup) => persistedGroup.id === group.id
+          && persistedGroup.workspaceId === targetWorkspaceId,
+      ),
+    );
+    if (!targetWorkspacePersisted || !groupsPersistedInTarget) {
+      throw new Error('The capture workspace changed before the session was saved.');
+    }
+    persistedGroupIds = new Set(persistedState.groups.map((group) => group.id));
   }
+  const persistedGroups = groups.filter((group) => persistedGroupIds.has(group.id));
+  const result: CaptureResult = {
+    storedTabs: persistedGroups.reduce((total, group) => total + group.tabs.length, 0),
+    storedGroups: persistedGroups.length,
+    cleanedDuplicates: duplicateTabs.length,
+    createdGroupIds: persistedGroups.map((group) => group.id),
+  };
 
   let managerTab: chrome.tabs.Tab | null = null;
   if (options.openAfter !== false && settings.openManagerAfterSave) {
-    managerTab = await openManager({
-      windowId: anchorTab?.windowId,
-      targetGroupId: result.createdGroupIds[0] || '',
-      feedback: result,
-    });
+    try {
+      managerTab = await openManager({
+        windowId: anchorTab?.windowId,
+        targetGroupId: result.createdGroupIds[0] || '',
+        feedback: result,
+      });
+    } catch {
+      // Capture is already persisted; manager navigation must not turn it into a retryable failure.
+    }
   }
 
-  const idsToClose = new Set<number>([
-    ...duplicateTabs.map((tab) => tab.id).filter((id): id is number => typeof id === 'number'),
-    ...(settings.closeTabsAfterSave
-      ? storableTabs.map((tab) => tab.id).filter((id): id is number => typeof id === 'number')
-      : []),
-  ]);
-  if (managerTab?.id) {
-    idsToClose.delete(managerTab.id);
-  }
-  await removeTabs([...idsToClose].filter(Number.isFinite));
+  const persistedSourceTabIds = new Set(
+    persistedGroups.flatMap((group) => group.tabs)
+      .map((tab) => tab.sourceTabId)
+      .filter((tabId): tabId is number => Number.isSafeInteger(tabId)),
+  );
+  const tabsToClose = [
+    ...duplicateTabs,
+    ...(settings.closeTabsAfterSave ? storableTabs.filter((tab) => persistedSourceTabIds.has(tab.id ?? -1)) : []),
+  ].filter((tab) => tab.id !== managerTab?.id);
+  await removeCapturedTabs(tabsToClose);
 
   return result;
 }
@@ -360,7 +740,16 @@ function canDedupeTab(tab: chrome.tabs.Tab): boolean {
 }
 
 function collectWindowDuplicates(tabs: chrome.tabs.Tab[]): chrome.tabs.Tab[] {
-  return dedupeSourceTabs(tabs.filter(canDedupeTab), { dedupeOnSave: true } as Settings).duplicateTabs;
+  const byUrl = new Map<string, chrome.tabs.Tab[]>();
+  for (const tab of tabs.filter(canDedupeTab)) {
+    const url = resolveTabUrl(tab);
+    byUrl.set(url, [...(byUrl.get(url) || []), tab]);
+  }
+  return [...byUrl.values()].flatMap((matches) => matches
+    .sort((left, right) => Number(right.active) - Number(left.active)
+      || (right.lastAccessed || 0) - (left.lastAccessed || 0)
+      || (left.index || 0) - (right.index || 0))
+    .slice(1));
 }
 
 async function getTabsForMode(
@@ -368,6 +757,9 @@ async function getTabsForMode(
   anchorTab: chrome.tabs.Tab | null | undefined,
   options: CaptureOptions = {}
 ): Promise<chrome.tabs.Tab[]> {
+  if (mode === 'tab-ids' && options.tabSnapshots) {
+    return options.tabSnapshots.map((tab) => ({ ...tab }));
+  }
   const current = anchorTab || (await getActiveTab());
   if (mode === 'all-windows') {
     const windows = await chrome.windows.getAll({ populate: true, windowTypes: ['normal'] });
@@ -388,12 +780,15 @@ async function getTabsForMode(
   }
   if (mode === 'tab-ids' && Array.isArray(options.tabIds)) {
     const tabs: chrome.tabs.Tab[] = [];
-    for (const tabId of options.tabIds) {
-      if (!Number.isFinite(tabId)) {
+    for (const tabId of [...new Set(options.tabIds)]) {
+      if (!Number.isSafeInteger(tabId)) {
         continue;
       }
       try {
-        tabs.push(await chrome.tabs.get(tabId));
+        const tab = await chrome.tabs.get(tabId);
+        if (options.windowId === undefined || tab.windowId === options.windowId) {
+          tabs.push(tab);
+        }
       } catch {
         // Ignore tabs that closed before the save action completed.
       }
@@ -442,12 +837,12 @@ async function readBrowserGroup(tab: chrome.tabs.Tab): Promise<BrowserGroup | nu
   }
 }
 
-function canCaptureTab(tab: chrome.tabs.Tab): boolean {
-  const url = resolveTabUrl(tab);
-  if (!tab?.id || !url) {
-    return false;
-  }
-  return !url.startsWith(chrome.runtime.getURL(''));
+function canCaptureTab(tab: chrome.tabs.Tab, settings: Settings): boolean {
+  return getCaptureCandidateReason(
+    { id: tab?.id, url: resolveTabUrl(tab), pinned: tab?.pinned },
+    settings,
+    chrome.runtime.getURL(''),
+  ) === null;
 }
 
 function captureTitle(mode: string, records: TabItem[], windowId: number): string {
@@ -495,7 +890,7 @@ interface FoundTabRef {
   tab: TabItem;
 }
 
-async function restoreTab({ source = 'group', groupId = '', tabId = '' }: TabRefWithSource) {
+async function restoreTabInternal({ source = 'group', groupId = '', tabId = '' }: TabRefWithSource) {
   const state = await getState();
   const settings = state.settings;
   const found = findTabRef(state, { source, groupId, tabId });
@@ -512,7 +907,7 @@ async function restoreTab({ source = 'group', groupId = '', tabId = '' }: TabRef
   return { restoredTabs: created.length };
 }
 
-async function restoreGroup(groupId: string) {
+async function restoreGroupInternal(groupId: string) {
   const state = await getState();
   const group = state.groups.find((item) => item.id === groupId);
   if (!group) {
@@ -531,7 +926,7 @@ async function restoreGroup(groupId: string) {
   return { restoredTabs: created.length };
 }
 
-async function restoreRefs(refs: TabRef[]) {
+async function restoreRefsInternal(refs: TabRef[]) {
   const state = await getState();
   const settings = state.settings;
   const found = refs.map((ref) => findTabRef(state, ref)).filter(Boolean) as FoundTabRef[];
@@ -548,7 +943,7 @@ async function restoreRefs(refs: TabRef[]) {
   return { restoredTabs: created.length };
 }
 
-async function restoreAll() {
+async function restoreAllInternal() {
   const state = await getState();
   const restorable: { group: Group; tab: TabItem }[] = state.groups.flatMap((group) =>
     group.tabs.filter(isRestorableTab).map((tab) => ({ group, tab }))
@@ -565,6 +960,22 @@ async function restoreAll() {
     await removeRestoredRefs(refs);
   }
   return { restoredTabs: created.length };
+}
+
+function restoreTab(ref: TabRefWithSource) {
+  return enqueueRestore(() => restoreTabInternal(ref));
+}
+
+function restoreGroup(groupId: string) {
+  return enqueueRestore(() => restoreGroupInternal(groupId));
+}
+
+function restoreRefs(refs: TabRef[]) {
+  return enqueueRestore(() => restoreRefsInternal(refs));
+}
+
+function restoreAll() {
+  return enqueueRestore(() => restoreAllInternal());
 }
 
 interface CreatedTab {
@@ -695,30 +1106,9 @@ async function removeRestoredRefs(refs: TabRefWithSource[]) {
   if (!refs.length) {
     return;
   }
-  await updateState((draft) => {
-    removeRefsFromState(draft, refs);
-    return { ...draft, updatedAt: nowIso() };
-  });
-}
-
-function removeRefsFromState(state: TabBoardState, refs: TabRefWithSource[]) {
-  const groupRefs = new Map<string, Set<string>>();
-  for (const ref of refs) {
-    if (ref.source !== 'group') {
-      continue;
-    }
-    if (!groupRefs.has(ref.groupId)) {
-      groupRefs.set(ref.groupId, new Set());
-    }
-    groupRefs.get(ref.groupId)!.add(ref.tabId);
-  }
-  for (const group of state.groups) {
-    const ids = groupRefs.get(group.id);
-    if (ids) {
-      group.tabs = group.tabs.filter((tab) => !ids.has(tab.id));
-    }
-  }
-  state.groups = state.groups.filter((group) => group.tabs.length || group.locked || group.note);
+  await statePersistence.applyMutations([
+    { type: 'remove-restored-refs', refs, updatedAt: nowIso() },
+  ]);
 }
 
 async function removeTabs(tabIds: number[]) {
@@ -727,6 +1117,26 @@ async function removeTabs(tabIds: number[]) {
       await chrome.tabs.remove(id);
     } catch {
       // The tab may already be closed by the user or Chrome may refuse an internal page.
+    }
+  }
+}
+
+async function removeCapturedTabs(capturedTabs: chrome.tabs.Tab[]) {
+  for (const capturedTab of capturedTabs) {
+    const tabId = capturedTab.id;
+    if (typeof tabId !== 'number' || !Number.isSafeInteger(tabId)) continue;
+    try {
+      const currentTab = await chrome.tabs.get(tabId) as chrome.tabs.Tab | undefined;
+      if (
+        !currentTab
+        || currentTab.windowId !== capturedTab.windowId
+        || resolveTabUrl(currentTab) !== resolveTabUrl(capturedTab)
+      ) {
+        continue;
+      }
+      await chrome.tabs.remove(tabId);
+    } catch {
+      // The tab may already be closed or Chrome may refuse an internal page.
     }
   }
 }
@@ -747,27 +1157,42 @@ async function dedupeWindow(windowId?: number) {
   return { removedTabs: duplicateTabs.length };
 }
 
-async function deleteSavedGroup(groupId: string) {
+async function deleteSavedGroupInternal(groupId: string) {
   const id = String(groupId || '');
   if (!id) {
     return { deleted: false };
   }
-  let deleted = false;
-  await updateState((draft) => {
-    const group = draft.groups.find((item) => item.id === id);
-    if (!group) {
-      return draft;
-    }
-    deleted = true;
-    const binEntry = createBinEntry('group', group, { label: group.title });
-    return {
-      ...draft,
-      groups: draft.groups.filter((item) => item.id !== id),
-      bin: binEntry ? compactBin([binEntry, ...(draft.bin || [])]) : draft.bin,
-      updatedAt: nowIso(),
-    };
+  const state = await getState();
+  const group = state.groups.find((item) => item.id === id);
+  if (!group) {
+    return { deleted: false };
+  }
+  const groupIndex = state.groups.findIndex((item) => item.id === id);
+  const workspace = state.workspaces.find((item) => item.id === group.workspaceId);
+  const folder = group.folderId
+    ? state.folders.find((item) => item.id === group.folderId)
+    : undefined;
+  const binEntry = createBinEntry('group', group, {
+    label: group.title,
+    groupId: group.id,
+    groupTitle: group.title,
+    originalIndex: groupIndex >= 0 ? groupIndex : undefined,
+    originalWorkspaceId: group.workspaceId,
+    originalFolderId: group.folderId,
+    originalWorkspaceName: workspace?.name,
+    originalFolderName: folder?.name,
   });
-  return { deleted };
+  if (!binEntry) {
+    return { deleted: false };
+  }
+  await statePersistence.applyMutations([
+    { type: 'delete-group', id, binEntry, updatedAt: nowIso() },
+  ]);
+  return { deleted: true };
+}
+
+function deleteSavedGroup(groupId: string) {
+  return enqueueRestore(() => deleteSavedGroupInternal(groupId));
 }
 
 interface OpenManagerOptions {
@@ -843,6 +1268,61 @@ async function closeOpenTab(tabId: number) {
   return { tabId: normalizedTabId };
 }
 
+async function pinOpenTab(tabId: number) {
+  const normalizedTabId = Number(tabId);
+  if (!Number.isSafeInteger(normalizedTabId) || normalizedTabId < 0) {
+    throw new Error('A valid tab ID is required');
+  }
+  await chrome.tabs.update(normalizedTabId, { pinned: true });
+  return { tabId: normalizedTabId, pinned: true };
+}
+
+function normalizeOpenTabIds(tabIds: unknown): number[] {
+  if (!Array.isArray(tabIds) || !tabIds.length) {
+    throw new Error('At least one valid tab ID is required');
+  }
+  const ids = [...new Set(tabIds.map(Number))];
+  if (ids.some((tabId) => !Number.isSafeInteger(tabId) || tabId < 0)) {
+    throw new Error('At least one valid tab ID is required');
+  }
+  return ids;
+}
+
+async function closeOpenTabs(tabIds: number[]) {
+  const ids = normalizeOpenTabIds(tabIds);
+  await chrome.tabs.remove(ids);
+  return { tabIds: ids };
+}
+
+async function pinOpenTabs(tabIds: number[]) {
+  const ids = normalizeOpenTabIds(tabIds);
+  await Promise.all(ids.map((tabId) => chrome.tabs.update(tabId, { pinned: true })));
+  return { tabIds: ids, pinned: true };
+}
+
+async function focusOpenTab(tabId: number, windowId: number) {
+  const normalizedTabId = Number(tabId);
+  if (!Number.isSafeInteger(normalizedTabId) || normalizedTabId < 0) {
+    throw new Error('A valid tab ID is required');
+  }
+  const normalizedWindowId = Number(windowId);
+  if (!Number.isSafeInteger(normalizedWindowId) || normalizedWindowId < 0) {
+    throw new Error('A valid window ID is required');
+  }
+  let currentTab: chrome.tabs.Tab | undefined;
+  try {
+    currentTab = await chrome.tabs.get(normalizedTabId);
+  } catch {
+    currentTab = undefined;
+  }
+  if (!currentTab || currentTab.windowId !== normalizedWindowId) {
+    throw new Error('The tab is no longer in the requested window');
+  }
+  await chrome.tabs.update(normalizedTabId, { active: true });
+  await chrome.windows.update(normalizedWindowId, { focused: true });
+  return { tabId: normalizedTabId, windowId: normalizedWindowId };
+}
+
 interface OpenTabInfo {
   id: number | undefined;
   windowId: number | undefined;
@@ -854,6 +1334,7 @@ interface OpenTabInfo {
   index: number;
   browserGroup: BrowserGroup | null;
   storable: boolean;
+  reason: CaptureCandidateReason | null;
 }
 
 interface OpenWindowInfo {
@@ -865,13 +1346,21 @@ interface OpenWindowInfo {
 }
 
 async function listOpenTabs(): Promise<{ windows: OpenWindowInfo[] }> {
+  const settings = await getSettings();
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ['normal'] });
+  const extensionBaseUrl = chrome.runtime.getURL('').toLowerCase();
   const openWindows: OpenWindowInfo[] = [];
   for (const window of windows) {
     const tabs: OpenTabInfo[] = [];
     for (const tab of window.tabs || []) {
-      const storable = canCaptureTab(tab);
       const url = resolveTabUrl(tab);
+      if (url.toLowerCase().startsWith(extensionBaseUrl)) continue;
+      if (matchesCustomUrlFilter(url, settings)) continue;
+      const reason = getCaptureCandidateReason(
+        { id: tab?.id, url, pinned: tab?.pinned },
+        settings,
+        extensionBaseUrl,
+      );
       tabs.push({
         id: tab.id,
         windowId: tab.windowId,
@@ -882,14 +1371,15 @@ async function listOpenTabs(): Promise<{ windows: OpenWindowInfo[] }> {
         pinned: Boolean(tab.pinned),
         index: tab.index || 0,
         browserGroup: await readBrowserGroup(tab),
-        storable,
+        storable: reason === null,
+        reason,
       });
     }
     openWindows.push({
       id: window.id,
       focused: Boolean(window.focused),
       incognito: Boolean(window.incognito),
-      tabCount: Array.isArray(window.tabs) ? window.tabs.length : 0,
+      tabCount: tabs.length,
       tabs,
     });
   }
@@ -982,7 +1472,17 @@ function createGroupFromTabRecords(
 function createBinEntry(
   kind: 'group' | 'tab',
   item: Group | TabItem,
-  meta: { label?: string; groupId?: string; groupTitle?: string; source?: string } = {}
+  meta: {
+    label?: string;
+    groupId?: string;
+    groupTitle?: string;
+    source?: string;
+    originalWorkspaceId?: string;
+    originalFolderId?: string | null;
+    originalIndex?: number;
+    originalWorkspaceName?: string;
+    originalFolderName?: string;
+  } = {}
 ) {
   const timestamp = nowIso();
   const normalizedKind = kind === 'group' ? 'group' : 'tab';
@@ -997,6 +1497,11 @@ function createBinEntry(
     groupId: meta.groupId || '',
     groupTitle: meta.groupTitle || '',
     source: meta.source || 'group',
+    originalWorkspaceId: meta.originalWorkspaceId,
+    originalFolderId: meta.originalFolderId,
+    originalIndex: meta.originalIndex,
+    originalWorkspaceName: meta.originalWorkspaceName,
+    originalFolderName: meta.originalFolderName,
     item: normalizedItem,
     deletedAt: timestamp,
   });
@@ -1020,9 +1525,78 @@ function escapeXml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-async function saveSelectedTabs(tabIds: number[]) {
-  return captureTabs('tab-ids', await getActiveTab(), {
-    tabIds,
+function resolveSelectedNormalWindow(
+  windows: chrome.windows.Window[],
+  selectedWindowId: number | undefined,
+): chrome.windows.Window | null {
+  const normalWindows = windows.filter(
+    (window) => (!window.type || window.type === 'normal') && !window.incognito,
+  );
+  return normalWindows.find((window) => window.id === selectedWindowId)
+    ?? normalWindows.find((window) => window.focused)
+    ?? normalWindows[0]
+    ?? null;
+}
+
+async function saveSelectedTabs(
+  tabIds: number[],
+  selectedWindowId?: number,
+  workspaceId?: string,
+) {
+  if (
+    !Array.isArray(tabIds)
+    || tabIds.length === 0
+    || !tabIds.every((tabId) => typeof tabId === 'number' && Number.isSafeInteger(tabId) && tabId > 0)
+  ) {
+    throw new Error('A non-empty tabIds array containing safe integer IDs is required.');
+  }
+  if (
+    selectedWindowId !== undefined
+    && (!Number.isSafeInteger(selectedWindowId) || selectedWindowId <= 0)
+  ) {
+    throw new Error('selectedWindowId must be a positive safe integer.');
+  }
+
+  const windows = await chrome.windows.getAll({ populate: true, windowTypes: ['normal'] });
+  const selectedWindow = resolveSelectedNormalWindow(windows, selectedWindowId);
+  const resolvedWindowId = selectedWindow?.id;
+  if (!selectedWindow || typeof resolvedWindowId !== 'number' || !Number.isSafeInteger(resolvedWindowId)) {
+    throw new Error('A normal browser window is required');
+  }
+
+  const settings = await getSettings();
+  const requestedTabIds = [...new Set(Array.isArray(tabIds) ? tabIds : [])];
+  const validatedTabs: chrome.tabs.Tab[] = [];
+  for (const tabId of requestedTabIds) {
+    const isValidId = typeof tabId === 'number' && Number.isSafeInteger(tabId);
+    if (!isValidId) {
+      throw new Error(`Selected tab ${String(tabId)} is not available in the selected normal window or cannot be saved.`);
+    }
+
+    const listedTab = selectedWindow.tabs?.find((tab) => tab.id === tabId);
+    let currentTab: chrome.tabs.Tab | null = null;
+    try {
+      currentTab = await chrome.tabs.get(tabId);
+    } catch {
+      currentTab = null;
+    }
+    if (
+      !listedTab
+      || !currentTab
+      || currentTab.windowId !== resolvedWindowId
+      || !canCaptureTab(currentTab, settings)
+    ) {
+      throw new Error(`Selected tab ${tabId} is not available in the selected normal window or cannot be saved.`);
+    }
+    validatedTabs.push({ ...currentTab });
+  }
+  const anchorTab = validatedTabs.find((tab) => tab.active) || await getActiveTab();
+
+  return captureTabs('tab-ids', anchorTab, {
+    tabIds: requestedTabIds,
+    tabSnapshots: validatedTabs,
+    windowId: resolvedWindowId,
+    workspaceId,
     openAfter: true,
   });
 }

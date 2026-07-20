@@ -1,10 +1,10 @@
 # Feature Spec
 
-本文档描述 ZipTab 当前版本的功能面和交互规则。它是“现在能做什么”的说明，不替代 [Feature Evolution](feature-evolution.md) 中的历史记录。
+本文档描述 TabBoard 当前版本的功能面和交互规则。它是“现在能做什么”的说明，不替代 [Feature Evolution](feature-evolution.md) 中的历史记录。
 
 ## 功能总览
 
-ZipTab 当前能力分为七组：
+TabBoard 当前能力分为七组：
 
 - Capture：保存当前浏览器上下文。
 - Restore：恢复 saved tabs。
@@ -14,6 +14,13 @@ ZipTab 当前能力分为七组：
 - Move：拖拽 tabs、sessions、categories。
 - Import/Export：数据迁移和备份。
 
+## 实现与验证边界
+
+- 生产 Manager 只有 React + Mantine 入口：`manager.html` 加载 `src/manager/main.tsx`，并由 Manifest V3 new-tab override 指向 `manager.html`。
+- workspace/category/session、Open Tabs、capture、import/export、Bin、overlay、DnD 与 persistence 行为由 typed React contracts 和现有 core tests 覆盖；状态更新保持 immutable，普通 mutation 经过引用、locked 和 URL 边界校验。
+- capture feedback 以后台 commit 与 manager reconciliation 的权威结果为准：成功、已提交但未定位、失败分别产生不同结果，不用乐观 toast 冒充保存完成。
+- 自动化 proof（Vitest core contracts）与真实 Chrome 手工验收是两层证据：自动化通过不等于完整 UI parity，DnD 事件时序、Shadow DOM/focus、capture/restore 与 sender 集成仍需 unpacked extension 手工回归。
+
 ## 页面和入口
 
 ### Toolbar action
@@ -21,7 +28,7 @@ ZipTab 当前能力分为七组：
 默认行为：
 
 - 点击扩展图标保存当前窗口。
-- 保存成功后根据设置打开 ZipTab manager。
+- 保存成功后根据设置打开 TabBoard manager。
 
 可配置行为：
 
@@ -29,7 +36,7 @@ ZipTab 当前能力分为七组：
 
 ### New tab page
 
-ZipTab 使用 `chrome_url_overrides.newtab` 替换 Chrome 新标签页。
+TabBoard 使用 `chrome_url_overrides.newtab` 替换 Chrome 新标签页。
 
 预期：
 
@@ -44,17 +51,18 @@ Manager 是 tabExtend-style visual board 主工作台，分为：
 - 右侧 64px toolbar：workspace dropdown、40px category tabs、search、Import、Export、Bin、Options；workspace 控制位于 category tabs 左侧，全部 controls 对齐同一基线。
 - 右侧 active category board：只展示当前 category 的 saved sessions；sessions 直接位于 Nord canvas 上，单行横向排列并滚动，不再有 category outer frame。
 
-Window selector 展示 Chrome normal windows 的 ordinal 和原始 tab 总数，不显示 `Current window` 或 raw Chrome window ID；window icon 作为 selector 的 start icon，一次只渲染 selected window 的 Open Tabs。所有有 URL 的非 ZipTab tabs 按 Chrome tab.index 排成一个纵向列表；pinned row 与普通 row 同处列表，只以内联 badge 标记 pinned。Sidebar 底部的 Filter tabs 输入只过滤当前 selected window 的 rows。Selected window 与单一 tab list 共用同一 top edge；Open/saved tab 的完整本地 metadata 通过 hover 或 focus 进入 interactive popover，不显示 eye/preview 按钮，动作执行前关闭 popover，随后将 keyboard focus 归还仍可用的 row、session 或 filter fallback，避免重绘后保留旧 trigger 或隐藏焦点。Session cards 保留 Restore 和 More；Add、Rename、Note、Lock、Copy、Delete 等次级动作进入 More。Card 充满 board 高度，全部 matching tabs 在 card 内部纵向滚动。Manager 使用 Nord semantic tokens；search、window selector 和 workspace dropdown 使用本地 Web Awesome controls，DnD product surfaces 保持自定义 DOM。
+Window selector 展示 Chrome normal windows 的 ordinal 和原始 tab 总数，不显示 `Current window` 或 raw Chrome window ID；window icon 作为 selector 的 start icon，一次只渲染 selected window 的 Open Tabs。Selected window 的 tab rows 按 Chrome tab.index 排成一个纵向列表；pinned row 与普通 row 同处列表，并根据 capture policy 显示 badge/reason。Sidebar 底部的 Filter tabs 输入只过滤当前 selected window 的 rows。Selected window 与单一 tab list 共用同一 top edge；Open/saved tab 的完整本地 metadata 通过 hover 或 focus 进入 interactive popover，不显示 eye/preview 按钮，动作执行前关闭 popover，随后将 keyboard focus 归还仍可用的 row、session 或 filter fallback，避免重绘后保留旧 trigger 或隐藏焦点。Session cards 保留 Restore 和 More；Add、Rename、Note、Lock、Copy、Delete 等次级动作进入 More。Card 充满 board 高度，全部 matching tabs 在 card 内部纵向滚动。Manager 使用 Nord semantic tokens 和 Mantine primitives；search、window selector、workspace dropdown、DnD product surfaces 均由 React component contracts 组合，DnD payload/target 仍保持 typed discriminated unions。
+
+Open Tabs 刷新期间保留上一份 window/tab rows，不插入 loading 文案或空白占位；sidebar 顶部 Refresh icon 持续旋转并通过 `aria-busy` 暴露刷新状态，请求成功后再原子替换列表。
 
 ### Popup
 
 Popup 是快动作入口：
 
-- 横排 quick actions：Save、Open、Dedupe。
-- Settings 按钮进入 Options。
-- Search recent sessions。
-- Recent sessions 最多展示 5 条，每行提供 Restore 和 Delete。
-- Hover 或 keyboard focus recent session 时展示该 session 的全部 tabs 预览。
+- 顶栏提供 Manager 和 Settings 入口。
+- 当前窗口概览显示 tab 总数、pinned 数量、重复 URL 数量与 Chrome tab group 数量。
+- Pinned tabs 与所有属于 Chrome tab group 的 tabs 可分别勾选是否纳入本次保存；取消 Group 会排除该窗口的全部 grouped tabs。
+- Save 创建新的 session 后自动关闭 popup；有重复 URL 时同时显示 Dedupe，关闭当前窗口中的重复 tabs 后自动关闭 popup。
 
 Save 完成后 popup 关闭，打开或聚焦最近访问的 manager，并在 manager 中定位刚保存的 session。Popup 不承载重命名、分类、编辑等管理流程。
 
@@ -64,7 +72,7 @@ Options 分为 Basic 和 Advanced：
 
 - Basic：日常 toolbar、capture（包括 tab 去重）、restore、theme 设置。
 - Advanced：Chrome shortcuts、reset settings。
-- Capture 默认开启 tab 去重；不提供自定义 URL 或 pinned capture 过滤设置。
+- Capture 默认开启 tab 去重；Options 仅提供自定义 URL 过滤规则，命中的 open tabs 不展示、不可保存也不可拖拽。
 - Favicons 始终展示，不再是设置项。
 - 危险操作始终确认，不再提供关闭确认的设置。
 - Session card 外露动作不再可配置。
@@ -73,7 +81,7 @@ Options 分为 Basic 和 Advanced：
 
 页面或扩展按钮右键菜单支持：
 
-- Open ZipTab。
+- Open TabBoard。
 - Save this tab。
 - Save all tabs in this window。
 - Save selected tabs。
@@ -84,7 +92,7 @@ Options 分为 Basic 和 Advanced：
 
 ### Omnibox
 
-地址栏输入 `zt` 后可搜索 saved tabs：
+地址栏输入 `tb` 后可搜索 saved tabs：
 
 - 输入 query 时返回最多 6 条可恢复 tab 建议。
 - 选择建议会直接 restore 该 tab。
@@ -104,7 +112,8 @@ Options 分为 Basic 和 Advanced：
 
 结果：
 
-- 当前 selected window 中有 URL 的非 ZipTab tabs 被创建为一个 session。
+- 当前 selected window 中符合 shared capture policy 的非 TabBoard tabs 被创建为一个 session；不符合 policy 的 rows 仍保留在 Open Tabs 中并显示原因。
+- 如果没有任何 policy-eligible tab，capture reports `No capturable tabs were found`，不会提交空 session。
 - 新 session 插入当前 workspace 的最前面。
 - 通过 Select tabs 创建的 session 会切到当前 workspace 的 Inbox，并在 board 中高亮刚创建的 session；若用户已切换 workspace，则不强行改变当前 workspace。
 - 如果开启 `closeTabsAfterSave`，保存成功后关闭源 tabs。
@@ -114,22 +123,22 @@ Options 分为 Basic 和 Advanced：
 
 入口：
 
-- Manager > Open Tabs > Select tabs。
-- 勾选多个 open tabs。
-- 点击 create session 按钮，或拖动已选 tabs 到 saved sessions 区域。
+- Manager > Open Tabs 中勾选任意一个可保存 tab，列表立即进入多选态。
+- 继续勾选多个 open tabs。
+- 点击底部 create-session 图标，或拖动已选 tabs 到 saved sessions 区域。
 
 结果：
 
-- 选中 tabs 被创建为一个新 session；selection toolbar 以 numeric badge 展示当前 selected 数量，并保留可读的辅助文本。
+- 选中 tabs 被创建为一个新 session；多选态在 sidebar footer 替换 Filter tabs，提供创建 session、批量删除、批量 pin、退出多选四个带可访问名称的 icon actions。
 - 如果拖到已有 session，会追加或插入到该 session。
 - 从任一已选 tab 开始拖动，会携带当前选中的所有 open tabs。
 
 ### Capture 规则
 
-- Open Tabs 展示所有有 URL 的非 ZipTab tabs，并按 Chrome `tab.index` 排序。
-- Capture 会尝试保存这些 tabs，包括 pinned tabs；pinned 只以内联 badge 表示，不改变保存资格。
-- ZipTab 自身 extension 页面没有保存资格。
-- 没有自定义 URL pattern、pinned capture 或特殊 URL 开关；Chrome 对受限 URL 的实际保存/恢复能力仍是平台边界。
+- Open Tabs 展示 selected normal window 的 tab rows，并按 Chrome `tab.index` 排序；TabBoard 自身 manager、popup、options 等 extension pages，以及命中自定义 URL 过滤规则的 rows 不展示。
+- pinned、`chrome://` 和 `file://` tabs 与普通 tabs 一样可以多选、拖拽和保存；同一 custom filter policy 同时用于列表、checkbox、DnD 和 capture。
+- TabBoard 自身 extension 页面不会进入 Open Tabs 列表或 capture；没有 usable URL 的 rows 不具备保存资格。
+- 即使 policy 允许特殊 URL，Chrome 对受限 URL 的实际保存/恢复能力仍是平台边界。
 
 ### 去重
 
@@ -140,6 +149,7 @@ Options > Capture 默认开启 capture 时 tab 去重。
 - 本次保存的源窗口 tabs 按 URL 去重。
 - 重复源 tabs 会被关闭。
 - 去重不再因为旧 saved sessions 中已有同 URL 而跳过本次 session 内容。
+- Popup 的 Dedupe 仅处理当前 browser window：同 URL 中优先保留 active tab；没有 active tab 时保留 `lastAccessed` 最新的 tab。
 
 ## Restore
 
@@ -374,6 +384,14 @@ Session card 可以在 horizontal track 中拖拽排序：
 - 点击顶部 category tab 会切换当前 board。
 - Session、saved tabs、open tabs 可拖到顶部 category tab，把内容移入该 category。
 
+### DnD 与状态边界
+
+- DnD payload 和 target 使用 discriminated unions；不同 workspace、错误归属、不可保存 open tab、越界 index 和 locked target 会被 resolver 拒绝。
+- Session drop 只有排序或 category placement 语义，不会把一个 session 合并进另一个 session body。
+- Escape、取消、drop 完成和 overlay 生命周期都会清理 drag payload、marker、source rect 与 target state。
+- Drop command 通过 replay ledger 识别重复 operation，生成的 session/tab identity 在 replay 时保持稳定；持久化队列串行化并以 normalized state 原子写入。
+- 普通 mutation 的输入先验证引用、locked 约束和 link/note URL 形态；语义错误不写 storage，队列在失败后可继续处理后续 mutation。
+
 ## Search and Filter
 
 ### 顶部搜索
@@ -433,8 +451,8 @@ Command palette 风格搜索：
 
 支持格式：
 
-- ZipTab JSON export。
-- ZipTab text export。
+- TabBoard JSON export。
+- TabBoard text export。
 - OneTab export text。
 - 简单 URL list。
 
@@ -482,7 +500,7 @@ Basic：
 
 - Extension button behavior：save current window / open popup。
 - Close tabs after saving。
-- Open ZipTab after saving。
+- Open TabBoard after saving。
 - Remove records after restore。
 - Restore groups in a new window。
 - Restore next to active tab。
@@ -499,8 +517,8 @@ Advanced：
 
 Quick list / Pinned workflow：
 
-- 已下线。
-- 旧数据启动时迁移为 `Former Quick list` 普通 session。
+- 已下线，当前 UI 不再暴露。
+- `quickList` 仍作为 state schema 字段保留（normalize 补齐为空数组），但不再有历史数据迁移逻辑。
 
 Todo：
 

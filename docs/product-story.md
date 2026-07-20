@@ -1,16 +1,16 @@
 # Product Story
 
-本文档用于 sell ZipTab：对用户、评审或后续开发者讲清楚它解决什么问题、为什么值得用、和 OneTab / tabExtend 的关系是什么。
+本文档用于 sell TabBoard：对用户、评审或后续开发者讲清楚它解决什么问题、为什么值得用、和 OneTab / tabExtend 的关系是什么。
 
 ## 一句话定位
 
-ZipTab 是一个 local-first 的 Chrome tab manager，把 OneTab 的快速收纳能力和更适合长期整理的 session 工作台结合起来。
+TabBoard 是一个 local-first 的 Chrome tab manager，把 OneTab 的快速收纳能力和更适合长期整理的 session 工作台结合起来。
 
 ## Elevator pitch
 
 浏览器 tabs 会快速变成临时记忆的堆积场：正在看的文档、排查中的链接、准备稍后再读的页面，最后都挤在窗口里。OneTab 能快速清空窗口，但后续整理能力有限；tabExtend 更像工作流工具，但概念较重。
 
-ZipTab 选择中间路线：一键保存当前窗口，把它变成可搜索、可分类、可恢复的 session；当你正在浏览当前窗口时，也可以勾选几个 open tabs 创建新 session，或者右键某个 open tab 反查它属于哪些历史 sessions。
+TabBoard 选择中间路线：一键保存当前窗口，把它变成可搜索、可分类、可恢复的 session；当你正在浏览当前窗口时，也可以勾选几个 open tabs 创建新 session，或者右键某个 open tab 反查它属于哪些历史 sessions。
 
 核心价值不是“保存链接”，而是把浏览器里的临时上下文变成可以回到现场的工作记忆。
 
@@ -65,14 +65,14 @@ ZipTab 选择中间路线：一键保存当前窗口，把它变成可搜索、�
 
 ## Compared with OneTab
 
-ZipTab 保留：
+TabBoard 保留：
 
 - 当前窗口保存。
 - session 恢复。
 - 导入导出。
 - OneTab 文本导入。
 
-ZipTab 增强：
+TabBoard 增强：
 
 - Workspaces 和 categories。
 - Kanban/grid 式浏览。
@@ -84,13 +84,13 @@ ZipTab 增强：
 
 ## Compared with tabExtend
 
-ZipTab 借鉴：
+TabBoard 借鉴：
 
 - workspace/category 的组织方式。
 - 更偏工作台的多 session 视图。
 - open tabs 和 saved sessions 的联动。
 
-ZipTab 避免：
+TabBoard 避免：
 
 - 过重的 pinned workflow 概念。
 - 为了工作流而牺牲 OneTab 式保存恢复速度。
@@ -116,6 +116,6 @@ ZipTab 避免：
 ## Risks to explain honestly
 
 - 目前没有跨设备同步。
-- 新标签页替换默认 Chrome new tab，用户需要接受 ZipTab 成为入口。
+- 新标签页替换默认 Chrome new tab，用户需要接受 TabBoard 成为入口。
 - Open tab filter 由右键菜单触发，后续可能需要更明显的视觉提示来提高发现性。
 - Quick list / Pinned workflow 已移除，未来如果恢复，需要重新定义它和 sessions 的关系。

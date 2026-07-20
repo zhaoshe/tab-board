@@ -1,6 +1,6 @@
 # Product Decisions
 
-本文档记录 ZipTab 的关键产品和实现决策。格式保持轻量：
+本文档记录 TabBoard 的关键产品和实现决策。格式保持轻量：
 
 - Context: 当时遇到的问题。
 - Decision: 做了什么选择。
@@ -14,7 +14,7 @@ Context:
 用户的 tabs、标题、URL 和工作流信息都很敏感。如果引入后端，产品还没证明价值就先制造隐私和信任成本。
 
 Decision:
-ZipTab 默认 local-first，数据存储在 Chrome extension storage 中，不引入远端账号和后端。
+TabBoard 默认 local-first，数据存储在 Chrome extension storage 中，不引入远端账号和后端。
 
 Rationale:
 
@@ -35,7 +35,7 @@ Accepted。
 ## D002: OneTab is the core workflow, tabExtend is inspiration
 
 Context:
-OneTab 好用在“快”，tabExtend 好用在“组织”。ZipTab 如果同时照搬两者，容易变成复杂工具。
+OneTab 好用在“快”，tabExtend 好用在“组织”。TabBoard 如果同时照搬两者，容易变成复杂工具。
 
 Decision:
 以 OneTab 的保存和恢复作为主干，只吸收 tabExtend 中确实能增强组织效率的部分。
@@ -54,13 +54,13 @@ Trade-offs:
 Status:
 Accepted。
 
-## D003: Replace Chrome new tab with ZipTab
+## D003: Replace Chrome new tab with TabBoard
 
 Context:
-如果 ZipTab 只是一个扩展页，用户需要主动想起来打开它。tab 管理工具的价值在于成为日常入口。
+如果 TabBoard 只是一个扩展页，用户需要主动想起来打开它。tab 管理工具的价值在于成为日常入口。
 
 Decision:
-通过 `chrome_url_overrides.newtab` 将 Chrome 新标签页改为 ZipTab。
+通过 `chrome_url_overrides.newtab` 将 Chrome 新标签页改为 TabBoard。
 
 Rationale:
 
@@ -71,7 +71,7 @@ Rationale:
 Trade-offs:
 
 - 用户会失去默认新标签页。
-- ZipTab 首页必须足够快、足够安静。
+- TabBoard 首页必须足够快、足够安静。
 
 Status:
 Accepted。
@@ -118,7 +118,7 @@ Trade-offs:
 - 未来如果要恢复类似能力，需要重新定义 copy/move/reference 的关系。
 
 Data handling:
-旧 `quickList` 数据在 manager 启动时迁移为 `Former Quick list` 普通 session。
+`quickList` 仍作为 state schema 字段保留（normalize 补齐为空数组），当前 UI 不再暴露。插件未上线，不再保留历史数据迁移逻辑。
 
 Status:
 Accepted。
@@ -135,7 +135,7 @@ Rationale:
 
 - 当前窗口一键保存是最重要的动作。
 - 多选 tabs 更符合“整理当前上下文”的真实行为。
-- Chrome 内部页、扩展页和 ZipTab 自身页面无法可靠恢复，展示出来只会制造不可选的噪音；pinned tabs 是为了保留浏览器现场而作的明确例外。
+- Chrome 内部页、扩展页和 TabBoard 自身页面无法可靠恢复，展示出来只会制造不可选的噪音；pinned tabs 是为了保留浏览器现场而作的明确例外。
 - 通过右键 open tab 筛选 saved sessions，可以帮助用户判断“这个页面以前存在哪个 session 里”。
 - 选择和筛选分离后，checkbox 语义更单纯；不可保存 pinned row 不提供这些交互。
 - 拖入已有 session 解决“补充一个链接到旧上下文”的需求。
@@ -232,7 +232,7 @@ Trade-offs:
 - 即使允许保存，恢复是否成功仍取决于 Chrome 和本机权限。
 
 Status:
-Superseded by D022。当前不提供特殊 URL 或 pinned capture 设置；有 URL 的非 ZipTab tabs 都进入 capture 尝试，实际限制交给 Chrome。
+Superseded by D022 and the current React shared `capture-policy`; `includeChromeUrls` and `includeFileUrls` remain separate opt-in settings, while Chrome permission limits still govern actual save/restore behavior.
 
 ## D011: Categories are navigation sections, not exclusive filters
 
@@ -353,7 +353,7 @@ Context:
 上一轮 manager-first redesign 引入 context strip 和 inspector，但用户手动验收认为语义不清、价值低，并且 Open Tabs、Popup、Options、DnD 仍有关键体验缺口。
 
 Decision:
-Manager 改为 Board-first：顶部 toolbar 放 workspace/search/import/export/bin/options；左侧放 Open Tabs all windows 和 Categories；右侧保留 session board。移除 context strip 和常驻 inspector。Popup 保持 trigger surface，使用 Save/Open/Dedupe 三个横排 quick actions。Capture 默认按源 tabs URL 去重；当前有 URL 的非 ZipTab tabs 都进入 capture 尝试。
+Manager 改为 Board-first：顶部 toolbar 放 workspace/search/import/export/bin/options；左侧放 Open Tabs all windows 和 Categories；右侧保留 session board。移除 context strip 和常驻 inspector。Popup 保持 trigger surface，使用 Save/Open/Dedupe 三个横排 quick actions。Capture 默认按源 tabs URL 去重；当前有 URL 的非 TabBoard tabs 都进入 capture 尝试。
 
 Rationale:
 
@@ -449,7 +449,7 @@ Context:
 D019 把 workspace 和 Open Tabs 都放进左侧 sidebar header，但用户希望更接近 tabExtend：sidebar 应直接表达 Chrome windows 和当前浏览器现场，workspace/category 则属于右侧 saved sessions 工作台。Pinned tabs 还需要在不可保存时保持可见，且 sidebar 内的文本过滤不能和历史 session URL filter 混用。
 
 Decision:
-Workspace switcher、stats、新建/重命名 workspace 放回 main topbar，并位于 category tabs 左侧。Sidebar header 改为 window chips、collapse 和新建 Chrome window；chips 显示原始 window tab 总数，一次只渲染 selected window。所有 pinned browser tabs 固定显示在 regular tabs 上方，并通过单行横向滚动保持可达；`storable` 决定 checkbox、拖拽和 URL session filter 能否使用。Regular tabs 是唯一纵向滚动区域。Sidebar footer 增加临时 Filter tabs query，只过滤当前 selected window，独立于 saved-session search 和 `openTabFilter`。相关 capture settings 变化时重新加载 Open Tabs eligibility。该 UI 状态不进入 ZipTab state schema。
+Workspace switcher、stats、新建/重命名 workspace 放回 main topbar，并位于 category tabs 左侧。Sidebar header 改为 window chips、collapse 和新建 Chrome window；chips 显示原始 window tab 总数，一次只渲染 selected window。所有 pinned browser tabs 固定显示在 regular tabs 上方，并通过单行横向滚动保持可达；`storable` 决定 checkbox、拖拽和 URL session filter 能否使用。Regular tabs 是唯一纵向滚动区域。Sidebar footer 增加临时 Filter tabs query，只过滤当前 selected window，独立于 saved-session search 和 `openTabFilter`。相关 capture settings 变化时重新加载 Open Tabs eligibility。该 UI 状态不进入 TabBoard state schema。
 
 Rationale:
 
@@ -499,7 +499,7 @@ Open Tabs、capture 和 Options 曾通过 Include pinned tabs、Exclude URL patt
 
 Decision:
 
-删除 Include pinned tabs、Exclude URL patterns、Capture edge cases card、URL editor 及其增删改路径。Advanced 只保留 Chrome shortcuts 和 Reset settings。Capture 对所有有 URL 的非 ZipTab tabs 进行保存尝试，pinned tabs 与普通 tabs 共用单一 Open Tabs 列表并以内联 badge 标记；不再按自定义 settings 改变 storable eligibility。
+删除 Include pinned tabs、Exclude URL patterns、Capture edge cases card、URL editor 及其增删改路径。Advanced 只保留 Chrome shortcuts 和 Reset settings。Capture 对所有有 URL 的非 TabBoard tabs 进行保存尝试，pinned tabs 与普通 tabs 共用单一 Open Tabs 列表并以内联 badge 标记；不再按自定义 settings 改变 storable eligibility。
 
 Rationale:
 
@@ -510,12 +510,17 @@ Rationale:
 
 Trade-offs:
 
-- 用户不能在 ZipTab 中配置自定义 capture 排除规则。
+- 用户不能在 TabBoard 中配置自定义 capture 排除规则。
 - 某些 Chrome 受限 URL 可能仍然无法保存或恢复，反馈需要依赖实际 Chrome 结果。
 - Open Tabs 可能展示更多当前浏览器现场，sidebar Filter tabs 继续承担临时定位。
 
 Status:
-Accepted。
+Superseded for capture eligibility by current React shared `capture-policy`; board simplification remains Accepted。
+
+Current implementation note:
+
+- Open Tabs uses one user-facing custom URL filter; older special-URL toggles are ignored for compatibility.
+- One policy drives Open Tabs storable reason, selection, DnD and background capture; ineligible rows remain visible for browser-context awareness, while Chrome permission limits remain platform behavior.
 
 ## D023: Use Nord semantic tokens with a bounded local Web Awesome layer
 
@@ -525,7 +530,7 @@ Manager 已经形成稳定的原生 DOM、Chrome API 和 HTML DnD 结构，但�
 
 Decision:
 
-以 Nord0-Nord15 为 primitives，建立 light/dark `--zt-*` semantic tokens，并让 ZipTab 自定义 shell、session cards、rows、DnD feedback 与 Web Awesome controls 共享同一 token source。固定并完整 vendoring Web Awesome `3.10.0`；生产 Manager 只迁移稳定 shell controls：search inputs、compact window select 和 workspace dropdown。Session/category/tab DnD surfaces、native context menu、本地 SVG icons、shared tooltip、buttons、dialog 和 Popup/Options behavior 保持现有实现。Popup/Options 只做 Nord CSS alignment。
+以 Nord0-Nord15 为 primitives，建立 light/dark `--zt-*` semantic tokens，并让 TabBoard 自定义 shell、session cards、rows、DnD feedback 与 Web Awesome controls 共享同一 token source。固定并完整 vendoring Web Awesome `3.10.0`；生产 Manager 只迁移稳定 shell controls：search inputs、compact window select 和 workspace dropdown。Session/category/tab DnD surfaces、native context menu、本地 SVG icons、shared tooltip、buttons、dialog 和 Popup/Options behavior 保持现有实现。Popup/Options 只做 Nord CSS alignment。
 
 Rationale:
 
@@ -541,24 +546,24 @@ Trade-offs:
 - 完整 vendored tree 增加仓库文件数量，但避免 bundler 和 runtime network dependencies。
 
 Status:
-Accepted。后续组件 family 只能独立迁移，并且不得使用 `wa-card`、远程 `wa-icon` 或改变现有 DnD 语义。
+Retired。生产 Manager controls 已由 React + Mantine 重写取代；本地 vendored Web Awesome 层与 vendor 目录已整体删除，当前使用 Mantine 组件与 `@tabler/icons-react`。Nord 视觉方向与不变的 DnD 语义仍保留，无远程 runtime asset。
 
 ## D024: Use progressive disclosure without hiding core tab workflows
 
 Context:
 
-用户参考 tabExtend 的 hover preview、category edit、session More 和 tab metadata surfaces，希望 ZipTab 的高密度 manager 默认更安静。但 ZipTab 需要继续支持 keyboard、touch、screen reader 与脆弱的原生 HTML DnD。
+用户参考 tabExtend 的 hover preview、category edit、session More 和 tab metadata surfaces，希望 TabBoard 的高密度 manager 默认更安静。但 TabBoard 需要继续支持 keyboard、touch、screen reader 与脆弱的浏览器 DnD 时序。
 
 Decision:
 
-将 hover 作为渐进披露增强，不作为唯一入口。Open/saved tab 的 rich metadata 使用本地 interactive popover；category/session/tab 的次级操作同时由 hover、focus-within 与 coarse-pointer 常驻路径访问。collapsed sidebar 以 selected-window icon rail 投影为默认状态，完整 sidebar 通过 absolute hover/focus overlay 打开，永不推动 board。rail 只聚焦既有 rows/filter，不参与 selection 或 DnD。图标继续使用本地 Heroicons Solid registry。
+将 hover 作为渐进披露增强，不作为唯一入口。Open/saved tab 的 rich metadata 使用本地 interactive popover；category/session/tab 的次级操作同时由 hover、focus-within 与 coarse-pointer 常驻路径访问。collapsed sidebar 以 selected-window icon rail 投影为默认状态，完整 sidebar 通过 absolute hover/focus overlay 打开，永不推动 board。rail 只聚焦既有 rows/filter，不参与 selection 或 DnD。图标使用 `@tabler/icons-react`。
 
 Rationale:
 
 - 默认行只保留身份信息，降低重复整理时的视觉竞争。
 - 本地 anchored surfaces 使操作与对象保持邻近，不引入全局 inspector。
 - focus/touch parity 保持 accessibility；stable overlay geometry 不破坏 drag target、placeholder 或 horizontal board。
-- 复用现有 native DOM、Web Awesome popover 和 icon registry，避免引入 framework 或远程 asset。
+- 复用 React/Mantine component tree、typed overlay contracts 和本地 icon assets，避免引入远程 runtime asset。
 
 Trade-offs:
 
@@ -592,6 +597,102 @@ Trade-offs:
 Status:
 Accepted。
 
+## D026: Keep React Manager as the only production Manager
+
+Context:
+
+React + Mantine Manager 是唯一 Manager 实现。曾经存在的旧 native Manager 双栈会让 bug 修复和行为归属含糊，因此需要收敛为单一实现。
+
+Decision:
+
+`manager.html` loads only `src/manager/main.tsx`, and Manifest V3 maps new-tab to `manager.html`. 旧 native `src/manager.js` 及其相关代码已删除，不再作为 shipped entry 或行为 oracle。
+
+Rationale:
+
+- One production entry gives release checks and Chrome behavior one source of truth.
+- Existing pure core tests can be reused without recreating legacy behavior.
+- 删除旧栈避免长期维护两套实现的成本与歧义。
+
+Trade-offs:
+
+- Browser-level gaps 仍是显式的手工验收工作，不再有旧实现可作参照基线。
+
+Status:
+
+Accepted。
+
+## D027: Automated coverage does not replace Chrome acceptance
+
+Context:
+
+Typed DnD, immutable mutations, persistence/replay, sender verification and capture feedback can be proven without Chrome, but custom-element lifecycle, native DnD timing and real focus behavior still depend on an unpacked extension.
+
+Decision:
+
+自动化 proof 收敛到 Vitest core contracts（`npm test`）加 `build` / `check`，覆盖 selectors、state mutations、persistence queue、replay、capture ownership/feedback、typed DnD、Open Tabs policy、overlays、layout 和 hydration。历史 parity manifest / native oracle 测试机制已删除。带 Chrome 依赖的行为（DnD 事件时序、Shadow DOM/focus、capture/restore 与 sender 集成）仍需在 unpacked extension 上手工回归。
+
+Rationale:
+
+- Existing tests remain source of behavior proof; 不再维护额外的映射层。
+- 明确区分自动化 proof 与 Chrome 手工验收，避免把自动化通过误报为完整 UI 验收。
+- Sender and ordinary mutation boundaries stay visible in their dedicated executable suites.
+
+Trade-offs:
+
+- 部分视觉与浏览器集成回归只能靠手工验证发现。
+
+Status:
+
+Accepted。React 自动化 proof、build、check 已通过；旧 native/Web Awesome 栈与相关测试全部退役。Chrome 手工回归仍建议在 unpacked extension 上执行。
+
+## D028: Checkbox starts the Open Tabs multi-selection workflow
+
+Context:
+
+Open Tabs 已有 selected IDs 和 multi-tab drag payload，但进入选择模式需要额外入口，导致 checkbox 的意图不直观。
+
+Decision:
+
+点击任一可保存 tab 的 checkbox 即进入多选态。footer 在该状态下替换 Filter tabs，提供创建 session、批量删除、批量 pin 与退出选择的 icon-only actions。
+
+Rationale:
+
+- checkbox 是用户预期的多选起点。
+- 复用现有 selected IDs、capture 与 typed DnD payload，避免两套 selection state。
+- 批量 Chrome 操作通过单一后台消息并只刷新一次列表。
+
+Trade-offs:
+
+- 多选态暂不显示文字按钮；可访问名称承担图标动作的语义。
+- 不自动在取消最后一个勾选时退出，用户可继续选择或显式退出。
+
+Status:
+
+Accepted。
+
+## D030: Popup controls only transient capture scope
+
+Context:
+
+当前窗口保存常会需要跳过 pinned 或 grouped tabs；为一次性保存修改全局 Options 会造成状态泄漏。
+
+Decision:
+
+Popup 在提交前提供 pinned 与 grouped tabs 的本次勾选范围，不写入全局 settings。Dedupe 对当前窗口按 URL 清理，保留 active tab，或在没有 active tab 时保留最后访问的 tab。
+
+Rationale:
+
+- Popup 保持短流程，同时让保存范围可见。
+- 保留 active tab 避免打断用户当前工作；最近访问规则为其它重复集合提供稳定默认值。
+
+Trade-offs:
+
+- Popup 不支持逐个 Chrome tab group 选择；需要该粒度时应在 Manager 中提供。
+
+Status:
+
+Accepted。
+
 ## Decision template
 
 ```md
@@ -608,3 +709,4 @@ Trade-offs:
 Status:
 Proposed / Accepted / Rejected / Revisit
 ```
+- D029（2026-07-19）：Open Tabs 不再提供 pinned、Chrome URL、file URL 三组捕获开关，仅保留自定义 URL 过滤规则。原因：多组“能否选择”的特例造成列表、批量操作与设置的认知负担；过滤应是统一的隐藏规则。取舍：Chrome 对部分 URL 的实际操作限制仍由平台返回错误。

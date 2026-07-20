@@ -7,6 +7,7 @@ import {
   ITEM_NOTE,
   TASK_NONE,
   LEGACY_ITEM_TODO,
+  DROP_OPERATION_LEDGER_LIMIT,
 } from './constants';
 import type {
   Workspace,
@@ -19,7 +20,14 @@ import type {
   TabBoardState,
   ItemType,
   BinEntryKind,
+  DropOperationLedgerEntry,
 } from './types';
+import {
+  isOperationId,
+  isTimestamp,
+  utf8ByteLength,
+  MAX_CANONICAL_DIGEST_BYTES,
+} from '../store/mutationValidation';
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -43,6 +51,7 @@ export function createEmptyState(): TabBoardState {
   const timestamp = nowIso();
   return {
     version: SCHEMA_VERSION,
+    mutationRevision: 0,
     workspaces: [createDefaultWorkspace(timestamp)],
     activeWorkspaceId: DEFAULT_WORKSPACE_ID,
     groups: [],
@@ -50,6 +59,7 @@ export function createEmptyState(): TabBoardState {
     categoryOrderByWorkspace: {},
     quickList: [],
     bin: [],
+    dropOperationLedger: [],
     settings: { ...DEFAULT_SETTINGS },
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -77,6 +87,11 @@ export function normalizeState(raw: unknown): TabBoardState {
 
   const state: TabBoardState = {
     version: SCHEMA_VERSION,
+    mutationRevision: typeof rawObj.mutationRevision === 'number'
+      && Number.isSafeInteger(rawObj.mutationRevision)
+      && rawObj.mutationRevision >= 0
+      ? rawObj.mutationRevision
+      : 0,
     workspaces,
     activeWorkspaceId: workspaceIds.has(String(rawObj.activeWorkspaceId))
       ? String(rawObj.activeWorkspaceId)
@@ -97,6 +112,7 @@ export function normalizeState(raw: unknown): TabBoardState {
     bin: Array.isArray(rawObj.bin)
       ? compactBin((rawObj.bin as unknown[]).map(normalizeBinEntry).filter(Boolean) as BinEntry[])
       : [],
+    dropOperationLedger: normalizeDropOperationLedger(rawObj.dropOperationLedger),
     settings: normalizeSettings(rawObj.settings),
     createdAt: typeof rawObj.createdAt === 'string' ? rawObj.createdAt : base.createdAt,
     updatedAt:
@@ -107,21 +123,22 @@ export function normalizeState(raw: unknown): TabBoardState {
         : base.updatedAt,
   };
 
-  const folderIds = new Set(state.folders.map((folder) => folder.id));
   state.folders = state.folders.map((folder) => ({
     ...folder,
     workspaceId: workspaceIds.has(folder.workspaceId) ? folder.workspaceId : defaultWorkspaceId,
   }));
-  const workspaceByFolder = new Map(
-    state.folders.map((folder) => [folder.id, folder.workspaceId])
-  );
-  state.groups = state.groups.map((group) => ({
-    ...group,
-    folderId: group.starred ? null : folderIds.has(group.folderId ?? '') ? group.folderId : null,
-    workspaceId: workspaceIds.has(group.workspaceId)
+  const folderById = new Map(state.folders.map((folder) => [folder.id, folder]));
+  state.groups = state.groups.map((group) => {
+    const folder = group.folderId ? folderById.get(group.folderId) : undefined;
+    const workspaceId = workspaceIds.has(group.workspaceId)
       ? group.workspaceId
-      : workspaceByFolder.get(group.folderId ?? '') || defaultWorkspaceId,
-  }));
+      : folder?.workspaceId || defaultWorkspaceId;
+    return {
+      ...group,
+      folderId: group.starred || folder?.workspaceId !== workspaceId ? null : folder.id,
+      workspaceId,
+    };
+  });
   state.settings.actionClick = state.settings.actionClick === 'popup' ? 'popup' : 'store';
   state.settings.theme = (['system', 'light', 'dark'] as const).includes(state.settings.theme)
     ? state.settings.theme
@@ -136,11 +153,40 @@ function normalizeSettings(raw: unknown): Settings {
   }
   const rawObj = raw as Record<string, unknown>;
   for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
-    if (Object.hasOwn(rawObj, key)) {
-      (settings[key] as unknown) = rawObj[key];
+    const value = rawObj[key];
+    if (Object.hasOwn(rawObj, key) && typeof value === typeof DEFAULT_SETTINGS[key]) {
+      (settings[key] as unknown) = value;
     }
   }
   return settings;
+}
+
+function normalizeDropOperationLedger(raw: unknown): DropOperationLedgerEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const entries = new Map<string, DropOperationLedgerEntry>();
+  for (const value of raw) {
+    if (!value || typeof value !== 'object') continue;
+    const item = value as Record<string, unknown>;
+    if (!isOperationId(item.operationId)
+      || typeof item.digest !== 'string'
+      || !item.digest
+      || utf8ByteLength(item.digest) > MAX_CANONICAL_DIGEST_BYTES
+      || !isTimestamp(item.appliedAt)) {
+      continue;
+    }
+    const entry = {
+      operationId: item.operationId,
+      digest: item.digest,
+      appliedAt: item.appliedAt,
+    };
+    const existing = entries.get(entry.operationId);
+    if (!existing || existing.appliedAt <= entry.appliedAt) {
+      entries.set(entry.operationId, entry);
+    }
+  }
+  return [...entries.values()]
+    .sort((left, right) => left.appliedAt.localeCompare(right.appliedAt))
+    .slice(-DROP_OPERATION_LEDGER_LIMIT);
 }
 
 function normalizeCategoryOrderByWorkspace(
@@ -516,20 +562,28 @@ export function createBinEntry(
   };
 }
 
+export type FolderNameValidation =
+  | { ok: true; value: string }
+  | { ok: false; reason: 'empty' | 'duplicate' };
+
 export function validateFolderName(
-  folders: Folder[],
+  folders: readonly Folder[],
   workspaceId: string,
   name: string,
-  excludeFolderId?: string
-): boolean {
-  const trimmed = String(name || '').trim();
-  if (!trimmed) return false;
-  return !folders.some(
-    (f) =>
-      f.workspaceId === workspaceId &&
-      f.id !== excludeFolderId &&
-      f.name.toLowerCase() === trimmed.toLowerCase()
+  excludedFolderId?: string,
+): FolderNameValidation {
+  const value = String(name ?? '').normalize('NFC').trim();
+  if (!value) {
+    return { ok: false, reason: 'empty' };
+  }
+  const key = value.toLocaleLowerCase('en-US');
+  const duplicate = folders.some(
+    (folder) =>
+      folder.workspaceId === workspaceId &&
+      folder.id !== excludedFolderId &&
+      folder.name.normalize('NFC').trim().toLocaleLowerCase('en-US') === key,
   );
+  return duplicate ? { ok: false, reason: 'duplicate' } : { ok: true, value };
 }
 
 export interface FindTabRefResult {
@@ -554,6 +608,38 @@ export function findTabRef(
     return null;
   }
   return { group, tab: group.tabs[index], index };
+}
+
+export function resolveRestoreGroupPlacement(
+  state: TabBoardState,
+  entry: BinEntry,
+  snapshotWorkspaceId: string,
+  snapshotFolderId: string | null,
+  starred: boolean,
+): { workspaceId: string; folderId: string | null } {
+  const workspaceId = entry.originalWorkspaceId && state.workspaces.some((workspace) => workspace.id === entry.originalWorkspaceId)
+    ? entry.originalWorkspaceId
+    : entry.originalGroupId
+      ? state.groups.find((group) => group.id === entry.originalGroupId)?.workspaceId
+      : undefined;
+  const folderWorkspaceId = entry.originalFolderId
+    ? state.folders.find((folder) => folder.id === entry.originalFolderId)?.workspaceId
+    : undefined;
+  const resolvedWorkspaceId = workspaceId
+    || folderWorkspaceId
+    || (state.workspaces.some((workspace) => workspace.id === snapshotWorkspaceId) ? snapshotWorkspaceId : undefined)
+    || state.activeWorkspaceId;
+  if (starred) return { workspaceId: resolvedWorkspaceId, folderId: null };
+
+  const folderId = entry.originalFolderId !== undefined
+    ? entry.originalFolderId
+    : snapshotFolderId;
+  return {
+    workspaceId: resolvedWorkspaceId,
+    folderId: folderId && state.folders.some((folder) => folder.id === folderId && folder.workspaceId === resolvedWorkspaceId)
+      ? folderId
+      : null,
+  };
 }
 
 export function moveGroupTabs(

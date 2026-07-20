@@ -13,6 +13,7 @@ import {
   SegmentedControl,
   Button,
   Notification,
+  Textarea,
 } from '@mantine/core';
 import {
   IconSettings,
@@ -73,7 +74,7 @@ export function OptionsApp() {
   };
 
   useEffect(() => {
-    document.title = 'ZipTab - Settings';
+    document.title = 'TabBoard - Settings';
   }, []);
 
   if (!hydrated) {
@@ -111,10 +112,10 @@ export function OptionsApp() {
           <Group justify="space-between" align="flex-start">
             <div>
               <Title order={1} size="h3">
-                ZipTab Settings
+                TabBoard Settings
               </Title>
               <Text c="dimmed" size="sm" mt={4}>
-                Configure how ZipTab works
+                Configure how TabBoard works
               </Text>
             </div>
             <Button
@@ -229,40 +230,14 @@ export function OptionsApp() {
 
                 <Divider />
 
-                <Switch
-                  label="Exclude pinned tabs"
-                  description="Do not include pinned tabs when saving"
-                  checked={settings.excludePinned}
-                  onChange={(e) =>
-                    handleSettingChange(
-                      'excludePinned',
-                      e.currentTarget.checked
-                    )
-                  }
-                />
-
-                <Switch
-                  label="Include chrome:// URLs"
-                  description="Save tabs with chrome://, edge://, and other browser internal URLs"
-                  checked={settings.includeChromeUrls}
-                  onChange={(e) =>
-                    handleSettingChange(
-                      'includeChromeUrls',
-                      e.currentTarget.checked
-                    )
-                  }
-                />
-
-                <Switch
-                  label="Include file:// URLs"
-                  description="Save tabs with local file:// URLs"
-                  checked={settings.includeFileUrls}
-                  onChange={(e) =>
-                    handleSettingChange(
-                      'includeFileUrls',
-                      e.currentTarget.checked
-                    )
-                  }
+                <Textarea
+                  label="Custom filter rules"
+                  description="Hide matching open tabs. Separate URL keywords with commas or new lines."
+                  placeholder="example.com, chrome://newtab"
+                  autosize
+                  minRows={2}
+                  value={settings.customUrlFilter}
+                  onChange={(event) => handleSettingChange('customUrlFilter', event.currentTarget.value)}
                 />
               </Stack>
             </Stack>

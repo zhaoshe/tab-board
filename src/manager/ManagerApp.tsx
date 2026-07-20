@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { MantineProvider, LoadingOverlay, Center } from '@mantine/core';
 import '@mantine/core/styles.css';
+import './styles/manager.css';
 import { theme } from '../shared/styles/theme';
 import { ManagerLayout } from './components/shell/ManagerLayout';
 import { useStoreHydration } from '../shared/hooks/useStoreHydration';

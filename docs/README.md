@@ -1,6 +1,6 @@
-# ZipTab Docs
+# TabBoard Docs
 
-这个目录用于记录 ZipTab 的功能变迁、产品决策和对外叙事，方便之后回溯、复盘和 sell。
+这个目录用于记录 TabBoard 的功能变迁、产品决策和对外叙事，方便之后回溯、复盘和 sell。
 
 ## 文档地图
 
@@ -9,8 +9,8 @@
 - [Technical Architecture](technical-architecture.md): 描述 extension 架构、数据模型、关键流程和验证方式。
 - [Feature Evolution](feature-evolution.md): 记录功能从哪里来、什么时候变化、当前状态是什么。
 - [Product Decisions](product-decisions.md): 记录关键决策的背景、取舍、结果和后续观察点。
-- [Product Story](product-story.md): 记录面向用户或评审时怎么介绍 ZipTab。
-- [Nord UI Redesign](nord-ui-redesign.md): 当前 Web Awesome + Nord UI 改造的设计准则、实施状态和防漂移检查表。
+- [Product Story](product-story.md): 记录面向用户或评审时怎么介绍 TabBoard。
+- [tabExtend Analysis](tabextend-analysis.md): 对 tabExtend 的功能/UI/UX 拆解，以及和 TabBoard 的对比与借鉴清单。
 
 ## 维护规则
 

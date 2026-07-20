@@ -21,6 +21,10 @@ export default defineConfig({
       },
     },
   },
+  test: {
+    include: ['src/**/*.test.ts'],
+    exclude: ['tests/**/*.mjs', 'node_modules/**', 'dist/**'],
+  },
   server: {
     port: 5173,
     strictPort: true,

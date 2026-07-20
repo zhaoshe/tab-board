@@ -3,7 +3,7 @@ import { useToast } from '../../hooks/useToast';
 import { onEvent, AppEvents } from '../../../shared/utils/events';
 
 export function useToastNotifications() {
-  const { showSuccess } = useToast();
+  const { showSuccess, showError } = useToast();
 
   useEffect(() => {
     const unsubSave = onEvent(AppEvents.SAVE_SUCCESS, (data: unknown) => {
@@ -22,6 +22,11 @@ export function useToastNotifications() {
       );
     });
 
+    const unsubError = onEvent(AppEvents.ERROR, (data: unknown) => {
+      const info = data as { message?: string };
+      showError(info.message || 'Unable to save changes');
+    });
+
     const unsubRestore = onEvent(AppEvents.RESTORE_SUCCESS, (data: unknown) => {
       const info = data as { type: string; count: number; label: string };
       if (info.type === 'group') {
@@ -37,7 +42,8 @@ export function useToastNotifications() {
     return () => {
       unsubSave();
       unsubImport();
+      unsubError();
       unsubRestore();
     };
-  }, [showSuccess]);
+  }, [showSuccess, showError]);
 }

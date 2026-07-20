@@ -1,22 +1,88 @@
-import { Stack, Title, Text, SimpleGrid, Group as MantineGroup, ActionIcon, Tooltip, Box } from '@mantine/core';
-import { IconPlus, IconArchive, IconSearch, IconFolder, IconStar } from '@tabler/icons-react';
-import {
-  SortableContext,
-  rectSortingStrategy,
-} from '@dnd-kit/sortable';
+import { Box, Text } from '@mantine/core';
+import { IconArchive, IconFolder, IconSearch, IconStar } from '@tabler/icons-react';
+import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable';
+import { useDroppable } from '@dnd-kit/core';
 import { useFilteredGroups, useSearchQuery } from '../../hooks/useFilteredGroups';
+import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
+import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
+import type { CategoryFilter } from '../../core/selectors';
+import type { DndData, DragMarker, DragSourceRect } from '../../core/dnd';
 import { SessionCard } from '../sessions/SessionCard';
 
 interface WorkspaceContentProps {
   folderId: string | null;
   starred: boolean;
   workspaceName: string;
+  runtime: ManagerRuntime;
   highlightedGroupId?: string | null;
+  dragMarker?: DragMarker | null;
+  sourceRect?: DragSourceRect | null;
 }
 
-export function WorkspaceContent({ folderId, starred, workspaceName, highlightedGroupId }: WorkspaceContentProps) {
+interface GroupInsertionTargetProps {
+  id: string;
+  category: CategoryFilter;
+  index: number;
+  workspaceId: string;
+  dragMarker?: DragMarker | null;
+  isEndTarget?: boolean;
+}
+
+function GroupInsertionTarget({
+  id,
+  category,
+  index,
+  workspaceId,
+  dragMarker = null,
+  isEndTarget = false,
+}: GroupInsertionTargetProps) {
+  const { setNodeRef } = useDroppable({
+    id,
+    data: {
+      type: 'group-insert',
+      dnd: {
+        targets: [{ kind: 'group-insert', category, index, workspaceId }],
+      } satisfies DndData,
+    },
+  });
+  const isMarker = dragMarker?.kind === 'group'
+    && dragMarker.index === index;
+  // data-drop-target="new-group" remains oracle marker for end insertion targets.
+  return (
+    <div
+      ref={setNodeRef}
+      className={`session-board__group-insert-target${isEndTarget ? ' session-board__end-target' : ''}`}
+      data-drop-target={id.startsWith('new-group') ? 'new-group' : 'group-insert'}
+      data-over={isMarker || undefined}
+      aria-hidden="true"
+    >
+      {isMarker && <span className="session-board__drop-marker" aria-hidden="true" />}
+    </div>
+  );
+}
+
+export function WorkspaceContent({
+  folderId,
+  starred,
+  workspaceName,
+  runtime,
+  highlightedGroupId,
+  dragMarker = null,
+  sourceRect = null,
+}: WorkspaceContentProps) {
   const groups = useFilteredGroups(folderId, starred);
   const searchQuery = useSearchQuery();
+  const { activeWorkspaceId, groups: allGroups } = useTabBoardStore((state) => ({
+    activeWorkspaceId: state.activeWorkspaceId,
+    groups: state.groups,
+  }));
+  const category: CategoryFilter = starred ? 'starred' : folderId ? `folder:${folderId}` : 'inbox';
+  const categoryGroups = allGroups.filter((group) => {
+    if (group.workspaceId !== activeWorkspaceId) return false;
+    if (category === 'starred') return group.starred;
+    if (category === 'inbox') return !group.starred && group.folderId === null;
+    return !group.starred && group.folderId === folderId;
+  });
   const hasSearch = searchQuery.trim().length > 0;
 
   const getTitle = () => {
@@ -26,136 +92,110 @@ export function WorkspaceContent({ folderId, starred, workspaceName, highlighted
   };
 
   const getEmptyState = () => {
+    const emptyStateProps = {
+      style: {
+        display: 'flex',
+        flexDirection: 'column' as const,
+        alignItems: 'center' as const,
+        justifyContent: 'center' as const,
+        height: '100%',
+        padding: '20px',
+      },
+    };
+
     if (hasSearch) {
       return (
-        <Box
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '60px 20px',
-            border: '2px dashed var(--mantine-color-gray-3)',
-            borderRadius: 'var(--mantine-radius-md)',
-          }}
-        >
+        <Box {...emptyStateProps}>
           <IconSearch size={48} style={{ opacity: 0.3 }} />
-          <Text mt="md" fw={500}>
-            No results for "{searchQuery}"
-          </Text>
-          <Text size="sm" c="dimmed">
-            Try different keywords or check your spelling
-          </Text>
+          <Text mt="md" fw={500}>No results for "{searchQuery}"</Text>
+          <Text size="sm" c="dimmed">Try different keywords or check your spelling</Text>
         </Box>
       );
     }
 
     if (starred) {
       return (
-        <Box
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '60px 20px',
-            border: '2px dashed var(--mantine-color-gray-3)',
-            borderRadius: 'var(--mantine-radius-md)',
-          }}
-        >
+        <Box {...emptyStateProps}>
           <IconStar size={48} style={{ opacity: 0.3 }} />
-          <Text mt="md" fw={500}>
-            No starred sessions yet
-          </Text>
-          <Text size="sm" c="dimmed">
-            Star important sessions to find them quickly
-          </Text>
+          <Text mt="md" fw={500}>No starred sessions yet</Text>
+          <Text size="sm" c="dimmed">Star important sessions to find them quickly</Text>
         </Box>
       );
     }
 
     if (folderId) {
       return (
-        <Box
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '60px 20px',
-            border: '2px dashed var(--mantine-color-gray-3)',
-            borderRadius: 'var(--mantine-radius-md)',
-          }}
-        >
+        <Box {...emptyStateProps}>
           <IconFolder size={48} style={{ opacity: 0.3 }} />
-          <Text mt="md" fw={500}>
-            This category is empty
-          </Text>
-          <Text size="sm" c="dimmed">
-            Move sessions here to organize your work
-          </Text>
+          <Text mt="md" fw={500}>This category is empty</Text>
+          <Text size="sm" c="dimmed">Move sessions here to organize your work</Text>
         </Box>
       );
     }
 
     return (
-      <Box
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '60px 20px',
-          border: '2px dashed var(--mantine-color-gray-3)',
-          borderRadius: 'var(--mantine-radius-md)',
-        }}
-      >
+      <Box {...emptyStateProps}>
         <IconArchive size={48} style={{ opacity: 0.3 }} />
-        <Text mt="md" fw={500}>
-          No sessions here yet
-        </Text>
-        <Text size="sm" c="dimmed">
-          Save tabs from your browser to get started
-        </Text>
+        <Text mt="md" fw={500}>No sessions here yet</Text>
+        <Text size="sm" c="dimmed">Save tabs from your browser to get started</Text>
       </Box>
     );
   };
 
   return (
-    <Stack gap="md">
-      <MantineGroup justify="space-between">
-        <Box>
-          <Title order={2} size="h4">
-            {getTitle()}
-          </Title>
-          <Text size="sm" c="dimmed">
-            {groups.length} {groups.length === 1 ? 'session' : 'sessions'}
-            {hasSearch && ` found`}
-          </Text>
-        </Box>
-        <MantineGroup>
-          <Tooltip label="Save current tabs">
-            <ActionIcon variant="filled" color="blue">
-              <IconPlus size={18} />
-            </ActionIcon>
-          </Tooltip>
-        </MantineGroup>
-      </MantineGroup>
-
+    <section className="manager-board" aria-label={`${workspaceName} ${getTitle()} sessions`} tabIndex={-1}>
       {groups.length === 0 ? (
-        getEmptyState()
+        <div className="manager-board__empty-content">
+          {getEmptyState()}
+          <div className="session-board" tabIndex={-1}>
+            <GroupInsertionTarget
+              id={`new-group-${activeWorkspaceId}-${category}`}
+              category={category}
+              index={categoryGroups.length}
+              workspaceId={activeWorkspaceId}
+              dragMarker={dragMarker}
+              isEndTarget
+            />
+          </div>
+        </div>
       ) : (
-        <SortableContext
-          items={groups.map((g) => `group-${g.id}`)}
-          strategy={rectSortingStrategy}
-        >
-          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
-            {groups.map((group) => (
-              <SessionCard key={group.id} group={group} highlighted={highlightedGroupId === group.id} />
-            ))}
-          </SimpleGrid>
+        <SortableContext items={groups.map((group) => `group-${group.id}`)} strategy={rectSortingStrategy}>
+          <div className="session-board" tabIndex={-1}>
+            {groups.map((group) => {
+              const groupIndex = Math.max(0, categoryGroups.findIndex((item) => item.id === group.id));
+              return (
+                <div key={group.id} className="session-board__group-slot">
+                  <GroupInsertionTarget
+                    id={`group-insert-${group.id}`}
+                    category={category}
+                    index={groupIndex}
+                    workspaceId={activeWorkspaceId}
+                    dragMarker={dragMarker}
+                  />
+                  <SessionCard
+                    group={group}
+                    runtime={runtime}
+                    searchQuery={searchQuery}
+                    groupIndex={groupIndex}
+                    groupCategory={category}
+                    highlighted={highlightedGroupId === group.id}
+                    dragMarker={dragMarker}
+                    sourceRect={sourceRect}
+                  />
+                </div>
+              );
+            })}
+            <GroupInsertionTarget
+              id={`new-group-${activeWorkspaceId}-${category}`}
+              category={category}
+              index={categoryGroups.length}
+              workspaceId={activeWorkspaceId}
+              dragMarker={dragMarker}
+              isEndTarget
+            />
+          </div>
         </SortableContext>
       )}
-    </Stack>
+    </section>
   );
 }

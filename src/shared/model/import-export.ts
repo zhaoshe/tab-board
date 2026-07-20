@@ -261,10 +261,18 @@ export function exportToText(state: TabBoardState): string {
       groupsByFolder.get(key)!.push(group);
     }
 
-    const folderOrder = state.categoryOrderByWorkspace[workspaceId] || [];
+    const folderOrder = [
+      ...new Set(
+        (state.categoryOrderByWorkspace[workspaceId] || []).map((id) =>
+          id.startsWith('folder:') ? id.slice('folder:'.length) : id,
+        ),
+      ),
+    ];
+    const orderedCategoryIds = folderOrder.map((id) => id === 'inbox' ? null : id);
     const orderedFolderIds = [
-      ...folderOrder.filter((id) => groupsByFolder.has(id)),
-      ...[...groupsByFolder.keys()].filter((id) => id !== null && !folderOrder.includes(id!)),
+      ...orderedCategoryIds.filter((id, index, ids) => groupsByFolder.has(id) && ids.indexOf(id) === index),
+      ...(groupsByFolder.has(null) && !orderedCategoryIds.includes(null) ? [null] : []),
+      ...[...groupsByFolder.keys()].filter((id) => id !== null && !orderedCategoryIds.includes(id)),
     ];
 
     for (const folderId of orderedFolderIds) {

@@ -1,19 +1,16 @@
+import type { CSSProperties } from 'react';
 import { Box } from '@mantine/core';
 
 interface SessionPlaceholderProps {
-  height?: number;
+  style?: CSSProperties;
 }
 
-export function SessionPlaceholder({ height = 200 }: SessionPlaceholderProps) {
+export function SessionPlaceholder({ style }: SessionPlaceholderProps) {
   return (
     <Box
-      style={{
-        height,
-        border: '2px dashed var(--mantine-color-blue-4)',
-        borderRadius: 'var(--mantine-radius-md)',
-        backgroundColor: 'var(--mantine-color-blue-0)',
-        opacity: 0.6,
-      }}
+      className="session-placeholder"
+      aria-hidden="true"
+      style={style}
     />
   );
 }

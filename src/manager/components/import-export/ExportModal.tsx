@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Modal,
   Textarea,
@@ -10,7 +10,7 @@ import {
   Alert,
 } from '@mantine/core';
 import { IconDownload, IconCopy, IconCheck, IconAlertCircle } from '@tabler/icons-react';
-import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
+import { persistedSnapshot, useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import { exportToText } from '../../../shared/model';
 
 interface ExportModalProps {
@@ -20,13 +20,16 @@ interface ExportModalProps {
 
 type ExportFormat = 'json' | 'text';
 
+const COPY_FEEDBACK_DURATION_MS = 2000;
+
 export function ExportModal({ opened, onClose }: ExportModalProps) {
   const [format, setFormat] = useState<ExportFormat>('json');
   const [exportContent, setExportContent] = useState('');
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exportAll = useTabBoardStore((state) => state.exportAll);
-  const state = useTabBoardStore((state) => state);
+  const snapshot = useTabBoardStore(persistedSnapshot);
 
   useEffect(() => {
     if (!opened) return;
@@ -34,21 +37,44 @@ export function ExportModal({ opened, onClose }: ExportModalProps) {
       if (format === 'json') {
         setExportContent(exportAll());
       } else {
-        setExportContent(exportToText(state));
+        setExportContent(exportToText(snapshot));
       }
       setError(null);
     } catch (e) {
       setError('Export failed: ' + (e instanceof Error ? e.message : 'Unknown error'));
       setExportContent('');
     }
-  }, [format, opened, exportAll, state]);
+  }, [format, opened, exportAll, snapshot]);
+
+  useEffect(() => {
+    if (!opened) {
+      if (copyResetTimerRef.current !== null) {
+        clearTimeout(copyResetTimerRef.current);
+        copyResetTimerRef.current = null;
+      }
+      setCopied(false);
+    }
+
+    return () => {
+      if (copyResetTimerRef.current !== null) {
+        clearTimeout(copyResetTimerRef.current);
+        copyResetTimerRef.current = null;
+      }
+    };
+  }, [opened]);
 
   const handleCopy = async () => {
     if (!exportContent) return;
     try {
       await navigator.clipboard.writeText(exportContent);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copyResetTimerRef.current !== null) {
+        clearTimeout(copyResetTimerRef.current);
+      }
+      copyResetTimerRef.current = setTimeout(() => {
+        copyResetTimerRef.current = null;
+        setCopied(false);
+      }, COPY_FEEDBACK_DURATION_MS);
     } catch (e) {
       setError('Failed to copy to clipboard');
     }
@@ -62,7 +88,7 @@ export function ExportModal({ opened, onClose }: ExportModalProps) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = format === 'json' ? 'ziptab-export.json' : 'ziptab-export.txt';
+    a.download = format === 'json' ? 'tabboard-export.json' : 'tabboard-export.txt';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -76,8 +102,17 @@ export function ExportModal({ opened, onClose }: ExportModalProps) {
       title="Export Sessions"
       size="lg"
       centered
+      styles={{
+        content: { display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+        body: { display: 'flex', flexDirection: 'column', minHeight: 0 },
+      }}
     >
-      <Stack gap="md">
+      <Stack gap="md" style={{ minHeight: 0, flex: '1 1 auto', overflow: 'hidden' }}>
+        <Stack
+          data-testid="export-scroll-region"
+          gap="md"
+          style={{ minHeight: 0, overflowY: 'auto' }}
+        >
         <SegmentedControl
           value={format}
           onChange={(value) => setFormat(value as ExportFormat)}
@@ -90,7 +125,7 @@ export function ExportModal({ opened, onClose }: ExportModalProps) {
 
         {format === 'json' && (
           <Text size="xs" c="dimmed">
-            TabBoard/ZipTab full format with all workspaces, folders, sessions, and settings.
+            TabBoard full format with all workspaces, folders, sessions, and settings.
           </Text>
         )}
         {format === 'text' && (
@@ -102,6 +137,7 @@ export function ExportModal({ opened, onClose }: ExportModalProps) {
         <Textarea
           value={exportContent}
           readOnly
+          aria-label="Exported session data"
           minRows={15}
           autosize
           style={{ fontFamily: 'monospace', fontSize: 'var(--mantine-font-size-xs)' }}
@@ -113,7 +149,14 @@ export function ExportModal({ opened, onClose }: ExportModalProps) {
           </Alert>
         )}
 
-        <Group justify="space-between" mt="md">
+        </Stack>
+
+        <Group
+          data-testid="export-footer"
+          justify="space-between"
+          mt="md"
+          style={{ flexShrink: 0 }}
+        >
           <Button variant="default" onClick={onClose}>
             Close
           </Button>

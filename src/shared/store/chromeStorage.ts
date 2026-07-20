@@ -1,5 +1,9 @@
-import { STATE_KEY, LEGACY_STATE_KEY } from '../model/constants';
+import { STATE_KEY } from '../model/constants';
 import { normalizeState, type TabBoardState } from '../model';
+import {
+  applyStateMutations,
+  InvalidDropMutationError,
+} from './stateMutations';
 
 export async function getState(): Promise<TabBoardState> {
   const result = await chrome.storage.local.get(STATE_KEY);
@@ -8,6 +12,105 @@ export async function getState(): Promise<TabBoardState> {
 
 export async function setState(state: TabBoardState): Promise<void> {
   await chrome.storage.local.set({ [STATE_KEY]: state });
+}
+
+let localHarnessChrome: unknown;
+let localHarnessState: TabBoardState | null = null;
+
+export class StatePersistenceError extends Error {
+  readonly code?: string;
+  readonly invalidMutationIndexes: number[];
+  readonly committedMutationIndexes: number[];
+  readonly committedState?: TabBoardState;
+
+  constructor(
+    message: string,
+    code?: string,
+    invalidMutationIndexes: readonly number[] = [],
+    committedMutationIndexes: readonly number[] = [],
+    committedState?: TabBoardState,
+  ) {
+    super(message);
+    this.name = 'StatePersistenceError';
+    this.code = code;
+    this.invalidMutationIndexes = [...invalidMutationIndexes];
+    this.committedMutationIndexes = [...committedMutationIndexes];
+    this.committedState = committedState;
+  }
+}
+
+function responseError(response: unknown): StatePersistenceError {
+  const value = response && typeof response === 'object' ? response as {
+    error?: unknown;
+    code?: unknown;
+    invalidMutationIndexes?: unknown;
+    committedMutationIndexes?: unknown;
+    state?: unknown;
+  } : {};
+  const committedState = value.state && typeof value.state === 'object'
+    ? normalizeState(value.state)
+    : undefined;
+  return new StatePersistenceError(
+    String(value.error || 'State persistence failed.'),
+    typeof value.code === 'string' ? value.code : undefined,
+    Array.isArray(value.invalidMutationIndexes) ? value.invalidMutationIndexes.filter(
+      (index): index is number => Number.isSafeInteger(index) && index >= 0,
+    ) : [],
+    Array.isArray(value.committedMutationIndexes) ? value.committedMutationIndexes.filter(
+      (index): index is number => Number.isSafeInteger(index) && index >= 0,
+    ) : [],
+    committedState,
+  );
+}
+
+async function applyMutationsLocally(
+  current: TabBoardState,
+  mutations: readonly unknown[],
+): Promise<TabBoardState> {
+  return normalizeState(applyStateMutations(current, mutations));
+}
+
+export async function sendStateMutations(
+  mutations: readonly unknown[],
+): Promise<TabBoardState> {
+  if (typeof chrome.runtime?.sendMessage !== 'function') {
+    if (localHarnessChrome !== chrome) {
+      localHarnessChrome = chrome;
+      localHarnessState = null;
+    }
+    const current = localHarnessState || await getState();
+    try {
+      const next = await applyMutationsLocally(current, mutations);
+      await setState(next);
+      localHarnessState = next;
+      return next;
+    } catch (error: unknown) {
+      if (error instanceof InvalidDropMutationError && error.committedState) {
+        await setState(error.committedState);
+        localHarnessState = error.committedState;
+      }
+      throw error;
+    }
+  }
+  const response = await chrome.runtime.sendMessage({
+    type: 'tabboard-state-mutations',
+    mutations,
+  });
+  if (!response?.ok) {
+    throw responseError(response);
+  }
+  return normalizeState(response.result);
+}
+
+export async function ensureStateViaWorker(): Promise<TabBoardState> {
+  if (typeof chrome.runtime?.sendMessage !== 'function') {
+    return ensureState();
+  }
+  const response = await chrome.runtime.sendMessage({ type: 'tabboard-ensure-state' });
+  if (!response?.ok) {
+    throw responseError(response);
+  }
+  return normalizeState(response.result);
 }
 
 export async function updateState(
@@ -24,40 +127,10 @@ export async function getSettings() {
   return state.settings;
 }
 
-export async function migrateFromLegacy(): Promise<{ migrated: boolean; tabCount: number; groupCount: number }> {
-  const storage = await chrome.storage.local.get([STATE_KEY, LEGACY_STATE_KEY]);
-
-  if (storage[STATE_KEY]) {
-    return { migrated: false, tabCount: 0, groupCount: 0 };
-  }
-
-  if (!storage[LEGACY_STATE_KEY]) {
-    return { migrated: false, tabCount: 0, groupCount: 0 };
-  }
-
-  const migratedState = normalizeState(storage[LEGACY_STATE_KEY]);
-
-  await setState(migratedState);
-
-  const tabCount = migratedState.groups.reduce((sum, g) => sum + g.tabs.length, 0);
-  const groupCount = migratedState.groups.length;
-
-  console.log(
-    `[TabBoard] Migrated legacy data: ${groupCount} sessions, ${tabCount} tabs`
-  );
-
-  return { migrated: true, tabCount, groupCount };
-}
-
 export async function ensureState(): Promise<TabBoardState> {
   const result = await chrome.storage.local.get(STATE_KEY);
   if (result[STATE_KEY]) {
     return normalizeState(result[STATE_KEY]);
-  }
-
-  const migrationResult = await migrateFromLegacy();
-  if (migrationResult.migrated) {
-    return getState();
   }
 
   const state = normalizeState(null);

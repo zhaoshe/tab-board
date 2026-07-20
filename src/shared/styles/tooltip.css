@@ -1,0 +1,11 @@
+.mantine-Tooltip-tooltip {
+  animation: zt-tooltip-auto-dismiss 1ms linear 1000ms forwards;
+}
+
+@keyframes zt-tooltip-auto-dismiss {
+  to {
+    opacity: 0;
+    pointer-events: none;
+    visibility: hidden;
+  }
+}

@@ -1,481 +1,191 @@
-import { useState } from 'react';
-import {
-  Stack,
-  NavLink,
-  Text,
-  Group as MantineGroup,
-  ActionIcon,
-  Tooltip,
-  Divider,
-  ScrollArea,
-  Box,
-  Modal,
-  TextInput,
-  Button,
-  Alert,
-  Menu,
-} from '@mantine/core';
-import { useDisclosure } from '@mantine/hooks';
-import {
-  IconInbox,
-  IconStar,
-  IconFolder,
-  IconFolderPlus,
-  IconUpload,
-  IconDownload,
-  IconTrash,
-  IconEdit,
-  IconTrashX,
-  IconAlertTriangle,
-  IconDots,
-} from '@tabler/icons-react';
-import { useDroppable } from '@dnd-kit/core';
-import { useWorkspaceFolders } from '../../hooks/useFilteredGroups';
-import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
-import { ImportModal } from '../import-export/ImportModal';
-import { ExportModal } from '../import-export/ExportModal';
-import { OpenTabsPanel } from './OpenTabsPanel';
+import { useEffect, useRef, type RefObject } from 'react';
+import { ActionIcon, Box, Stack, Tooltip } from '@mantine/core';
+import { IconBrowser, IconSearch } from '@tabler/icons-react';
+import { OPEN_TABS_FILTER_INPUT_ID, OpenTabsPanel } from './OpenTabsPanel';
+import { useOpenTabsRuntime } from '../../hooks/useOpenTabsRuntime';
+import type { CaptureCategorySnapshot } from '../../core/capture';
+import type { OpenTabInfo, OpenWindowInfo } from '../../core/open-tabs';
 
-const FOLDER_COLORS = [
-  '#228be6',
-  '#40c057',
-  '#fab005',
-  '#fa5252',
-  '#be4bdb',
-  '#7950f2',
-  '#15aabf',
-  '#fd7e14',
-  '#868e96',
-  '#e64980',
-];
+interface SidebarRailProps {
+  sidebarExpanded: boolean;
+  selectedWindow: OpenWindowInfo | null;
+  windows: OpenWindowInfo[];
+  tabs: OpenTabInfo[];
+  toggleRef: RefObject<HTMLButtonElement>;
+  onToggleSidebar: (expanded: boolean) => void;
+  onSelectionModeChange?: (selectionMode: boolean) => void;
+  onSelectWindow: (windowId: number) => void;
+  onFocusTab: (tabId: number | undefined) => void;
+  onFocusFilter: () => void;
+}
+
+function SidebarRail({
+  sidebarExpanded,
+  selectedWindow,
+  windows,
+  tabs,
+  toggleRef,
+  onToggleSidebar,
+  onSelectionModeChange,
+  onSelectWindow,
+  onFocusTab,
+  onFocusFilter,
+}: SidebarRailProps) {
+  return (
+    <div className="manager-sidebar-rail" aria-label="Open Tabs quick access">
+      <Tooltip label={selectedWindow ? `Current window · ${selectedWindow.tabCount} tabs` : 'No open browser window'} position="right">
+        <ActionIcon
+          ref={toggleRef}
+          className="manager-sidebar-rail-window"
+          variant="subtle"
+          aria-label={selectedWindow ? `Current window, ${selectedWindow.tabCount} tabs` : 'No open browser window'}
+          onClick={() => {
+            const visibleWindows = windows.filter((window) => !window.incognito && window.id !== undefined);
+            if (visibleWindows.length < 2) return;
+            const index = visibleWindows.findIndex((window) => window.id === selectedWindow?.id);
+            onSelectWindow(visibleWindows[(index + 1) % visibleWindows.length].id!);
+          }}
+        >
+          <IconBrowser size={20} />
+        </ActionIcon>
+      </Tooltip>
+
+      <div className="manager-sidebar-rail-tabs" aria-label={`${tabs.length} visible open tabs`}>
+        {tabs.map((tab) => {
+          const title = tab.title || tab.url || 'Untitled tab';
+          return (
+            <Tooltip key={`${tab.windowId ?? 'window'}-${tab.id ?? tab.index}`} label={title} position="right">
+              <ActionIcon
+                className="manager-sidebar-rail-tab"
+                variant="subtle"
+                aria-label={`Focus ${title}`}
+                aria-current={tab.active ? 'page' : undefined}
+                data-active={tab.active || undefined}
+                data-pinned={tab.pinned || undefined}
+                onClick={() => onFocusTab(tab.id)}
+              >
+                <IconBrowser className="manager-sidebar-rail-tab__fallback" size={16} aria-hidden="true" />
+                {tab.favIconUrl && (
+                  <img
+                    src={tab.favIconUrl}
+                    alt=""
+                    onError={(event) => {
+                      event.currentTarget.style.display = 'none';
+                    }}
+                  />
+                )}
+              </ActionIcon>
+            </Tooltip>
+          );
+        })}
+      </div>
+
+      <Tooltip label="Filter open tabs" position="right">
+        <ActionIcon
+          className="manager-sidebar-rail-filter"
+          variant="subtle"
+          aria-label="Filter open tabs"
+          onClick={onFocusFilter}
+        >
+          <IconSearch size={17} />
+        </ActionIcon>
+      </Tooltip>
+    </div>
+  );
+}
 
 interface SidebarProps {
+  workspaceId: string;
   selectedFolderId: string | null;
-  onSelectFolder: (id: string | null) => void;
   showStarred: boolean;
-  onSelectStarred: () => void;
-  onSelectInbox: () => void;
   showBin: boolean;
-  onSelectBin: () => void;
+  sidebarCollapsed: boolean;
+  sidebarExpanded: boolean;
+  sidebarToggleRef: RefObject<HTMLButtonElement>;
+  sidebarRailToggleRef: RefObject<HTMLButtonElement>;
+  onToggleSidebar: (expanded: boolean) => void;
+  onSelectionModeChange?: (selectionMode: boolean) => void;
+  onOpenTabsSourceKeyChange?: (key: string) => void;
 }
 
 export function Sidebar({
+  workspaceId,
   selectedFolderId,
-  onSelectFolder,
   showStarred,
-  onSelectStarred,
-  onSelectInbox,
   showBin,
-  onSelectBin,
+  sidebarCollapsed,
+  sidebarExpanded,
+  sidebarToggleRef,
+  sidebarRailToggleRef,
+  onToggleSidebar,
+  onSelectionModeChange,
+  onOpenTabsSourceKeyChange,
 }: SidebarProps) {
-  const folders = useWorkspaceFolders();
-  const groups = useTabBoardStore((state) => state.groups);
-  const bin = useTabBoardStore((state) => state.bin);
-  const activeWorkspaceId = useTabBoardStore((state) => state.activeWorkspaceId);
-  const addFolder = useTabBoardStore((state) => state.addFolder);
-  const renameFolder = useTabBoardStore((state) => state.renameFolder);
-  const deleteFolder = useTabBoardStore((state) => state.deleteFolder);
-
-  const [importModalOpened, { open: openImportModal, close: closeImportModal }] = useDisclosure(false);
-  const [exportModalOpened, { open: openExportModal, close: closeExportModal }] = useDisclosure(false);
-  const [createModalOpened, { open: openCreateModal, close: closeCreateModal }] = useDisclosure(false);
-  const [renameModalOpened, { open: openRenameModal, close: closeRenameModal }] = useDisclosure(false);
-  const [deleteModalOpened, { open: openDeleteModal, close: closeDeleteModal }] = useDisclosure(false);
-
-  const [newFolderName, setNewFolderName] = useState('');
-  const [selectedColor, setSelectedColor] = useState(FOLDER_COLORS[0]);
-  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
-  const [editingFolderName, setEditingFolderName] = useState('');
-  const [hoveredFolderId, setHoveredFolderId] = useState<string | null>(null);
-
-  const inboxCount = groups.filter(
-    (g) =>
-      g.workspaceId === activeWorkspaceId && !g.starred && g.folderId === null
-  ).length;
-
-  const starredCount = groups.filter(
-    (g) => g.workspaceId === activeWorkspaceId && g.starred
-  ).length;
-
-  const getFolderCount = (folderId: string) =>
-    groups.filter(
-      (g) => g.workspaceId === activeWorkspaceId && g.folderId === folderId
-    ).length;
-
-  const handleCreateFolder = () => {
-    if (newFolderName.trim()) {
-      addFolder(activeWorkspaceId, newFolderName.trim(), selectedColor);
-      setNewFolderName('');
-      setSelectedColor(FOLDER_COLORS[0]);
-      closeCreateModal();
-    }
+  const openTabs = useOpenTabsRuntime();
+  useEffect(() => {
+    onSelectionModeChange?.(openTabs.selectionMode);
+    return () => onSelectionModeChange?.(false);
+  }, [onSelectionModeChange, openTabs.selectionMode]);
+  const currentCategorySnapshot: CaptureCategorySnapshot = {
+    showBin,
+    showStarred,
+    selectedFolderId,
   };
-
-  const openRenameFolderModal = (folderId: string) => {
-    const folder = folders.find((f) => f.id === folderId);
-    if (folder) {
-      setEditingFolderId(folderId);
-      setEditingFolderName(folder.name);
-      openRenameModal();
-    }
-  };
-
-  const handleRenameFolder = () => {
-    if (editingFolderId && editingFolderName.trim()) {
-      renameFolder(editingFolderId, editingFolderName.trim());
-      closeRenameModal();
-      setEditingFolderId(null);
-      setEditingFolderName('');
-    }
-  };
-
-  const openDeleteFolderModal = (folderId: string) => {
-    setEditingFolderId(folderId);
-    openDeleteModal();
-  };
-
-  const handleDeleteFolder = () => {
-    if (editingFolderId) {
-      deleteFolder(editingFolderId);
-      closeDeleteModal();
-      if (selectedFolderId === editingFolderId) {
-        onSelectFolder(null);
-      }
-      setEditingFolderId(null);
-    }
-  };
-
-  const getEditingFolder = () => folders.find((f) => f.id === editingFolderId);
-
-  const openCreateModalAndReset = () => {
-    setNewFolderName('');
-    setSelectedColor(FOLDER_COLORS[0]);
-    openCreateModal();
-  };
-
-  const InboxDroppable = () => {
-    const { setNodeRef, isOver } = useDroppable({
-      id: 'inbox-droppable',
-      data: {
-        type: 'inbox',
-        folderId: null,
-      },
-    });
-
-    return (
-      <div ref={setNodeRef}>
-        <NavLink
-          label="Inbox"
-          leftSection={<IconInbox size={18} />}
-          rightSection={
-            <Text size="xs" c="dimmed">
-              {inboxCount}
-            </Text>
-          }
-          active={!selectedFolderId && !showStarred && !showBin}
-          onClick={onSelectInbox}
-          style={{
-            backgroundColor: isOver ? 'var(--mantine-color-blue-0)' : undefined,
-            borderRadius: 'var(--mantine-radius-sm)',
-          }}
-        />
-      </div>
+  const categorySnapshotRef = useRef(currentCategorySnapshot);
+  categorySnapshotRef.current = currentCategorySnapshot;
+  const captureSelectedTabs = () => {
+    const categorySnapshot = { ...categorySnapshotRef.current };
+    return openTabs.captureSelectedTabs(
+      categorySnapshot,
+      () => ({ ...categorySnapshotRef.current }),
     );
   };
-
-  const FolderDroppable = ({ folder }: { folder: typeof folders[0] }) => {
-    const { setNodeRef, isOver } = useDroppable({
-      id: `folder-${folder.id}`,
-      data: {
-        type: 'folder',
-        folderId: folder.id,
-      },
-    });
-
-    return (
-      <Menu shadow="md" width={160} key={folder.id} trigger="click">
-        <Menu.Target>
-          <div
-            ref={setNodeRef}
-            onMouseEnter={() => setHoveredFolderId(folder.id)}
-            onMouseLeave={() => setHoveredFolderId(null)}
-            style={{
-              backgroundColor: isOver ? 'var(--mantine-color-blue-0)' : undefined,
-              borderRadius: 'var(--mantine-radius-sm)',
-            }}
-          >
-            <NavLink
-              label={
-                <MantineGroup gap="xs" wrap="nowrap">
-                  <Box
-                    w={8}
-                    h={8}
-                    style={{ backgroundColor: folder.color, flexShrink: 0, borderRadius: '100%' }}
-                  />
-                  <Text size="sm" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {folder.name}
-                  </Text>
-                </MantineGroup>
-              }
-              leftSection={<IconFolder size={18} color={folder.color} />}
-              rightSection={
-                <MantineGroup gap={2} style={{ visibility: hoveredFolderId === folder.id ? 'visible' : 'hidden' }}>
-                  <Tooltip label="Rename">
-                    <ActionIcon
-                      size="xs"
-                      variant="subtle"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openRenameFolderModal(folder.id);
-                      }}
-                    >
-                      <IconEdit size={12} />
-                    </ActionIcon>
-                  </Tooltip>
-                  <Tooltip label="Delete">
-                    <ActionIcon
-                      size="xs"
-                      variant="subtle"
-                      color="red"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openDeleteFolderModal(folder.id);
-                      }}
-                    >
-                      <IconTrashX size={12} />
-                    </ActionIcon>
-                  </Tooltip>
-                  <Text size="xs" c="dimmed" ml={4}>
-                    {getFolderCount(folder.id)}
-                  </Text>
-                </MantineGroup>
-              }
-              active={selectedFolderId === folder.id}
-              onClick={() => onSelectFolder(folder.id)}
-            />
-          </div>
-        </Menu.Target>
-        <Menu.Dropdown>
-          <Menu.Item
-            leftSection={<IconEdit size={14} />}
-            onClick={() => openRenameFolderModal(folder.id)}
-          >
-            Rename
-          </Menu.Item>
-          <Menu.Item
-            leftSection={<IconTrashX size={14} />}
-            color="red"
-            onClick={() => openDeleteFolderModal(folder.id)}
-          >
-            Delete
-          </Menu.Item>
-        </Menu.Dropdown>
-      </Menu>
-    );
+  const focusFilter = () => document.getElementById(OPEN_TABS_FILTER_INPUT_ID)?.focus();
+  const focusTab = (tabId: number | undefined) => {
+    if (!Number.isSafeInteger(tabId)) return;
+    document.querySelector<HTMLElement>(
+      `.manager-open-tab-row[data-open-tab-id="${tabId}"] [data-info-popover="open"]`,
+    )?.focus();
   };
 
   return (
-    <Stack gap={0} h="100%">
-      <Box style={{ height: 280, flexShrink: 0 }}>
-        <OpenTabsPanel />
-      </Box>
-
-      <Divider my="sm" />
-
-      <InboxDroppable />
-      <NavLink
-        label="Starred"
-        leftSection={<IconStar size={18} />}
-        rightSection={
-          <Text size="xs" c="dimmed">
-            {starredCount}
-          </Text>
-        }
-        active={showStarred}
-        onClick={onSelectStarred}
-      />
-      <NavLink
-        label="Trash"
-        leftSection={<IconTrash size={18} />}
-        rightSection={
-          <Text size="xs" c="dimmed">
-            {bin.length}
-          </Text>
-        }
-        active={showBin}
-        onClick={onSelectBin}
-      />
-
-      <Divider my="sm" />
-
-      <MantineGroup justify="space-between" px="xs" mb="xs">
-        <Text size="xs" fw={600} c="dimmed" tt="uppercase">
-          Categories
-        </Text>
-        <Tooltip label="New category">
-          <ActionIcon
-            size="xs"
-            variant="subtle"
-            onClick={openCreateModalAndReset}
-          >
-            <IconFolderPlus size={16} />
-          </ActionIcon>
-        </Tooltip>
-      </MantineGroup>
-
-      <ScrollArea style={{ flex: 1 }} type="scroll" scrollbarSize={4}>
-        <Stack gap={0}>
-          {folders.map((folder) => (
-            <FolderDroppable key={folder.id} folder={folder} />
-          ))}
-          {folders.length === 0 && (
-            <Box px="md" py="xs">
-              <Text size="sm" c="dimmed">
-                No categories yet
-              </Text>
-            </Box>
-          )}
+    <div className="manager-sidebar__overlay">
+        <Stack gap={0} className="manager-sidebar-content">
+          <Box className="manager-open-tabs">
+            <OpenTabsPanel
+              workspaceId={workspaceId}
+              windows={openTabs.windows}
+              selectedWindow={openTabs.selectedWindow}
+              selectedWindowId={openTabs.selectedWindowId}
+              query={openTabs.query}
+              filteredTabs={openTabs.filteredTabs}
+              selectionMode={openTabs.selectionMode}
+              selectedTabIds={openTabs.selectedTabIds}
+              selectedCount={openTabs.selectedCount}
+              sidebarPinned={sidebarExpanded}
+              closingTabIds={openTabs.closingTabIds}
+              updatingSelection={openTabs.updatingSelection}
+              loading={openTabs.loading}
+              capturing={openTabs.capturing}
+              error={openTabs.error}
+              onQueryChange={openTabs.setQuery}
+              onSelectWindow={openTabs.selectWindow}
+              onExitSelectionMode={openTabs.exitSelectionMode}
+              onToggleTabSelection={openTabs.toggleTabSelection}
+              onFocusTab={openTabs.focusTab}
+              onCloseTab={openTabs.closeTab}
+              onPinTab={openTabs.pinTab}
+              onCloseSelectedTabs={openTabs.closeSelectedTabs}
+              onPinSelectedTabs={openTabs.pinSelectedTabs}
+              onClearFilter={openTabs.clearFilter}
+              onCaptureSelectedTabs={captureSelectedTabs}
+              onRefresh={openTabs.refresh}
+              sidebarToggleRef={sidebarToggleRef}
+              onToggleSidebar={onToggleSidebar}
+              onSourceKeyChange={onOpenTabsSourceKeyChange}
+            />
+          </Box>
         </Stack>
-      </ScrollArea>
-
-      <Divider my="sm" />
-
-      <MantineGroup justify="center" gap="xs" pb="xs">
-        <Tooltip label="Import">
-          <ActionIcon
-            variant="subtle"
-            size="md"
-            onClick={openImportModal}
-          >
-            <IconUpload size={18} />
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label="Export">
-          <ActionIcon
-            variant="subtle"
-            size="md"
-            onClick={openExportModal}
-          >
-            <IconDownload size={18} />
-          </ActionIcon>
-        </Tooltip>
-      </MantineGroup>
-
-      <ImportModal opened={importModalOpened} onClose={closeImportModal} />
-      <ExportModal opened={exportModalOpened} onClose={closeExportModal} />
-
-      <Modal
-        opened={createModalOpened}
-        onClose={closeCreateModal}
-        title="New Category"
-        size="sm"
-        centered
-      >
-        <Stack gap="md">
-          <TextInput
-            label="Category name"
-            placeholder="Enter category name"
-            value={newFolderName}
-            onChange={(e) => setNewFolderName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleCreateFolder();
-            }}
-            autoFocus
-          />
-          <div>
-            <Text size="sm" fw={500} mb="xs">
-              Color
-            </Text>
-            <MantineGroup gap="xs">
-              {FOLDER_COLORS.map((color) => (
-                <ActionIcon
-                  key={color}
-                  size="lg"
-                  variant={selectedColor === color ? 'filled' : 'light'}
-                  style={{ backgroundColor: selectedColor === color ? color : 'transparent', color }}
-                  onClick={() => setSelectedColor(color)}
-                >
-                  <Box w={16} h={16} style={{ backgroundColor: color, borderRadius: '50%' }} />
-                </ActionIcon>
-              ))}
-            </MantineGroup>
-          </div>
-          <MantineGroup justify="flex-end" mt="md">
-            <Button variant="default" onClick={closeCreateModal}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleCreateFolder}
-              disabled={!newFolderName.trim()}
-              leftSection={<IconFolderPlus size={16} />}
-            >
-              Create
-            </Button>
-          </MantineGroup>
-        </Stack>
-      </Modal>
-
-      <Modal
-        opened={renameModalOpened}
-        onClose={closeRenameModal}
-        title="Rename Category"
-        size="sm"
-        centered
-      >
-        <Stack gap="md">
-          <TextInput
-            label="Category name"
-            placeholder="Enter new name"
-            value={editingFolderName}
-            onChange={(e) => setEditingFolderName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleRenameFolder();
-            }}
-            autoFocus
-          />
-          <MantineGroup justify="flex-end" mt="md">
-            <Button variant="default" onClick={closeRenameModal}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleRenameFolder}
-              disabled={!editingFolderName.trim()}
-              leftSection={<IconEdit size={16} />}
-            >
-              Rename
-            </Button>
-          </MantineGroup>
-        </Stack>
-      </Modal>
-
-      <Modal
-        opened={deleteModalOpened}
-        onClose={closeDeleteModal}
-        title="Delete Category"
-        size="sm"
-        centered
-      >
-        <Stack gap="md">
-          <Alert icon={<IconAlertTriangle size={16} />} color="yellow" variant="light">
-            <Text size="sm">
-              Are you sure you want to delete <strong>{getEditingFolder()?.name}</strong>?
-              Sessions in this category will be moved to Inbox.
-            </Text>
-          </Alert>
-          <MantineGroup justify="flex-end" mt="md">
-            <Button variant="default" onClick={closeDeleteModal}>
-              Cancel
-            </Button>
-            <Button
-              color="red"
-              onClick={handleDeleteFolder}
-              leftSection={<IconTrashX size={16} />}
-            >
-              Delete
-            </Button>
-          </MantineGroup>
-        </Stack>
-      </Modal>
-    </Stack>
+    </div>
   );
 }

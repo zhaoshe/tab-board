@@ -1,4 +1,5 @@
 import { createTheme, type MantineThemeOverride } from '@mantine/core';
+import './tooltip.css';
 
 export const theme: MantineThemeOverride = createTheme({
   primaryColor: 'blue',
@@ -25,6 +26,11 @@ export const theme: MantineThemeOverride = createTheme({
       'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
   },
   components: {
+    Tooltip: {
+      defaultProps: {
+        openDelay: 1000,
+      },
+    },
     Button: {
       defaultProps: {
         size: 'sm',

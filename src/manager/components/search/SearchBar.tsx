@@ -1,24 +1,37 @@
 import { useState, useEffect, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { TextInput, ActionIcon, Tooltip, Badge } from '@mantine/core';
 import { IconSearch, IconX, IconKeyboard } from '@tabler/icons-react';
 import { useSearchQuery, useSetSearchQuery } from '../../hooks/useFilteredGroups';
+import { getVisibleGroups, type CategoryFilter } from '../../core/selectors';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
-import { normalizeSearch, groupMatchesQuery } from '../../../shared/model';
+import { normalizeSearch } from '../../../shared/model';
 
-export function SearchBar() {
+interface SearchBarProps {
+  autoFocus?: boolean;
+  inputId?: string;
+  category?: CategoryFilter;
+  fullWidth?: boolean;
+  onEscape?: () => void;
+}
+
+export function SearchBar({ autoFocus = false, inputId, category = 'inbox', fullWidth = false, onEscape }: SearchBarProps) {
   const query = useSearchQuery();
   const setQuery = useSetSearchQuery();
   const [localValue, setLocalValue] = useState(query);
   const inputRef = useRef<HTMLInputElement>(null);
-  const groups = useTabBoardStore((state) => state.groups);
-  const activeWorkspaceId = useTabBoardStore((state) => state.activeWorkspaceId);
+  const state = useTabBoardStore(
+    useShallow((currentState) => ({
+      activeWorkspaceId: currentState.activeWorkspaceId,
+      workspaces: currentState.workspaces,
+      folders: currentState.folders,
+      groups: currentState.groups,
+    })),
+  );
 
   const normalized = normalizeSearch(localValue);
   const matchCount = normalized
-    ? groups.filter(
-        (g) =>
-          g.workspaceId === activeWorkspaceId && groupMatchesQuery(g, normalized)
-      ).length
+    ? getVisibleGroups(state, category, localValue).length
     : 0;
 
   useEffect(() => {
@@ -32,27 +45,15 @@ export function SearchBar() {
   }, []);
 
   useEffect(() => {
+    if (autoFocus) inputRef.current?.focus();
+  }, [autoFocus]);
+
+  useEffect(() => {
     const timeout = setTimeout(() => {
       setQuery(localValue);
     }, 150);
     return () => clearTimeout(timeout);
   }, [localValue, setQuery]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-        e.preventDefault();
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      }
-      if (e.key === 'Escape' && document.activeElement === inputRef.current) {
-        setLocalValue('');
-        inputRef.current?.blur();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
 
   const handleClear = () => {
     setLocalValue('');
@@ -60,26 +61,40 @@ export function SearchBar() {
   };
 
   return (
-    <div style={{ position: 'relative', maxWidth: 500, width: '100%' }}>
+    <div style={{ position: 'relative', maxWidth: fullWidth ? undefined : 500, width: '100%' }}>
       <TextInput
+        id={inputId}
         ref={inputRef}
         placeholder="Search sessions, tabs, URLs, notes..."
         leftSection={<IconSearch size={16} />}
+        rightSectionPointerEvents="all"
         rightSection={
-          localValue ? (
-            <ActionIcon variant="subtle" onClick={handleClear} title="Clear (Esc)">
+          onEscape ? (
+            <Tooltip label="Close search" position="left">
+              <ActionIcon variant="subtle" onClick={onEscape} aria-label="Close search">
+                <IconX size={16} />
+              </ActionIcon>
+            </Tooltip>
+          ) : localValue ? (
+            <ActionIcon variant="subtle" onClick={handleClear} title="Clear (Esc)" aria-label="Clear search">
               <IconX size={16} />
             </ActionIcon>
           ) : (
-            <Tooltip label="Ctrl/Cmd + F" position="left">
-              <ActionIcon variant="subtle" size="sm">
+            <Tooltip label="/ or Ctrl/Cmd + K" position="left">
+              <span aria-hidden="true">
                 <IconKeyboard size={14} />
-              </ActionIcon>
+              </span>
             </Tooltip>
           )
         }
         value={localValue}
         onChange={(e) => setLocalValue(e.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            onEscape?.();
+          }
+        }}
         style={{ width: '100%' }}
       />
       {normalized && matchCount > 0 && (

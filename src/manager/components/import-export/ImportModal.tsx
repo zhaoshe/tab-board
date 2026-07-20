@@ -14,14 +14,15 @@ import {
 } from '@mantine/core';
 import { IconUpload, IconFileImport, IconAlertCircle, IconCheck } from '@tabler/icons-react';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
-import { parseImportText } from '../../../shared/model';
+import { parseImportedText } from '../../core/commands';
 
 interface ImportModalProps {
   opened: boolean;
   onClose: () => void;
+  folderId?: string | null;
 }
 
-export function ImportModal({ opened, onClose }: ImportModalProps) {
+export function ImportModal({ opened, onClose, folderId = null }: ImportModalProps) {
   const [importText, setImportText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -36,15 +37,16 @@ export function ImportModal({ opened, onClose }: ImportModalProps) {
       return;
     }
     try {
-      const groups = parseImportText(text, { workspaceId: activeWorkspaceId });
+      const groups = parseImportedText(text);
       const tabCount = groups.reduce((sum, g) => sum + g.tabs.length, 0);
       setPreview({ groupCount: groups.length, tabCount });
       setError(null);
     } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to parse import text';
       setPreview(null);
-      setError('Failed to parse import text');
+      setError(message);
     }
-  }, [activeWorkspaceId]);
+  }, []);
 
   const handleTextChange = (value: string) => {
     setImportText(value);
@@ -78,6 +80,8 @@ export function ImportModal({ opened, onClose }: ImportModalProps) {
       updatePreview(text);
     };
     reader.onerror = () => {
+      setImportText('');
+      setPreview(null);
       setError('Failed to read file');
     };
     reader.readAsText(file);
@@ -95,7 +99,7 @@ export function ImportModal({ opened, onClose }: ImportModalProps) {
       return;
     }
     try {
-      importGroups(importText, { workspaceId: activeWorkspaceId });
+      importGroups(importText, { workspaceId: activeWorkspaceId, folderId });
       setImportText('');
       setPreview(null);
       setError(null);
@@ -175,7 +179,7 @@ export function ImportModal({ opened, onClose }: ImportModalProps) {
           </Text>
           <Stack gap={4}>
             <Text size="xs">
-              <strong>TabBoard JSON</strong> - Full export format from TabBoard/ZipTab
+              <strong>TabBoard JSON</strong> - Full export format from TabBoard
             </Text>
             <Text size="xs">
               <strong>OneTab text</strong> - OneTab export format (title + URL pairs)

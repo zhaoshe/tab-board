@@ -6,6 +6,7 @@ export interface Settings {
   closeTabsAfterSave: boolean;
   dedupeOnSave: boolean;
   deleteRestoredTabs: boolean;
+  customUrlFilter: string;
   excludePinned: boolean;
   focusRestoredTabs: boolean;
   includeChromeUrls: boolean;
@@ -89,8 +90,15 @@ export interface BinEntry {
   originalWorkspaceName?: string;
 }
 
+export interface DropOperationLedgerEntry {
+  operationId: string;
+  digest: string;
+  appliedAt: string;
+}
+
 export interface TabBoardState {
   version: number;
+  mutationRevision: number;
   workspaces: Workspace[];
   activeWorkspaceId: string;
   groups: Group[];
@@ -98,6 +106,7 @@ export interface TabBoardState {
   categoryOrderByWorkspace: Record<string, string[]>;
   quickList: TabItem[];
   bin: BinEntry[];
+  dropOperationLedger: DropOperationLedgerEntry[];
   settings: Settings;
   createdAt: string;
   updatedAt: string;

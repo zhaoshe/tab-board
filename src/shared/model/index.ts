@@ -24,9 +24,12 @@ export {
   createGroupFromTabRecords,
   createBinEntry,
   validateFolderName,
+  type FolderNameValidation,
   findTabRef,
   moveGroupTabs,
+  resolveRestoreGroupPlacement,
 } from './schema';
 export type { FindTabRefResult } from './schema';
 export * from './search';
 export * from './import-export';
+export * from './capture-policy';

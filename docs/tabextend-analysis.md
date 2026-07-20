@@ -338,11 +338,11 @@
 
 ---
 
-# 下一步 1：tabExtend 与 ZipTab 逐项对比
+# 下一步 1：tabExtend 与 TabBoard 逐项对比
 
 ## 8. 总体定位对比
 
-| 维度 | tabExtend | ZipTab |
+| 维度 | tabExtend | TabBoard |
 |---|---|---|
 | 产品一句话 | 浏览器内 workspace dashboard | local-first tab manager |
 | 核心目标 | 管理 tabs + notes + reminders + 协作 | 保存和找回浏览现场 |
@@ -350,7 +350,7 @@
 | 复杂度 | 高 | 中等，刻意克制 |
 | 商业模型 | 账号 + freemium + 协作升级 | 纯本地、无账号 |
 
-ZipTab 当前定位证据：
+TabBoard 当前定位证据：
 
 - `docs/project-overview.md:5-8`
 - `docs/project-overview.md:11-20`
@@ -359,7 +359,7 @@ ZipTab 当前定位证据：
 结论：
 
 - tabExtend 更宽，更像平台
-- ZipTab 更窄，更像专注版本地工具
+- TabBoard 更窄，更像专注版本地工具
 
 ## 9. 信息架构对比
 
@@ -372,7 +372,7 @@ ZipTab 当前定位证据：
 - group / session
 - open tabs 与 saved 内容联动
 
-ZipTab 证据：
+TabBoard 证据：
 
 - `docs/project-overview.md:42-47`
 - `docs/feature-spec.md:41-47`
@@ -380,7 +380,7 @@ ZipTab 证据：
 
 ### 9.2 差异点
 
-| 维度 | tabExtend | ZipTab |
+| 维度 | tabExtend | TabBoard |
 |---|---|---|
 | 顶层抽象 | workspace OS | saved browsing context manager |
 | group 内内容 | link + note + todo + reminder + image + stack | link + note |
@@ -388,12 +388,12 @@ ZipTab 证据：
 | live 区域 | 左侧 open tabs，较强操作性 | 左侧 Open Tabs · All windows |
 | board 主体 | 强卡片工作区 | session board，偏恢复与整理 |
 
-ZipTab 当前刻意不做：
+TabBoard 当前刻意不做：
 
 - Todo 工作流：`docs/project-overview.md:48-53`
 - 远端同步和协作：`docs/project-overview.md:48-53`, `121-127`
 
-结论：ZipTab 现在是 **窄而稳**，tabExtend 是 **宽而强**。
+结论：TabBoard 现在是 **窄而稳**，tabExtend 是 **宽而强**。
 
 ## 10. 功能面逐项对比
 
@@ -405,19 +405,19 @@ ZipTab 当前刻意不做：
 - context menu save image / text selection / tabs
 - bookmarks / top sites / custom URL 进入系统
 
-**ZipTab**
+**TabBoard**
 - 保存当前窗口、选中 open tabs、左右 tabs、其他 tabs、全部窗口
-- capture 时按源 URL 去重；所有有 URL 的非 ZipTab tabs 都进入 capture 尝试
+- capture 时按源 URL 去重；所有有 URL 的非 TabBoard tabs 都进入 capture 尝试
 - popup Save / Open / Dedupe
 
 证据：
 
-- ZipTab Capture：`docs/feature-spec.md:93-155`
+- TabBoard Capture：`docs/feature-spec.md:93-155`
 - Popup：`docs/feature-spec.md:49-60`
 
 判断：
 
-- ZipTab 在“窗口保存”主链路上更干净
+- TabBoard 在“窗口保存”主链路上更干净
 - tabExtend 在“多来源输入”上明显更丰富
 
 ### 10.2 Restore / Recovery
@@ -426,7 +426,7 @@ ZipTab 当前刻意不做：
 - restore group / item
 - bin / restore deleted items
 
-**ZipTab**
+**TabBoard**
 - 单 tab restore
 - session restore
 - restore 后按设置删除记录
@@ -434,13 +434,13 @@ ZipTab 当前刻意不做：
 
 证据：
 
-- ZipTab Restore：`docs/feature-spec.md:156-195`
+- TabBoard Restore：`docs/feature-spec.md:156-195`
 - Bin：`docs/project-overview.md:86-88`
 
 判断：
 
 - 两者都重视恢复
-- ZipTab 恢复语义更聚焦“浏览现场”
+- TabBoard 恢复语义更聚焦“浏览现场”
 - tabExtend 更偏内容资产回收
 
 ### 10.3 组织 / 编辑
@@ -451,40 +451,40 @@ ZipTab 当前刻意不做：
 - stack / unstack
 - public share / invite / collaboration
 
-**ZipTab**
+**TabBoard**
 - workspace / category / session / tab item
 - rename / note / lock / delete / drag
 - note 仅作 session 辅助，不做任务系统
 
 证据：
 
-- ZipTab Organize / Edit / Move：`docs/feature-spec.md:11-15`
+- TabBoard Organize / Edit / Move：`docs/feature-spec.md:11-15`
 - 项目边界：`docs/project-overview.md:121-127`
 
 判断：
 
 - tabExtend 把“工作组织”做满
-- ZipTab 更像“session memory manager”
+- TabBoard 更像“session memory manager”
 
 ### 10.4 搜索与发现
 
 **tabExtend**
 - 高概率有 workspace 内搜索、empty search state、most visited、bookmarks 辅助
 
-**ZipTab**
+**TabBoard**
 - manager search
 - omnibox 搜索 saved tabs
 - 反查历史 session
 
 证据：
 
-- ZipTab Search / Filter：`docs/feature-spec.md:12`
+- TabBoard Search / Filter：`docs/feature-spec.md:12`
 - Omnibox：`docs/feature-spec.md:85-92`
 - 项目目标里的反查：`docs/project-overview.md:15-18`
 
 判断：
 
-- ZipTab 搜索更贴浏览器恢复任务
+- TabBoard 搜索更贴浏览器恢复任务
 - tabExtend 搜索更像工作台内容搜索
 
 ### 10.5 协作 / 同步
@@ -492,17 +492,17 @@ ZipTab 当前刻意不做：
 **tabExtend**
 - 支持账号、同步、邀请、实时协作、公开链接
 
-**ZipTab**
+**TabBoard**
 - 明确不做
 
 证据：
 
-- ZipTab 不做多设备同步和协作：`docs/project-overview.md:121-127`
+- TabBoard 不做多设备同步和协作：`docs/project-overview.md:121-127`
 
 判断：
 
 - 这是两者最大战略分叉
-- ZipTab 不该盲目追 tabExtend 这一块
+- TabBoard 不该盲目追 tabExtend 这一块
 
 ## 11. UI 设计对比
 
@@ -514,7 +514,7 @@ ZipTab 当前刻意不做：
 
 ### 11.2 差异点
 
-| 维度 | tabExtend | ZipTab |
+| 维度 | tabExtend | TabBoard |
 |---|---|---|
 | 视觉气质 | SaaS 工作台、插画化、柔和 | dense but calm、本地工具感更强 |
 | 空状态 | 插画 + 教学 | 功能说明更直接，营销感低 |
@@ -522,12 +522,12 @@ ZipTab 当前刻意不做：
 | 可定制程度 | 高 | 中等，克制 |
 | 新手引导 | 强 tour | 目前弱很多 |
 
-ZipTab 原则证据：`docs/project-overview.md:100-105`
+TabBoard 原则证据：`docs/project-overview.md:100-105`
 
 判断：
 
 - tabExtend 更“产品化”
-- ZipTab 更“工具化”
+- TabBoard 更“工具化”
 
 ## 12. UX 风格对比
 
@@ -539,7 +539,7 @@ ZipTab 原则证据：`docs/project-overview.md:100-105`
 - 渐进暴露强
 - 情绪价值高
 
-### ZipTab
+### TabBoard
 
 - save fast, organize later：`docs/project-overview.md:94-95`
 - sessions over bookmarks：`docs/project-overview.md:97-98`
@@ -550,12 +550,12 @@ ZipTab 原则证据：`docs/project-overview.md:100-105`
 判断：
 
 - 两者都重直接操作
-- ZipTab 更快、更克制
+- TabBoard 更快、更克制
 - tabExtend 更完整、更具“workspace 产品感”
 
 ---
 
-# 下一步 2：ZipTab 可借鉴清单
+# 下一步 2：TabBoard 可借鉴清单
 
 ## 13. 可以直接借鉴
 
@@ -569,7 +569,7 @@ ZipTab 原则证据：`docs/project-overview.md:100-105`
 - 明确解释顶部 workspace、左侧 Open Tabs、右侧 saved sessions
 - 空状态直接给操作建议
 
-原因：ZipTab 现在结构已经不算简单，但新手引导偏弱。
+原因：TabBoard 现在结构已经不算简单，但新手引导偏弱。
 
 ### B. Empty state 组件化
 
@@ -599,7 +599,7 @@ ZipTab 原则证据：`docs/project-overview.md:100-105`
 - Most visited sites 作为快速导入源
 - Save image / selection 到 note 或 session
 
-注意：要按 ZipTab 边界做减法，不要把系统做重。
+注意：要按 TabBoard 边界做减法，不要把系统做重。
 
 ### D. Workspace 可识别性增强
 
@@ -620,7 +620,7 @@ ZipTab 原则证据：`docs/project-overview.md:100-105`
 - session/category symbol
 - 更强分组区分色或 meta 标记
 
-前提：不能破坏 ZipTab 现在“dense but calm”原则。
+前提：不能破坏 TabBoard 现在“dense but calm”原则。
 
 ### F. 引导式快捷提示
 
@@ -649,7 +649,7 @@ ZipTab 原则证据：`docs/project-overview.md:100-105`
 
 原因：
 
-- 会明显冲击 ZipTab 定位
+- 会明显冲击 TabBoard 定位
 - 会让 session memory manager 变成泛 productivity app
 - 维护成本大增
 
@@ -662,7 +662,7 @@ ZipTab 原则证据：`docs/project-overview.md:100-105`
 
 原因：
 
-- 与 ZipTab 的 local-first 原则冲突：`docs/project-overview.md:91-93`
+- 与 TabBoard 的 local-first 原则冲突：`docs/project-overview.md:91-93`
 - 会引入权限、后端、隐私、计费复杂度
 
 建议：不做。
@@ -671,7 +671,7 @@ ZipTab 原则证据：`docs/project-overview.md:100-105`
 
 原因：
 
-- 与 ZipTab 当前产品气质不匹配
+- 与 TabBoard 当前产品气质不匹配
 - 会污染工具体验
 
 建议：不做。
@@ -680,7 +680,7 @@ ZipTab 原则证据：`docs/project-overview.md:100-105`
 
 原因：
 
-- ZipTab 当前优势之一是界面相对收敛
+- TabBoard 当前优势之一是界面相对收敛
 - 太多样式开关会削弱可维护性
 
 建议：只保留能提升识别与导航效率的个性化。
@@ -695,15 +695,15 @@ ZipTab 原则证据：`docs/project-overview.md:100-105`
 4. 过多内容类型混排
 5. 把 tab manager 做成半个 Notion
 
-ZipTab 现在最值钱地方，是“范围收得住”。
+TabBoard 现在最值钱地方，是“范围收得住”。
 
 ---
 
-# 下一步 3：面向 ZipTab 的改造建议
+# 下一步 3：面向 TabBoard 的改造建议
 
 ## 16. 设计目标
 
-在不破坏 ZipTab 当前定位前提下，借 tabExtend 长处，增强：
+在不破坏 TabBoard 当前定位前提下，借 tabExtend 长处，增强：
 
 - 首次理解成本
 - workspace 辨识度
@@ -765,7 +765,7 @@ ZipTab 现在最值钱地方，是“范围收得住”。
 
 tabExtend 最强地方之一，不是功能多，而是会告诉用户下一步该干嘛。
 
-**为什么适合 ZipTab**
+**为什么适合 TabBoard**
 
 不改数据模型，不改核心定位，但能显著提升完成度。
 
@@ -779,7 +779,7 @@ tabExtend 最强地方之一，不是功能多，而是会告诉用户下一步�
 
 **为什么**
 
-ZipTab 已经有 workspace，但感知强度还不够高。
+TabBoard 已经有 workspace，但感知强度还不够高。
 
 **收益**
 
@@ -813,7 +813,7 @@ tabExtend 很强一点，是它不仅接当前 tabs，还接浏览器里别的�
 
 **为什么**
 
-ZipTab 已经有强 DnD，但可发现性仍偏工程化。
+TabBoard 已经有强 DnD，但可发现性仍偏工程化。
 
 ### 18.5 P1：Session/category 轻量 symbol 系统
 
@@ -829,7 +829,7 @@ tabExtend 的 symbol/emoji 提高了扫描效率。
 
 **风险控制**
 
-必须限制密度，不能把 ZipTab 弄成花板子。
+必须限制密度，不能把 TabBoard 弄成花板子。
 
 ### 18.6 P2：搜索辅助增强
 
@@ -841,7 +841,7 @@ tabExtend 的 symbol/emoji 提高了扫描效率。
 
 **为什么**
 
-这能强化 ZipTab 的“找回浏览现场”优势。
+这能强化 TabBoard 的“找回浏览现场”优势。
 
 ### 18.7 P3：note 能力小幅增强，不扩成任务系统
 
@@ -858,7 +858,7 @@ tabExtend 的 symbol/emoji 提高了扫描效率。
 
 **理由**
 
-ZipTab 需要的是“session 注释能力”，不是第二个 productivity suite。
+TabBoard 需要的是“session 注释能力”，不是第二个 productivity suite。
 
 ---
 
@@ -899,9 +899,9 @@ ZipTab 需要的是“session 注释能力”，不是第二个 productivity sui
 它好用，不是因为“能存 tab”。
 而是因为它把 tab 管理提升成了 **workspace 设计**。
 
-### 对 ZipTab 的判断
+### 对 TabBoard 的判断
 
-ZipTab 现在方向是对的：
+TabBoard 现在方向是对的：
 
 - local-first
 - save fast, organize later
@@ -913,7 +913,7 @@ ZipTab 现在方向是对的：
 - `docs/project-overview.md:91-105`
 - `docs/feature-spec.md:39-71`
 
-### 对 ZipTab 下一步最合理方向
+### 对 TabBoard 下一步最合理方向
 
 不是把 tabExtend 全搬过来。
 而是借它这些长处：
@@ -924,7 +924,7 @@ ZipTab 现在方向是对的：
 - 多来源输入
 - 更好的引导式交互
 
-同时保住 ZipTab 当前最值钱的东西：
+同时保住 TabBoard 当前最值钱的东西：
 
 - 本地优先
 - 边界克制
@@ -932,4 +932,4 @@ ZipTab 现在方向是对的：
 
 ### 一句话建议
 
-**ZipTab 应该学 tabExtend 的“产品完成度”，不要学它的“产品膨胀度”。**
+**TabBoard 应该学 tabExtend 的“产品完成度”，不要学它的“产品膨胀度”。**

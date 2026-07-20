@@ -1,12 +1,12 @@
-# ZipTab Agent Guide
+# TabBoard Agent Guide
 
-This file is the shared operating guide for AI agents working in this repo. `CLAUDE.md` should be a symlink to this file so Codex and Claude Code read the same project context.
+This file is the shared operating guide for AI agents working in this repo. `CLAUDE.md` is a symlink to this file so Codex and Claude Code read the same project context.
 
 ## Project Snapshot
 
-ZipTab is a local-first Chrome Manifest V3 tab manager inspired by OneTab and tabExtend. It saves browser tabs into recoverable sessions, then lets the user organize them with workspaces, categories, search, notes, drag and drop, import/export, and a new-tab manager page.
+TabBoard is a local-first Chrome Manifest V3 tab manager inspired by OneTab and tabExtend. It saves browser tabs into recoverable sessions, then lets the user organize them with workspaces, categories, search, notes, drag and drop, import/export, and a new-tab manager page.
 
-The project has no build step. It uses native ES modules, native DOM APIs, Chrome extension APIs, and `chrome.storage.local`.
+The project is a React + TypeScript app built with Vite. It uses React 18, Mantine v7, Zustand, `@dnd-kit`, `@tabler/icons-react`, Chrome extension APIs, and `chrome.storage.local`. The extension is packaged with `@crxjs/vite-plugin`.
 
 ## Read First
 
@@ -21,14 +21,16 @@ Before making meaningful changes, read these docs in order:
 ## Important Files
 
 - `manifest.json`: extension permissions, entries, new-tab override, commands, omnibox.
-- `manager.html` plus `src/manager.js` and `src/styles.css`: main workspace UI.
-- `popup.html` plus `src/popup.js` and `src/popup.css`: compact toolbar popup.
-- `options.html` plus `src/options.js` and `src/options.css`: settings page.
-- `src/background.js`: service worker, Chrome API boundary, capture/restore/context menus/omnibox.
-- `src/model.js`: state schema, normalize, creation helpers, import/export, matching logic.
-- `src/store.js`: `chrome.storage.local` get/set/update wrapper.
-- `src/icons.js`: local SVG icon registry and tooltip hydration.
-- `tests/model.test.mjs`: model/import/export tests.
+- `manager.html` plus `src/manager/main.tsx`: main workspace UI entry; `src/manager/ManagerApp.tsx` composes the app.
+- `popup.html` plus `src/popup/`: compact toolbar popup.
+- `options.html` plus `src/options/`: settings page.
+- `src/background/service-worker.ts`: service worker, Chrome API boundary, capture/restore/context menus/omnibox.
+- `src/background/statePersistence.ts`: serialized mutation queue and normalized atomic writes.
+- `src/shared/model/`: state schema, types, normalize, creation helpers, import/export, matching logic.
+- `src/shared/store/`: `chrome.storage.local` adapter, immutable state mutations, mutation validation, Zustand store.
+- `src/manager/components/`: Mantine shell, workspace header, sidebar/Open Tabs, session board, Bin, import/export, search, overlays.
+- `src/manager/core/`: pure selectors, commands, capture, open-tabs, typed DnD contracts, and core tests.
+- `src/manager/hooks/`: hydration, runtime message, Open Tabs, and overlay lifecycle adapters.
 - `scripts/check-extension.mjs`: project sanity check used by `npm run check`.
 
 ## Commands
@@ -36,21 +38,23 @@ Before making meaningful changes, read these docs in order:
 Use these from the repo root:
 
 ```sh
-npm run icons
+npm run dev
+npm run build
 npm run check
 npm test
+npm run icons
 ```
 
-`npm run icons` regenerates extension icons if needed. `npm run check` validates required files, JS syntax, and tests. There is no bundler or TypeScript compiler.
+`npm run dev` starts the Vite dev server. `npm run build` runs `tsc --noEmit` then `vite build`. `npm run check` builds and then validates required files and build output via `scripts/check-extension.mjs`. `npm test` runs the Vitest suite (`vitest run`, happy-dom environment). `npm run icons` regenerates extension icons if needed.
 
 ## Architecture Rules
 
-- Keep pure data logic in `src/model.js`; it must not depend on DOM or Chrome APIs.
-- Keep persistence in `src/store.js`; all writes should pass through `normalizeState()`.
-- Keep Chrome API interactions in `src/background.js` unless a UI page must call an API directly.
-- Keep manager UI work in `src/manager.js` and styling in `src/styles.css`.
-- Prefer small, localized edits. `src/manager.js` is already large, so do not add broad abstractions unless they clearly reduce complexity.
-- Do not introduce React, Vue, a bundler, TypeScript, or new runtime dependencies without an explicit product/maintenance reason.
+- Keep pure data logic in `src/shared/model/`; it must not depend on DOM or Chrome APIs.
+- Keep persistence in `src/shared/store/`; all writes should pass through `normalizeState()`.
+- Keep Chrome API interactions in `src/background/` unless a UI page must call an API directly.
+- Keep manager UI work in `src/manager/components/`, pure logic in `src/manager/core/`, and runtime adapters in `src/manager/hooks/`.
+- Prefer small, localized edits. Keep the model/store/background boundaries clean, and do not add broad abstractions unless they clearly reduce complexity.
+- Do not add new runtime dependencies without an explicit product/maintenance reason.
 
 ## Product Model
 
@@ -72,8 +76,8 @@ npm test
 - Keep common actions near the object they affect.
 - The workspace switcher/header belongs in the main top bar.
 - Search belongs in the workspace header area, not the left sidebar.
-- The sidebar is for open tabs and categories.
-- Open Tabs should only show tabs that can be stored under current settings.
+- The sidebar is for open tabs and browser windows.
+- Open Tabs should only show tabs that can be stored under current settings, plus pinned tabs marked as not storable.
 - Selection mode for open tabs is explicit. Checked tabs are for creating sessions or batch dragging, not for automatic filtering.
 - Filtering sessions by an open tab is triggered from a right-click/context action, not by merely checking a tab.
 - Session tab items open on click. Per-item action buttons are intentionally minimized; use right-click menus for secondary actions.
@@ -98,9 +102,9 @@ Drag and drop is one of the most fragile areas. Be conservative.
 
 ## Import And Export
 
-- Import should support ZipTab JSON/text and OneTab export text through the normal Import entry.
+- Import should support TabBoard JSON/text and OneTab export text through the normal Import entry.
 - Do not add a separate "Import from OneTab" entry unless explicitly requested.
-- Export should preserve enough data for round-tripping ZipTab sessions.
+- Export should preserve enough data for round-tripping TabBoard sessions.
 - The sidebar utility actions are Bin, Import, Export, and Options.
 - Import icon semantics should point inward/down; Export should point outward/up.
 
@@ -125,7 +129,7 @@ Keep docs concise and traceable: problem, decision, reason, tradeoff, current st
 
 - The working tree may contain user changes. Never revert unrelated changes.
 - Check `git status --short` before large edits or commits.
-- Keep generated artifacts and local indexes out of git. `.codegraph/`, `.agents/`, build output, zips, CRX, PEM files, and `node_modules/` are ignored.
+- Keep generated artifacts and local indexes out of git. `dist/`, build output, zips, CRX, PEM files, and `node_modules/` are ignored.
 - Prefer non-destructive git commands. Do not run `git reset --hard` or checkout files unless explicitly requested.
 
 ## Verification Checklist
@@ -133,8 +137,9 @@ Keep docs concise and traceable: problem, decision, reason, tradeoff, current st
 For most changes, run:
 
 ```sh
+npm run build
 npm run check
 npm test
 ```
 
-For syntax-only or documentation-only changes, at least confirm the changed files and run the relevant lightweight check when practical. For UI/drag changes, also manually test in Chrome because automated tests do not cover browser DnD behavior.
+For documentation-only changes, at least confirm the changed files and run the relevant lightweight check when practical. For UI/drag changes, also manually test in Chrome because automated tests do not cover browser DnD behavior.

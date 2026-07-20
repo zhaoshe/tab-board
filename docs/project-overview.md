@@ -1,14 +1,14 @@
 # Project Overview
 
-本文档总结 ZipTab 的项目定位、产品目标、边界、当前状态和后续观察点。历史变迁请看 [Feature Evolution](feature-evolution.md)，关键取舍请看 [Product Decisions](product-decisions.md)。
+本文档总结 TabBoard 的项目定位、产品目标、边界、当前状态和后续观察点。历史变迁请看 [Feature Evolution](feature-evolution.md)，关键取舍请看 [Product Decisions](product-decisions.md)。
 
 ## 一句话定位
 
-ZipTab 是一个 local-first 的 Chrome tab manager：用 OneTab 式的一键收纳清理窗口，再用 workspace、顶部 category navigation、横向 session board 和拖拽整理，把临时浏览上下文变成可恢复的工作记忆。
+TabBoard 是一个 local-first 的 Chrome tab manager：用 OneTab 式的一键收纳清理窗口，再用 workspace、顶部 category navigation、横向 session board 和拖拽整理，把临时浏览上下文变成可恢复的工作记忆。
 
 ## 项目目标
 
-ZipTab 要解决的不是“收藏网页”，而是“保存和找回一次浏览现场”。
+TabBoard 要解决的不是“收藏网页”，而是“保存和找回一次浏览现场”。
 
 核心目标：
 
@@ -20,7 +20,7 @@ ZipTab 要解决的不是“收藏网页”，而是“保存和找回一次浏�
 
 ## 背景和竞品关系
 
-ZipTab 的第一阶段从 OneTab 复刻开始，后来吸收 tabExtend 的组织方式。
+TabBoard 的第一阶段从 OneTab 复刻开始，后来吸收 tabExtend 的组织方式。
 
 保留 OneTab 的部分：
 
@@ -37,7 +37,7 @@ ZipTab 的第一阶段从 OneTab 复刻开始，后来吸收 tabExtend 的组织
 - Open Tabs 面板。
 - 当前 tab 反查 saved sessions。
 - Inline rename、note、lock、bin。
-- 新标签页直接进入 ZipTab。
+- 新标签页直接进入 TabBoard。
 
 借鉴 tabExtend 的部分：
 
@@ -53,15 +53,15 @@ ZipTab 的第一阶段从 OneTab 复刻开始，后来吸收 tabExtend 的组织
 
 ## 当前产品形态
 
-ZipTab 是 Manifest V3 Chrome extension，安装后会提供这些入口：
+TabBoard 是 Manifest V3 Chrome extension，安装后会提供这些入口：
 
 - Toolbar action：默认保存当前窗口；也可在 Options 中切换为打开 popup。
-- New tab override：新标签页打开 ZipTab manager。
+- New tab override：新标签页打开 TabBoard manager。
 - Manager page：主要工作台，包含 open tabs、categories、workspace、search 和 saved sessions。
 - Popup：轻量入口，支持保存当前窗口、打开 manager、搜索 recent sessions。
 - Context menu：页面/扩展按钮右键保存当前 tab、窗口、左右 tabs、其它 tabs、全部窗口等。
-- Omnibox：输入 `zt` 搜索 saved tabs。
-- Commands：快捷键保存当前窗口或打开 ZipTab。
+- Omnibox：输入 `tb` 搜索 saved tabs。
+- Commands：快捷键保存当前窗口或打开 TabBoard。
 
 ## 核心概念
 
@@ -95,7 +95,7 @@ Bin：
 保存窗口必须轻，整理能力不能阻碍主流程。
 
 3. Sessions over bookmarks
-默认保存工作上下文，不把 ZipTab 变成普通书签夹。
+默认保存工作上下文，不把 TabBoard 变成普通书签夹。
 
 4. Dense but calm
 主界面偏信息工作台，强调扫描、比较和重复操作，不做营销式 landing page。
@@ -133,14 +133,14 @@ Bin：
 
 代码规模：
 
-- 核心 extension 页面：`manager.html`、`popup.html`、`options.html`。
-- 核心 JS 模块：`background.js`、`manager.js`、`model.js`、`store.js`、`icons.js`。
-- 测试入口：`npm test`（显式运行 `tests/*.test.mjs`）、`npm run check` 和 `git diff --check`。
-- UI foundation：Nord semantic tokens；Manager 稳定 shell controls 使用本地 self-host Web Awesome `3.10.0`，产品/DnD surfaces 保持自定义 DOM。
+- 技术栈：React 18 + TypeScript + Vite；UI 使用 Mantine v7，状态用 Zustand 持久化到 `chrome.storage.local`，拖拽用 `@dnd-kit`，图标用 `@tabler/icons-react`。
+- 核心 extension 页面入口：`manager.html`、`popup.html`、`options.html`。
+- 核心模块目录：`src/background/`（Chrome API 边界与 service worker）、`src/shared/model/`（纯数据）、`src/shared/store/`（持久化与 Zustand）、`src/manager/`（Manager UI + core 纯逻辑 + hooks）。
+- 构建与测试：`npm run build`（`tsc --noEmit` + `vite build`）、`npm test`（Vitest）、`npm run check`（build + `scripts/check-extension.mjs`）和 `git diff --check`。
 
 主要风险：
 
-- `manager.js` 已经承担大量 UI、业务和拖拽逻辑，后续可能需要拆分。
+- Manager UI 逻辑较多，后续新增行为要注意维持 components / core / hooks 的边界。
 - 拖拽交互依赖浏览器原生 HTML DnD，视觉反馈和事件时序容易出现边界 bug。
 - session 数量继续增长后，当前 DOM 全量渲染和多 category section 可能需要虚拟列表。
 - 右键菜单触发筛选、icon-only 操作的可发现性仍需观察。
@@ -157,7 +157,7 @@ Bin：
 技术维护层：
 
 - 状态 schema 可 normalize 旧数据。
-- Import/export 能覆盖 ZipTab text/json 和 OneTab text。
+- Import/export 能覆盖 TabBoard text/json 和 OneTab text。
 - Chrome API 权限和特殊 URL 行为有明确边界。
 - 每次明显方向变化都有文档记录。
 

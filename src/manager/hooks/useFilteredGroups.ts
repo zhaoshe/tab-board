@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
-import { normalizeSearch, groupMatchesQuery } from '../../shared/model';
+import { getVisibleGroups, type CategoryFilter } from '../core/selectors';
 import type { Group } from '../../shared/model';
 
 const SEARCH_KEY = 'tabboardSearch';
@@ -27,27 +28,22 @@ function setGlobalQuery(value: string) {
 }
 
 export function useFilteredGroups(folderId: string | null, starred = false): Group[] {
-  const groups = useTabBoardStore((state) => state.groups);
-  const activeWorkspaceId = useTabBoardStore((state) => state.activeWorkspaceId);
+  const state = useTabBoardStore(
+    useShallow((currentState) => ({
+      activeWorkspaceId: currentState.activeWorkspaceId,
+      workspaces: currentState.workspaces,
+      folders: currentState.folders,
+      groups: currentState.groups,
+    })),
+  );
   const searchQuery = useSearchQuery();
+  const filter: CategoryFilter = starred
+    ? 'starred'
+    : folderId
+      ? `folder:${folderId}`
+      : 'inbox';
 
-  const normalized = normalizeSearch(searchQuery);
-
-  const filteredGroups = groups.filter((group) => {
-    if (group.workspaceId !== activeWorkspaceId) return false;
-    if (starred) {
-      if (!group.starred) return false;
-    } else {
-      if (group.starred) return false;
-      if (group.folderId !== folderId) return false;
-    }
-    if (normalized && !groupMatchesQuery(group, normalized)) {
-      return false;
-    }
-    return true;
-  });
-
-  return filteredGroups;
+  return getVisibleGroups(state, filter, searchQuery);
 }
 
 export function useSearchQuery(): string {

@@ -1,55 +1,48 @@
 # Technical Architecture
 
-本文档描述 ZipTab 的技术结构、模块边界、数据模型和关键流程。目标是帮助后续维护者快速判断“改哪里、注意什么、怎么验证”。
+本文档描述 TabBoard 的技术结构、模块边界、数据模型和关键流程。目标是帮助后续维护者快速判断“改哪里、注意什么、怎么验证”。
 
 ## 技术栈
 
-ZipTab 是一个无构建步骤的 Chrome Manifest V3 extension。
+TabBoard 是 Chrome Manifest V3 extension，使用 React + TypeScript 开发，通过 Vite 构建，Manager 使用 Mantine，背景页和 shared model 保持明确边界。
 
 运行环境：
 
 - Chrome 115+。
 - Manifest V3 service worker。
-- 原生 ES modules。
-- 原生 DOM API。
-- 本地 self-host 的 Web Awesome `3.10.0` Web Components，仅用于稳定的通用 shell controls。
+- Vite + `@crxjs/vite-plugin` 构建链；`manager.html` 的生产入口是 `src/manager/main.tsx`。
+- React 18、Mantine v7、Zustand、`@dnd-kit`、`@tabler/icons-react`。
 - `chrome.storage.local`。
-- `chrome.tabs` / `chrome.tabGroups` / `chrome.contextMenus` / `chrome.omnibox`。
+- `chrome.tabs` / `chrome.windows` / `chrome.tabGroups` / `chrome.contextMenus` / `chrome.omnibox` / `chrome.runtime`。
 
-项目没有 React、Vue、bundler 或 TypeScript。所有页面直接加载 `src/*.js` 和 CSS。
+React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/main.tsx` 构建产物。
 
 ## 文件结构
 
 核心文件：
 
-- `manifest.json`: extension 声明、权限、入口、newtab override、commands、omnibox。
-- `src/background.js`: service worker，负责 Chrome API、保存、恢复、右键菜单、omnibox、消息处理。
-- `src/manager.js`: manager page 的主要 UI 和业务逻辑。
-- `src/model.js`: state schema、normalize、数据创建、导入导出、匹配和工具函数。
-- `src/store.js`: `chrome.storage.local` 的 get/set/update 封装。
-- `src/icons.js`: 本地 SVG icon registry、按钮 hydrate、tooltip。
-- `src/webawesome-controls.js`: 设置本地 Web Awesome base path，并静态注册 Manager 使用的 input/select/option/dropdown controls。
-- `vendor/webawesome/`: 固定版本 `3.10.0` 的完整本地 runtime、license、来源说明和最终文件 checksums。
-- `src/manager-view.js`: manager open windows model、sidebar filter/sort、selection reconciliation、DnD zone、session reorder/target-lock、session card view model、floating menu positioning、session action layout 的纯 helper。
-- `src/popup-view.js`: popup quick actions、recent sessions、hover preview、empty copy 的纯 helper。
-- `src/options-view.js`: options Basic / Advanced section 分组 helper。
-- `src/feedback-copy.js`: popup、manager、options 共享的反馈文案 helper，包括 capture result counts。
-- `manager.html`: 主工作台。
-- `popup.html` / `src/popup.js`: toolbar popup。
-- `options.html` / `src/options.js`: 设置页。
-- `src/styles.css`: 主要 UI 样式。
-- `tests/*.test.mjs`: 数据模型、background hardening 和 UI helper 单元测试。
-- `scripts/check-extension.mjs`: extension 文件存在性、JS 语法和测试聚合检查。
+- `manifest.json`: extension 声明、权限、入口、new-tab override、commands、omnibox。
+- `manager.html`: 生产 Manager HTML shell，加载 `/src/manager/main.tsx`。
+- `src/manager/main.tsx` / `src/manager/ManagerApp.tsx`: React Manager 启动和应用 composition。
+- `src/manager/components/`: Mantine shell、workspace header、sidebar/Open Tabs、session board、Bin、import/export、search 和 overlays。
+- `src/manager/core/`: selectors、commands、capture、open-tabs、typed DnD 等纯 contracts，以及 core tests。
+- `src/manager/hooks/`: hydration、runtime message、Open Tabs、overlay 和 derived group 生命周期。
+- `src/background/service-worker.ts`: Chrome API boundary、capture/restore、runtime messages、sender verification。
+- `src/background/statePersistence.ts`: serialized mutation queue、optional Web Locks、normalized atomic writes。
+- `src/shared/model/`: schema/types、normalize、capture policy、import/export 和 search。
+- `src/shared/store/`: `chrome.storage.local` adapter、immutable state mutations、mutation validation、Zustand store。
+- `src/shared/styles/`: shared theme tokens。
+- `scripts/check-extension.mjs`: extension 文件存在性、构建产物引用和 sanity checks。
 
 ## Manifest 能力
 
 `manifest.json` 声明：
 
-- `background.service_worker`: `src/background.js`。
+- `background.service_worker`: `src/background/service-worker.ts`。
 - `action`: toolbar action。
 - `options_page`: `options.html`。
 - `chrome_url_overrides.newtab`: `manager.html`。
-- `omnibox.keyword`: `zt`。
+- `omnibox.keyword`: `tb`。
 - commands：
   - `capture-current-window`。
   - `open-manager`。
@@ -65,76 +58,55 @@ ZipTab 是一个无构建步骤的 Chrome Manifest V3 extension。
 
 ## 模块边界
 
-### `model.js`
+### `src/shared/model/`
 
 负责纯数据逻辑：
 
-- State schema。
-- 默认设置。
-- normalize 旧数据。
-- 创建 workspace/folder/group/tab/note/bin entry。
-- 校验同一 workspace 内 category 名称冲突。
-- import/export text 解析。
-- query matching。
-- restorable 判断。
+- State schema、types、默认设置和 `normalizeState()`。
+- workspace/folder/group/tab/note/bin invariants。
+- capture eligibility、import/export text、query matching 和 restorable 判断。
+- 同一 workspace 内 category 名称唯一性校验。
 
-它不依赖 DOM，也不直接调用 Chrome APIs。
+不依赖 DOM，也不直接调用 Chrome APIs。
 
-### `store.js`
+### `src/shared/store/`
 
-负责持久化：
+负责客户端状态和持久化边界：
 
-- `getState()`。
-- `setState(nextState)`。
-- `updateState(updater)`。
-- `getSettings()`。
-- `ensureState()`。
+- `chromeStorage.ts` 封装 `chrome.storage.local`。
+- `stateMutations.ts` 以 immutable commands 应用普通 state mutation，并拒绝无效引用、locked 目标和 link/note URL 形态错误。
+- `mutationValidation.ts` 负责 untrusted/raw mutation boundary。
+- `useTabBoardStore.ts` 提供 React 状态投影和 mutation 入口。
 
-所有写入都会经过 `normalizeState()`，并更新 `updatedAt`。
+所有写入先 normalize；跨页面更新按 revision/hydration 规则应用，不能让旧快照覆盖较新 state。
 
-### `background.js`
+### `src/background/`
 
-负责 Chrome API 边界：
+负责 Chrome API 和持久化队列边界：
 
-- extension install/startup 初始化。
-- toolbar action 行为。
-- context menu 创建和点击处理。
-- commands。
-- runtime message。
-- omnibox search。
-- tabs capture。
-- tabs restore。
-- Chrome tab group metadata read/restore。
+- `service-worker.ts` 处理 install/startup、toolbar action、context menu、commands、runtime message、omnibox、capture、restore 和 Chrome tab-group metadata。
+- runtime message 先验证 extension sender id 与内部 extension URL；不可信 sender 在 storage 或 Chrome side effect 前拒绝。
+- `statePersistence.ts` 串行化 mutation batch，使用可用的 Web Locks，执行 normalized atomic writes，并返回 committed/invalid/replay evidence。
 
-### `manager.js`
+### `src/manager/`
 
-负责 manager page：
+负责唯一生产 Manager：
 
-- 渲染 tabExtend-style 两栏 shell、右侧 workspace/category topbar、可折叠全高 sidebar、Open Tabs selected window、horizontal active category board、session cards、modals。
-- manager 页面事件分发、compact window selector、workspace dropdown 和 sidebar localStorage UI preference。
-- 稳定 shell controls 使用本地 Web Awesome `wa-input`、`wa-select` / `wa-option`、`wa-dropdown` / `wa-dropdown-item`；session cards、category tabs、saved/open tab rows、DnD targets 和 native context menu 保持 ZipTab 自定义 DOM。
-- open tabs panel 顶部通过 compact window selector 和 actions 选择/操作 window，一次只渲染一个 selected window；所有有 URL 的非 ZipTab tabs 按 `tab.index` 进入单一纵向列表，pinned row 只以内联 badge 标记，底部 Filter tabs 只作用于当前 selected window。
-- session/category/tab drag and drop。
-- 保存后 target session 定位和 floating toast；selected open-tab capture 使用 selection snapshot 与 pending guard，只有 snapshot 仍匹配时才清空选择，并在同一 workspace 内切到 Inbox/highlight 新 session。
-- inline rename。
-- category create/rename 在 manager 的 Web Lock（可用时）保护下基于最新 state 做唯一性校验。
-- bin modal。
-- import/export modal。
-- search modal。
+- `main.tsx` 挂载 React app；`ManagerApp.tsx` 组合 Mantine shell、store hydration、runtime hooks 和 overlays。
+- components 渲染 workspace/category topbar、可折叠 sidebar、selected-window Open Tabs、horizontal active-category board、session cards、modals 和 feedback。
+- core modules 提供 selectors、capture snapshot ownership、open-tabs policy、commands、typed DnD、overlay/focus contracts；这些模块可在无 Chrome DOM 的测试中执行。
+- DnD 不复用未类型化 payload；resolver 先校验 workspace/ownership/URL/locked/index 边界，session body 不产生 merge intent。
+- capture 使用 selection snapshot 与 pending guard；反馈由 committed/reconciled outcome 决定，避免 stale response 清空新 selection 或错误 reveal。
 
-纯 UI 决策尽量放在 `manager-view.js`，避免继续把可测试逻辑塞进 `manager.js`。
+### 图标
 
-### `icons.js`
-
-负责：
-
-- 本地 SVG icon 定义。
-- 将 `data-icon` 元素 hydrate 成 icon button 或 icon+text button。
-- icon-only tooltip。
+- 使用 `@tabler/icons-react` 提供的 React icon 组件。
+- 通过 Mantine `ActionIcon` / `Tooltip` 组合成 icon button 或 icon+text button。
+- icon-only 按钮提供 tooltip 和 `aria-label`。
 
 ## State Schema
 
-State 存储在 `chrome.storage.local["ziptabState"]`。`quickList` 仍保留为 legacy migration compatibility 字段，用于接收旧数据并迁移成普通 session；当前 UI 不读写 Quick list / Pinned workflow。
+State canonical key 是 `chrome.storage.local["tabboardState"]`。`quickList` 仍作为 state schema 字段保留（normalize 会补齐为空数组），但当前 UI 不读写 Quick list / Pinned workflow，也不再有历史数据迁移逻辑。
 
 顶层结构：
 
@@ -283,19 +255,22 @@ Bin entry 用于恢复删除内容。
 
 默认设置在 `DEFAULT_SETTINGS`：
 
-```js
+```ts
 {
-  actionClick: "store",
+  actionClick: 'store',
   closeTabsAfterSave: true,
   dedupeOnSave: true,
   deleteRestoredTabs: true,
+  customUrlFilter: '',
   focusRestoredTabs: true,
   openManagerAfterSave: true,
   restoreGroupsInNewWindow: false,
   restoreNextToCurrent: true,
-  theme: "system"
+  theme: 'system'
 }
 ```
+
+`customUrlFilter` 由 shared capture policy 统一用于 Open Tabs、capture 和 DnD eligibility；命中规则的 open tab 不返回给列表，实际 Chrome 权限限制仍由平台决定。
 
 ## 关键流程
 
@@ -313,9 +288,9 @@ Bin entry 用于恢复删除内容。
 
 1. 入口调用 `captureTabs(mode, anchorTab, options)`。
 2. `getTabsForMode()` 根据 mode 取 tabs。
-3. `canCaptureTab()` 只排除没有 usable URL 或 ZipTab 自身 extension 页；pinned、`about:blank` 和其它特殊 URL 都进入 capture 尝试。
+3. `getCaptureCandidateReason()` 只拒绝 TabBoard 自身 extension 页、没有 usable URL 的 rows 和命中 `customUrlFilter` 的 URL；pinned、Chrome 和 file URLs 与普通 tab 一样处理。
 4. 如开启 `dedupeOnSave`，按符合保存资格的源 tab URL 去重，重复源 tabs 关闭。
-5. `createTabRecord()` 转成 ZipTab tab records。
+5. `createTabRecord()` 转成 TabBoard tab records。
 6. 按 windowId 分组。
 7. `createGroupFromTabRecords()` 创建 session。
 8. `updateState()` 将新 sessions 放到 groups 头部。
@@ -324,9 +299,10 @@ Bin entry 用于恢复删除内容。
 
 重要边界：
 
-- 如果没有有 URL 的非 ZipTab tabs，会返回 `storedTabs: 0`；重复源 tabs 仍按 capture dedupe 设置处理。
+- 如果没有 policy-eligible 的非 TabBoard tabs，会抛出 `No capturable tabs were found`，不会提交空 session；重复源 tabs 仍按 capture dedupe 设置处理。
 - Source-tab dedupe 只针对本次 capture 的源 tabs，不因为历史 saved sessions 里已有同 URL 而跳过本次 session 内容。
-- Capture 不提供自定义 URL 或 pinned 过滤设置；Chrome 对受限 URL 的实际保存/恢复能力仍是平台边界。
+- `dedupe-window` 是独立的当前窗口清理操作：按 URL 分桶，保留 active tab，若无 active tab 则保留 `lastAccessed` 最新的 tab，并关闭同桶其余 tabs。
+- Capture 不提供自定义 URL pattern；pinned、Chrome 和 file URL 资格由 shared capture policy 和对应 settings 控制，实际保存和恢复能力仍是 Chrome 平台边界。
 - 如果 manager tab 是保存过程中打开的，关闭源 tabs 时会排除 manager tab。
 
 ### Manager Open Tabs
@@ -334,18 +310,19 @@ Bin entry 用于恢复删除内容。
 流程：
 
 1. Manager 调用 runtime message `list-open-tabs`。
-2. Background 使用 `chrome.windows.getAll({ populate: true })`，为 window 返回原始 `tabCount`。
-3. `canCaptureTab()` 只排除没有 URL 或 ZipTab 自身 extension 页；其它有 URL 的 tabs（包括 pinned）都标记为可保存。
-4. Manager 用 compact `wa-select` 展示 window ordinal 和 tab count；Chrome raw window ID 只作为 option value 使用，不显示给用户。一次只渲染 selected window 的 Open Tabs body。
-5. Selected window 先用 `filterOpenTabs()` 过滤 sidebar `wa-input` query，再用 `sortOpenTabs()` 按 Chrome `tab.index` 排成单一纵向列表；pinned row 与普通 row 同处列表，只保留 inline badge。
-6. Selected window 可保存、从 More 清理重复 tabs、进入 select mode；有 URL 的 row 都可进入选择、拖拽和 URL session filter。
+2. Background 使用 `chrome.windows.getAll({ populate: true })`，先按当前 extension base URL 排除 TabBoard 自身 manager、popup、options 等页面，再为 window 返回过滤后可见 rows 的 `tabCount`。
+3. `getCaptureCandidateReason()` 使用 shared capture policy 判定其余 tab 是否 storable；命中 `customUrlFilter` 的 rows 不返回，没有 usable URL 的 rows 被拒绝。
+4. Manager 用 Mantine `Select` 展示 window ordinal 和 tab count；Chrome raw window ID 只作为 option value 使用，不显示给用户。一次只渲染 selected window 的 Open Tabs body。
+5. Selected window 先用 sidebar `TextInput` query 过滤，再用 `sortOpenTabs()` 按 Chrome `tab.index` 排成单一纵向列表；pinned row 与普通 row 同处列表，并显示 inline badge/reason。
+6. Selected window 可保存、从 More 清理重复 tabs、进入 select mode；已显示的普通 URL、pinned、Chrome 和 file rows 均可选择、拖拽和保存。
 7. Select mode controls 位于 64px header rail 内，不改变 header 高度或移动 tab 列表；selected count 以 numeric badge 呈现并保留 aria-live 文本。
 8. Selected capture 在请求前快照 selected tab ids、window、workspace 和 select mode，并以 pending guard 防止重复提交；返回后仅在 snapshot 与当前选择一致时清空，避免覆盖用户在请求期间的新选择。
 9. `chrome.storage.onChanged` 直接恢复正常 manager render。
+10. Open Tabs refresh 不清空当前 `windows` state，也不渲染 loading row；`loading` 只驱动顶部 Refresh icon 的旋转/`aria-busy` 状态，请求成功后一次替换 rows，请求失败则保留旧列表并显示错误。
 
 ### Manager 启动与降级
 
-Manager 启动先同步生成 `normalizeState()` 默认 state，准备并渲染可用 shell，同时发起 Open Tabs 请求；storage state 在后台异步读取，完成后再应用到当前页面。`src/webawesome-controls.js` 作为独立的本地 Web Awesome module boundary 加载，失败只影响通用 shell controls，不应阻断 Manager 空 shell 首屏。
+Manager 启动先由 React shell 和 `useStoreHydration()` 生成 normalized default state，准备并渲染可用 layout，同时由 `useOpenTabsRuntime()` 发起 Open Tabs 请求；storage state 在后台异步读取，完成后再应用到当前页面。Mantine render 或 runtime message 失败只影响对应 surface，不应阻断基础 Manager shell。
 
 异步 storage apply 记录启动 revision；`chrome.storage.onChanged` 到达时先递增 revision 并应用新 state，旧的 storage 快照完成后若 revision 已变化则丢弃，避免旧快照覆盖新 state。错误按阶段降级：popover 失败只关闭信息浮层，storage 失败保留默认 normalized state，migration 失败保留已加载 sessions，shell 失败停止后续启动，Open Tabs 失败保留空面板并提示；loaded/render 失败则保留已启动的基础界面并提示。
 
@@ -440,7 +417,7 @@ Drop target 类型：
 
 - `closestSupportedDropTarget()` 会跳过当前 drag kind 不支持的内部 drop target，避免 session drag 被 tab row 抢走。
 - Saved tab 插入使用上/下高亮线；单个或批量移动通过 model 的 `moveGroupTabs()` 原子验证目标、移除和插入，避免同 session 移动最后一项时误删 session。
-- 左侧 sidebar 使用 `sidebar-collapsed` shell class 和 `ziptab.sidebarCollapsed` localStorage preference；该状态不进入业务 state。`renderSidebarRail()` 复用 `buildSidebarRailModel()`，只投影 selected window 的 tab identity，不拥有 selection 或 DnD state。collapsed content 通过 absolute hover/focus overlay 显示，因此不改变 board grid geometry。
+- 左侧 sidebar 使用 `sidebar-collapsed` shell class 和 `tabboard.sidebarCollapsed` localStorage preference；该状态不进入业务 state。`renderSidebarRail()` 复用 `buildSidebarRailModel()`，只投影 selected window 的 tab identity，不拥有 selection 或 DnD state。collapsed content 通过 absolute hover/focus overlay 显示，因此不改变 board grid geometry。
 - Open Tabs body 使用单一纵向列表和 Filter tabs footer；pinned row 与普通 row共用列表，只显示 inline badge。rail 只聚焦既有 row/filter control，不生成 drag/drop target 或 payload。
 - `managerInfoPopover` 是单例 interactive overlay；来自其 action slot 的 delegated click 在 mutation 前调用 `hide()`，并在下一帧把 focus 恢复到仍可用的 row、session 或 Open Tabs fallback，避免 DOM 重绘后出现断连 trigger、旧内容或隐藏 keyboard focus。active drag 会隐藏 collapsed overlay 并临时禁用其 pointer events，让 board drop target 继续接收 dragover/drop。
 - 顶部 category tabs 复用 `folderList` 和 `category-row`，按 `categoryOrderByWorkspace` 排序，点击后切换 `activeFilter`。
@@ -467,31 +444,28 @@ Drop target 类型：
 
 ## UI 架构
 
-UI 使用手写 DOM：
-
-- `h(tag, attrs, ...children)` 创建 DOM。
-- `render()` 驱动 manager 页面重绘。
-- 事件主要通过 document-level delegation 分发。
-- Modals 使用原生 `<dialog>`。
+生产 Manager 使用 React component tree 和 Mantine primitives；业务 state 由 Zustand store 提供，纯 projection/command contracts 保持在 `src/manager/core/` 与 `src/shared/`。
 
 主要渲染路径：
 
 ```text
-render()
-  -> renderSidebarState()
-  -> renderWorkspaceSwitcher()
-  -> renderStats()
-  -> renderHeaderActions()
-  -> renderActiveTabs()
-  -> renderFolders()
-  -> renderGroups()
+manager.html
+  -> src/manager/main.tsx
+  -> ManagerApp
+  -> ManagerLayout
+     -> WorkspaceHeader / SearchBar
+     -> Sidebar / OpenTabsPanel
+     -> WorkspaceContent
+        -> SessionCard / TabItemRow
 ```
 
-状态更新后通常：
+状态更新路径：
 
-1. `updateState()` 写 storage。
-2. 本地 `state = normalizeState(nextState)`。
-3. 调用局部 render 或全量 render。
+1. UI 事件生成 typed `StateMutation` 或 typed `DropIntent`。
+2. shared mutation layer 验证 immutable state preconditions，包括 ownership、locked、URL、index 和 workspace。
+3. `useTabBoardStore` 与 background persistence queue 应用 normalized state。
+4. `chrome.storage.onChanged` 通过 hydration/runtime hooks 回流；revision guard 丢弃过期快照。
+5. React 根据 authoritative state 重绘，并由 capture outcome/overlay lifecycle 恢复 feedback 与 focus。
 
 ## Search
 
@@ -506,7 +480,7 @@ Manager search：
 Omnibox search：
 
 - Background 的 `getOmniboxSuggestions()` 遍历 groups 和 restorable tabs。
-- 命中后返回 `ziptab://tab/group/<groupId>/<tabId>` content。
+- 命中后返回 `tabb://tab/group/<groupId>/<tabId>` content。
 - onInputEntered 收到该 content 后调用 `restoreTab()`。
 
 ## Theme and Icons
@@ -518,10 +492,9 @@ Theme：
 
 Icons：
 
-- 不依赖外部 icon package。
-- `icons.js` 内置 SVG path registry。
-- HTML 使用 `data-icon` 和 `data-icon-text`。
-- icon-only 按钮自动生成 tooltip 和 `aria-label`。
+- 使用 `@tabler/icons-react` 提供的 React icon 组件。
+- 通过 Mantine `ActionIcon` / `Tooltip` 组合成 icon button 或 icon+text button。
+- icon-only 按钮提供 tooltip 和 `aria-label`。
 
 ## Testing and Verification
 
@@ -529,39 +502,22 @@ Icons：
 
 ```sh
 npm test
+npm run build
 npm run check
-npm run verify:vendor
-npm run check:release
-node --check src/manager.js
+git diff --check
 ```
 
-`npm test`：
+自动化 proof 当前覆盖：
 
-- 运行 `node --test tests/*.test.mjs`，避免递归发现 vendored declaration files。
-- 当前覆盖 model/import/export、background capture/restore、popup/options view、manager view/DnD helper、Nord token/source contracts、Header/Board CSS contracts、Web Awesome local production wiring、vendor path/checksum contracts。
-
-`npm run check`：
-
-- 检查 manifest 和页面引用文件存在。
-- 对项目与 vendored runtime JavaScript 执行 `node --check`。
-- 拒绝 vendor symlink、项目根路径逃逸和 checksum mismatch。
-- 校验 Web Awesome 1,066 个最终 vendored 文件 checksums；该清单用于检测 checkout drift，不作为独立供应链信任锚。
-- 运行 `tests/*.test.mjs` 完整测试。
-
-`npm run verify:vendor`：
-
-- 需要网络访问；以 verifier 内的 executable version/URL/SRI/SHA-256 pins 为基线，从 npm registry 获取固定版本的 metadata 与 tarball。
-- 对 response、archive entry 和 extracted tree 设置 timeout、byte、file-count、path、symlink 与 entry-type 边界。
-- 验证 registry SHA-512 integrity 和固定 tarball SHA-256。
-- 只应用已记录的远程字体 import 删除 patch，再比较完整目录、文件类型和文件内容。
-
-`npm run check:release` 串联离线 extension sanity/test 和联网 vendor provenance verification，用于 release/security gate；日常 `npm run check` 保持离线可重复。
+- `npm test`（Vitest，happy-dom）：React/core contracts，包括 selectors、state mutations、persistence queue、replay、capture ownership/feedback、typed DnD、Open Tabs policy、overlays、layout 和 hydration。
+- `build`：`tsc --noEmit` 类型检查加 Vite/CRX 产物构建。
+- `check`：先 `build`，再由 `scripts/check-extension.mjs` 校验 Manifest entry、构建产物引用和 extension sanity。
 
 当前测试空白：
 
-- Manager 的真实 custom-element lifecycle、Shadow DOM keyboard/focus 和完整 DOM render 未自动化覆盖；当前主要使用纯 helper 与 source-contract tests。
-- 原生 Drag and drop 的浏览器事件时序未自动化覆盖，只有 geometry/helper/source contracts。
-- Chrome API restore/capture 依赖浏览器环境，当前没有 Playwright/Chrome e2e。
+- 真实 Chrome custom-element/extension lifecycle、Shadow DOM keyboard/focus、完整 DOM render 未自动化覆盖。
+- 原生 Drag and drop 浏览器事件时序未自动化覆盖，只有 typed resolver、geometry、lifecycle 和 cleanup contracts。
+- Chrome capture/restore 与 sender integration 仍需要 unpacked extension 手工验证。
 
 建议人工回归：
 
@@ -569,7 +525,7 @@ node --check src/manager.js
 - 展开/折叠 sidebar，并刷新确认 UI preference 保留；窄屏下确认 rail、compact window selector 和 toggle 仍可达。
 - 切换多个 compact window selector，确认一次只显示 selected window，tab count 与 Chrome window 原始总数一致；新建 Chrome window 后自动选中。
 - 确认 compact window selector 和 actions 位于 sidebar 顶部，切换 window 后只显示 selected window 的单一纵向 Open Tabs 列表；pinned row 与普通 row 同处列表并显示 inline badge。
-- 确认所有有 URL 的非 ZipTab tabs 都尝试保存，且 pinned tabs 不因 badge 被排除。
+- 按 Options policy 验证 pinned、Chrome 和 file URL rows 的 storable reason、checkbox、DnD 与 capture 结果保持一致。
 - 输入 sidebar Filter tabs，确认只过滤当前 window rows；切换 window 或刷新 tabs 后，已有 `openTabFilter` 仍保留。
 - 确认 sessions 单行横向滚动、每张 card 全高、tab list 在 card 内滚动。
 - 在横向滚动前后测试 session target-slot、saved/open tabs 和 category DnD。
@@ -578,16 +534,14 @@ node --check src/manager.js
 
 ## 维护建议
 
-1. 优先拆分 `manager.js`
+1. 按 React Manager 边界维护功能
 
 推荐拆分方向：
 
-- open tabs panel。
-- category navigation。
-- session card rendering。
-- drag/drop controller。
-- modals。
-- bin。
+- UI 结构放在 `src/manager/components/`，按 shell、workspace、sidebar、session 和 overlay surface 保持高内聚。
+- 页面生命周期与 Chrome runtime 适配放在 `src/manager/hooks/`。
+- selectors、commands、capture、open-tabs 和 typed DnD 规则放在 `src/manager/core/`，优先保持纯函数和可执行测试。
+- 状态 schema、normalize、mutation validation 与 persistence adapter 继续留在 `src/shared/` 和 `src/background/` 边界内。
 
 2. 给 drag/drop 增加浏览器级测试
 

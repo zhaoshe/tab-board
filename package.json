@@ -7,12 +7,11 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "check": "node scripts/check-extension.mjs",
-    "check:release": "npm run check && npm run verify:vendor",
+    "check": "npm run build && node scripts/check-extension.mjs",
     "icons": "node scripts/generate-icons.mjs",
-    "test": "vitest",
-    "test:run": "vitest run",
-    "verify:vendor": "node scripts/verify-webawesome-provenance.mjs"
+    "test": "npm run test:react",
+    "test:react": "vitest run",
+    "test:run": "npm run test:react"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -33,6 +32,7 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "happy-dom": "^20.10.6",
     "typescript": "^5.5.4",
     "vite": "^5.4.1",
     "vitest": "^2.0.5"
