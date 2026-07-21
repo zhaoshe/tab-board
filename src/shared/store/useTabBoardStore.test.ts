@@ -2178,12 +2178,27 @@ describe('TabBoard store hydration lifecycle', () => {
     expect(activeListeners).toHaveLength(1);
   });
 
-  it('records active hydration failures and permits retry', async () => {
+  it('hydrates from local storage when the ensure-state worker call fails', async () => {
+    // An idle/cold MV3 worker (or torn-down message port) must not blank the
+    // manager: hydration is decoupled from the worker and reads storage directly.
     const { chromeMock } = setupChrome();
     chromeMock.runtime.sendMessage.mockRejectedValueOnce(new Error('worker unavailable'));
 
-    await expect(useTabBoardStore.getState().hydrate()).rejects.toThrow('worker unavailable');
-    expect(useTabBoardStore.getState().persistenceError).toBe('worker unavailable');
+    await useTabBoardStore.getState().hydrate();
+
+    expect(useTabBoardStore.getState().hydrated).toBe(true);
+    expect(useTabBoardStore.getState().persistenceError).toBeNull();
+    // Fell back to reading chrome.storage.local rather than failing.
+    expect(chromeMock.storage.local.get).toHaveBeenCalled();
+  });
+
+  it('records a hydration failure and permits retry when storage is also unreachable', async () => {
+    const { chromeMock } = setupChrome();
+    chromeMock.runtime.sendMessage.mockRejectedValueOnce(new Error('worker unavailable'));
+    chromeMock.storage.local.get.mockRejectedValueOnce(new Error('storage unavailable'));
+
+    await expect(useTabBoardStore.getState().hydrate()).rejects.toThrow('storage unavailable');
+    expect(useTabBoardStore.getState().persistenceError).toBe('storage unavailable');
 
     await useTabBoardStore.getState().hydrate();
     expect(useTabBoardStore.getState().hydrated).toBe(true);

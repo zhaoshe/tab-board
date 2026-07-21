@@ -113,6 +113,27 @@ export async function ensureStateViaWorker(): Promise<TabBoardState> {
   return normalizeState(response.result);
 }
 
+/**
+ * Hydration-safe state read.
+ *
+ * The manager page does not actually need the MV3 service worker to display: it
+ * only needs the persisted state, which lives in `chrome.storage.local` and is
+ * readable directly. We still prefer the worker (it wakes it and seeds default
+ * state on first install), but an idle/cold worker must never blank the page.
+ * On any worker/messaging failure we fall back to reading storage locally, so
+ * the UI always comes up. Writes still go through the worker for cross-page
+ * serialization; only this read is decoupled.
+ */
+export async function ensureStateForHydration(): Promise<TabBoardState> {
+  try {
+    return await ensureStateViaWorker();
+  } catch {
+    // Worker asleep, cold-start race, or torn-down message port. Read the
+    // authoritative state straight from local storage instead of failing.
+    return ensureState();
+  }
+}
+
 export async function updateState(
   updater: (state: TabBoardState) => TabBoardState
 ): Promise<TabBoardState> {

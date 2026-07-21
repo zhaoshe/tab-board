@@ -21,6 +21,23 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-07-21: 修复 manager 白屏（hydration 与 MV3 worker 解耦）
+
+用户反馈 manager 页面运行中经常白屏。定位到根因:manager 是可长时间开着的新标签页,而 MV3 service worker 空闲约 30s 就会被 Chrome 挂起。此前 `hydrate()` 用**单次 `sendMessage({type:'tabboard-ensure-state'})`** 读初始 state,worker 处于挂起/冷启动竞态/通道断开时该调用 reject,导致 `hydrated` 永远为 false、页面卡在空的 `LoadingOverlay` 上——即白屏,且不会自愈。
+
+变化:
+
+- 新增 `ensureStateForHydration()`:优先走 worker(唤醒它、给空存储播种默认值),worker/messaging 失败时 catch 并降级为本地 `ensureState()` 直接读 `chrome.storage.local`。`store.hydrate()` 改用它。
+- 结论层面:manager 页面的**显示不再依赖 service worker**;worker 只在**写入**时用于跨页面串行化。只有 worker 与本地存储读取同时失败,`hydrate()` 才 reject 并允许重试。
+- 新增 `src/shared/store/chromeStorage.test.ts`(worker 成功 / worker 失败降级读存储 / 失败且空存储本地播种)、拆分并改写 store 的 hydration-failure 用例、新增 `tests/e2e/hydration-resilience.e2e.ts`(worker 不可达时 manager 仍渲染 seeded board)。
+
+判断:
+
+- MV3 service worker 被挂起是平台刻意设计,无法也不应"保活";正确做法是让客户端对冷 worker 有韧性,而不是与之硬刚。
+- 采用"读绕过、写留 worker"方案:精准解耦"页面能否显示"与"worker 活没活",同时保留 worker 作为多页面写入的唯一权威,改动面最小、风险最低。
+
+当前状态:Current,`npm run check`、`npm test`(614 通过)通过;Playwright e2e(含 worker 不可达场景,10 通过)本地按需运行通过。
+
 ### 2026-07-21: Session 键盘拖拽无障碍修复
 
 上一轮新增的 Playwright e2e 暴露出一个无障碍缺口：session card 的拖拽 activator 是不可聚焦的 `<header>`，只 spread 了 `@dnd-kit` listeners、没有 attributes，因此键盘用户无法拿起并重排 session。

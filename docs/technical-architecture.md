@@ -331,6 +331,8 @@ Bin entry 用于恢复删除内容。
 
 Manager 启动先由 React shell 和 `useStoreHydration()` 生成 normalized default state，准备并渲染可用 layout，同时由 `useOpenTabsRuntime()` 发起 Open Tabs 请求；storage state 在后台异步读取，完成后再应用到当前页面。Mantine render 或 runtime message 失败只影响对应 surface，不应阻断基础 Manager shell。
 
+Hydration 不依赖 MV3 service worker：manager 作为页面可直接读写 `chrome.storage.local`，worker 只在**写入**时用于跨页面串行化。`store.hydrate()` 通过 `ensureStateForHydration()` 读取初始 state——优先发 `tabboard-ensure-state` 给 worker（顺便唤醒它、给空存储播种默认值），但**如果 worker 处于空闲挂起、冷启动竞态或消息通道断开**（典型报错 `Could not establish connection` / `message port closed`），则 catch 后降级为本地 `ensureState()` 直接读 `chrome.storage.local`。这样 worker 不可达时页面仍能正常起来，避免此前"单次 `sendMessage` 失败 → `hydrated` 永远为 false → 无限 loading 白屏"的问题。只有当 worker 与本地存储读取**同时失败**时，`hydrate()` 才会 reject，此时 `useStoreHydration` 记录错误并允许重试。
+
 异步 storage apply 记录启动 revision；`chrome.storage.onChanged` 到达时先递增 revision 并应用新 state，旧的 storage 快照完成后若 revision 已变化则丢弃，避免旧快照覆盖新 state。错误按阶段降级：popover 失败只关闭信息浮层，storage 失败保留默认 normalized state，migration 失败保留已加载 sessions，shell 失败停止后续启动，Open Tabs 失败保留空面板并提示；loaded/render 失败则保留已启动的基础界面并提示。
 
 ### Restore

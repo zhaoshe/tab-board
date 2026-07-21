@@ -8,7 +8,7 @@ import {
   createNoteRecord,
   DROP_OPERATION_LEDGER_LIMIT,
 } from '../model';
-import { ensureStateViaWorker, getState, sendStateMutations, subscribeState } from './chromeStorage';
+import { ensureStateForHydration, getState, sendStateMutations, subscribeState } from './chromeStorage';
 import type { StateMutation } from './stateMutations';
 import {
   applyStateMutation,
@@ -862,7 +862,7 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
     const hydration = (async () => {
       let pendingHydrationState: TabBoardState | null = null;
       try {
-        await ensureStateViaWorker();
+        await ensureStateForHydration();
         if (generation !== hydrationGeneration) return;
 
         activeHydrationUnsubscribe?.();
