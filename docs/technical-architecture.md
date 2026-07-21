@@ -106,20 +106,21 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 
 ## State Schema
 
-State canonical key 是 `chrome.storage.local["tabboardState"]`。`quickList` 仍作为 state schema 字段保留（normalize 会补齐为空数组），但当前 UI 不读写 Quick list / Pinned workflow，也不再有历史数据迁移逻辑。
+State canonical key 是 `chrome.storage.local["tabboardState"]`。`quickList` 字段已从 schema 移除（Quick list / Pinned workflow 于 2026-07-06 下线）；`normalizeState()` 读到历史数据里的 `quickList` 时，会把其中的 items 迁移成一个名为 `Former Quick list` 的普通 session 插到 groups 头部，保证不丢数据，之后不再保留该字段。
 
 顶层结构：
 
 ```js
 {
   version,
+  mutationRevision,
   workspaces,
   activeWorkspaceId,
   groups,
   folders,
   categoryOrderByWorkspace,
-  quickList,
   bin,
+  dropOperationLedger,
   settings,
   createdAt,
   updatedAt
@@ -405,50 +406,63 @@ otherwise          -> Inbox
 
 ### Drag and Drop
 
-Drag payload 类型：
+TabBoard 的 DnD 基于 `@dnd-kit`（`@dnd-kit/core` + `@dnd-kit/sortable`），不再使用原生 HTML5 `draggable` / `dataTransfer` / `setDragImage`。单个 `DndContext` 位于 `src/manager/components/shell/ManagerLayout.tsx`，纯逻辑（payload/target 类型、intent resolver、几何锁定）集中在 `src/manager/core/dnd.ts`，可在 DOM 之外用 Vitest 覆盖。
 
-- `group`
-- `category`
-- `open-tabs`
-- `tab`
-- `tabs`
+Drag payload 类型（`DragPayload`，由各可拖拽组件通过 `useDraggable` / `useSortable` 的 `data.dnd.payload` 声明）：
 
-Drop target 类型：
+- `group`：拖拽整张 session card。
+- `category`：拖拽顶部 category tab 重排。
+- `tab`：拖拽单个 saved tab item。
+- `tabs`：拖拽 session 内多选的 saved tabs。
+- `open-tabs`：从 sidebar 拖拽一个或多个 open tabs。
 
-- `category-column`
-- `group-body`
-- `group-insert`
-- `tab-before`
-- `category-reorder`
+Drop target 类型（`DropTarget`，由 `useDroppable` 容器通过 `data.dnd.targets` 声明，一个容器可暴露多个候选 target）：
 
-重要实现点：
+- `group-body`：落入 session 主体，追加到末尾。
+- `tab-before`：落在某个 tab 行的 before/after 边缘，用于精确插入。
+- `group-insert`：落在两张 session card 之间的指定 index。
+- `category-column`：落在某个 category 的空白列区域，追加到该 category 末尾。
+- `category-reorder`：落在顶部某个 category tab 的 before/after，用于重排 category。
 
-- `closestSupportedDropTarget()` 会跳过当前 drag kind 不支持的内部 drop target，避免 session drag 被 tab row 抢走。
-- Saved tab 插入使用上/下高亮线；单个或批量移动通过 model 的 `moveGroupTabs()` 原子验证目标、移除和插入，避免同 session 移动最后一项时误删 session。
-- 左侧 sidebar 使用 `sidebar-collapsed` shell class 和 `tabboard.sidebarCollapsed` localStorage preference；该状态不进入业务 state。`renderSidebarRail()` 复用 `buildSidebarRailModel()`，只投影 selected window 的 tab identity，不拥有 selection 或 DnD state。collapsed content 通过 absolute hover/focus overlay 显示，因此不改变 board grid geometry。
-- Open Tabs body 使用单一纵向列表和 Filter tabs footer；pinned row 与普通 row共用列表，只显示 inline badge。rail 只聚焦既有 row/filter control，不生成 drag/drop target 或 payload。
-- `managerInfoPopover` 是单例 interactive overlay；来自其 action slot 的 delegated click 在 mutation 前调用 `hide()`，并在下一帧把 focus 恢复到仍可用的 row、session 或 Open Tabs fallback，避免 DOM 重绘后出现断连 trigger、旧内容或隐藏 keyboard focus。active drag 会隐藏 collapsed overlay 并临时禁用其 pointer events，让 board drop target 继续接收 dragover/drop。
-- 顶部 category tabs 复用 `folderList` 和 `category-row`，按 `categoryOrderByWorkspace` 排序，点击后切换 `activeFilter`。
-- 右侧 board 只渲染当前 active category；`category-section-grid` 使用单行 column-flow，sessions 横向滚动。
-- Session card 充满 board 高度，`tab-list` 负责 card 内部纵向滚动。
-- Session card 的视觉数据来自 `buildSessionCardView()`，favicon stack、link/note counts、status chips 和 overflow counts 可在 DOM 外测试。
-- Action menu 使用 fixed positioning 和 `getFloatingMenuPosition()`，避免被 horizontal board overflow 裁切。
-- Session 移动使用 `group-insert-marker` 作为 Move here placeholder。
-- Session dragstart 会 seed marker 到源位置，并记录源卡片 rect，避免隐藏后的源卡片实时 rect 抢回 placeholder。
-- Session drag image 使用源卡片位置的 visible clone，避免浏览器截不到 drag image。
-- Session hover 到目标卡左右 25% 时按 before/after 插入；进入目标卡中间 50% 时使用 target slot 语义，让被拖拽 session 占目标位置、目标卡回填源空位。
-- Target slot 进入后会记录目标卡原始 rect，并用 hysteresis margin 保持锁定，减少原生 DnD 与 grid 重排导致的边界回闪。
+DnD 生命周期（React 侧，`ManagerLayout`）：
+
+- Sensors：`PointerSensor`（`activationConstraint.distance = 5px`，避免点击误触发拖拽）、`TouchSensor`（`delay 200ms` + `tolerance 5px`）、`KeyboardSensor`（键盘可达）。
+- Collision detection：自定义 `createGeometryCollisionDetection()` 取代默认算法。它按指针到候选 rect 的距离排序、用 `isCompatibleTarget()` 过滤掉当前 payload 不支持的 target（例如 session drag 不会被 tab row 抢走），并对 `tab-before` 用 `getTabDropPlacement()`（上/下 25% 边缘 → before/after，中间 50% → 收敛为 `group-body`）细化落点。
+- Target 锁定：`lockDropTarget()` 用 `DROP_TARGET_RELEASE_MARGIN`（12px）hysteresis 保持已选 target，减少横向 board 重排导致的边界回闪；`category-column` 命中时优先直接选中，不参与锁定。
+- `onDragStart` 记录 `event.active.rect.current.initial` 作为 `sourceRect`，并快照 `dragReplacementKey`（workspace + category + view + groups 指纹）。`onDragOver` 由 collision 结果算出 `target` 与 `markerForTarget()` 生成的插入标记。`onDragEnd` 用 `getDragEndTarget()` 取最终 target。
+- Overlay：`DragOverlay`（`dropAnimation={null}`）渲染跟随指针的预览，尺寸取 `sourceRect`；不同 payload 渲染不同预览（session card / tab row / "N saved tabs" / "N open tabs" 剪影 / category label）。这取代了原生实现里"截取源卡片 clone 当 drag image"的做法，视口外元素不再出现"一拖就消失"。
+
+Intent 解析与提交：
+
+- `resolveDrop({ payload, target, state, openTabs })` 是唯一裁决点，先校验 workspace 边界（`isValidWorkspaceBoundary`，且 `target.workspaceId === payload.workspaceId`），再按 payload 类型分派，产出 typed `DropIntent`（`move-session` / `reorder-category` / `move-tabs` / `copy-open-tabs` / `create-session`）或返回 `null`。
+- Ownership/边界校验全部在 resolver 内：group/tab 必须属于当前 workspace（`getOwnedGroup` / `getOwnedTab`），category 必须存在（`isOwnedCategory`），插入 index 必须合法（`isValidInsertionIndex`），open-tabs 必须仍是 storable candidate（复用 `isStorableCaptureCandidate`）。同 session 内移动会用 `isSavedTabMoveNoOp()` 剔除 no-op，避免误删或空提交。
+- session body 不会产出 merge intent：拖 session 只能落到 `group-insert` / `category-column`，不能落进另一张 session 内部，从根本上排除"把 A 合并进 B"的误操作。
+- 提交走 `useTabBoardStore.applyDropIntent(intent, openTabs)` → `commitDropMutation`（带 `operationId` 与 `expectedRevision`），在 background persistence 队列内做 normalized 原子写入；`persistDropWithFeedback()` 统一 success/error toast。
+
+拖拽期间的一致性保护：
+
+- `shouldInvalidateDragReplacement()`：拖拽进行中若 workspace/category/view/groups 指纹变化，或拖拽源已不再渲染（`isDragSourceStillRendered`），则调用 `finishDrag()` 主动收尾，避免落到过期布局。
+- `handleOpenTabsSourceKeyChange()`：Open Tabs 列表在拖拽中被刷新替换时，取消进行中的 `open-tabs` 拖拽。
+- `Escape` 键与组件卸载都会触发 `finishDrag()`；`onDragStart` 通过 `useDndMonitor` 关闭所有 info overlay，避免浮层遮挡 drop target。
+
+板面与 sidebar 布局（与 DnD 相关的部分）：
+
+- 顶部 category tabs 按 `categoryOrderByWorkspace` 排序，点击切换 `selectedCategory`；右侧 board 只渲染当前 active category，单行横向滚动，每张 session card 全高、card 内 `tab-list` 独立纵向滚动。
+- 左侧 sidebar 折叠状态用 `manager-shell--sidebar-collapsed` class 和 `tabboard.sidebarCollapsed` localStorage preference，不进入业务 state；collapsed rail 只投影 selected window 的 tab identity，不拥有 selection 或 DnD state；active drag 期间通过 `manager-shell--open-tabs-drag-active` 让 collapsed overlay 让出 pointer events。
 
 已知敏感点：
 
-- HTML DnD 事件时序在 Chrome 中比较脆，尤其是原元素隐藏、drag image、placeholder 重排三者叠加时。
-- 修改拖拽逻辑时应同时验证：
+- DnD 逻辑仍是最脆弱的区域之一，但脆弱点已从"原生事件时序"转移到"collision detection 几何 + target 锁定 hysteresis + 拖拽中布局失效"三者的交互。
+- `resolveDrop` 是行为契约的中心，任何落点语义调整都应先在 `src/manager/core/dnd.test.ts` 加用例，再改 UI。
+- 自动化只覆盖 typed resolver / 几何 / 生命周期契约，真实指针/键盘事件时序仍需浏览器验证。修改拖拽逻辑时应同时手工验证：
   - 拖 session 起始位置。
   - 拖 session 到同 category 前/后。
   - 拖 session 到其它 category。
   - 拖 saved tab 到已有 session。
   - 拖 saved tab 到新 session placeholder。
-  - 多选 open tabs 拖拽。
+  - 多选 saved tabs 拖拽。
+  - 多选 open tabs 拖入已有 session 与新建 session。
+  - 键盘（Space 拿起 / 方向键移动 / Space 放下 / Esc 取消）拖拽路径。
 
 ## UI 架构
 
@@ -474,6 +488,10 @@ manager.html
 3. `useTabBoardStore` 与 background persistence queue 应用 normalized state。
 4. `chrome.storage.onChanged` 通过 hydration/runtime hooks 回流；revision guard 丢弃过期快照。
 5. React 根据 authoritative state 重绘，并由 capture outcome/overlay lifecycle 恢复 feedback 与 focus。
+
+### 大 board 性能
+
+`WorkspaceContent` 一次渲染当前 active category 的全部 session card（横向 track），不做 JS 虚拟化，以保持 `@dnd-kit` 的 collision/measurement、浏览器 find-in-page 与 `scrollIntoView` 正常工作。为控制成本，`.session-board__group-slot` 使用 CSS `content-visibility: auto` + `contain-intrinsic-size`：滚出视口的 session slot 跳过 layout/paint，但仍留在 DOM 中，可被拖拽 measurement、搜索定位和滚动命中。该行为由 `src/manager/core/layout.test.ts` 的 CSS 契约和 `tests/e2e/large-board.e2e.ts`（60 sessions 全部在 DOM、远端 card 可滚动可见）守护。若单 category 达到数百 session 仍出现压力，再评估引入真正的虚拟列表及其与 `@dnd-kit` 的兼容性。
 
 ## Search
 
@@ -524,7 +542,7 @@ git diff --check
 当前测试空白：
 
 - 真实 Chrome custom-element/extension lifecycle、Shadow DOM keyboard/focus、完整 DOM render 未自动化覆盖。
-- 原生 Drag and drop 浏览器事件时序未自动化覆盖，只有 typed resolver、geometry、lifecycle 和 cleanup contracts。
+- `@dnd-kit` 拖拽的真实指针/键盘事件时序未由 Vitest 覆盖，只有 typed resolver、geometry、lifecycle 和 cleanup contracts；浏览器级冒烟见 `tests/e2e/`（Playwright，需本地按需运行）。
 - Chrome capture/restore 与 sender integration 仍需要 unpacked extension 手工验证。
 
 建议人工回归：
@@ -551,9 +569,9 @@ git diff --check
 - selectors、commands、capture、open-tabs 和 typed DnD 规则放在 `src/manager/core/`，优先保持纯函数和可执行测试。
 - 状态 schema、normalize、mutation validation 与 persistence adapter 继续留在 `src/shared/` 和 `src/background/` 边界内。
 
-2. 给 drag/drop 增加浏览器级测试
+2. 扩充 drag/drop 的浏览器级测试
 
-如果引入 Playwright 或 Chrome extension e2e，优先覆盖 session drag 起始位置、目标 placeholder 和 saved/open tabs 拖拽。
+`tests/e2e/`（Playwright）已提供 manager 加载与 `@dnd-kit` 键盘拖拽的冒烟骨架；继续扩充时优先覆盖 session 跨 category 重排、saved/open tabs 落点 placeholder 与键盘拖拽路径。指针拖拽在 Playwright 中需模拟 pointer move 序列，建议同时保留 `src/manager/core/dnd.test.ts` 的纯 resolver 用例作为主回归。
 
 3. 数据 schema 改动必须经过 normalize
 

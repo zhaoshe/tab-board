@@ -21,6 +21,25 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-07-21: 架构文档校正与死字段清理
+
+在一次全项目审查中发现文档与实现漂移，并清理了 React 重写后遗留的死 schema 字段。
+
+变化：
+
+- 校正 `technical-architecture.md` 的 Drag and Drop 章节：DnD 早已从原生 HTML5（`setDragImage`/`dataTransfer`）迁移到 `@dnd-kit`（`PointerSensor`/`TouchSensor`/`KeyboardSensor` + 自定义 `createGeometryCollisionDetection` + `DragOverlay`），文档此前仍在描述已废弃的原生实现。
+- 移除 schema 中的死字段 `quickList`（Quick list workflow 于 2026-07-06 下线，React 重写后 UI 已完全不读写）。`normalizeState()` 遇到历史 `quickList` 数据时迁移成 `Former Quick list` session，保证不丢数据。
+- 新增 `src/shared/model/schema.test.ts` 覆盖迁移与字段移除。
+- 新增 `tests/e2e/`（Playwright）浏览器级冒烟骨架，覆盖 manager 加载与 `@dnd-kit` 键盘拖拽；纯 resolver 回归仍以 `src/manager/core/dnd.test.ts` 为主。
+- 大数据量 board 性能：`WorkspaceContent` 的横向 session track 引入按需渲染，减少 session 数量很大时的一次性 DOM 成本。
+
+判断：
+
+- `collapsed` 字段刻意保留：`browserGroup.collapsed` 是真实 Chrome tab group 元数据，`group.collapsed` / `folder.collapsed` 仍嵌在 mutation 校验与 replay identity 契约中，移除属于高风险低收益。
+- 文档漂移会误导后续维护"改哪里、注意什么"，因此把 DnD 章节校正视为与代码同等重要的修复。
+
+当前状态：Current，`tsc`、`npm test`、`npm run check` 通过；Playwright e2e 为按需本地运行。
+
 ### 2026-07-21: Category 系统改造与体验优化
 
 用户反馈当前分类体系不够清晰，同时 Open Tabs 和 session 管理有多处体验缺口。本轮将 category 从 Inbox/Starred 两档内置扩展为 Inbox/Saved/Archive 三档内置 + 自定义 folder，并补齐 note、搜索、确认设置等体验细节。

@@ -175,7 +175,6 @@ export function persistedSnapshot(state: TabBoardState): TabBoardState {
     groups: state.groups,
     folders: state.folders,
     categoryOrderByWorkspace: state.categoryOrderByWorkspace,
-    quickList: state.quickList,
     bin: state.bin,
     dropOperationLedger: state.dropOperationLedger,
     settings: state.settings,

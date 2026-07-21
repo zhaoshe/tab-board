@@ -90,7 +90,6 @@ function makeState(overrides: Partial<TabBoardState> = {}): TabBoardState {
     groups: overrides.groups ?? [],
     folders: overrides.folders ?? [],
     categoryOrderByWorkspace: {},
-    quickList: [],
     bin: [],
     dropOperationLedger: [],
     settings: {

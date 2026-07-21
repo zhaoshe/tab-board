@@ -57,7 +57,6 @@ export function createEmptyState(): TabBoardState {
     groups: [],
     folders: [],
     categoryOrderByWorkspace: {},
-    quickList: [],
     bin: [],
     dropOperationLedger: [],
     settings: { ...DEFAULT_SETTINGS },
@@ -106,9 +105,6 @@ export function normalizeState(raw: unknown): TabBoardState {
       rawObj.categoryOrderByWorkspace,
       workspaceIds
     ),
-    quickList: Array.isArray(rawObj.quickList)
-      ? (rawObj.quickList as unknown[]).map(normalizeTab).filter(Boolean) as TabItem[]
-      : [],
     bin: Array.isArray(rawObj.bin)
       ? compactBin((rawObj.bin as unknown[]).map(normalizeBinEntry).filter(Boolean) as BinEntry[])
       : [],
@@ -139,6 +135,23 @@ export function normalizeState(raw: unknown): TabBoardState {
       workspaceId,
     };
   });
+
+  // Legacy migration: the Quick list / Pinned workflow was retired (2026-07-06).
+  // The field is no longer part of the schema, but any residual stored items are
+  // preserved as a normal "Former Quick list" session instead of being dropped.
+  const legacyQuickList = Array.isArray(rawObj.quickList)
+    ? (rawObj.quickList as unknown[]).map(normalizeTab).filter(Boolean) as TabItem[]
+    : [];
+  if (legacyQuickList.length) {
+    state.groups = [
+      createGroupFromTabRecords(legacyQuickList, {
+        title: 'Former Quick list',
+        workspaceId: defaultWorkspaceId,
+      }),
+      ...state.groups,
+    ];
+  }
+
   state.settings.actionClick = state.settings.actionClick === 'popup' ? 'popup' : 'store';
   state.settings.theme = (['system', 'light', 'dark'] as const).includes(state.settings.theme)
     ? state.settings.theme

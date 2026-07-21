@@ -509,6 +509,13 @@ function windowsForCustomTabs(tabs: readonly PreviewTab[]): StoredPreviewWindow[
 }
 
 export function installPreviewChrome(options: PreviewChromeOptions = {}): PreviewChromeHarness {
+  // Allow the preview HTML (and Playwright addInitScript) to seed deterministic
+  // state without changing the `installPreviewChrome()` boot call. Explicit
+  // arguments always win over the injected global.
+  const injected = (globalThis as { __TABBOARD_PREVIEW__?: PreviewChromeOptions }).__TABBOARD_PREVIEW__;
+  if (injected && typeof injected === 'object') {
+    options = { ...injected, ...options };
+  }
   let state = normalizeState(options.state ?? fixtureState());
   let tabs: PreviewTab[];
   let windows: StoredPreviewWindow[];

@@ -12,3 +12,6 @@ build/
 .agents/
 .superpowers/
 skills-lock.json
+test-results/
+playwright-report/
+.playwright/

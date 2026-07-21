@@ -106,7 +106,6 @@ export interface TabBoardState {
   groups: Group[];
   folders: Folder[];
   categoryOrderByWorkspace: Record<string, string[]>;
-  quickList: TabItem[];
   bin: BinEntry[];
   dropOperationLedger: DropOperationLedgerEntry[];
   settings: Settings;

@@ -144,9 +144,10 @@ Bin：
 主要风险：
 
 - Manager UI 逻辑较多，后续新增行为要注意维持 components / core / hooks 的边界。
-- 拖拽交互依赖浏览器原生 HTML DnD，视觉反馈和事件时序容易出现边界 bug。
-- session 数量继续增长后，当前 DOM 全量渲染和多 category section 可能需要虚拟列表。
+- 拖拽交互基于 `@dnd-kit`（pointer/touch/keyboard sensors + 自定义 collision detection），视觉反馈和落点几何仍是最易出边界 bug 的区域。
+- session 数量继续增长后，当前用 CSS `content-visibility` 让 off-screen session slot 跳过 layout/paint；若单 category 达到数百 session，仍可能需要引入真正的虚拟列表（需评估与 `@dnd-kit` measurement 的兼容性）。
 - 右键菜单触发筛选、icon-only 操作的可发现性仍需观察。
+- Session card 的拖拽 activator（`.session-card__header`）目前只 spread `@dnd-kit` listeners、未 spread attributes，因此键盘（Space/方向键）拖拽 session 尚不可用；如需键盘 DnD 需补 activator 的 `tabindex`/`role`/`aria-roledescription`。
 
 ## 成功标准
 

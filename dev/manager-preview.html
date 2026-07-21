@@ -10,6 +10,9 @@
     <script type="module">
       import { installPreviewChrome } from '/src/dev/previewChrome.ts';
 
+      // Tests (and manual exploration) can seed deterministic preview state by
+      // setting `window.__TABBOARD_PREVIEW__` before this module runs (e.g. via
+      // Playwright addInitScript); installPreviewChrome() reads it as defaults.
       installPreviewChrome();
       await import('/src/manager/main.tsx');
     </script>

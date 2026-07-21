@@ -105,4 +105,13 @@ describe('Task105 manager layout contracts', () => {
     expect(workspace).toContain('groups.map((group) =>');
     expect(workspace).toContain('highlighted={highlightedGroupId === group.id}');
   });
+
+  it('skips layout/paint for off-screen session slots without removing them from the DOM', () => {
+    const slot = cssBlock('.session-board__group-slot');
+
+    // content-visibility keeps large boards cheap while preserving @dnd-kit
+    // measurement, find-in-page, and scrollIntoView (unlike JS virtualization).
+    expect(slot).toContain('content-visibility: auto');
+    expect(slot).toContain('contain-intrinsic-size:');
+  });
 });
