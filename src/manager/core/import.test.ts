@@ -62,6 +62,7 @@ function group(id: string, overrides: Partial<Group> = {}): Group {
     folderId: null,
     locked: false,
     starred: false,
+    archived: false,
     collapsed: false,
     tabs: [],
     createdAt: timestamp,

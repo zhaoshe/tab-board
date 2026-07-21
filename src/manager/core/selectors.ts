@@ -1,13 +1,13 @@
 import { groupMatchesQuery, normalizeSearch } from '../../shared/model/search';
 import type { Folder, Group, TabBoardState } from '../../shared/model';
 
-export type CategoryFilter = 'inbox' | 'starred' | `folder:${string}`;
+export type CategoryFilter = 'inbox' | 'saved' | 'archive' | `folder:${string}`;
 
 export type CategoryStripItem = {
   id: CategoryFilter;
   label: string;
   count: number;
-  kind: 'inbox' | 'starred' | 'folder';
+  kind: 'inbox' | 'saved' | 'archive' | 'folder';
   folderId?: string;
 };
 
@@ -40,18 +40,20 @@ export function getCategoryStrip(state: CategoryStripState): CategoryStripItem[]
   }
 
   const inboxCount = workspaceGroups.filter(
-    (group) => !group.starred && !isValidFolder(group.folderId, folderById),
+    (group) => !group.starred && !group.archived && !isValidFolder(group.folderId, folderById),
   ).length;
-  const starredCount = workspaceGroups.filter((group) => group.starred).length;
+  const savedCount = workspaceGroups.filter((group) => group.starred).length;
+  const archiveCount = workspaceGroups.filter((group) => group.archived).length;
 
   return [
     { id: 'inbox', label: 'Inbox', count: inboxCount, kind: 'inbox' },
-    { id: 'starred', label: 'Starred', count: starredCount, kind: 'starred' },
+    { id: 'saved', label: 'Saved', count: savedCount, kind: 'saved' },
+    { id: 'archive', label: 'Archive', count: archiveCount, kind: 'archive' },
     ...orderedFolders.map((folder) => ({
       id: `folder:${folder.id}` as const,
       label: folder.name,
       count: workspaceGroups.filter(
-        (group) => !group.starred && group.folderId === folder.id,
+        (group) => !group.starred && !group.archived && group.folderId === folder.id,
       ).length,
       kind: 'folder' as const,
       folderId: folder.id,
@@ -82,13 +84,16 @@ export function getVisibleGroups(
     if (group.workspaceId !== workspaceId) {
       return false;
     }
-    if (filter === 'starred') {
+    if (filter === 'saved') {
       return group.starred;
     }
-    if (filter === 'inbox') {
-      return !group.starred && !isValidFolder(group.folderId, folderById);
+    if (filter === 'archive') {
+      return group.archived;
     }
-    return !group.starred && group.folderId === filter.slice('folder:'.length) && isValidFolder(group.folderId, folderById);
+    if (filter === 'inbox') {
+      return !group.starred && !group.archived && !isValidFolder(group.folderId, folderById);
+    }
+    return !group.starred && !group.archived && group.folderId === filter.slice('folder:'.length) && isValidFolder(group.folderId, folderById);
   });
 
   const normalizedQuery = normalizeSearch(query);

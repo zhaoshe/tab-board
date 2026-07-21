@@ -49,7 +49,7 @@ interface TabBoardStore extends TabBoardState {
   updateSettings: (updates: Partial<Settings>) => void;
   moveTab: (groupId: string, tabId: string, targetGroupId: string, targetIndex: number) => void;
   applyDropIntent: (intent: DropIntent, openTabs?: readonly OpenTabInfo[]) => Promise<void>;
-  reorderGroupsInFolder: (workspaceId: string, folderId: string | null, starred: boolean, orderedGroupIds: string[]) => void;
+  reorderGroupsInFolder: (workspaceId: string, folderId: string | null, starred: boolean, archived: boolean, orderedGroupIds: string[]) => void;
   starGroup: (groupId: string) => void;
   lockGroup: (groupId: string) => void;
   collapseGroup: (groupId: string) => void;
@@ -981,7 +981,7 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
     if (!group) return;
     const timestamp = nowIso();
     const categoryIndex = state.groups
-      .filter((item) => item.workspaceId === group.workspaceId && item.folderId === group.folderId && item.starred === group.starred)
+      .filter((item) => item.workspaceId === group.workspaceId && item.folderId === group.folderId && item.starred === group.starred && item.archived === group.archived)
       .findIndex((item) => item.id === id);
     const workspace = state.workspaces.find((w) => w.id === group.workspaceId);
     const folder = group.folderId ? state.folders.find((f) => f.id === group.folderId) : null;
@@ -1013,6 +1013,7 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
       groupId,
       targetFolderId,
       starred: false,
+      archived: false,
       index,
       updatedAt: timestamp,
     });
@@ -1132,8 +1133,8 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
     updatedAt: nowIso(),
   }),
 
-  reorderGroupsInFolder: (workspaceId, folderId, starred, orderedGroupIds) => {
-    commitMutation({ type: 'reorder-groups', workspaceId, folderId, starred, orderedGroupIds, updatedAt: nowIso() });
+  reorderGroupsInFolder: (workspaceId, folderId, starred, archived, orderedGroupIds) => {
+    commitMutation({ type: 'reorder-groups', workspaceId, folderId, starred, archived, orderedGroupIds, updatedAt: nowIso() });
   },
 
   starGroup: (groupId) => {

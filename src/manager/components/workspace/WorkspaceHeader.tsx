@@ -477,7 +477,7 @@ export function WorkspaceHeader({
       <div className="manager-category-strip">
         <nav className="manager-category-nav" aria-label="Categories">
           <MantineGroup gap={2} wrap="nowrap">
-            {categories.map((item) => {
+            {(isSearchExpanded ? categories.slice(0, 3) : categories).map((item) => {
               const isActive = !showBin && selectedCategory === item.id;
               return (
                 <CategoryDndItem
@@ -493,6 +493,18 @@ export function WorkspaceHeader({
                 />
               );
             })}
+            {isSearchExpanded && categories.length > 3 && (
+              <Tooltip label={`${categories.length - 3} more categories`}>
+                <ActionIcon
+                  variant="subtle"
+                  size="sm"
+                  aria-label={`${categories.length - 3} more categories`}
+                  onClick={() => setIsSearchExpanded(false)}
+                >
+                  <Text size="xs" c="dimmed">+{categories.length - 3}</Text>
+                </ActionIcon>
+              </Tooltip>
+            )}
           </MantineGroup>
         </nav>
 
@@ -509,28 +521,32 @@ export function WorkspaceHeader({
         </Menu>
       </div>
 
-      <MantineGroup className={`manager-search-slot${isSearchExpanded ? ' manager-search-slot--expanded' : ''}`} gap={4} justify={isSearchExpanded ? 'flex-start' : 'center'} ml="auto">
-        <Tooltip label={isSearchExpanded ? 'Hide search' : 'Show search'}>
-          <ActionIcon
-            className="manager-search-toggle"
-            variant={isSearchExpanded ? 'light' : 'subtle'}
-            aria-label={isSearchExpanded ? 'Hide search' : 'Show search'}
-            aria-controls={SEARCH_INPUT_ID}
-            aria-expanded={isSearchExpanded}
-            onClick={toggleSearch}
-          >
-            <IconSearch size={20} />
-          </ActionIcon>
-        </Tooltip>
-        <div className={isSearchExpanded ? undefined : 'manager-search-input-collapsed'}>
-          <SearchBar
-            inputId={SEARCH_INPUT_ID}
-            autoFocus={isSearchExpanded}
-            category={showBin ? 'inbox' : selectedCategory}
-            fullWidth={isSearchExpanded}
-            onEscape={() => setIsSearchExpanded(false)}
-          />
-        </div>
+      <MantineGroup className={`manager-search-slot${isSearchExpanded ? ' manager-search-slot--expanded' : ''}`} gap={4} justify="center" ml={isSearchExpanded ? 'xs' : 'auto'}>
+        {!isSearchExpanded && (
+          <Tooltip label="Show search">
+            <ActionIcon
+              className="manager-search-toggle"
+              variant="subtle"
+              aria-label="Show search"
+              aria-controls={SEARCH_INPUT_ID}
+              aria-expanded={isSearchExpanded}
+              onClick={toggleSearch}
+            >
+              <IconSearch size={20} />
+            </ActionIcon>
+          </Tooltip>
+        )}
+        {isSearchExpanded && (
+          <div style={{ width: 280, minWidth: 200 }}>
+            <SearchBar
+              inputId={SEARCH_INPUT_ID}
+              autoFocus={isSearchExpanded}
+              category={showBin ? 'inbox' : selectedCategory}
+              fullWidth={false}
+              onEscape={() => setIsSearchExpanded(false)}
+            />
+          </div>
+        )}
       </MantineGroup>
 
       <MantineGroup className="manager-header-actions" gap={2} ml="sm" wrap="nowrap">

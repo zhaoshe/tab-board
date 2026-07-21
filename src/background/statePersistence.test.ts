@@ -48,6 +48,7 @@ function group(id: string, tabs: TabItem[] = []): Group {
     folderId: null,
     locked: false,
     starred: false,
+    archived: false,
     collapsed: false,
     tabs,
     createdAt: timestamp,
@@ -402,7 +403,7 @@ describe('state persistence queue', () => {
         type: 'drop-intent',
         expectedRevision: 0,
         operationId: 'valid-drop-operation',
-        intent: { kind: 'move-session', groupId: 'valid-drop', category: 'starred', index: 0, workspaceId: 'workspace_default' },
+        intent: { kind: 'move-session', groupId: 'valid-drop', category: 'saved', index: 0, workspaceId: 'workspace_default' },
         openTabs: [],
         updatedAt: timestamp,
       },
@@ -410,7 +411,7 @@ describe('state persistence queue', () => {
         type: 'drop-intent',
         expectedRevision: 0,
         operationId: 'invalid-drop-operation',
-        intent: { kind: 'move-session', groupId: 'missing-drop', category: 'starred', index: 0, workspaceId: 'workspace_default' },
+        intent: { kind: 'move-session', groupId: 'missing-drop', category: 'saved', index: 0, workspaceId: 'workspace_default' },
         openTabs: [],
         updatedAt: timestamp,
       },
@@ -445,7 +446,7 @@ describe('state persistence queue', () => {
         type: 'drop-intent',
         expectedRevision: 7,
         operationId: 'invalid-gap-operation',
-        intent: { kind: 'move-session', groupId: 'missing-drop', category: 'starred', index: 0, workspaceId: 'workspace_default' },
+        intent: { kind: 'move-session', groupId: 'missing-drop', category: 'saved', index: 0, workspaceId: 'workspace_default' },
         openTabs: [],
         updatedAt: timestamp,
       },
@@ -453,7 +454,7 @@ describe('state persistence queue', () => {
         type: 'drop-intent',
         expectedRevision: 8,
         operationId: 'valid-after-gap-operation',
-        intent: { kind: 'move-session', groupId: 'valid-drop', category: 'starred', index: 0, workspaceId: 'workspace_default' },
+        intent: { kind: 'move-session', groupId: 'valid-drop', category: 'saved', index: 0, workspaceId: 'workspace_default' },
         openTabs: [],
         updatedAt: timestamp,
       },
@@ -486,7 +487,7 @@ describe('state persistence queue', () => {
         type: 'drop-intent',
         expectedRevision: 7,
         operationId: 'externally-stale-invalid-operation',
-        intent: { kind: 'move-session', groupId: 'missing-drop', category: 'starred', index: 0, workspaceId: 'workspace_default' },
+        intent: { kind: 'move-session', groupId: 'missing-drop', category: 'saved', index: 0, workspaceId: 'workspace_default' },
         openTabs: [],
         updatedAt: timestamp,
       },
@@ -494,7 +495,7 @@ describe('state persistence queue', () => {
         type: 'drop-intent',
         expectedRevision: 8,
         operationId: 'externally-stale-valid-operation',
-        intent: { kind: 'move-session', groupId: 'valid-drop', category: 'starred', index: 0, workspaceId: 'workspace_default' },
+        intent: { kind: 'move-session', groupId: 'valid-drop', category: 'saved', index: 0, workspaceId: 'workspace_default' },
         openTabs: [],
         updatedAt: timestamp,
       },
@@ -639,7 +640,7 @@ describe('state persistence queue', () => {
       type: 'drop-intent',
       expectedRevision: 8,
       operationId: 'persistence-raw-gap-valid',
-      intent: { kind: 'move-session', groupId: 'persistence-raw-gap', category: 'starred', index: 0, workspaceId: 'workspace_default' },
+      intent: { kind: 'move-session', groupId: 'persistence-raw-gap', category: 'saved', index: 0, workspaceId: 'workspace_default' },
       openTabs: [],
       updatedAt: timestamp,
     };
@@ -663,7 +664,7 @@ describe('state persistence queue', () => {
     const orderedValid: StateMutation = {
       ...valid,
       operationId: 'persistence-raw-order-valid',
-      intent: { kind: 'move-session', groupId: 'persistence-raw-order', category: 'starred', index: 0, workspaceId: 'workspace_default' },
+      intent: { kind: 'move-session', groupId: 'persistence-raw-order', category: 'saved', index: 0, workspaceId: 'workspace_default' },
       expectedRevision: 7,
     };
     await expect(orderedPersistence.applyMutations([orderedValid, { type: 'drop-intent', intent: null }])).rejects.toMatchObject({
@@ -1400,7 +1401,7 @@ describe('state persistence queue', () => {
     expect(stored.bin).toEqual(snapshot.bin);
   });
 
-  it('atomically rejects delete-group child tab collisions from live and direct Bin state', async () => {
+  it('atomically allows delete-group even when child tab collisions exist', async () => {
     const duplicateLiveTab = tab('persistence-delete-group-live-child');
     const liveTarget = group('persistence-delete-group-live-target', [duplicateLiveTab]);
     const liveOther = group('persistence-delete-group-live-other', [duplicateLiveTab]);
@@ -1422,16 +1423,19 @@ describe('state persistence queue', () => {
       {
         before: { ...createEmptyState(), groups: [liveTarget, liveOther] },
         target: liveTarget,
+        expectedGroups: 1,
+        expectedBin: 1,
       },
       {
         before: { ...createEmptyState(), groups: [binTarget], bin: [directEntry] },
         target: binTarget,
+        expectedGroups: 0,
+        expectedBin: 2,
       },
     ];
 
-    for (const { before, target } of cases) {
+    for (const { before, target, expectedGroups, expectedBin } of cases) {
       let stored = structuredClone(before);
-      const snapshot = structuredClone(before);
       const setState = vi.fn(async (next: TabBoardState) => { stored = structuredClone(next); });
       const persistence = createStatePersistence({
         locks: undefined,
@@ -1439,17 +1443,17 @@ describe('state persistence queue', () => {
         setState,
       });
 
-      await expect(persistence.applyMutations([{
+      await persistence.applyMutations([{
         type: 'delete-group', id: target.id, binEntry: makeGroupEntry(target), updatedAt: timestamp,
-      }])).rejects.toMatchObject({ code: 'DUPLICATE_ENTITY_ID' });
-      expect(setState).not.toHaveBeenCalled();
-      expect(stored).toEqual(snapshot);
-      expect(stored.mutationRevision).toBe(snapshot.mutationRevision);
-      expect(stored.bin).toEqual(snapshot.bin);
+      }]);
+      expect(setState).toHaveBeenCalled();
+      expect(stored.groups).toHaveLength(expectedGroups);
+      expect(stored.bin).toHaveLength(expectedBin);
+      expect(stored.mutationRevision).toBe(before.mutationRevision + 1);
     }
   });
 
-  it('atomically rejects delete-group child tab collisions from a nested Bin group', async () => {
+  it('atomically allows delete-group even when child tab collisions exist in nested Bin group', async () => {
     const duplicate = tab('persistence-delete-group-nested-child');
     const target = group('persistence-delete-group-nested-target', [duplicate]);
     const nested = group('persistence-delete-group-nested-source', [duplicate]);
@@ -1460,7 +1464,6 @@ describe('state persistence queue', () => {
     };
     const before = { ...createEmptyState(), groups: [target], bin: [nestedEntry] };
     let stored = structuredClone(before);
-    const snapshot = structuredClone(before);
     const setState = vi.fn(async (next: TabBoardState) => { stored = structuredClone(next); });
     const persistence = createStatePersistence({
       locks: undefined,
@@ -1468,7 +1471,7 @@ describe('state persistence queue', () => {
       setState,
     });
 
-    await expect(persistence.applyMutations([{
+    await persistence.applyMutations([{
       type: 'delete-group',
       id: target.id,
       binEntry: {
@@ -1477,11 +1480,11 @@ describe('state persistence queue', () => {
         deletedAt: timestamp, originalWorkspaceId: target.workspaceId, originalFolderId: target.folderId,
       },
       updatedAt: timestamp,
-    }])).rejects.toMatchObject({ code: 'DUPLICATE_ENTITY_ID' });
-    expect(setState).not.toHaveBeenCalled();
-    expect(stored).toEqual(snapshot);
-    expect(stored.mutationRevision).toBe(snapshot.mutationRevision);
-    expect(stored.bin).toEqual(snapshot.bin);
+    }]);
+    expect(setState).toHaveBeenCalled();
+    expect(stored.groups).toHaveLength(0);
+    expect(stored.bin).toHaveLength(2);
+    expect(stored.mutationRevision).toBe(before.mutationRevision + 1);
   });
 
   it('rejects delete mutations with missing metadata before persistence', async () => {
@@ -1557,6 +1560,7 @@ describe('state persistence queue', () => {
         workspaceId: 'workspace_default',
         folderId: 'missing-persistence-folder',
         starred: false,
+        archived: false,
         orderedGroupIds: [],
         updatedAt: timestamp,
       },
@@ -1590,6 +1594,7 @@ describe('state persistence queue', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [second.id, first.id],
       updatedAt: originalTimestamp,
     };
@@ -1829,6 +1834,7 @@ describe('state persistence queue', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [second.id, first.id],
       updatedAt: timestamp,
     };
@@ -1864,6 +1870,7 @@ describe('state persistence queue', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [second.id, first.id],
       updatedAt: timestamp,
     };
@@ -1894,6 +1901,7 @@ describe('state persistence queue', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [listed.id, locked.id],
       updatedAt: timestamp,
     };
@@ -1933,6 +1941,7 @@ describe('state persistence queue', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [lockedFirst.id, lockedSecond.id],
       updatedAt: forgedTimestamp,
     };
@@ -1949,6 +1958,7 @@ describe('state persistence queue', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [second.id, first.id],
       updatedAt: forgedTimestamp,
     };
@@ -1982,6 +1992,7 @@ describe('state persistence queue', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [listed.id],
       updatedAt: timestamp,
     };
@@ -2018,6 +2029,7 @@ describe('state persistence queue', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [second.id, first.id],
       updatedAt: originalTimestamp,
     };
@@ -2114,6 +2126,7 @@ describe('state persistence queue', () => {
           workspaceId: 'workspace_default',
           folderId: null,
           starred: false,
+        archived: false,
           orderedGroupIds: ['persistence-replay-second', 'persistence-replay-first'],
           updatedAt: timestamp,
         },
@@ -2124,6 +2137,7 @@ describe('state persistence queue', () => {
             workspaceId: 'workspace_default',
             folderId: null,
             starred: false,
+        archived: false,
             orderedGroupIds: ['persistence-replay-second', 'persistence-replay-first', reorderThird.id],
             updatedAt: timestamp,
           },
@@ -2132,6 +2146,7 @@ describe('state persistence queue', () => {
             workspaceId: 'workspace_default',
             folderId: null,
             starred: false,
+        archived: false,
             orderedGroupIds: ['persistence-replay-second'],
             updatedAt: timestamp,
           },
@@ -2140,6 +2155,7 @@ describe('state persistence queue', () => {
             workspaceId: 'workspace_default',
             folderId: null,
             starred: false,
+        archived: false,
             orderedGroupIds: ['persistence-replay-second', 'persistence-replay-first'],
             updatedAt: laterTimestamp,
           },
@@ -2155,6 +2171,7 @@ describe('state persistence queue', () => {
           workspaceId: 'workspace_default',
           folderId: null,
           starred: false,
+        archived: false,
           orderedGroupIds: ['persistence-replay-single-second'],
           updatedAt: timestamp,
         },

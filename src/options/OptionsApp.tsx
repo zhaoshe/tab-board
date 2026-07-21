@@ -336,6 +336,33 @@ export function OptionsApp() {
             </Stack>
           </Card>
 
+          <Card withBorder shadow="sm" padding="lg">
+            <Stack gap="md">
+              <div>
+                <Title order={2} size="h5">
+                  Safety
+                </Title>
+                <Text size="sm" c="dimmed">
+                  Confirmation dialogs for destructive actions
+                </Text>
+              </div>
+
+              <Stack gap="sm">
+                <Switch
+                  label="Confirm before destructive actions"
+                  description="Show a confirmation dialog before deleting tabs, sessions, and other important operations"
+                  checked={settings.confirmBeforeDestructive}
+                  onChange={(e) =>
+                    handleSettingChange(
+                      'confirmBeforeDestructive',
+                      e.currentTarget.checked
+                    )
+                  }
+                />
+              </Stack>
+            </Stack>
+          </Card>
+
           <Divider />
 
           <Card withBorder shadow="sm" padding="lg">

@@ -22,6 +22,7 @@ const settings: Settings = {
   openManagerAfterSave: false,
   restoreGroupsInNewWindow: false,
   restoreNextToCurrent: false,
+  confirmBeforeDestructive: true,
   theme: 'system',
 };
 

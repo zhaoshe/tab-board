@@ -27,7 +27,7 @@ function setGlobalQuery(value: string) {
   listeners.forEach((listener) => listener(value));
 }
 
-export function useFilteredGroups(folderId: string | null, starred = false): Group[] {
+export function useFilteredGroups(category: CategoryFilter): Group[] {
   const state = useTabBoardStore(
     useShallow((currentState) => ({
       activeWorkspaceId: currentState.activeWorkspaceId,
@@ -37,13 +37,8 @@ export function useFilteredGroups(folderId: string | null, starred = false): Gro
     })),
   );
   const searchQuery = useSearchQuery();
-  const filter: CategoryFilter = starred
-    ? 'starred'
-    : folderId
-      ? `folder:${folderId}`
-      : 'inbox';
 
-  return getVisibleGroups(state, filter, searchQuery);
+  return getVisibleGroups(state, category, searchQuery);
 }
 
 export function useSearchQuery(): string {

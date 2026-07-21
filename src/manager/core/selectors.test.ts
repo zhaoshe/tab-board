@@ -71,6 +71,7 @@ function makeGroup(
     folderId: null,
     locked: false,
     starred: false,
+    archived: false,
     collapsed: false,
     tabs: [makeTab(`${id}-tab`, id)],
     createdAt: timestamp,
@@ -105,6 +106,7 @@ function makeState(overrides: Partial<TabBoardState> = {}): TabBoardState {
       openManagerAfterSave: false,
       restoreGroupsInNewWindow: false,
       restoreNextToCurrent: false,
+      confirmBeforeDestructive: true,
       theme: 'system',
     },
     createdAt: timestamp,
@@ -165,16 +167,16 @@ describe('getVisibleGroups', () => {
     expect(getVisibleGroups(state, 'inbox', '')).toEqual([groups[0], groups[1]]);
   });
 
-  it('projects Starred groups and excludes their folders', () => {
+  it('projects Saved groups and excludes their folders', () => {
     const groups = [
-      makeGroup('starred', 'workspace-1', { starred: true, folderId: null }),
+      makeGroup('saved', 'workspace-1', { starred: true, folderId: null }),
       makeGroup('foldered', 'workspace-1', { folderId: 'folder-1' }),
-      makeGroup('other-workspace-starred', 'workspace-2', { starred: true }),
+      makeGroup('other-workspace-saved', 'workspace-2', { starred: true }),
     ];
 
     expect(getVisibleGroups(
       makeState({ groups, folders: [makeFolder('folder-1', 'workspace-1')] }),
-      'starred',
+      'saved',
       '',
     )).toEqual([groups[0]]);
   });
@@ -262,7 +264,7 @@ describe('getVisibleGroups', () => {
     ];
 
     expect(getVisibleGroups(makeState({ groups }), 'inbox', '  NEEDLE  ')).toEqual([groups[0]]);
-    expect(getVisibleGroups(makeState({ groups }), 'starred', 'needle')).toEqual([
+    expect(getVisibleGroups(makeState({ groups }), 'saved', 'needle')).toEqual([
       groups[1],
       groups[2],
     ]);
@@ -270,7 +272,7 @@ describe('getVisibleGroups', () => {
 });
 
 describe('getCategoryStrip', () => {
-  it('orders Inbox, Starred, then active-workspace custom folders', () => {
+  it('orders Inbox, Saved, Archive, then active-workspace custom folders', () => {
     const state = makeState({
       folders: [
         makeFolder('folder-a', 'workspace-1', 'Alpha'),
@@ -290,15 +292,17 @@ describe('getCategoryStrip', () => {
         makeGroup('beta-one', 'workspace-1', { folderId: 'folder-b' }),
         makeGroup('beta-two', 'workspace-1', { folderId: 'folder-b' }),
         makeGroup('beta-three', 'workspace-1', { folderId: 'folder-b' }),
-        makeGroup('starred-one', 'workspace-1', { starred: true }),
-        makeGroup('starred-two', 'workspace-1', { starred: true, folderId: 'folder-a' }),
+        makeGroup('saved-one', 'workspace-1', { starred: true }),
+        makeGroup('saved-two', 'workspace-1', { starred: true, folderId: 'folder-a' }),
+        makeGroup('archived-one', 'workspace-1', { archived: true }),
         makeGroup('other-workspace', 'workspace-2', { folderId: 'folder-b' }),
       ],
     });
 
     expect(getCategoryStrip(state)).toEqual([
       { id: 'inbox', label: 'Inbox', count: 3, kind: 'inbox' },
-      { id: 'starred', label: 'Starred', count: 2, kind: 'starred' },
+      { id: 'saved', label: 'Saved', count: 2, kind: 'saved' },
+      { id: 'archive', label: 'Archive', count: 1, kind: 'archive' },
       { id: 'folder:folder-b', label: 'Beta', count: 3, kind: 'folder', folderId: 'folder-b' },
       { id: 'folder:folder-a', label: 'Alpha', count: 2, kind: 'folder', folderId: 'folder-a' },
       { id: 'folder:folder-c', label: 'Gamma', count: 0, kind: 'folder', folderId: 'folder-c' },
@@ -313,7 +317,8 @@ describe('getCategoryStrip', () => {
 
     expect(getCategoryStrip(state).map((item) => item.id)).toEqual([
       'inbox',
-      'starred',
+      'saved',
+      'archive',
       'folder:folder-b',
       'folder:folder-a',
     ]);
@@ -326,7 +331,7 @@ describe('getCategoryStrip', () => {
       groups: [
         makeGroup('inbox', 'workspace-1', { folderId: 'missing-folder' }),
         makeGroup('foldered', 'workspace-1', { folderId: 'folder-a' }),
-        makeGroup('starred', 'workspace-1', { starred: true, folderId: 'folder-b' }),
+        makeGroup('saved', 'workspace-1', { starred: true, folderId: 'folder-b' }),
       ],
     });
     const before = JSON.stringify(state);
@@ -441,7 +446,7 @@ describe('normalizeState group invariants', () => {
         makeFolder('folder-2', 'workspace-2'),
       ],
       groups: [
-        makeGroup('starred', 'workspace-1', { starred: true, folderId: 'folder-1' }),
+        makeGroup('saved', 'workspace-1', { starred: true, folderId: 'folder-1' }),
         makeGroup('cross-folder', 'workspace-1', { folderId: 'folder-2' }),
         makeGroup('missing-folder', 'workspace-1', { folderId: 'missing-folder' }),
         makeGroup('fallback', 'missing-workspace', { folderId: 'folder-2' }),
@@ -452,7 +457,7 @@ describe('normalizeState group invariants', () => {
 
     expect(JSON.stringify(raw)).toBe(before);
     expect(normalized.groups.map(({ id, workspaceId, folderId }) => ({ id, workspaceId, folderId }))).toEqual([
-      { id: 'starred', workspaceId: 'workspace-1', folderId: null },
+      { id: 'saved', workspaceId: 'workspace-1', folderId: null },
       { id: 'cross-folder', workspaceId: 'workspace-1', folderId: null },
       { id: 'missing-folder', workspaceId: 'workspace-1', folderId: null },
       { id: 'fallback', workspaceId: 'workspace-2', folderId: 'folder-2' },

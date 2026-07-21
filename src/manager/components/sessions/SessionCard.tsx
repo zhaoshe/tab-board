@@ -263,13 +263,14 @@ export function SessionCard({
   };
 
   const categoryOptions = [
-    { id: 'inbox', label: 'Inbox', folderId: null, starred: false },
-    { id: 'starred', label: 'Starred', folderId: null, starred: true },
-    ...folders.map((folder) => ({ id: `folder:${folder.id}`, label: folder.name, folderId: folder.id, starred: false })),
-  ].filter((category) => category.folderId !== group.folderId || category.starred !== group.starred);
+    { id: 'inbox', label: 'Inbox', folderId: null, starred: false, archived: false },
+    { id: 'saved', label: 'Saved', folderId: null, starred: true, archived: false },
+    { id: 'archive', label: 'Archive', folderId: null, starred: false, archived: true },
+    ...folders.map((folder) => ({ id: `folder:${folder.id}`, label: folder.name, folderId: folder.id, starred: false, archived: false })),
+  ].filter((category) => category.folderId !== group.folderId || category.starred !== group.starred || category.archived !== group.archived);
 
   const handleMoveToCategory = (category: typeof categoryOptions[number]) => {
-    updateGroup(group.id, { folderId: category.folderId, starred: category.starred });
+    updateGroup(group.id, { folderId: category.folderId, starred: category.starred, archived: category.archived });
   };
 
   const startSelection = (tabId: string) => {

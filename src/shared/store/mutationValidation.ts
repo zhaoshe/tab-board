@@ -87,7 +87,7 @@ function isSavedTabRef(value: unknown): value is SavedTabRef {
 }
 
 function isCategory(value: unknown): boolean {
-  if (value === 'inbox' || value === 'starred') return true;
+  if (value === 'inbox' || value === 'saved' || value === 'archive') return true;
   return typeof value === 'string'
     && isBoundedString(value, MAX_ENTITY_ID_BYTES)
     && value.startsWith('folder:')

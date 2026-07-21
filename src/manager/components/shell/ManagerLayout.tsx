@@ -253,11 +253,10 @@ function createGeometryCollisionDetection(
 }
 
 export function getWorkspaceFiltersAfterDelete(): {
-  selectedFolderId: null;
-  showStarred: false;
+  category: 'inbox';
   showBin: false;
 } {
-  return { selectedFolderId: null, showStarred: false, showBin: false };
+  return { category: 'inbox', showBin: false };
 }
 
 function ManagerOverlayDragLifecycle() {
@@ -287,15 +286,15 @@ type HighlightOwnership = {
 };
 
 export function ManagerLayout() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(getStoredSidebarCollapsed);
+  const initialCollapsed = getStoredSidebarCollapsed();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(initialCollapsed);
   const [sidebarOverlayOpen, setSidebarOverlayOpen] = useState(false);
   const [sidebarSelectionOpen, setSidebarSelectionOpen] = useState(false);
   const [sidebarPreviewOpen, setSidebarPreviewOpen] = useState(false);
-  const [sidebarHoverSuppressed, setSidebarHoverSuppressed] = useState(false);
+  const [sidebarHoverSuppressed, setSidebarHoverSuppressed] = useState(initialCollapsed);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const sidebarRailToggleRef = useRef<HTMLButtonElement>(null);
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
-  const [showStarred, setShowStarred] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>('inbox');
   const [showBin, setShowBin] = useState(false);
   const [importModalOpened, setImportModalOpened] = useState(false);
   const [exportModalOpened, setExportModalOpened] = useState(false);
@@ -316,33 +315,16 @@ export function ManagerLayout() {
   const setSearchQuery = useSetSearchQuery();
   const currentCategorySnapshot: CaptureCategorySnapshot = {
     showBin,
-    showStarred,
-    selectedFolderId,
+    category: selectedCategory,
   };
   const currentCategorySnapshotRef = useRef(currentCategorySnapshot);
   currentCategorySnapshotRef.current = currentCategorySnapshot;
-  const groups = useFilteredGroups(selectedFolderId, showStarred);
+  const groups = useFilteredGroups(showBin ? 'inbox' : selectedCategory);
   const applyDropIntent = useTabBoardStore((state) => state.applyDropIntent);
-  const selectedCategory: CategoryFilter = showStarred
-    ? 'starred'
-    : selectedFolderId
-      ? `folder:${selectedFolderId}`
-      : 'inbox';
 
   const handleSelectCategory = (category: CategoryFilter) => {
     setShowBin(false);
-    if (category === 'starred') {
-      setShowStarred(true);
-      setSelectedFolderId(null);
-      return;
-    }
-    if (category === 'inbox') {
-      setShowStarred(false);
-      setSelectedFolderId(null);
-      return;
-    }
-    setShowStarred(false);
-    setSelectedFolderId(category.slice('folder:'.length));
+    setSelectedCategory(category);
   };
 
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -471,6 +453,9 @@ export function ManagerLayout() {
         showSuccess,
         showError,
       );
+      if (payload.kind === 'open-tabs') {
+        window.dispatchEvent(new CustomEvent('tabboard-open-tabs-dropped'));
+      }
     } finally {
       finishDrag();
     }
@@ -548,8 +533,7 @@ export function ManagerLayout() {
     if (previousWorkspaceIdRef.current === activeWorkspaceId) return;
     previousWorkspaceIdRef.current = activeWorkspaceId;
     const nextFilters = getWorkspaceFiltersAfterDelete();
-    setSelectedFolderId(nextFilters.selectedFolderId);
-    setShowStarred(nextFilters.showStarred);
+    setSelectedCategory(nextFilters.category);
     setShowBin(nextFilters.showBin);
   }, [activeWorkspaceId]);
 
@@ -586,8 +570,7 @@ export function ManagerLayout() {
       )) return;
 
       setShowBin(false);
-      setShowStarred(false);
-      setSelectedFolderId(null);
+      setSelectedCategory('inbox');
       setPendingTargetWorkspaceId(detail.sourceWorkspaceId);
       setPendingTargetGroupId(createdGroupId);
       setPendingTargetCategorySnapshot(detail.targetCategorySnapshot);
@@ -596,7 +579,7 @@ export function ManagerLayout() {
 
     window.addEventListener(CAPTURE_COMPLETED_EVENT, handleCaptureCompleted);
     return () => window.removeEventListener(CAPTURE_COMPLETED_EVENT, handleCaptureCompleted);
-  }, [selectedFolderId, showBin, showError, showStarred, showSuccess]);
+  }, [selectedCategory, showBin, showError, showSuccess]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -616,19 +599,16 @@ export function ManagerLayout() {
           );
         } else {
           setSearchQuery('');
-          if (targetGroup.folderId) {
-            setSelectedFolderId(targetGroup.folderId);
-            setShowStarred(false);
-            setShowBin(false);
+          let targetCategory: CategoryFilter = 'inbox';
+          if (targetGroup.archived) {
+            targetCategory = 'archive';
           } else if (targetGroup.starred) {
-            setShowStarred(true);
-            setSelectedFolderId(null);
-            setShowBin(false);
-          } else {
-            setSelectedFolderId(null);
-            setShowStarred(false);
-            setShowBin(false);
+            targetCategory = 'saved';
+          } else if (targetGroup.folderId) {
+            targetCategory = `folder:${targetGroup.folderId}`;
           }
+          setSelectedCategory(targetCategory);
+          setShowBin(false);
 
           setPendingTargetWorkspaceId(targetGroup.workspaceId);
           setPendingTargetGroupId(targetGroupId);
@@ -721,8 +701,7 @@ export function ManagerLayout() {
 
     const currentCategorySnapshot: CaptureCategorySnapshot = {
       showBin,
-      showStarred,
-      selectedFolderId,
+      category: selectedCategory,
     };
     const targetGroupExists = useTabBoardStore.getState().groups.some((group) => group.id === pendingTargetGroupId);
     if (
@@ -781,9 +760,8 @@ export function ManagerLayout() {
     pendingTargetWorkspaceId,
     searchQuery,
     tabFilterUrl,
-    selectedFolderId,
+    selectedCategory,
     showBin,
-    showStarred,
   ]);
 
   useEffect(() => () => {
@@ -828,9 +806,8 @@ export function ManagerLayout() {
     highlightOwnership,
     searchQuery,
     tabFilterUrl,
-    selectedFolderId,
+    selectedCategory,
     showBin,
-    showStarred,
   ]);
 
   function clearCaptureHighlight(): void {
@@ -889,8 +866,7 @@ export function ManagerLayout() {
         <aside className="manager-sidebar" id="manager-sidebar" aria-label="Open Tabs workspace" onMouseLeave={() => setSidebarHoverSuppressed(false)}>
           <Sidebar
             workspaceId={workspace?.id ?? activeWorkspaceId}
-            selectedFolderId={selectedFolderId}
-            showStarred={showStarred}
+            category={selectedCategory}
             showBin={showBin}
             sidebarCollapsed={sidebarCollapsed}
             sidebarExpanded={!sidebarCollapsed || sidebarOverlayOpen || sidebarSelectionOpen || sidebarPreviewOpen}
@@ -908,8 +884,7 @@ export function ManagerLayout() {
               <BinView />
             ) : (
               <WorkspaceContent
-                folderId={selectedFolderId}
-                starred={showStarred}
+                category={selectedCategory}
                 workspaceName={workspace?.name || 'Workspace'}
                 runtime={runtime}
                 highlightedGroupId={highlightedGroupId}
@@ -922,14 +897,14 @@ export function ManagerLayout() {
         <ImportModal
           opened={importModalOpened}
           onClose={() => setImportModalOpened(false)}
-          folderId={selectedFolderId}
+          category={selectedCategory}
         />
         <ExportModal
           opened={exportModalOpened}
           onClose={() => setExportModalOpened(false)}
         />
         </main>
-      <DragOverlay>
+      <DragOverlay dropAnimation={null}>
         <div className="manager-drag-overlay__preview" style={overlayStyle} aria-hidden="true">
           {dragUiState.payload?.kind === 'category' ? (
             <div className="manager-drag-overlay__label">{dragUiState.payload.categoryId}</div>

@@ -13,6 +13,7 @@ export {
   normalizeTab,
   normalizeBinEntry,
   normalizeBrowserGroup,
+  dedupeTabItems,
   compactBin,
   itemTypeLabel,
   defaultGroupTitle,

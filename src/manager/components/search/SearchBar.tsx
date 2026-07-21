@@ -57,7 +57,14 @@ export function SearchBar({ autoFocus = false, inputId, category = 'inbox', full
 
   const handleClear = () => {
     setLocalValue('');
+    setQuery('');
     inputRef.current?.focus();
+  };
+
+  const handleClose = () => {
+    setLocalValue('');
+    setQuery('');
+    onEscape?.();
   };
 
   return (
@@ -71,7 +78,7 @@ export function SearchBar({ autoFocus = false, inputId, category = 'inbox', full
         rightSection={
           onEscape ? (
             <Tooltip label="Close search" position="left">
-              <ActionIcon variant="subtle" onClick={onEscape} aria-label="Close search">
+              <ActionIcon variant="subtle" onClick={handleClose} aria-label="Close search">
                 <IconX size={16} />
               </ActionIcon>
             </Tooltip>
@@ -92,7 +99,11 @@ export function SearchBar({ autoFocus = false, inputId, category = 'inbox', full
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             event.preventDefault();
-            onEscape?.();
+            if (onEscape) {
+              handleClose();
+            } else {
+              handleClear();
+            }
           }
         }}
         style={{ width: '100%' }}

@@ -255,23 +255,37 @@ export function normalizeFolder(folder: unknown): Folder | null {
   };
 }
 
+export function dedupeTabItems(tabs: TabItem[]): TabItem[] {
+  const seenUrls = new Set<string>();
+  return tabs.filter((tab) => {
+    if (tab.itemType !== ITEM_LINK) return true;
+    if (!tab.url) return true;
+    if (seenUrls.has(tab.url)) return false;
+    seenUrls.add(tab.url);
+    return true;
+  });
+}
+
 export function normalizeGroup(group: unknown): Group | null {
   if (!group || typeof group !== 'object') {
     return null;
   }
   const g = group as Record<string, unknown>;
-  const tabs = Array.isArray(g.tabs)
+  const rawTabs = Array.isArray(g.tabs)
     ? (g.tabs as unknown[]).map(normalizeTab).filter(Boolean) as TabItem[]
     : [];
+  const tabs = dedupeTabItems(rawTabs);
   const starred = Boolean(g.starred);
+  const archived = Boolean(g.archived);
   return {
     id: String(g.id || createId('group')),
     title: String(g.title || defaultGroupTitle()),
     note: String(g.note || ''),
     workspaceId: g.workspaceId ? String(g.workspaceId) : DEFAULT_WORKSPACE_ID,
-    folderId: starred ? null : g.folderId ? String(g.folderId) : null,
+    folderId: starred || archived ? null : g.folderId ? String(g.folderId) : null,
     locked: Boolean(g.locked),
     starred,
+    archived,
     collapsed: Boolean(g.collapsed),
     tabs,
     createdAt: typeof g.createdAt === 'string' ? g.createdAt : nowIso(),
@@ -502,6 +516,7 @@ export interface CreateGroupOptions {
   folderId?: string | null;
   locked?: boolean;
   starred?: boolean;
+  archived?: boolean;
   collapsed?: boolean;
 }
 
@@ -515,9 +530,10 @@ export function createGroupFromTabRecords(
     title: options.title || defaultGroupTitle(),
     note: String(options.note || ''),
     workspaceId: options.workspaceId || DEFAULT_WORKSPACE_ID,
-    folderId: options.starred ? null : options.folderId ?? null,
+    folderId: options.starred || options.archived ? null : options.folderId ?? null,
     locked: Boolean(options.locked),
     starred: Boolean(options.starred),
+    archived: Boolean(options.archived),
     collapsed: Boolean(options.collapsed),
     tabs: tabs.map((tab) => ({ ...tab })),
     createdAt: timestamp,
@@ -616,6 +632,7 @@ export function resolveRestoreGroupPlacement(
   snapshotWorkspaceId: string,
   snapshotFolderId: string | null,
   starred: boolean,
+  archived: boolean,
 ): { workspaceId: string; folderId: string | null } {
   const workspaceId = entry.originalWorkspaceId && state.workspaces.some((workspace) => workspace.id === entry.originalWorkspaceId)
     ? entry.originalWorkspaceId
@@ -629,7 +646,7 @@ export function resolveRestoreGroupPlacement(
     || folderWorkspaceId
     || (state.workspaces.some((workspace) => workspace.id === snapshotWorkspaceId) ? snapshotWorkspaceId : undefined)
     || state.activeWorkspaceId;
-  if (starred) return { workspaceId: resolvedWorkspaceId, folderId: null };
+  if (starred || archived) return { workspaceId: resolvedWorkspaceId, folderId: null };
 
   const folderId = entry.originalFolderId !== undefined
     ? entry.originalFolderId

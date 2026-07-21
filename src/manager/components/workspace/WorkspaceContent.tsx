@@ -10,8 +10,7 @@ import type { DndData, DragMarker, DragSourceRect } from '../../core/dnd';
 import { SessionCard } from '../sessions/SessionCard';
 
 interface WorkspaceContentProps {
-  folderId: string | null;
-  starred: boolean;
+  category: CategoryFilter;
   workspaceName: string;
   runtime: ManagerRuntime;
   highlightedGroupId?: string | null;
@@ -62,33 +61,37 @@ function GroupInsertionTarget({
 }
 
 export function WorkspaceContent({
-  folderId,
-  starred,
+  category,
   workspaceName,
   runtime,
   highlightedGroupId,
   dragMarker = null,
   sourceRect = null,
 }: WorkspaceContentProps) {
-  const groups = useFilteredGroups(folderId, starred);
+  const groups = useFilteredGroups(category);
   const searchQuery = useSearchQuery();
-  const { activeWorkspaceId, groups: allGroups } = useTabBoardStore((state) => ({
+  const { activeWorkspaceId, groups: allGroups, folders } = useTabBoardStore((state) => ({
     activeWorkspaceId: state.activeWorkspaceId,
     groups: state.groups,
+    folders: state.folders,
   }));
-  const category: CategoryFilter = starred ? 'starred' : folderId ? `folder:${folderId}` : 'inbox';
   const categoryGroups = allGroups.filter((group) => {
     if (group.workspaceId !== activeWorkspaceId) return false;
-    if (category === 'starred') return group.starred;
-    if (category === 'inbox') return !group.starred && group.folderId === null;
-    return !group.starred && group.folderId === folderId;
+    if (category === 'saved') return group.starred && !group.archived;
+    if (category === 'archive') return group.archived;
+    if (category === 'inbox') return !group.starred && !group.archived && group.folderId === null;
+    const folderId = category.slice('folder:'.length);
+    return !group.starred && !group.archived && group.folderId === folderId;
   });
   const hasSearch = searchQuery.trim().length > 0;
 
   const getTitle = () => {
-    if (starred) return 'Starred';
-    if (folderId) return 'Category';
-    return 'Inbox';
+    if (category === 'saved') return 'Saved';
+    if (category === 'archive') return 'Archive';
+    if (category === 'inbox') return 'Inbox';
+    const folderId = category.slice('folder:'.length);
+    const folder = folders.find((f) => f.id === folderId);
+    return folder?.name || 'Category';
   };
 
   const getEmptyState = () => {
@@ -113,17 +116,27 @@ export function WorkspaceContent({
       );
     }
 
-    if (starred) {
+    if (category === 'saved') {
       return (
         <Box {...emptyStateProps}>
           <IconStar size={48} style={{ opacity: 0.3 }} />
-          <Text mt="md" fw={500}>No starred sessions yet</Text>
+          <Text mt="md" fw={500}>No saved sessions yet</Text>
           <Text size="sm" c="dimmed">Star important sessions to find them quickly</Text>
         </Box>
       );
     }
 
-    if (folderId) {
+    if (category === 'archive') {
+      return (
+        <Box {...emptyStateProps}>
+          <IconArchive size={48} style={{ opacity: 0.3 }} />
+          <Text mt="md" fw={500}>No archived sessions yet</Text>
+          <Text size="sm" c="dimmed">Archive old sessions to keep your inbox clean</Text>
+        </Box>
+      );
+    }
+
+    if (category.startsWith('folder:')) {
       return (
         <Box {...emptyStateProps}>
           <IconFolder size={48} style={{ opacity: 0.3 }} />

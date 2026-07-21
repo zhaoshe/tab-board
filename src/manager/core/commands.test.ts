@@ -41,6 +41,7 @@ function group(id: string, workspaceId: string, overrides: Partial<Group> = {}):
     folderId: null,
     locked: false,
     starred: false,
+    archived: false,
     collapsed: false,
     tabs: [],
     createdAt: timestamp,
@@ -241,7 +242,7 @@ describe('category commands', () => {
   it('moves a session to Starred and clears folderId', () => {
     const next = moveSessionToCategory(state(), {
       groupId: 'group-2',
-      category: 'starred',
+      category: 'saved',
       index: 0,
     });
 
@@ -259,7 +260,7 @@ describe('category commands', () => {
 
     const next = moveSessionToCategory(before, {
       groupId: 'source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
     });
 
@@ -273,7 +274,7 @@ describe('category commands', () => {
 
     const next = moveSessionToCategory(before, {
       groupId: 'source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
     });
 
@@ -348,16 +349,16 @@ describe('category commands', () => {
   });
 
   it('reorders before and after without mutating the source array', () => {
-    const source = ['inbox', 'folder:a', 'folder:b', 'starred'];
+    const source = ['inbox', 'folder:a', 'folder:b', 'saved'];
 
     const before = reorderCategoryIds(source, 'folder:b', 'folder:a', 'before');
     const after = reorderCategoryIds(source, 'folder:a', 'folder:b', 'after');
 
-    expect(before).toEqual(['inbox', 'folder:b', 'folder:a', 'starred']);
-    expect(after).toEqual(['inbox', 'folder:b', 'folder:a', 'starred']);
+    expect(before).toEqual(['inbox', 'folder:b', 'folder:a', 'saved']);
+    expect(after).toEqual(['inbox', 'folder:b', 'folder:a', 'saved']);
     expect(before).not.toBe(source);
     expect(after).not.toBe(source);
-    expect(source).toEqual(['inbox', 'folder:a', 'folder:b', 'starred']);
+    expect(source).toEqual(['inbox', 'folder:a', 'folder:b', 'saved']);
     expect(reorderCategoryIds(source, 'missing', 'folder:a', 'before')).toEqual(source);
   });
 
@@ -502,7 +503,7 @@ describe('category commands', () => {
 
   it('falls back to Inbox when the original folder is invalid or the group is starred', () => {
     const invalidFolderGroup = group('invalid-folder', 'workspace-a', { folderId: 'folder-a' });
-    const starredGroup = group('starred', 'workspace-a', { starred: true, folderId: 'folder-a' });
+    const starredGroup = group('saved', 'workspace-a', { starred: true, folderId: 'folder-a' });
     const entries: BinEntry[] = [
       {
         id: 'bin-invalid',
@@ -871,7 +872,7 @@ describe('store category mutation lock', () => {
     });
     const board = state({
       categoryOrderByWorkspace: {
-        'workspace-a': ['inbox', 'starred', 'folder:folder-a', 'stale'],
+        'workspace-a': ['inbox', 'saved', 'folder:folder-a', 'stale'],
       },
       folders: [folder('folder-a', 'workspace-a'), folder('folder-c', 'workspace-a')],
     });
@@ -889,7 +890,8 @@ describe('store category mutation lock', () => {
       'folder-c',
       'folder-a',
       'inbox',
-      'starred',
+      'saved',
+      'archive',
     ]);
     vi.runAllTimers();
   });
@@ -935,7 +937,8 @@ describe('store category mutation lock', () => {
       'folder-a',
       'folder-b',
       'inbox',
-      'starred',
+      'saved',
+      'archive',
     ]);
     const updatedExport = exportToText(useTabBoardStore.getState());
     expect(updatedExport.indexOf('--- Folder A ---')).toBeLessThan(updatedExport.indexOf('--- Folder B ---'));

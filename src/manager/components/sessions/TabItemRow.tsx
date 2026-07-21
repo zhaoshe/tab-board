@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ActionIcon,
+  Button,
   Checkbox,
   Group as MantineGroup,
   Text,
@@ -8,10 +9,12 @@ import {
   Tooltip,
 } from '@mantine/core';
 import {
+  IconCheck,
   IconCopy,
   IconFileText,
   IconLink,
   IconNotes,
+  IconTrash,
   IconX,
 } from '@tabler/icons-react';
 import { useSortable } from '@dnd-kit/sortable';
@@ -86,6 +89,7 @@ export function TabItemRow({
   const { showError, showSuccess } = useToast();
   const updateTab = useTabBoardStore((state) => state.updateTab);
   const deleteTab = useTabBoardStore((state) => state.deleteTab);
+  const settings = useTabBoardStore((state) => state.settings);
 
   const {
     listeners,
@@ -131,11 +135,15 @@ export function TabItemRow({
   }, [isEditingNote]);
 
   const handleClick = () => {
-    if (tab.itemType === ITEM_LINK && tab.url) void runtime.openSavedTab(tab.url);
+    if (tab.itemType === ITEM_LINK && tab.url) {
+      closeOverlays();
+      void runtime.openSavedTab(tab.url);
+    }
   };
 
   const handleDelete = () => {
-    if (locked || !confirm('Delete this saved tab?')) return;
+    if (locked) return;
+    if (settings.confirmBeforeDestructive && !confirm('Delete this saved tab?')) return;
     closeOverlays();
     deleteTab(groupId, tab.id);
   };
@@ -143,6 +151,7 @@ export function TabItemRow({
   const handleEditNote = () => {
     setNoteValue(tab.note);
     setIsEditingNote(true);
+    closeOverlays();
   };
 
   const handleNoteSubmit = () => {
@@ -150,10 +159,19 @@ export function TabItemRow({
     setIsEditingNote(false);
   };
 
+  const handleNoteCancel = () => {
+    setNoteValue(tab.note);
+    setIsEditingNote(false);
+  };
+
+  const handleNoteDelete = () => {
+    updateTab(groupId, tab.id, { note: '' });
+    setIsEditingNote(false);
+  };
+
   const handleNoteKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === 'Escape') {
-      setNoteValue(tab.note);
-      setIsEditingNote(false);
+      handleNoteCancel();
     }
   };
 
@@ -208,7 +226,6 @@ export function TabItemRow({
           ref={noteTextareaRef}
           value={noteValue}
           onChange={(event) => setNoteValue(event.target.value)}
-          onBlur={handleNoteSubmit}
           onKeyDown={handleNoteKeyDown}
           size="xs"
           minRows={2}
@@ -216,6 +233,17 @@ export function TabItemRow({
           placeholder="Add a note..."
           autosize
         />
+        <MantineGroup gap={6} mt={6} justify="flex-end">
+          <Button size="xs" variant="subtle" color="red" leftSection={<IconTrash size={14} />} onClick={handleNoteDelete}>
+            Delete
+          </Button>
+          <Button size="xs" variant="subtle" leftSection={<IconX size={14} />} onClick={handleNoteCancel}>
+            Cancel
+          </Button>
+          <Button size="xs" leftSection={<IconCheck size={14} />} onClick={handleNoteSubmit}>
+            Save
+          </Button>
+        </MantineGroup>
       </div>
     );
   }
@@ -329,6 +357,11 @@ export function TabItemRow({
           {tab.itemType === ITEM_LINK && tab.url && (
             <Text className="tab-item-row__url" component="span" size="xs" c="dimmed">
               {tab.url}
+            </Text>
+          )}
+          {tab.itemType === ITEM_LINK && tab.note && (
+            <Text className="tab-item-row__note" component="span" size="xs" c="dimmed" lineClamp={2}>
+              {tab.note}
             </Text>
           )}
         </div>

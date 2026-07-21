@@ -85,6 +85,7 @@ function createSavedGroup(id = 'target', overrides: Partial<Group> = {}): Group 
     folderId: null,
     locked: false,
     starred: false,
+    archived: false,
     collapsed: false,
     tabs: [],
     createdAt: timestamp,
@@ -531,7 +532,7 @@ describe('Task112 live Open Tabs validation', () => {
           intent: {
             kind: 'move-session',
             groupId: 'valid-source',
-            category: 'starred',
+            category: 'saved',
             index: 0,
             workspaceId: 'workspace-a',
           },
@@ -739,7 +740,7 @@ describe('Task112 live Open Tabs validation', () => {
           intent: {
             kind: 'move-session',
             groupId: 'worker-raw-gap',
-            category: 'starred',
+            category: 'saved',
             index: 0,
             workspaceId: 'workspace-a',
           },
@@ -777,7 +778,7 @@ describe('Task112 live Open Tabs validation', () => {
           intent: {
             kind: 'move-session',
             groupId: 'worker-raw-order',
-            category: 'starred',
+            category: 'saved',
             index: 0,
             workspaceId: 'workspace-a',
           },
@@ -855,7 +856,7 @@ describe('Task112 live Open Tabs validation', () => {
           intent: {
             kind: 'move-session',
             groupId: 'valid-source',
-            category: 'starred',
+            category: 'saved',
             index: 0,
             workspaceId: 'workspace-a',
           },
@@ -1123,7 +1124,7 @@ describe('Task112 live Open Tabs validation', () => {
           intent: {
             kind: 'move-session',
             groupId: 'valid-source',
-            category: 'starred',
+            category: 'saved',
             index: 0,
             workspaceId: 'workspace-a',
           },
@@ -1206,7 +1207,7 @@ describe('Task112 live Open Tabs validation', () => {
           type: 'drop-intent',
           expectedRevision: 0,
         operationId: 'locked-session-operation',
-          intent: { kind: 'move-session', groupId: 'locked-session', category: 'starred', index: 0, workspaceId: 'workspace-a' },
+          intent: { kind: 'move-session', groupId: 'locked-session', category: 'saved', index: 0, workspaceId: 'workspace-a' },
           openTabs: [],
           updatedAt: '2026-01-01T00:00:00.000Z',
         },

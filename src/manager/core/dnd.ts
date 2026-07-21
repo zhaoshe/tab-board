@@ -172,7 +172,7 @@ export function isDragSourceStillRendered(
     && group.tabs.some((tab) => tab.id === ref.tabId)));
 }
 
-const BUILT_IN_CATEGORIES: readonly CategoryFilter[] = ['inbox', 'starred'];
+const BUILT_IN_CATEGORIES: readonly CategoryFilter[] = ['inbox', 'saved', 'archive'];
 
 export function resolveDrop({
   payload,
@@ -222,7 +222,7 @@ function resolveGroupDrop(
     return null;
   }
 
-  const categoryGroups = groupsForCategory(state, category, payload.workspaceId);
+  const categoryGroups = groupsForCategory(state, category, payload.workspaceId).filter((g) => g.id !== source.id);
   const sourceCategory = categoryForGroup(state, source);
   const sourceIndex = groupsForCategory(state, sourceCategory, payload.workspaceId).findIndex(
     (group) => group.id === source.id,
@@ -448,7 +448,10 @@ function getOwnedTab(
 
 function categoryForGroup(state: TabBoardState, group: Group): CategoryFilter {
   if (group.starred) {
-    return 'starred';
+    return 'saved';
+  }
+  if (group.archived) {
+    return 'archive';
   }
   if (group.folderId && state.folders.some((folder) => folder.id === group.folderId && folder.workspaceId === group.workspaceId)) {
     return `folder:${group.folderId}`;
@@ -464,7 +467,7 @@ function isOwnedCategory(state: TabBoardState, category: CategoryFilter, workspa
   if (typeof category !== 'string') {
     return false;
   }
-  if (category === 'inbox' || category === 'starred') {
+  if (category === 'inbox' || category === 'saved' || category === 'archive') {
     return true;
   }
   if (!category.startsWith('folder:')) {

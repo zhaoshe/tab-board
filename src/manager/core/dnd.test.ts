@@ -79,6 +79,7 @@ function group(
     folderId: null,
     locked: false,
     starred: false,
+    archived: false,
     collapsed: false,
     tabs: [],
     createdAt: timestamp,
@@ -95,7 +96,7 @@ function fixtureState(): TabBoardState {
     activeWorkspaceId: 'workspace-a',
     folders: [folder('folder-a', 'workspace-a'), folder('folder-b', 'workspace-b')],
     categoryOrderByWorkspace: {
-      'workspace-a': ['inbox', 'starred', 'folder:folder-a'],
+      'workspace-a': ['inbox', 'saved', 'folder:folder-a'],
     },
     groups: [
       group('source', 'workspace-a', { tabs: sourceTabs }),
@@ -149,9 +150,9 @@ function target(kind: DropTarget['kind']): DropTarget {
     case 'group-insert':
       return { kind, category: 'folder:folder-a', index: 1, workspaceId: 'workspace-a' };
     case 'category-column':
-      return { kind, category: 'starred', workspaceId: 'workspace-a' };
+      return { kind, category: 'saved', workspaceId: 'workspace-a' };
     case 'category-reorder':
-      return { kind, categoryId: 'starred', placement: 'before', workspaceId: 'workspace-a' };
+      return { kind, categoryId: 'saved', placement: 'before', workspaceId: 'workspace-a' };
   }
 }
 
@@ -353,7 +354,7 @@ describe('resolveDrop', () => {
     })).toBeNull();
     expect(resolveDrop({
       payload: { kind: 'category', categoryId: 42, workspaceId: 'workspace-a' } as unknown as DragPayload,
-      target: { kind: 'category-reorder', categoryId: 'starred', placement: 'before', workspaceId: 'workspace-a' },
+      target: { kind: 'category-reorder', categoryId: 'saved', placement: 'before', workspaceId: 'workspace-a' },
       state,
     })).toBeNull();
   });
@@ -377,7 +378,7 @@ describe('resolveDrop', () => {
     })).toBeNull();
     expect(resolveDrop({
       payload: payload('category'),
-      target: { kind: 'category-reorder', categoryId: 'starred', placement: 'sideways', workspaceId: 'workspace-a' } as unknown as DropTarget,
+      target: { kind: 'category-reorder', categoryId: 'saved', placement: 'sideways', workspaceId: 'workspace-a' } as unknown as DropTarget,
       state,
     })).toBeNull();
     expect(resolveDrop({
@@ -485,26 +486,26 @@ describe('resolveDrop', () => {
   it('rejects category reorder no-ops and resolves real before/after reorders', () => {
     const state = {
       ...fixtureState(),
-      categoryOrderByWorkspace: { 'workspace-a': ['inbox', 'starred'] },
+      categoryOrderByWorkspace: { 'workspace-a': ['inbox', 'saved'] },
     };
     const beforeNoOp = resolveDrop({
       payload: { kind: 'category', categoryId: 'inbox', workspaceId: 'workspace-a' },
-      target: { kind: 'category-reorder', categoryId: 'starred', placement: 'before', workspaceId: 'workspace-a' },
+      target: { kind: 'category-reorder', categoryId: 'saved', placement: 'before', workspaceId: 'workspace-a' },
       state,
     });
     const afterNoOp = resolveDrop({
-      payload: { kind: 'category', categoryId: 'starred', workspaceId: 'workspace-a' },
+      payload: { kind: 'category', categoryId: 'saved', workspaceId: 'workspace-a' },
       target: { kind: 'category-reorder', categoryId: 'inbox', placement: 'after', workspaceId: 'workspace-a' },
       state,
     });
     const beforeReorder = resolveDrop({
-      payload: { kind: 'category', categoryId: 'starred', workspaceId: 'workspace-a' },
+      payload: { kind: 'category', categoryId: 'saved', workspaceId: 'workspace-a' },
       target: { kind: 'category-reorder', categoryId: 'inbox', placement: 'before', workspaceId: 'workspace-a' },
       state,
     });
     const afterReorder = resolveDrop({
       payload: { kind: 'category', categoryId: 'inbox', workspaceId: 'workspace-a' },
-      target: { kind: 'category-reorder', categoryId: 'starred', placement: 'after', workspaceId: 'workspace-a' },
+      target: { kind: 'category-reorder', categoryId: 'saved', placement: 'after', workspaceId: 'workspace-a' },
       state,
     });
 
@@ -517,17 +518,17 @@ describe('resolveDrop', () => {
   it('preserves raw folder category order while resolving a reorder', () => {
     const state = {
       ...fixtureState(),
-      categoryOrderByWorkspace: { 'workspace-a': ['folder-a', 'starred', 'inbox'] },
+      categoryOrderByWorkspace: { 'workspace-a': ['folder-a', 'saved', 'inbox'] },
     };
     const result = resolveDrop({
-      payload: { kind: 'category', categoryId: 'starred', workspaceId: 'workspace-a' },
+      payload: { kind: 'category', categoryId: 'saved', workspaceId: 'workspace-a' },
       target: { kind: 'category-reorder', categoryId: 'folder:folder-a', placement: 'before', workspaceId: 'workspace-a' },
       state,
     });
 
-    expect(result).toMatchObject({ kind: 'reorder-category', categoryId: 'starred' });
+    expect(result).toMatchObject({ kind: 'reorder-category', categoryId: 'saved' });
     expect(executeDropIntent(state, result! ).categoryOrderByWorkspace['workspace-a']).toEqual([
-      'starred', 'folder:folder-a', 'inbox',
+      'saved', 'folder:folder-a', 'inbox', 'archive',
     ]);
   });
 });
@@ -646,7 +647,7 @@ describe('executeDropIntent', () => {
       {
         kind: 'reorder-category',
         categoryId: 'inbox',
-        targetCategoryId: 'starred',
+        targetCategoryId: 'saved',
         placement: 'before',
         workspaceId: 'workspace-b',
       },
@@ -698,7 +699,7 @@ describe('executeDropIntent', () => {
 
     expect(movedSession).not.toBe(before);
     expect(movedSession.groups.find((item) => item.id === 'source')).toMatchObject({ folderId: 'folder-a' });
-    expect(reordered.categoryOrderByWorkspace['workspace-a']).toEqual(['inbox', 'folder:folder-a', 'starred']);
+    expect(reordered.categoryOrderByWorkspace['workspace-a']).toEqual(['inbox', 'folder:folder-a', 'saved', 'archive']);
     expect(movedTabs.groups.find((item) => item.id === 'target')?.tabs.map((item) => item.id)).toEqual([
       'target-1', 'b', 'c', 'target-2',
     ]);

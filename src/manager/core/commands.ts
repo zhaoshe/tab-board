@@ -321,25 +321,31 @@ function isMoveTabsAlreadyApplied(
 }
 
 function categoryMatches(group: Group, category: CategoryFilter): boolean {
-  if (category === 'starred') {
+  if (category === 'saved') {
     return group.starred;
   }
-  if (category === 'inbox') {
-    return !group.starred && group.folderId === null;
+  if (category === 'archive') {
+    return group.archived;
   }
-  return !group.starred && group.folderId === category.slice('folder:'.length);
+  if (category === 'inbox') {
+    return !group.starred && !group.archived && group.folderId === null;
+  }
+  return !group.starred && !group.archived && group.folderId === category.slice('folder:'.length);
 }
 
 function categoryForMove(
   state: TabBoardState,
   group: Group,
   category: CategoryFilter,
-): Pick<Group, 'folderId' | 'starred'> {
-  if (category === 'starred') {
-    return { folderId: null, starred: true };
+): Pick<Group, 'folderId' | 'starred' | 'archived'> {
+  if (category === 'saved') {
+    return { folderId: null, starred: true, archived: false };
+  }
+  if (category === 'archive') {
+    return { folderId: null, starred: false, archived: true };
   }
   if (category === 'inbox') {
-    return { folderId: null, starred: false };
+    return { folderId: null, starred: false, archived: false };
   }
 
   const folderId = category.slice('folder:'.length);
@@ -350,7 +356,7 @@ function categoryForMove(
   if (folder.workspaceId !== group.workspaceId) {
     throw new Error('Target category is outside the group workspace.');
   }
-  return { folderId, starred: false };
+  return { folderId, starred: false, archived: false };
 }
 
 export function moveSessionToCategory(
@@ -511,7 +517,7 @@ function getOwnedGroup(state: TabBoardState, groupId: string, workspaceId: strin
 }
 
 function isOwnedCategory(state: TabBoardState, category: CategoryFilter, workspaceId: string): boolean {
-  if (category === 'inbox' || category === 'starred') {
+  if (category === 'inbox' || category === 'saved' || category === 'archive') {
     return true;
   }
   if (typeof category !== 'string' || !category.startsWith('folder:')) {
@@ -523,7 +529,7 @@ function isOwnedCategory(state: TabBoardState, category: CategoryFilter, workspa
 
 function isOwnedCategoryId(state: TabBoardState, categoryId: string, workspaceId: string): boolean {
   return typeof categoryId === 'string'
-    && (categoryId === 'inbox' || categoryId === 'starred' || isOwnedCategory(state, categoryId as CategoryFilter, workspaceId));
+    && (categoryId === 'inbox' || categoryId === 'saved' || categoryId === 'archive' || isOwnedCategory(state, categoryId as CategoryFilter, workspaceId));
 }
 
 function isDenseArray(value: readonly unknown[]): boolean {
@@ -849,10 +855,10 @@ function categoryForNewGroup(
   state: TabBoardState,
   workspaceId: string,
   category: CategoryFilter,
-): Pick<Group, 'folderId' | 'starred'> {
+): Pick<Group, 'folderId' | 'starred' | 'archived'> {
   const template = {
     ...state.groups.find((group) => group.workspaceId === workspaceId) ?? {
-      id: '', title: '', note: '', workspaceId, folderId: null, locked: false, starred: false,
+      id: '', title: '', note: '', workspaceId, folderId: null, locked: false, starred: false, archived: false,
       collapsed: false, tabs: [], createdAt: '', updatedAt: '',
     },
     workspaceId,
@@ -901,7 +907,8 @@ function insertGroupAtCategoryIndex(
 function categoryOrder(state: TabBoardState, workspaceId: string): string[] {
   const known = [
     'inbox',
-    'starred',
+    'saved',
+    'archive',
     ...state.folders.filter((folder) => folder.workspaceId === workspaceId).map((folder) => `folder:${folder.id}`),
   ];
   const knownSet = new Set(known);
@@ -934,6 +941,7 @@ export function restoreGroupFromBin(
     originalGroup.workspaceId,
     originalGroup.folderId,
     originalGroup.starred,
+    originalGroup.archived,
   );
   const timestamp = restoredAt;
   const restored: Group = {

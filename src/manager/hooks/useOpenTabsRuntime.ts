@@ -97,6 +97,7 @@ export interface OpenTabsRuntime {
   selectWindow: (windowId: number) => void;
   exitSelectionMode: () => void;
   toggleTabSelection: (tabId: number | undefined) => void;
+  selectAllTabs: () => void;
   focusTab: (tabId: number | undefined, windowId: number | undefined) => Promise<void>;
   closeTab: (tabId: number | undefined) => Promise<void>;
   pinTab: (tabId: number | undefined) => Promise<void>;
@@ -311,6 +312,21 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
     };
   }, [refresh]);
 
+  const exitSelectionMode = useCallback(() => {
+    selectionModeRef.current = false;
+    setSelectionMode(false);
+    selectedTabIdsRef.current = [];
+    setSelectedTabIds([]);
+  }, []);
+
+  useEffect(() => {
+    const handleOpenTabsDropped = () => {
+      exitSelectionMode();
+    };
+    window.addEventListener('tabboard-open-tabs-dropped', handleOpenTabsDropped);
+    return () => window.removeEventListener('tabboard-open-tabs-dropped', handleOpenTabsDropped);
+  }, [exitSelectionMode]);
+
   const selectedWindow = useMemo(
     () => resolveSelectedWindow(windows, selectedWindowId),
     [windows, selectedWindowId],
@@ -330,13 +346,6 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
     setSelectedTabIds([]);
   }, [windows]);
 
-  const exitSelectionMode = useCallback(() => {
-    selectionModeRef.current = false;
-    setSelectionMode(false);
-    selectedTabIdsRef.current = [];
-    setSelectedTabIds([]);
-  }, []);
-
   const toggleTabSelection = useCallback((tabId: number | undefined) => {
     if (typeof tabId !== 'number' || !Number.isSafeInteger(tabId) || !selectedWindow) return;
     const canSelect = selectedWindow.tabs.some((tab) => tab.id === tabId && tab.storable === true);
@@ -350,6 +359,18 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
       setSelectionMode(next.length > 0);
       return next;
     });
+  }, [selectedWindow]);
+
+  const selectAllTabs = useCallback(() => {
+    if (!selectedWindow) return;
+    const allStorableIds = selectedWindow.tabs
+      .filter((tab) => tab.storable === true && Number.isSafeInteger(tab.id))
+      .map((tab) => tab.id as number);
+    if (!allStorableIds.length) return;
+    selectedTabIdsRef.current = allStorableIds;
+    setSelectedTabIds(allStorableIds);
+    selectionModeRef.current = true;
+    setSelectionMode(true);
   }, [selectedWindow]);
 
   const focusTab = useCallback(async (tabId: number | undefined, windowId: number | undefined) => {
@@ -604,8 +625,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
       }
       const targetCategorySnapshot: CaptureCategorySnapshot = {
         showBin: false,
-        showStarred: false,
-        selectedFolderId: null,
+        category: 'inbox',
       };
       const targetFilterSnapshot: CaptureFilterSnapshot = {
         tabFilterUrl: tabFilterUrlRef.current,
@@ -655,6 +675,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
     selectWindow,
     exitSelectionMode,
     toggleTabSelection,
+    selectAllTabs,
     focusTab,
     closeTab,
     pinTab,

@@ -29,8 +29,7 @@ function snapshot(input: Partial<OpenTabsCaptureSnapshot> = {}): OpenTabsCapture
 function categorySnapshot(input: Partial<CaptureCategorySnapshot> = {}): CaptureCategorySnapshot {
   return {
     showBin: false,
-    showStarred: false,
-    selectedFolderId: 'folder-a',
+    category: 'inbox',
     ...input,
   };
 }
@@ -52,6 +51,7 @@ function group(id: string, workspaceId: string): Group {
     folderId: null,
     locked: false,
     starred: false,
+    archived: false,
     collapsed: false,
     tabs: [],
     createdAt: `${id}-created`,
@@ -139,7 +139,7 @@ describe('capture contracts', () => {
   it('detects category changes while capture is pending', () => {
     expect(sameCaptureCategorySnapshot(
       categorySnapshot(),
-      categorySnapshot({ selectedFolderId: null, showStarred: true }),
+      categorySnapshot({ category: 'saved' }),
     )).toBe(false);
     expect(sameCaptureCategorySnapshot(categorySnapshot(), categorySnapshot())).toBe(true);
   });
@@ -170,7 +170,7 @@ describe('capture contracts', () => {
   });
 
   it('clears pending capture targets after category, filter, or visibility changes', () => {
-    const targetCategorySnapshot = categorySnapshot({ selectedFolderId: null });
+    const targetCategorySnapshot = categorySnapshot({ category: 'inbox' });
     const targetFilterSnapshot = filterSnapshot({ searchQuery: '' });
     const base = {
       targetCategorySnapshot,
@@ -182,7 +182,7 @@ describe('capture contracts', () => {
     };
     expect(shouldKeepPendingCaptureTarget({
       ...base,
-      currentCategorySnapshot: categorySnapshot({ showStarred: true, selectedFolderId: null }),
+      currentCategorySnapshot: categorySnapshot({ category: 'saved' }),
     })).toBe(false);
     expect(shouldKeepPendingCaptureTarget({
       ...base,

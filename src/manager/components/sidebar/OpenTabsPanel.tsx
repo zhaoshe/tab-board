@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type MouseEvent, type RefObject } from 'react';
+import { useEffect, useMemo, useState, type MouseEvent, type RefObject } from 'react';
 import {
   ActionIcon,
   Alert,
@@ -18,6 +18,7 @@ import {
   IconLayoutSidebarLeftCollapse,
   IconPin,
   IconRefresh,
+  IconSelectAll,
   IconTrash,
   IconX,
 } from '@tabler/icons-react';
@@ -53,6 +54,7 @@ export interface OpenTabsPanelProps {
   onSelectWindow: (windowId: number) => void;
   onExitSelectionMode: () => void;
   onToggleTabSelection: (tabId: number | undefined) => void;
+  onSelectAll: () => void;
   onFocusTab: (tabId: number | undefined, windowId: number | undefined) => Promise<void>;
   onCloseTab: (tabId: number | undefined) => Promise<void>;
   onPinTab: (tabId: number | undefined) => Promise<void>;
@@ -110,6 +112,8 @@ function OpenTabContentTrigger({
   onPinTab,
 }: OpenTabContentTriggerProps) {
   const { isPreviewOpen } = useManagerOverlayController();
+  const [faviconFailed, setFaviconFailed] = useState(false);
+  const showFavicon = Boolean(tab.favIconUrl) && !faviconFailed;
   const infoTriggerRef = useManagerInfoTrigger(previewKey, {
     kind: 'open',
     model: {
@@ -194,14 +198,12 @@ function OpenTabContentTrigger({
       }}
     >
       <span className="manager-open-tab-favicon" aria-hidden="true">
-        <IconBrowser className="manager-open-tab-favicon__fallback" size={20} />
-        {tab.favIconUrl && (
+        {!showFavicon && <IconBrowser className="manager-open-tab-favicon__fallback" size={20} />}
+        {tab.favIconUrl && !faviconFailed && (
           <img
             src={tab.favIconUrl}
             alt=""
-            onError={(event) => {
-              event.currentTarget.style.display = 'none';
-            }}
+            onError={() => setFaviconFailed(true)}
           />
         )}
       </span>
@@ -234,6 +236,7 @@ export function OpenTabsPanel({
   onSelectWindow,
   onExitSelectionMode,
   onToggleTabSelection,
+  onSelectAll,
   onCloseTab,
   onPinTab,
   onCloseSelectedTabs,
@@ -371,6 +374,7 @@ export function OpenTabsPanel({
         <Stack
           gap={2}
           px="xs"
+          pt="md"
           pb="xs"
           data-open-tabs-panel
           className={selectionMode ? 'manager-open-tabs--selection-mode' : undefined}
@@ -456,6 +460,7 @@ export function OpenTabsPanel({
         <MantineGroup className="manager-open-tabs-selection-actions" gap={8} wrap="nowrap">
           <Text className="manager-open-tabs-selection-actions__count" size="sm" fw={600} aria-live="polite">{selectedCount} Selected</Text>
           <div className="manager-open-tabs-selection-actions__tools">
+            <Tooltip label="Select all" openDelay={1000}><ActionIcon size={32} variant="subtle" aria-label="Select all tabs" disabled={updatingSelection} onClick={onSelectAll}><IconSelectAll size={20} /></ActionIcon></Tooltip>
             <Tooltip label="Create session" openDelay={1000}><ActionIcon size={32} variant="subtle" color="blue" aria-label={`Create session from ${selectedCount} selected tabs`} disabled={selectedCount === 0 || capturing || updatingSelection} loading={capturing} onClick={() => void onCaptureSelectedTabs()}><IconFolderPlus size={20} /></ActionIcon></Tooltip>
             <Tooltip label="Delete selected tabs" openDelay={1000}><ActionIcon size={32} variant="subtle" color="red" aria-label={`Delete ${selectedCount} selected tabs`} disabled={selectedCount === 0 || capturing || updatingSelection} loading={updatingSelection} onClick={() => void onCloseSelectedTabs()}><IconTrash size={20} /></ActionIcon></Tooltip>
             <Tooltip label="Pin selected tabs" openDelay={1000}><ActionIcon size={32} variant="subtle" aria-label={`Pin ${selectedCount} selected tabs`} disabled={selectedCount === 0 || capturing || updatingSelection} onClick={() => void onPinSelectedTabs()}><IconPin size={20} /></ActionIcon></Tooltip>

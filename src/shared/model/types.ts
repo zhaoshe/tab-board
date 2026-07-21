@@ -15,6 +15,7 @@ export interface Settings {
   restoreGroupsInNewWindow: boolean;
   restoreNextToCurrent: boolean;
   theme: 'system' | 'light' | 'dark';
+  confirmBeforeDestructive: boolean;
 }
 
 export interface Workspace {
@@ -67,6 +68,7 @@ export interface Group {
   folderId: string | null;
   locked: boolean;
   starred: boolean;
+  archived: boolean;
   collapsed: boolean;
   tabs: TabItem[];
   createdAt: string;

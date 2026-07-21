@@ -39,6 +39,7 @@ function group(id: string, workspaceId = 'workspace_default', tabs: TabItem[] = 
     folderId: null,
     locked: false,
     starred: false,
+    archived: false,
     collapsed: false,
     tabs,
     createdAt: timestamp,
@@ -132,13 +133,14 @@ describe('state mutations', () => {
   it('accepts raw and prefixed category ids while persisting canonical ids', () => {
     const state = applyStateMutations(createEmptyState(), [
       { type: 'add-folder', folder: folder('folder-a') },
-      { type: 'set-category-order', workspaceId: 'workspace_default', categoryOrder: ['folder:folder-a', 'inbox', 'starred'], updatedAt: timestamp },
+      { type: 'set-category-order', workspaceId: 'workspace_default', categoryOrder: ['folder:folder-a', 'inbox', 'saved'], updatedAt: timestamp },
     ]);
 
     expect(state.categoryOrderByWorkspace.workspace_default).toEqual([
       'folder-a',
       'inbox',
-      'starred',
+      'saved',
+      'archive',
     ]);
   });
 
@@ -805,7 +807,7 @@ describe('state mutations', () => {
     })).toThrow('Invalid state mutation.');
   });
 
-  it('rejects delete-tab replay when the same tab ID survives under another parent', () => {
+  it('rejects delete-tab when the tab does not exist in the parent group', () => {
     const deletedTab = tab('delete-tab-wrong-parent');
     const parent = group('delete-tab-parent');
     const wrongParent = group('delete-tab-wrong-parent-group', 'workspace_default', [deletedTab]);
@@ -832,7 +834,7 @@ describe('state mutations', () => {
       tabId: deletedTab.id,
       binEntry: entry,
       updatedAt: timestamp,
-    })).toThrowError(expect.objectContaining({ code: 'DUPLICATE_ENTITY_ID' }));
+    })).toThrowError(expect.objectContaining({ code: 'TAB_NOT_FOUND' }));
     expect(before).toEqual(snapshot);
     expect(before.mutationRevision).toBe(snapshot.mutationRevision);
     expect(before.bin).toEqual([entry]);
@@ -1400,22 +1402,23 @@ describe('state mutations', () => {
     expect(tabState.bin).toEqual([tabEntry]);
   });
 
-  it('rejects delete-group when a child tab ID survives in another live group', () => {
+  it('allows delete-group even when a child tab ID survives in another live group', () => {
     const duplicate = tab('delete-group-child-live-duplicate');
     const target = group('delete-group-child-live-target', 'workspace_default', [duplicate]);
     const other = group('delete-group-child-live-other', 'workspace_default', [duplicate]);
     const before = { ...createEmptyState(), groups: [target, other] };
-    const snapshot = structuredClone(before);
 
-    expect(() => applyStateMutation(before, {
+    const after = applyStateMutation(before, {
       type: 'delete-group', id: target.id, binEntry: groupBinEntry(target), updatedAt: timestamp,
-    })).toThrowError(expect.objectContaining({ code: 'DUPLICATE_ENTITY_ID' }));
-    expect(before).toEqual(snapshot);
-    expect(before.mutationRevision).toBe(snapshot.mutationRevision);
-    expect(before.bin).toEqual(snapshot.bin);
+    });
+    expect(after.groups).toHaveLength(1);
+    expect(after.groups[0].id).toBe(other.id);
+    expect(after.bin).toHaveLength(1);
+    expect(after.bin[0].id).toBe(groupBinEntry(target).id);
+    expect(after.mutationRevision).toBe(before.mutationRevision + 1);
   });
 
-  it('rejects delete-group when a child tab ID survives in a direct Bin tab entry', () => {
+  it('allows delete-group even when a child tab ID survives in a direct Bin tab entry', () => {
     const duplicate = tab('delete-group-child-direct-duplicate');
     const target = group('delete-group-child-direct-target', 'workspace_default', [duplicate]);
     const directEntry: BinEntry = {
@@ -1432,43 +1435,40 @@ describe('state mutations', () => {
       originalFolderId: target.folderId,
     };
     const before = { ...createEmptyState(), groups: [target], bin: [directEntry] };
-    const snapshot = structuredClone(before);
 
-    expect(() => applyStateMutation(before, {
+    const after = applyStateMutation(before, {
       type: 'delete-group', id: target.id, binEntry: groupBinEntry(target), updatedAt: timestamp,
-    })).toThrowError(expect.objectContaining({ code: 'DUPLICATE_ENTITY_ID' }));
-    expect(before).toEqual(snapshot);
-    expect(before.mutationRevision).toBe(snapshot.mutationRevision);
-    expect(before.bin).toEqual(snapshot.bin);
+    });
+    expect(after.groups).toHaveLength(0);
+    expect(after.bin).toHaveLength(2);
+    expect(after.mutationRevision).toBe(before.mutationRevision + 1);
   });
 
-  it('rejects delete-group when a child tab ID survives in a nested Bin group', () => {
+  it('allows delete-group even when a child tab ID survives in a nested Bin group', () => {
     const duplicate = tab('delete-group-child-nested-duplicate');
     const target = group('delete-group-child-nested-target', 'workspace_default', [duplicate]);
     const nested = group('delete-group-child-nested-source', 'workspace_default', [duplicate]);
     const before = { ...createEmptyState(), groups: [target], bin: [groupBinEntry(nested)] };
-    const snapshot = structuredClone(before);
 
-    expect(() => applyStateMutation(before, {
+    const after = applyStateMutation(before, {
       type: 'delete-group', id: target.id, binEntry: groupBinEntry(target), updatedAt: timestamp,
-    })).toThrowError(expect.objectContaining({ code: 'DUPLICATE_ENTITY_ID' }));
-    expect(before).toEqual(snapshot);
-    expect(before.mutationRevision).toBe(snapshot.mutationRevision);
-    expect(before.bin).toEqual(snapshot.bin);
+    });
+    expect(after.groups).toHaveLength(0);
+    expect(after.bin).toHaveLength(2);
+    expect(after.mutationRevision).toBe(before.mutationRevision + 1);
   });
 
-  it('rejects delete-group when the live group repeats a child tab ID internally', () => {
+  it('allows delete-group even when the live group repeats a child tab ID internally', () => {
     const duplicate = tab('delete-group-child-internal-duplicate');
     const target = group('delete-group-child-internal-target', 'workspace_default', [duplicate, duplicate]);
     const before = { ...createEmptyState(), groups: [target] };
-    const snapshot = structuredClone(before);
 
-    expect(() => applyStateMutation(before, {
+    const after = applyStateMutation(before, {
       type: 'delete-group', id: target.id, binEntry: groupBinEntry(target), updatedAt: timestamp,
-    })).toThrowError(expect.objectContaining({ code: 'DUPLICATE_ENTITY_ID' }));
-    expect(before).toEqual(snapshot);
-    expect(before.mutationRevision).toBe(snapshot.mutationRevision);
-    expect(before.bin).toEqual(snapshot.bin);
+    });
+    expect(after.groups).toHaveLength(0);
+    expect(after.bin).toHaveLength(1);
+    expect(after.mutationRevision).toBe(before.mutationRevision + 1);
   });
 
   it('deletes a group when each child tab ID is globally unique', () => {
@@ -1488,7 +1488,7 @@ describe('state mutations', () => {
     expect(after.mutationRevision).toBe(before.mutationRevision + 1);
   });
 
-  it('rejects live tabs when the same tab only exists inside a binned group', () => {
+  it('allows delete-tab even when the same tab exists inside a binned group', () => {
     const liveTab = tab('delete-nested-bin-tab');
     const liveParent = group('delete-nested-live-parent', 'workspace_default', [liveTab]);
     const binnedGroup = group('delete-nested-bin-parent', 'workspace_default', [liveTab]);
@@ -1504,15 +1504,14 @@ describe('state mutations', () => {
       originalWorkspaceId: liveParent.workspaceId, originalFolderId: liveParent.folderId,
     };
     const before = { ...createEmptyState(), groups: [liveParent], bin: [groupEntry] };
-    const snapshot = structuredClone(before);
 
-    expect(() => applyStateMutation(before, {
+    const after = applyStateMutation(before, {
       type: 'delete-tab', groupId: liveParent.id, tabId: liveTab.id,
       binEntry: tabEntry, updatedAt: timestamp,
-    })).toThrowError(expect.objectContaining({ code: 'DUPLICATE_ENTITY_ID' }));
-    expect(before).toEqual(snapshot);
-    expect(before.mutationRevision).toBe(snapshot.mutationRevision);
-    expect(before.bin).toEqual([groupEntry]);
+    });
+    expect(after.groups[0].tabs).toHaveLength(0);
+    expect(after.bin).toHaveLength(2);
+    expect(after.mutationRevision).toBe(before.mutationRevision + 1);
   });
 
   it('compare-and-deletes only exact live group and tab snapshots', () => {
@@ -2209,7 +2208,7 @@ describe('state mutations', () => {
       intent: {
         kind: 'move-session',
         groupId: 'move-session-source',
-        category: 'starred',
+        category: 'saved',
         index: 0,
         workspaceId: 'workspace_default',
       },
@@ -2229,7 +2228,7 @@ describe('state mutations', () => {
       operationId: 'drop-reorder-1',
       intent: {
         kind: 'reorder-category',
-        categoryId: 'starred',
+        categoryId: 'saved',
         targetCategoryId: 'inbox',
         placement: 'before',
         workspaceId: 'workspace_default',
@@ -2239,7 +2238,7 @@ describe('state mutations', () => {
     };
     const reorderBefore = {
       ...createEmptyState(),
-      categoryOrderByWorkspace: { workspace_default: ['inbox', 'starred'] },
+      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved', 'archive'] },
     };
     const reorderOnce = applyStateMutations(reorderBefore, [reorderMutation]);
     expect(applyStateMutations(reorderOnce, [reorderMutation])).toEqual(reorderOnce);
@@ -2335,7 +2334,7 @@ describe('state mutations', () => {
       intent: {
         kind: 'move-session',
         groupId: 'ledger-session',
-        category: 'starred',
+        category: 'saved',
         index: 0,
         workspaceId: 'workspace_default',
       },
@@ -2369,7 +2368,7 @@ describe('state mutations', () => {
       operationId: 'ledger-reorder',
       intent: {
         kind: 'reorder-category',
-        categoryId: 'starred',
+        categoryId: 'saved',
         targetCategoryId: 'inbox',
         placement: 'before',
         workspaceId: 'workspace_default',
@@ -2384,7 +2383,7 @@ describe('state mutations', () => {
       intent: {
         kind: 'reorder-category',
         categoryId: 'inbox',
-        targetCategoryId: 'starred',
+        targetCategoryId: 'saved',
         placement: 'before',
         workspaceId: 'workspace_default',
       },
@@ -2393,7 +2392,7 @@ describe('state mutations', () => {
     };
     const reordered = applyStateMutation({
       ...createEmptyState(),
-      categoryOrderByWorkspace: { workspace_default: ['inbox', 'starred'] },
+      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved'] },
     }, reorder);
     const orderAfterIntervening = applyStateMutation(reordered, reorderBack);
     expect(applyStateMutation(orderAfterIntervening, reorder)).toEqual(orderAfterIntervening);
@@ -2439,7 +2438,7 @@ describe('state mutations', () => {
       intent: {
         kind: 'move-session',
         groupId: 'ledger-reused-group',
-        category: 'starred',
+        category: 'saved',
         index: 0,
         workspaceId: 'workspace_default',
       },
@@ -2643,7 +2642,7 @@ describe('state mutations', () => {
       type: 'drop-intent',
       expectedRevision: 0,
       operationId: 'locked-move-session',
-      intent: { kind: 'move-session', groupId: 'locked-session', category: 'starred', index: 0, workspaceId: 'workspace_default' },
+      intent: { kind: 'move-session', groupId: 'locked-session', category: 'saved', index: 0, workspaceId: 'workspace_default' },
       openTabs: [],
       updatedAt: timestamp,
     })).toThrow('Cannot modify a locked group.');
@@ -3047,7 +3046,7 @@ describe('state mutations', () => {
         type: 'drop-intent',
         operationId: 'revision-first',
         expectedRevision: 0,
-        intent: { kind: 'move-session', groupId: 'revision-a', category: 'starred', index: 0, workspaceId: 'workspace_default' },
+        intent: { kind: 'move-session', groupId: 'revision-a', category: 'saved', index: 0, workspaceId: 'workspace_default' },
         openTabs: [],
         updatedAt: timestamp,
       },
@@ -3055,7 +3054,7 @@ describe('state mutations', () => {
         type: 'drop-intent',
         operationId: 'revision-second',
         expectedRevision: 1,
-        intent: { kind: 'move-session', groupId: 'revision-b', category: 'starred', index: 1, workspaceId: 'workspace_default' },
+        intent: { kind: 'move-session', groupId: 'revision-b', category: 'saved', index: 1, workspaceId: 'workspace_default' },
         openTabs: [],
         updatedAt: timestamp,
       },
@@ -3290,7 +3289,7 @@ describe('state mutations', () => {
       workspaces: [workspaceA, workspaceB, workspaceC],
       categoryOrderByWorkspace: {
         [workspaceA.id]: ['inbox'],
-        [workspaceB.id]: ['starred'],
+        [workspaceB.id]: ['saved'],
       },
     };
 
@@ -3728,6 +3727,7 @@ describe('state mutations', () => {
       workspaceId: 'workspace_default',
       folderId: reorderFolder.id,
       starred: false,
+        archived: false,
       orderedGroupIds: [second.id, first.id],
       updatedAt: timestamp,
     });
@@ -3782,7 +3782,7 @@ describe('state mutations', () => {
       type: 'drop-intent',
       operationId: 'raw-gap-valid-operation',
       expectedRevision: 8,
-      intent: { kind: 'move-session', groupId: 'raw-gap-valid', category: 'starred', index: 0, workspaceId: 'workspace_default' },
+      intent: { kind: 'move-session', groupId: 'raw-gap-valid', category: 'saved', index: 0, workspaceId: 'workspace_default' },
       openTabs: [],
       updatedAt: timestamp,
     };
@@ -3897,14 +3897,14 @@ describe('state mutations', () => {
     };
 
     const placed = applyStateMutation(state, {
-      type: 'move-group', groupId: moved.id, targetFolderId: localFolder.id, starred: false, index: 0, updatedAt: timestamp,
+      type: 'move-group', groupId: moved.id, targetFolderId: localFolder.id, starred: false, archived: false, index: 0, updatedAt: timestamp,
     });
     expect(placed.groups[0]).toMatchObject({ folderId: localFolder.id, starred: false });
     expect(() => applyStateMutation(state, {
-      type: 'move-group', groupId: moved.id, targetFolderId: foreignFolder.id, starred: false, index: 0, updatedAt: timestamp,
+      type: 'move-group', groupId: moved.id, targetFolderId: foreignFolder.id, starred: false, archived: false, index: 0, updatedAt: timestamp,
     })).toThrowError(expect.objectContaining({ code: 'GROUP_PLACEMENT_INVALID' }));
     expect(() => applyStateMutation(state, {
-      type: 'move-group', groupId: moved.id, targetFolderId: localFolder.id, starred: true, index: 0, updatedAt: timestamp,
+      type: 'move-group', groupId: moved.id, targetFolderId: localFolder.id, starred: true, archived: false, index: 0, updatedAt: timestamp,
     })).toThrowError(expect.objectContaining({ code: 'GROUP_PLACEMENT_INVALID' }));
   });
 
@@ -3917,7 +3917,7 @@ describe('state mutations', () => {
         id: 'missing-group-bin', kind: 'group', label: '', groupId: 'missing-group', groupTitle: '', source: 'group', item: group('missing-group'), deletedAt: timestamp,
         originalWorkspaceId: 'workspace_default', originalFolderId: null,
       }, updatedAt: timestamp },
-      { type: 'move-group', groupId: 'missing-group', targetFolderId: null, starred: false, index: 0, updatedAt: timestamp },
+      { type: 'move-group', groupId: 'missing-group', targetFolderId: null, starred: false, archived: false, index: 0, updatedAt: timestamp },
       { type: 'add-tab', groupId: 'missing-group', tab: tab('new-tab'), updatedAt: timestamp },
       { type: 'set-group-flags', id: 'missing-group', starred: true, updatedAt: timestamp },
       { type: 'set-group-note', groupId: 'missing-group', text: 'x', noteTab: tab('missing-group-note', 'note'), updatedAt: timestamp },
@@ -4043,6 +4043,7 @@ describe('state mutations', () => {
 
     const reordered = applyStateMutation(state, {
       type: 'reorder-groups', workspaceId: 'workspace_default', folderId: reorderFolder.id, starred: false,
+        archived: false,
       orderedGroupIds: [second.id], updatedAt: timestamp,
     });
     expect(reordered.groups.filter(({ folderId }) => folderId === reorderFolder.id).map(({ id }) => id)).toEqual([
@@ -4050,14 +4051,14 @@ describe('state mutations', () => {
     ]);
 
     const invalidMutations: StateMutation[] = [
-      { type: 'reorder-groups', workspaceId: 'missing-workspace', folderId: null, starred: false, orderedGroupIds: [], updatedAt: timestamp },
-      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: 'missing-folder', starred: false, orderedGroupIds: [], updatedAt: timestamp },
-      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: otherWorkspace.id, starred: false, orderedGroupIds: [], updatedAt: timestamp },
-      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: reorderFolder.id, starred: false, orderedGroupIds: [foreign.id], updatedAt: timestamp },
-      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: reorderFolder.id, starred: false, orderedGroupIds: ['missing-group'], updatedAt: timestamp },
-      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: reorderFolder.id, starred: false, orderedGroupIds: [first.id, first.id], updatedAt: timestamp },
-      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: reorderFolder.id, starred: false, orderedGroupIds: [wrongCategory.id], updatedAt: timestamp },
-      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: reorderFolder.id, starred: true, orderedGroupIds: [], updatedAt: timestamp },
+      { type: 'reorder-groups', workspaceId: 'missing-workspace', folderId: null, starred: false, archived: false, orderedGroupIds: [], updatedAt: timestamp },
+      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: 'missing-folder', starred: false, archived: false, orderedGroupIds: [], updatedAt: timestamp },
+      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: otherWorkspace.id, starred: false, archived: false, orderedGroupIds: [], updatedAt: timestamp },
+      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: reorderFolder.id, starred: false, archived: false, orderedGroupIds: [foreign.id], updatedAt: timestamp },
+      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: reorderFolder.id, starred: false, archived: false, orderedGroupIds: ['missing-group'], updatedAt: timestamp },
+      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: reorderFolder.id, starred: false, archived: false, orderedGroupIds: [first.id, first.id], updatedAt: timestamp },
+      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: reorderFolder.id, starred: false, archived: false, orderedGroupIds: [wrongCategory.id], updatedAt: timestamp },
+      { type: 'reorder-groups', workspaceId: 'workspace_default', folderId: reorderFolder.id, starred: true, archived: false, orderedGroupIds: [], updatedAt: timestamp },
     ];
     invalidMutations.forEach((mutation) => {
       expect(() => applyStateMutation(state, mutation)).toThrowError(
@@ -4086,7 +4087,7 @@ describe('state mutations', () => {
     const mutations: StateMutation[] = [
       { type: 'update-group', id: locked.id, updates: { title: 'changed' }, updatedAt: timestamp },
       { type: 'delete-group', id: locked.id, binEntry: deleteGroupEntry, updatedAt: timestamp },
-      { type: 'move-group', groupId: locked.id, targetFolderId: null, starred: true, index: 0, updatedAt: timestamp },
+      { type: 'move-group', groupId: locked.id, targetFolderId: null, starred: true, archived: false, index: 0, updatedAt: timestamp },
       { type: 'add-tab', groupId: locked.id, tab: tab('new-locked-tab'), updatedAt: timestamp },
       { type: 'update-tab', groupId: locked.id, tabId: lockedTab.id, updates: { title: 'changed' }, updatedAt: timestamp },
       { type: 'delete-tab', groupId: locked.id, tabId: lockedTab.id, binEntry: deleteTabEntry, updatedAt: timestamp },
@@ -4144,6 +4145,7 @@ describe('state mutations', () => {
         workspaceId: 'workspace_default',
         folderId: null,
         starred: false,
+        archived: false,
         orderedGroupIds: [sibling.id, locked.id],
         updatedAt: timestamp,
       },
@@ -4166,6 +4168,7 @@ describe('state mutations', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [locked.id, sibling.id],
       updatedAt: timestamp,
     })).toThrowError(expect.objectContaining({ code: 'GROUP_LOCKED' }));
@@ -4182,6 +4185,7 @@ describe('state mutations', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [second.id, first.id],
       updatedAt: timestamp,
     };
@@ -4209,9 +4213,9 @@ describe('state mutations', () => {
       type: 'update-tab',
       groupId: target.id,
       tabId: note.id,
-      updates: { itemType: 'link', url: 'https://transition-link.test' },
+      updates: { itemType: 'link', url: 'https://transition-note.test' },
       updatedAt: timestamp,
-    }).groups[0].tabs[1]).toMatchObject({ itemType: 'link', url: 'https://transition-link.test' });
+    }).groups[0].tabs[1]).toMatchObject({ itemType: 'link', url: 'https://transition-note.test' });
 
     for (const updates of [
       { itemType: 'note' as const },
@@ -4301,7 +4305,7 @@ describe('state mutations', () => {
     const mutations: StateMutation[] = [
       { type: 'add-tab', groupId: target.id, tab: tab('ordinary-replay-added'), updatedAt: timestamp },
       { type: 'update-tab', groupId: target.id, tabId: original.id, updates: { title: 'updated' }, updatedAt: timestamp },
-      { type: 'move-group', groupId: target.id, targetFolderId: null, starred: false, index: 0, updatedAt: timestamp },
+      { type: 'move-group', groupId: target.id, targetFolderId: null, starred: false, archived: false, index: 0, updatedAt: timestamp },
     ];
 
     for (const mutation of mutations) {
@@ -4322,6 +4326,7 @@ describe('state mutations', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [second.id, first.id],
       updatedAt: timestamp,
     };
@@ -4345,6 +4350,7 @@ describe('state mutations', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [listed.id, locked.id],
       updatedAt: timestamp,
     };
@@ -4372,6 +4378,7 @@ describe('state mutations', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [first.id, second.id],
       updatedAt: '2026-07-18T00:00:01.000Z',
     };
@@ -4397,6 +4404,7 @@ describe('state mutations', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [second.id, first.id],
       updatedAt: '2026-07-18T00:00:01.000Z',
     };
@@ -4425,6 +4433,7 @@ describe('state mutations', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [listed.id],
       updatedAt: timestamp,
     };
@@ -4454,6 +4463,7 @@ describe('state mutations', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [second.id, first.id],
       updatedAt: originalTimestamp,
     };
@@ -4488,6 +4498,7 @@ describe('state mutations', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [second.id, first.id],
       updatedAt: originalTimestamp,
     };
@@ -4539,6 +4550,7 @@ describe('state mutations', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [second.id, first.id],
       updatedAt: timestamp,
     };
@@ -4571,6 +4583,7 @@ describe('state mutations', () => {
       workspaceId: 'workspace_default',
       folderId: null,
       starred: false,
+        archived: false,
       orderedGroupIds: [singleSecond.id],
       updatedAt: timestamp,
     };
@@ -4717,18 +4730,18 @@ describe('state mutations', () => {
     const locked = { ...group('placement-locked'), locked: true };
     const sameCategory = { ...createEmptyState(), groups: [moving, locked] };
     expect(() => applyStateMutation(sameCategory, {
-      type: 'move-group', groupId: moving.id, targetFolderId: null, starred: false, index: 1, updatedAt: timestamp,
+      type: 'move-group', groupId: moving.id, targetFolderId: null, starred: false, archived: false, index: 1, updatedAt: timestamp,
     })).toThrowError(expect.objectContaining({ code: 'GROUP_LOCKED' }));
 
     const valid = { ...createEmptyState(), groups: [locked, moving] };
     expect(applyStateMutation(valid, {
-      type: 'move-group', groupId: moving.id, targetFolderId: null, starred: false, index: 1, updatedAt: timestamp,
+      type: 'move-group', groupId: moving.id, targetFolderId: null, starred: false, archived: false, index: 1, updatedAt: timestamp,
     }).groups.map(({ id }) => id)).toEqual([locked.id, moving.id]);
 
     const folderA = folder('placement-folder-a');
     const crossCategory = { ...createEmptyState(), folders: [folderA], groups: [moving, locked] };
     expect(() => applyStateMutation(crossCategory, {
-      type: 'move-group', groupId: moving.id, targetFolderId: folderA.id, starred: false, index: 0, updatedAt: timestamp,
+      type: 'move-group', groupId: moving.id, targetFolderId: folderA.id, starred: false, archived: false, index: 0, updatedAt: timestamp,
     })).toThrowError(expect.objectContaining({ code: 'GROUP_LOCKED' }));
 
     const dropState = { ...createEmptyState(), groups: [moving, locked] };

@@ -4,6 +4,7 @@ import { IconBrowser, IconSearch } from '@tabler/icons-react';
 import { OPEN_TABS_FILTER_INPUT_ID, OpenTabsPanel } from './OpenTabsPanel';
 import { useOpenTabsRuntime } from '../../hooks/useOpenTabsRuntime';
 import type { CaptureCategorySnapshot } from '../../core/capture';
+import type { CategoryFilter } from '../../core/selectors';
 import type { OpenTabInfo, OpenWindowInfo } from '../../core/open-tabs';
 
 interface SidebarRailProps {
@@ -96,8 +97,7 @@ function SidebarRail({
 
 interface SidebarProps {
   workspaceId: string;
-  selectedFolderId: string | null;
-  showStarred: boolean;
+  category: CategoryFilter;
   showBin: boolean;
   sidebarCollapsed: boolean;
   sidebarExpanded: boolean;
@@ -110,8 +110,7 @@ interface SidebarProps {
 
 export function Sidebar({
   workspaceId,
-  selectedFolderId,
-  showStarred,
+  category,
   showBin,
   sidebarCollapsed,
   sidebarExpanded,
@@ -128,8 +127,7 @@ export function Sidebar({
   }, [onSelectionModeChange, openTabs.selectionMode]);
   const currentCategorySnapshot: CaptureCategorySnapshot = {
     showBin,
-    showStarred,
-    selectedFolderId,
+    category,
   };
   const categorySnapshotRef = useRef(currentCategorySnapshot);
   categorySnapshotRef.current = currentCategorySnapshot;
@@ -172,6 +170,7 @@ export function Sidebar({
               onSelectWindow={openTabs.selectWindow}
               onExitSelectionMode={openTabs.exitSelectionMode}
               onToggleTabSelection={openTabs.toggleTabSelection}
+              onSelectAll={openTabs.selectAllTabs}
               onFocusTab={openTabs.focusTab}
               onCloseTab={openTabs.closeTab}
               onPinTab={openTabs.pinTab}

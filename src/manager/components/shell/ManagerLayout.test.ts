@@ -153,8 +153,7 @@ describe('drag persistence feedback', () => {
 describe('workspace deletion filters', () => {
   it('clears the selected category and all category UI modes', () => {
     expect(getWorkspaceFiltersAfterDelete()).toEqual({
-      selectedFolderId: null,
-      showStarred: false,
+      category: 'inbox',
       showBin: false,
     });
   });
@@ -204,8 +203,7 @@ describe('Task174 capture selection ownership contracts', () => {
     const filterOwnershipIndex = source.indexOf('if (!detail.filterCurrent) return;', selectionGuardIndex);
     const resetIndices = [
       source.indexOf('setShowBin(false);', selectionGuardIndex),
-      source.indexOf('setShowStarred(false);', selectionGuardIndex),
-      source.indexOf('setSelectedFolderId(null);', selectionGuardIndex),
+      source.indexOf('setSelectedCategory(\'inbox\');', selectionGuardIndex),
     ];
     const pendingTargetIndices = [
       source.indexOf('setPendingTargetWorkspaceId(detail.sourceWorkspaceId);', selectionGuardIndex),
@@ -323,16 +321,14 @@ describe('Task110 capture category race contracts', () => {
     expect(invalidationEffect).not.toContain('pendingTarget');
     expect(invalidationEffect).toContain('searchQuery');
     expect(invalidationEffect).toContain('tabFilterUrl');
-    expect(invalidationEffect).toContain('selectedFolderId');
-    expect(invalidationEffect).toContain('showStarred');
+    expect(invalidationEffect).toContain('selectedCategory');
     expect(invalidationEffect).toContain('showBin');
     expect(invalidationEffect).toContain('groups');
     const dependencyStart = invalidationEffect.lastIndexOf('}, [');
     const dependencies = invalidationEffect.slice(dependencyStart);
     for (const dependency of [
       'activeWorkspaceId',
-      'selectedFolderId',
-      'showStarred',
+      'selectedCategory',
       'showBin',
       'searchQuery',
       'tabFilterUrl',

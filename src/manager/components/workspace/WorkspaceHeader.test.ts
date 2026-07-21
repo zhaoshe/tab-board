@@ -82,7 +82,7 @@ describe('WorkspaceHeader source contracts', () => {
     expect(source).toContain('aria-expanded={isSearchExpanded}');
     expect(source).toContain('setIsSearchExpanded');
     expect(source).toContain("workspace-header${isSearchExpanded ? ' workspace-header--search-expanded' : ''}");
-    expect(source).toContain('fullWidth={isSearchExpanded}');
+    expect(source).toContain('fullWidth={false}');
     expect(source).toContain('onEscape={() => setIsSearchExpanded(false)}');
     expect(getInitialSearchExpanded('needle')).toBe(true);
     expect(getInitialSearchExpanded('')).toBe(false);

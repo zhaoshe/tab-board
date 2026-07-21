@@ -272,7 +272,7 @@ describe('centralized manager overlay contracts', () => {
 
   it('passes resolved markers to rendered drop surfaces', () => {
     expect(layout).toContain('markerForTarget(target)');
-    expect(layout).toContain('<DragOverlay>');
+    expect(layout).toContain('DragOverlay');
   });
 
   it('keeps after-edge feedback explicit and propagates locked category markers', () => {

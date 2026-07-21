@@ -26,4 +26,5 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   restoreGroupsInNewWindow: false,
   restoreNextToCurrent: true,
   theme: 'system',
+  confirmBeforeDestructive: true,
 };

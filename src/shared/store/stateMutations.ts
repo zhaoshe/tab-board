@@ -4,6 +4,7 @@ import {
   nowIso,
   resolveRestoreGroupPlacement,
   validateFolderName,
+  dedupeTabItems,
   DROP_OPERATION_LEDGER_LIMIT,
   type BinEntry,
   type Folder,
@@ -23,6 +24,7 @@ import {
   isDropIntentAlreadyApplied,
   moveSessionToCategory,
 } from '../../manager/core/commands';
+import type { CategoryFilter } from '../../manager/core/selectors';
 import type { DropIntent } from '../../manager/core/dnd';
 import type { OpenTabInfo } from '../../manager/core/open-tabs';
 import {
@@ -59,6 +61,7 @@ export type StateMutation =
       groupId: string;
       targetFolderId: string | null;
       starred: boolean;
+      archived: boolean;
       index: number;
       updatedAt: string;
     }
@@ -90,10 +93,11 @@ export type StateMutation =
       workspaceId: string;
       folderId: string | null;
       starred: boolean;
+      archived: boolean;
       orderedGroupIds: string[];
       updatedAt: string;
     }
-  | { type: 'set-group-flags'; id: string; starred?: boolean; locked?: boolean; collapsed?: boolean; updatedAt: string }
+  | { type: 'set-group-flags'; id: string; starred?: boolean; archived?: boolean; locked?: boolean; collapsed?: boolean; updatedAt: string }
   | { type: 'set-group-note'; groupId: string; text: string; noteTab: TabItem; updatedAt: string }
   | { type: 'set-tab-note'; groupId: string; tabId: string; text: string; updatedAt: string }
   | {
@@ -194,6 +198,7 @@ function isGroup(value: unknown): value is Group {
     && isBoundedString(value.note, MAX_TITLE_BYTES) && isEntityId(value.workspaceId)
     && (value.folderId === null || isEntityId(value.folderId))
     && typeof value.locked === 'boolean' && typeof value.starred === 'boolean'
+    && typeof value.archived === 'boolean'
     && typeof value.collapsed === 'boolean' && Array.isArray(value.tabs)
     && isDenseArray(value.tabs)
     && value.tabs.every(isTab) && isTimestamp(value.createdAt) && isTimestamp(value.updatedAt);
@@ -268,6 +273,7 @@ const groupPatchFields: Record<string, FieldValidator> = {
   folderId: isNullableString,
   locked: (value) => typeof value === 'boolean',
   starred: (value) => typeof value === 'boolean',
+  archived: (value) => typeof value === 'boolean',
   collapsed: (value) => typeof value === 'boolean',
   tabs: (value) => Array.isArray(value) && isDenseArray(value) && value.every(isTab),
 };
@@ -290,6 +296,7 @@ const tabPatchFields: Record<string, FieldValidator> = {
 const settingsPatchFields: Record<string, FieldValidator> = {
   actionClick: (value) => value === 'store' || value === 'popup',
   closeTabsAfterSave: (value) => typeof value === 'boolean',
+  confirmBeforeDestructive: (value) => typeof value === 'boolean',
   dedupeOnSave: (value) => typeof value === 'boolean',
   deleteRestoredTabs: (value) => typeof value === 'boolean',
   customUrlFilter: (value) => typeof value === 'string',
@@ -337,7 +344,7 @@ export function isStateMutation(value: unknown): value is StateMutation {
       return isString(value.id) && isDeleteGroupBinEntry(value.binEntry, value.id) && isUpdated(value);
     case 'move-group':
       return isString(value.groupId) && (value.targetFolderId === null || isString(value.targetFolderId)) &&
-        typeof value.starred === 'boolean' && typeof value.index === 'number' && Number.isFinite(value.index) &&
+        typeof value.starred === 'boolean' && typeof value.archived === 'boolean' && typeof value.index === 'number' && Number.isFinite(value.index) &&
         isUpdated(value);
     case 'add-tab':
       return isString(value.groupId) && isTab(value.tab) && isUpdated(value);
@@ -363,10 +370,11 @@ export function isStateMutation(value: unknown): value is StateMutation {
         typeof value.targetIndex === 'number' && Number.isFinite(value.targetIndex) && isUpdated(value);
     case 'reorder-groups':
       return isString(value.workspaceId) && (value.folderId === null || isString(value.folderId)) &&
-        typeof value.starred === 'boolean' && isStringArray(value.orderedGroupIds) && isUpdated(value);
+        typeof value.starred === 'boolean' && typeof value.archived === 'boolean' && isStringArray(value.orderedGroupIds) && isUpdated(value);
     case 'set-group-flags':
-      return hasOnlyKeys(value, ['type', 'id', 'starred', 'locked', 'collapsed', 'updatedAt'])
+      return hasOnlyKeys(value, ['type', 'id', 'starred', 'archived', 'locked', 'collapsed', 'updatedAt'])
         && isString(value.id) && (value.starred === undefined || typeof value.starred === 'boolean') &&
+        (value.archived === undefined || typeof value.archived === 'boolean') &&
         (value.locked === undefined || typeof value.locked === 'boolean') &&
         (value.collapsed === undefined || typeof value.collapsed === 'boolean') && isUpdated(value);
     case 'set-group-note':
@@ -509,9 +517,12 @@ function isValidGroupPlacement(
   workspaceId: string,
   folderId: string | null,
   starred: boolean,
+  archived: boolean,
 ): boolean {
   if (!state.workspaces.some((workspace) => workspace.id === workspaceId)) return false;
+  if (starred && archived) return false;
   if (starred) return folderId === null;
+  if (archived) return folderId === null;
   if (folderId === null) return true;
   const folder = state.folders.find((item) => item.id === folderId);
   return Boolean(folder && folder.workspaceId === workspaceId);
@@ -522,12 +533,19 @@ function groupPlacementValidationError(
   workspaceId: string,
   folderId: string | null,
   starred: boolean,
+  archived: boolean,
 ): StateMutationValidationError | undefined {
   if (!state.workspaces.some((workspace) => workspace.id === workspaceId)) {
     return new StateMutationValidationError('WORKSPACE_NOT_FOUND', 'Invalid state mutation. Workspace not found.');
   }
+  if (starred && archived) {
+    return new StateMutationValidationError('GROUP_PLACEMENT_INVALID', 'Group cannot be both starred and archived.');
+  }
   if (starred && folderId !== null) {
     return new StateMutationValidationError('GROUP_PLACEMENT_INVALID', 'Starred groups cannot belong to a folder.');
+  }
+  if (archived && folderId !== null) {
+    return new StateMutationValidationError('GROUP_PLACEMENT_INVALID', 'Archived groups cannot belong to a folder.');
   }
   if (folderId === null) return undefined;
   const folder = state.folders.find((item) => item.id === folderId);
@@ -543,8 +561,9 @@ function assertGroupPlacement(
   workspaceId: string,
   folderId: string | null,
   starred: boolean,
+  archived: boolean,
 ): void {
-  const error = groupPlacementValidationError(state, workspaceId, folderId, starred);
+  const error = groupPlacementValidationError(state, workspaceId, folderId, starred, archived);
   if (error) throw error;
 }
 
@@ -619,7 +638,7 @@ function lockedSiblingPlacementChanged(
 function simulateSessionMove(
   state: TabBoardState,
   groupId: string,
-  category: `folder:${string}` | 'inbox' | 'starred',
+  category: CategoryFilter,
   index: number,
 ): TabBoardState | undefined {
   try {
@@ -657,9 +676,10 @@ function assertGroupPlacementMutationSafety(
   workspaceId: string,
   folderId: string | null,
   starred: boolean,
+  archived: boolean,
   after: TabBoardState | undefined,
 ): void {
-  if (!isValidGroupPlacement(state, workspaceId, folderId, starred)) return;
+  if (!isValidGroupPlacement(state, workspaceId, folderId, starred, archived)) return;
   assertLockedSiblingPlacementUnchanged(state, after, groupId);
 }
 
@@ -825,13 +845,14 @@ function assertOrdinaryMutationSafety(state: TabBoardState, mutation: StateMutat
     }
     case 'prepend-groups':
       if (mutation.groups.some((group) => !isExactGroupReplay(state, group)
-        && !isValidGroupPlacement(state, group.workspaceId, group.folderId, group.starred))) return;
+        && !isValidGroupPlacement(state, group.workspaceId, group.folderId, group.starred, group.archived))) return;
       assertLockedSiblingPlacementUnchanged(state, simulatePrependGroups(state, mutation.groups), '');
       return;
     case 'reorder-groups': {
       const matching = state.groups.filter((group) => group.workspaceId === mutation.workspaceId
         && group.folderId === mutation.folderId
-        && group.starred === mutation.starred);
+        && group.starred === mutation.starred
+        && group.archived === mutation.archived);
       const retimestampsLockedGroup = mutation.orderedGroupIds.some((id) =>
         matching.some((group) => group.id === id && group.locked));
       if (retimestampsLockedGroup) assertGroupsUnlocked(matching);
@@ -843,7 +864,8 @@ function assertOrdinaryMutationSafety(state: TabBoardState, mutation: StateMutat
       const simulated = simulateReorderGroups(state, mutation);
       const simulatedMatching = simulated?.groups.filter((group) => group.workspaceId === mutation.workspaceId
         && group.folderId === mutation.folderId
-        && group.starred === mutation.starred);
+        && group.starred === mutation.starred
+        && group.archived === mutation.archived);
       const orderUnchanged = Boolean(simulatedMatching
         && simulatedMatching.length === matching.length
         && simulatedMatching.every((group, index) => group.id === matching[index]?.id));
@@ -868,12 +890,16 @@ function assertOrdinaryMutationSafety(state: TabBoardState, mutation: StateMutat
       const starred = Object.prototype.hasOwnProperty.call(updates, 'starred')
         ? updates.starred as boolean
         : group.starred;
+      const archived = Object.prototype.hasOwnProperty.call(updates, 'archived')
+        ? updates.archived as boolean
+        : group.archived;
       assertGroupPlacementMutationSafety(
         state,
         group.id,
         workspaceId,
         folderId,
         starred,
+        archived,
         simulateGroupUpdate(state, group.id, updates),
       );
       return;
@@ -890,12 +916,15 @@ function assertOrdinaryMutationSafety(state: TabBoardState, mutation: StateMutat
     case 'move-group': {
       const group = state.groups.find((item) => item.id === mutation.groupId);
       assertGroupUnlocked(group);
-      if (!group || !isValidGroupPlacement(state, group.workspaceId, mutation.targetFolderId, mutation.starred)) return;
-      const category = mutation.starred
-        ? 'starred'
-        : mutation.targetFolderId
-          ? `folder:${mutation.targetFolderId}` as const
-          : 'inbox' as const;
+      if (!group || !isValidGroupPlacement(state, group.workspaceId, mutation.targetFolderId, mutation.starred, mutation.archived)) return;
+      let category: CategoryFilter = 'inbox';
+      if (mutation.archived) {
+        category = 'archive';
+      } else if (mutation.starred) {
+        category = 'saved';
+      } else if (mutation.targetFolderId) {
+        category = `folder:${mutation.targetFolderId}`;
+      }
       assertLockedSiblingPlacementUnchanged(
         state,
         simulateSessionMove(state, mutation.groupId, category, mutation.index),
@@ -922,7 +951,7 @@ function assertOrdinaryMutationSafety(state: TabBoardState, mutation: StateMutat
       assertGroupUnlocked(state.groups.find((group) => group.id === mutation.targetGroupId));
       return;
     case 'restore-group':
-      if (!isValidGroupPlacement(state, mutation.group.workspaceId, mutation.group.folderId, mutation.group.starred)) return;
+      if (!isValidGroupPlacement(state, mutation.group.workspaceId, mutation.group.folderId, mutation.group.starred, mutation.group.archived)) return;
       assertLockedSiblingPlacementUnchanged(state, simulateRestoreGroup(state, mutation), '');
       return;
     case 'restore-tab':
@@ -936,22 +965,41 @@ function assertOrdinaryMutationSafety(state: TabBoardState, mutation: StateMutat
       if (!group) return;
       if (group.locked) {
         const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(mutation, key);
-        if (mutation.locked !== false || !hasOwn('locked') || hasOwn('starred') || hasOwn('collapsed')) {
+        if (mutation.locked !== false || !hasOwn('locked') || hasOwn('starred') || hasOwn('archived') || hasOwn('collapsed')) {
           throw new StateMutationValidationError('GROUP_LOCKED', 'Only unlocking a locked group is allowed.');
         }
         return;
       }
       if (mutation.starred !== undefined) {
         const starred = mutation.starred;
+        const archived = group.archived;
         assertGroupPlacementMutationSafety(
           state,
           group.id,
           group.workspaceId,
           starred ? null : group.folderId,
           starred,
+          archived,
           simulateGroupUpdate(state, group.id, {
             starred,
             folderId: starred ? null : group.folderId,
+          }),
+        );
+      }
+      if (mutation.archived !== undefined) {
+        const archived = mutation.archived;
+        const starred = archived ? false : group.starred;
+        assertGroupPlacementMutationSafety(
+          state,
+          group.id,
+          group.workspaceId,
+          archived ? null : group.folderId,
+          starred,
+          archived,
+          simulateGroupUpdate(state, group.id, {
+            archived,
+            starred,
+            folderId: archived ? null : group.folderId,
           }),
         );
       }
@@ -1051,7 +1099,7 @@ function assertStateMutationSemantics(state: TabBoardState, mutation: StateMutat
       if (hasTabIdConflict(state, [mutation.group])) {
         invalid(new StateMutationValidationError('DUPLICATE_ENTITY_ID', 'Tab ID already exists.'));
       }
-      assertGroupPlacement(state, mutation.group.workspaceId, mutation.group.folderId, mutation.group.starred);
+      assertGroupPlacement(state, mutation.group.workspaceId, mutation.group.folderId, mutation.group.starred, mutation.group.archived);
       return;
     case 'prepend-groups':
     case 'import-groups':
@@ -1068,7 +1116,7 @@ function assertStateMutationSemantics(state: TabBoardState, mutation: StateMutat
       }
       mutation.groups.forEach((group) => {
         if (!isExactGroupReplay(state, group)) {
-          assertGroupPlacement(state, group.workspaceId, group.folderId, group.starred);
+          assertGroupPlacement(state, group.workspaceId, group.folderId, group.starred, group.archived);
         }
       });
       return;
@@ -1092,12 +1140,13 @@ function assertStateMutationSemantics(state: TabBoardState, mutation: StateMutat
         (entry.item as Group).workspaceId,
         (entry.item as Group).folderId,
         mutation.group.starred,
+        mutation.group.archived,
       );
       const expectedWorkspaceId = expectedPlacement.workspaceId;
       const expectedFolderId = expectedPlacement.folderId;
       if (mutation.group.workspaceId !== expectedWorkspaceId
         || mutation.group.folderId !== expectedFolderId
-        || !isValidGroupPlacement(state, mutation.group.workspaceId, mutation.group.folderId, mutation.group.starred)) invalid();
+        || !isValidGroupPlacement(state, mutation.group.workspaceId, mutation.group.folderId, mutation.group.starred, mutation.group.archived)) invalid();
       return;
     }
     case 'restore-tab': {
@@ -1142,11 +1191,14 @@ function assertStateMutationSemantics(state: TabBoardState, mutation: StateMutat
       const starred = Object.prototype.hasOwnProperty.call(updates, 'starred')
         ? updates.starred as boolean
         : group.starred;
+      const archived = Object.prototype.hasOwnProperty.call(updates, 'archived')
+        ? updates.archived as boolean
+        : group.archived;
       if (Object.prototype.hasOwnProperty.call(updates, 'tabs')
         && hasReplacementTabIdConflict(state, group, updates.tabs || [])) {
         invalid(new StateMutationValidationError('DUPLICATE_ENTITY_ID', 'Tab ID already exists.'));
       }
-      assertGroupPlacement(state, workspaceId, folderId, starred);
+      assertGroupPlacement(state, workspaceId, folderId, starred, archived);
       return;
     }
     case 'delete-group': {
@@ -1156,8 +1208,6 @@ function assertStateMutationSemantics(state: TabBoardState, mutation: StateMutat
       }
       if (state.groups.filter((item) => item.id === mutation.id).length !== 1
         || hasBinEntryId(state, mutation.binEntry.id)
-        || hasBinEntity(state, 'group', group.id)
-        || group.tabs.some((tab) => tabEntitiesWithId(state, tab.id).length !== 1)
         || !matchesDeleteGroupSnapshot(mutation.binEntry, group)) {
         invalid(new StateMutationValidationError('DUPLICATE_ENTITY_ID', 'Group snapshot does not match the live group.'));
       }
@@ -1168,7 +1218,7 @@ function assertStateMutationSemantics(state: TabBoardState, mutation: StateMutat
       if (!group) {
         throw new StateMutationValidationError('GROUP_NOT_FOUND', 'Group not found.');
       }
-      assertGroupPlacement(state, group.workspaceId, mutation.targetFolderId, mutation.starred);
+      assertGroupPlacement(state, group.workspaceId, mutation.targetFolderId, mutation.starred, mutation.archived);
       return;
     }
     case 'update-tab': {
@@ -1186,16 +1236,11 @@ function assertStateMutationSemantics(state: TabBoardState, mutation: StateMutat
       if (!group) {
         throw new StateMutationValidationError('GROUP_NOT_FOUND', 'Group not found.');
       }
-      const liveTabs = state.groups.flatMap((item) => item.tabs.filter((tab) => tab.id === mutation.tabId));
       const targetTab = group.tabs.find((tab) => tab.id === mutation.tabId);
       if (!targetTab) {
-        return invalid(new StateMutationValidationError(
-          liveTabs.length ? 'DUPLICATE_ENTITY_ID' : 'TAB_NOT_FOUND',
-          liveTabs.length ? 'Tab ID exists under a different parent group.' : 'Tab not found in group.',
-        ));
+        return invalid(new StateMutationValidationError('TAB_NOT_FOUND', 'Tab not found in group.'));
       }
       if (hasBinEntryId(state, mutation.binEntry.id)
-        || liveTabs.length !== 1 || hasBinEntity(state, 'tab', targetTab.id)
         || !matchesDeleteTabSnapshot(mutation.binEntry, group, targetTab)) {
         invalid(new StateMutationValidationError('DUPLICATE_ENTITY_ID', 'Tab snapshot does not match the live tab.'));
       }
@@ -1225,7 +1270,7 @@ function assertStateMutationSemantics(state: TabBoardState, mutation: StateMutat
       if (!state.workspaces.some((workspace) => workspace.id === mutation.workspaceId)) {
         invalid(new StateMutationValidationError('WORKSPACE_NOT_FOUND', 'Workspace not found.'));
       }
-      assertGroupPlacement(state, mutation.workspaceId, mutation.folderId, mutation.starred);
+      assertGroupPlacement(state, mutation.workspaceId, mutation.folderId, mutation.starred, mutation.archived);
       const seen = new Set<string>();
       for (const groupId of mutation.orderedGroupIds) {
         if (seen.has(groupId)) {
@@ -1274,7 +1319,8 @@ function categoryOrder(
 ): string[] {
   const available = [
     'inbox',
-    'starred',
+    'saved',
+    'archive',
     ...state.folders.filter((folder) => folder.workspaceId === workspaceId).map(({ id }) => id),
   ];
   const availableSet = new Set(available);
@@ -1295,7 +1341,13 @@ function updateGroup(
 ): TabBoardState {
   return {
     ...state,
-    groups: state.groups.map((group) => group.id === id ? updater(group) : group),
+    groups: state.groups.map((group) => {
+      if (group.id !== id) return group;
+      const updated = updater(group);
+      const deduped = dedupeTabItems(updated.tabs);
+      if (deduped.length === updated.tabs.length) return updated;
+      return { ...updated, tabs: deduped };
+    }),
   };
 }
 
@@ -1837,16 +1889,18 @@ function isExactMoveGroupReplay(
   mutation: Extract<StateMutation, { type: 'move-group' }>,
 ): boolean {
   const group = state.groups.find((item) => item.id === mutation.groupId);
-  if (!group || !isValidGroupPlacement(state, group.workspaceId, mutation.targetFolderId, mutation.starred)
-    || group.folderId !== mutation.targetFolderId || group.starred !== mutation.starred) return false;
+  if (!group || !isValidGroupPlacement(state, group.workspaceId, mutation.targetFolderId, mutation.starred, mutation.archived)
+    || group.folderId !== mutation.targetFolderId || group.starred !== mutation.starred || group.archived !== mutation.archived) return false;
   const categoryGroupsWithoutMoved = state.groups.filter((item) => item.id !== group.id
     && item.workspaceId === group.workspaceId
     && item.folderId === mutation.targetFolderId
-    && item.starred === mutation.starred);
+    && item.starred === mutation.starred
+    && item.archived === mutation.archived);
   const currentIndex = state.groups
     .filter((item) => item.workspaceId === group.workspaceId
       && item.folderId === mutation.targetFolderId
-      && item.starred === mutation.starred)
+      && item.starred === mutation.starred
+      && item.archived === mutation.archived)
     .findIndex((item) => item.id === group.id);
   const expectedIndex = Math.max(0, Math.min(Math.trunc(mutation.index), categoryGroupsWithoutMoved.length));
   return currentIndex === expectedIndex;
@@ -1867,10 +1921,11 @@ function isExactReorderReplay(
   state: TabBoardState,
   mutation: Extract<StateMutation, { type: 'reorder-groups' }>,
 ): boolean {
-  if (!isValidGroupPlacement(state, mutation.workspaceId, mutation.folderId, mutation.starred)) return false;
+  if (!isValidGroupPlacement(state, mutation.workspaceId, mutation.folderId, mutation.starred, mutation.archived)) return false;
   const matching = state.groups.filter((group) => group.workspaceId === mutation.workspaceId
     && group.folderId === mutation.folderId
-    && group.starred === mutation.starred);
+    && group.starred === mutation.starred
+    && group.archived === mutation.archived);
   if (new Set(mutation.orderedGroupIds).size !== mutation.orderedGroupIds.length
     || mutation.orderedGroupIds.some((id) => !matching.some((group) => group.id === id))) return false;
   const orderedSet = new Set(mutation.orderedGroupIds);
@@ -2095,7 +2150,7 @@ function applyStateMutationCore(state: TabBoardState, mutation: StateMutation): 
         originalWorkspaceName: workspace?.name,
         originalFolderName: folder?.name,
         originalIndex: next.groups
-          .filter((item) => item.workspaceId === group.workspaceId && item.folderId === group.folderId && item.starred === group.starred)
+          .filter((item) => item.workspaceId === group.workspaceId && item.folderId === group.folderId && item.starred === group.starred && item.archived === group.archived)
           .findIndex((item) => item.id === group.id),
       };
       return {
@@ -2106,7 +2161,14 @@ function applyStateMutationCore(state: TabBoardState, mutation: StateMutation): 
       };
     }
     case 'move-group': {
-      const category: 'inbox' | 'starred' | `folder:${string}` = mutation.starred ? 'starred' : mutation.targetFolderId ? `folder:${mutation.targetFolderId}` : 'inbox';
+      let category: CategoryFilter = 'inbox';
+      if (mutation.archived) {
+        category = 'archive';
+      } else if (mutation.starred) {
+        category = 'saved';
+      } else if (mutation.targetFolderId) {
+        category = `folder:${mutation.targetFolderId}`;
+      }
       const moved = moveSessionToCategory(next, { groupId: mutation.groupId, category, index: mutation.index });
       return { ...moved, groups: moved.groups.map((group) => group.id === mutation.groupId ? { ...group, updatedAt: mutation.updatedAt } : group), updatedAt: mutation.updatedAt };
     }
@@ -2176,7 +2238,12 @@ function applyStateMutationCore(state: TabBoardState, mutation: StateMutation): 
       const group = next.groups.find((item) => item.id === mutation.groupId);
       if (!group) return next;
       const index = Math.max(0, Math.min(Math.trunc(mutation.index), group.tabs.length));
-      return { ...next, groups: next.groups.map((item) => item.id === group.id ? { ...item, tabs: [...item.tabs.slice(0, index), clone(mutation.tab), ...item.tabs.slice(index)], updatedAt: mutation.updatedAt } : item), bin: next.bin.filter((_, binIndex) => binIndex !== sourceIndex), updatedAt: mutation.updatedAt };
+      const withTab = updateGroup(next, mutation.groupId, (g) => ({
+        ...g,
+        tabs: [...g.tabs.slice(0, index), clone(mutation.tab), ...g.tabs.slice(index)],
+        updatedAt: mutation.updatedAt,
+      }));
+      return { ...withTab, bin: withTab.bin.filter((_, binIndex) => binIndex !== sourceIndex), updatedAt: mutation.updatedAt };
     }
     case 'delete-bin-entry':
       return { ...next, bin: next.bin.filter((entry) => entry.id !== mutation.entryId), updatedAt: mutation.updatedAt };
@@ -2204,12 +2271,37 @@ function applyStateMutationCore(state: TabBoardState, mutation: StateMutation): 
         return { ...reordered, updatedAt: mutation.updatedAt };
       }
       const targetIndex = Math.max(0, Math.min(Math.trunc(mutation.targetIndex), target.tabs.length));
-      return { ...next, groups: next.groups.map((group) => group.id === source.id ? { ...group, tabs: group.tabs.filter((item) => item.id !== mutation.tabId), updatedAt: mutation.updatedAt } : group.id === target.id ? { ...group, tabs: [...group.tabs.slice(0, targetIndex), { ...tab, updatedAt: mutation.updatedAt }, ...group.tabs.slice(targetIndex)], updatedAt: mutation.updatedAt } : group), updatedAt: mutation.updatedAt };
+      const afterSourceRemove = updateGroup(next, source.id, (group) => ({
+        ...group,
+        tabs: group.tabs.filter((item) => item.id !== mutation.tabId),
+        updatedAt: mutation.updatedAt,
+      }));
+      const afterTargetAdd = updateGroup(afterSourceRemove, target.id, (group) => ({
+        ...group,
+        tabs: [...group.tabs.slice(0, targetIndex), { ...tab, updatedAt: mutation.updatedAt }, ...group.tabs.slice(targetIndex)],
+        updatedAt: mutation.updatedAt,
+      }));
+      return { ...afterTargetAdd, updatedAt: mutation.updatedAt };
     }
     case 'reorder-groups':
       return simulateReorderGroups(next, mutation) ?? next;
-    case 'set-group-flags':
-      return updateGroup(next, mutation.id, (group) => ({ ...group, ...(mutation.starred === undefined ? {} : { starred: mutation.starred, folderId: mutation.starred ? null : group.folderId }), ...(mutation.locked === undefined ? {} : { locked: mutation.locked }), ...(mutation.collapsed === undefined ? {} : { collapsed: mutation.collapsed }), updatedAt: mutation.updatedAt }));
+    case 'set-group-flags': {
+      const starredPatch = mutation.starred === undefined ? {} : { starred: mutation.starred };
+      const archivedPatch = mutation.archived === undefined ? {} : { archived: mutation.archived };
+      const lockedPatch = mutation.locked === undefined ? {} : { locked: mutation.locked };
+      const collapsedPatch = mutation.collapsed === undefined ? {} : { collapsed: mutation.collapsed };
+      const shouldClearFolder = (mutation.starred === true) || (mutation.archived === true);
+      const folderPatch = shouldClearFolder ? { folderId: null } : {};
+      return updateGroup(next, mutation.id, (group) => ({
+        ...group,
+        ...starredPatch,
+        ...archivedPatch,
+        ...lockedPatch,
+        ...collapsedPatch,
+        ...folderPatch,
+        updatedAt: mutation.updatedAt,
+      }));
+    }
     case 'set-group-note':
       return updateGroup(next, mutation.groupId, (group) => ({ ...group, note: mutation.text, tabs: [...group.tabs, clone(mutation.noteTab)], updatedAt: mutation.updatedAt }));
     case 'set-tab-note':

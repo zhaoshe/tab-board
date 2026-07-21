@@ -15,20 +15,23 @@ import {
 import { IconUpload, IconFileImport, IconAlertCircle, IconCheck } from '@tabler/icons-react';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import { parseImportedText } from '../../core/commands';
+import type { CategoryFilter } from '../../core/selectors';
 
 interface ImportModalProps {
   opened: boolean;
   onClose: () => void;
-  folderId?: string | null;
+  category?: CategoryFilter;
 }
 
-export function ImportModal({ opened, onClose, folderId = null }: ImportModalProps) {
+export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModalProps) {
   const [importText, setImportText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [preview, setPreview] = useState<{ groupCount: number; tabCount: number } | null>(null);
   const importGroups = useTabBoardStore((state) => state.importGroups);
   const activeWorkspaceId = useTabBoardStore((state) => state.activeWorkspaceId);
+
+  const folderId = category.startsWith('folder:') ? category.slice('folder:'.length) : null;
 
   const updatePreview = useCallback((text: string) => {
     if (!text.trim()) {

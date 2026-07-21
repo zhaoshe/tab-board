@@ -1,4 +1,5 @@
 import type { TabBoardState } from '../../shared/model';
+import type { CategoryFilter } from './selectors';
 
 export type OpenTabsCaptureSnapshot = {
   selectedTabIds: number[];
@@ -9,8 +10,7 @@ export type OpenTabsCaptureSnapshot = {
 
 export type CaptureCategorySnapshot = {
   showBin: boolean;
-  showStarred: boolean;
-  selectedFolderId: string | null;
+  category: CategoryFilter;
 };
 
 export type CaptureFilterSnapshot = {
@@ -90,8 +90,7 @@ export function sameCaptureCategorySnapshot(
   right: CaptureCategorySnapshot,
 ): boolean {
   return left.showBin === right.showBin
-    && left.showStarred === right.showStarred
-    && left.selectedFolderId === right.selectedFolderId;
+    && left.category === right.category;
 }
 
 export function createCaptureSnapshot(input: OpenTabsCaptureSnapshot): OpenTabsCaptureSnapshot {

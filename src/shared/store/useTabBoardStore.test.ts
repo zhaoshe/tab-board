@@ -15,6 +15,7 @@ function group(id: string, workspaceId = 'workspace_default', overrides: Partial
     folderId: null,
     locked: false,
     starred: false,
+    archived: false,
     collapsed: false,
     tabs: [],
     createdAt: timestamp,
@@ -152,7 +153,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     const firstDrop = useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -205,7 +206,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     const persistencePromise = useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -247,7 +248,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     let stored: TabBoardState = {
       ...createEmptyState(),
       groups: [group('local-group')],
-      categoryOrderByWorkspace: { workspace_default: ['inbox', 'starred'] },
+      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved', 'archive'] },
     };
     const listeners: Array<(changes: Record<string, { newValue: TabBoardState }>, area: string) => void> = [];
     let sentMutations: StateMutation[] | undefined;
@@ -271,14 +272,14 @@ describe('TabBoard store remote persistence reconciliation', () => {
     vi.stubGlobal('chrome', chromeMock);
     const { useTabBoardStore } = await import('./useTabBoardStore');
     await useTabBoardStore.getState().hydrate();
-    const orderPromise = useTabBoardStore.getState().updateCategoryOrder('workspace_default', ['starred', 'inbox']);
+    const orderPromise = useTabBoardStore.getState().updateCategoryOrder('workspace_default', ['saved', 'inbox']);
     await vi.waitFor(() => expect(sentMutations).toBeDefined());
 
     const remoteState: TabBoardState = {
       ...stored,
       mutationRevision: stored.mutationRevision + 1,
       groups: [group('remote-group')],
-      categoryOrderByWorkspace: { workspace_default: ['inbox', 'starred'] },
+      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved', 'archive'] },
       updatedAt: '9999-01-01T00:00:00.000Z',
     };
     listeners.forEach((listener) => listener({ tabboardState: { newValue: remoteState } }, 'local'));
@@ -289,7 +290,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     await orderPromise;
 
     const result = useTabBoardStore.getState();
-    expect(result.categoryOrderByWorkspace.workspace_default).toEqual(['starred', 'inbox']);
+    expect(result.categoryOrderByWorkspace.workspace_default).toEqual(['saved', 'inbox', 'archive']);
     expect(result.groups.map(({ id }) => id)).toEqual(['remote-group']);
     expect(result.mutationRevision).toBe(remoteState.mutationRevision);
   });
@@ -559,7 +560,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     const persistencePromise = useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -606,7 +607,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     const persistencePromise = useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'retry-drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -647,7 +648,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     const persistencePromise = useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'failed-drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -687,7 +688,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     const persistencePromise = useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'rollback-drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -718,7 +719,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     const persistencePromise = useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'locked-drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -750,7 +751,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     const persistencePromise = useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'mixed-drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -787,7 +788,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     const persistencePromise = useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'invalid-drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -985,14 +986,14 @@ describe('TabBoard store remote persistence reconciliation', () => {
     useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'valid-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
     useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'invalid-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -1045,14 +1046,14 @@ describe('TabBoard store remote persistence reconciliation', () => {
     useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'valid-drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
     useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'invalid-drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -1098,7 +1099,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'failed-drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -1383,7 +1384,7 @@ describe('Task191 persistence feedback and terminal failures', () => {
     const dropPromise = useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'mixed-drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -1727,7 +1728,7 @@ describe('Task191 persistence feedback and terminal failures', () => {
     const dropPromise = useTabBoardStore.getState().applyDropIntent({
       kind: 'move-session',
       groupId: 'partial-drop-source',
-      category: 'starred',
+      category: 'saved',
       index: 0,
       workspaceId: 'workspace_default',
     });
@@ -1780,7 +1781,7 @@ describe('Task191 persistence feedback and terminal failures', () => {
     const dropIntent = {
       kind: 'move-session' as const,
       groupId: dropTarget.id,
-      category: 'starred' as const,
+      category: 'saved' as const,
       index: 0,
       workspaceId: 'workspace_default',
     };
@@ -1868,7 +1869,7 @@ describe('Task191 persistence feedback and terminal failures', () => {
     const dropIntent = {
       kind: 'move-session' as const,
       groupId: dropTarget.id,
-      category: 'starred' as const,
+      category: 'saved' as const,
       index: 0,
       workspaceId: 'workspace_default',
     };
@@ -1970,7 +1971,7 @@ describe('Task191 persistence feedback and terminal failures', () => {
     const dropIntent = {
       kind: 'move-session' as const,
       groupId: dropTarget.id,
-      category: 'starred' as const,
+      category: 'saved' as const,
       index: 0,
       workspaceId: 'workspace_default',
     };
