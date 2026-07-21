@@ -70,11 +70,11 @@ Save 完成后 popup 关闭，打开或聚焦最近访问的 manager，并在 ma
 
 Options 分为 Basic 和 Advanced：
 
-- Basic：日常 toolbar、capture（包括 tab 去重）、restore、theme 设置。
+- Basic：日常 toolbar、capture（包括 tab 去重）、restore、theme、确认设置。
 - Advanced：Chrome shortcuts、reset settings。
-- Capture 默认开启 tab 去重；Options 仅提供自定义 URL 过滤规则，命中的 open tabs 不展示、不可保存也不可拖拽。
+- Capture 默认开启 tab 去重；Options 提供自定义 URL 过滤规则，命中的 open tabs 不展示、不可保存也不可拖拽。
 - Favicons 始终展示，不再是设置项。
-- 危险操作始终确认，不再提供关闭确认的设置。
+- 危险操作默认识别，可在设置中关闭二次确认。
 - Session card 外露动作不再可配置。
 
 ### Context menu
@@ -213,8 +213,9 @@ Categories 是 session 的导航目录。
 
 内置 categories：
 
-- Inbox：没有 category 的 sessions。
-- Starred：被标为 starred 的 sessions。
+- Inbox：没有 category 且未归档的 sessions。
+- Saved：被标为 starred 的 sessions。
+- Archive：被归档的 sessions。
 
 自定义 categories：
 
@@ -229,8 +230,9 @@ Categories 是 session 的导航目录。
 - 重命名自身当前名称允许；已有重复 category 保留，不由 normalize 自动合并或删除。
 - 冲突会被拒绝并显示 toast。
 - Starred 是内置 category，不是额外叠加的视觉状态。
-- 移动到 Starred 会设置 `starred: true` 并清空 `folderId`。
-- 移动到 Inbox 或自定义 category 会取消 Starred。
+- 移动到 Saved 会设置 `starred: true`、`archived: false` 并清空 `folderId`。
+- 移动到 Archive 会设置 `archived: true`、`starred: false` 并清空 `folderId`。
+- 移动到 Inbox 或自定义 category 会取消 Starred 和 Archive。
 
 排序：
 
@@ -251,7 +253,7 @@ Session card 展示：
 - Title。
 - Favicon stack 和剩余 link 数量。
 - Links/notes 数量。
-- lock/starred chips。
+- lock/starred/archived chips。
 - Restore 直接动作和 More 菜单。
 - Session note。
 - 全部 matching tab items。
@@ -268,6 +270,8 @@ Session card 展示：
 - Add link/note。
 - Copy session links。
 - Lock / unlock。
+- Star / unstar（移入/移出 Saved）。
+- Archive / unarchive（移入/移出 Archive）。
 - Rename。
 - Edit session note。
 - Delete。
@@ -396,7 +400,7 @@ Session card 可以在 horizontal track 中拖拽排序：
 
 ### 顶部搜索
 
-Workspace header 右侧搜索框过滤当前 workspace 的 sessions。搜索默认收起为 icon button；已有 query 时仍保留 query，收起状态通过 active indicator 表明筛选仍在生效，再次展开可继续编辑。
+Workspace header 右侧搜索框过滤当前 workspace 的 sessions。搜索默认收起为 icon button；关闭搜索时清空筛选条件，收起状态不保留上次 query。
 
 匹配范围：
 
@@ -506,6 +510,11 @@ Basic：
 - Restore next to active tab。
 - Focus first restored tab。
 - Dedupe source tabs during capture。
+- Exclude pinned tabs during capture。
+- Include chrome:// URLs。
+- Include file:// URLs。
+- Custom URL filter。
+- Confirm before destructive actions。
 - Theme：system / light / dark。
 
 Advanced：

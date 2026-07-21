@@ -153,6 +153,7 @@ State canonical key 是 `chrome.storage.local["tabboardState"]`。`quickList` �
   folderId,
   locked,
   starred,
+  archived,
   collapsed,
   tabs,
   createdAt,
@@ -164,8 +165,8 @@ State canonical key 是 `chrome.storage.local["tabboardState"]`。`quickList` �
 
 - `workspaceId` 必须指向有效 workspace。
 - `folderId` 必须指向有效 folder，否则 normalize 为 `null`。
-- 如果 `starred === true`，`folderId` 会 normalize 为 `null`。
-- session 的 category 是由 `starred` 和 `folderId` 共同推导出来的单一归属。
+- 如果 `starred === true` 或 `archived === true`，`folderId` 会 normalize 为 `null`。
+- session 的 category 是由 `starred`、`archived` 和 `folderId` 共同推导出来的单一归属。
 
 ### Folders / Custom Categories
 
@@ -182,7 +183,8 @@ State canonical key 是 `chrome.storage.local["tabboardState"]`。`quickList` �
 系统 categories 不存在 folders 中：
 
 - Inbox。
-- Starred。
+- Saved。
+- Archive。
 
 ### Tab Items
 
@@ -262,11 +264,15 @@ Bin entry 用于恢复删除内容。
   dedupeOnSave: true,
   deleteRestoredTabs: true,
   customUrlFilter: '',
+  excludePinned: false,
   focusRestoredTabs: true,
+  includeChromeUrls: false,
+  includeFileUrls: false,
   openManagerAfterSave: true,
   restoreGroupsInNewWindow: false,
   restoreNextToCurrent: true,
-  theme: 'system'
+  theme: 'system',
+  confirmBeforeDestructive: true,
 }
 ```
 
@@ -382,16 +388,18 @@ All：
 Session category 推导规则：
 
 ```text
-starred true       -> Starred
+archived true      -> Archive
+starred true       -> Saved
 folderId exists    -> folder:<folderId>
 otherwise          -> Inbox
 ```
 
 移动 category 时：
 
-- 目标是 Starred：`starred = true`, `folderId = null`。
-- 目标是 Inbox：`starred = false`, `folderId = null`。
-- 目标是 folder：`starred = false`, `folderId = folder.id`。
+- 目标是 Archive：`archived = true`, `starred = false`, `folderId = null`。
+- 目标是 Saved：`starred = true`, `archived = false`, `folderId = null`。
+- 目标是 Inbox：`archived = false`, `starred = false`, `folderId = null`。
+- 目标是 folder：`archived = false`, `starred = false`, `folderId = folder.id`。
 
 创建或重命名 category 时，manager 通过 `withCategoryMutationLock()`（优先使用 `navigator.locks`）包住基于最新 state 的 `validateFolderName()` 检查和写入；normalize 仍不合并历史重复 category。
 

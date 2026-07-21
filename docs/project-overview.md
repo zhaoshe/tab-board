@@ -75,13 +75,16 @@ Tab item：
 session 内的条目。当前支持 link 和 note。旧 todo 会被 normalize 成 note。
 
 Category：
-session 的单一归属。内置 category 包括 Inbox 和 Starred，自定义 category 存在 `folders` 中。
+session 的单一归属。内置 category 包括 Inbox、Saved 和 Archive，自定义 category 存在 `folders` 中。
 
 Inbox：
-没有自定义 category、也不是 Starred 的默认收纳区。
+没有自定义 category、也未归档的默认收纳区。
 
-Starred：
-内置 category。它是 session 的一种归属，而不是额外叠加状态。
+Saved：
+内置 category。标为 starred 的 session 归入 Saved，它是 session 的一种归属，而不是额外叠加状态。
+
+Archive：
+内置 category。归档的 session 归入 Archive，用于存放不常用但需要保留的工作上下文。
 
 Bin：
 删除 session 或 tab item 后进入的本地回收区，最多保留 80 条。

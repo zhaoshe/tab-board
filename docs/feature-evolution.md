@@ -7,18 +7,44 @@
 
 ## 当前产品形态
 
-TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的“快速收起和恢复 tabs”为基础，吸收 tabExtend 的 workspace、分类和工作台思路，但保持主流程更轻：
+TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收起和恢复 tabs"为基础，吸收 tabExtend 的 workspace、分类和工作台思路，但保持主流程更轻：
 
 - 当前选中的 browser window 一键保存为 session。
 - 从单一 Open Tabs 列表勾选多个有 URL 的 tabs 创建 session。
 - 通过有 URL open tab 的右键菜单筛选包含该 URL 的 saved sessions。
 - 用 sidebar footer Filter tabs 只过滤当前 selected browser window 的单一 Open Tabs 列表。
 - Open Tabs 保留 selected normal window 的非 TabBoard tab rows；pinned、Chrome 和 file URLs 可正常多选和保存，自定义 URL 过滤规则与 TabBoard 自身页面直接隐藏。
-- 勾选 open tabs 只用于批量创建 session 或批量拖入已有 session。
+- 勾选 open tabs 只用于批量创建 session 或批量拖入已有 session，拖拽完成后自动退出多选。
 - 拖动 open tab 到已有 session 中追加链接。
-- saved sessions 支持分类、搜索、恢复、拖拽排序、inline rename、笔记、导入导出、回收站。
+- saved sessions 支持三档内置分类（Inbox/Saved/Archive）+ 自定义分类、搜索、恢复、拖拽排序、inline rename、笔记、导入导出、回收站。
+- Session card 展示 note，预览弹窗可添加/修改 note，点击打开链接后自动隐藏预览窗。
 
 ## 变迁时间线
+
+### 2026-07-21: Category 系统改造与体验优化
+
+用户反馈当前分类体系不够清晰，同时 Open Tabs 和 session 管理有多处体验缺口。本轮将 category 从 Inbox/Starred 两档内置扩展为 Inbox/Saved/Archive 三档内置 + 自定义 folder，并补齐 note、搜索、确认设置等体验细节。
+
+变化：
+
+- Category 系统：从 `Inbox + Starred + folders` 改为 `Inbox + Saved + Archive + folders` 三档内置分类。Starred 改名为 Saved，新增 Archive 用于归档不常用的工作上下文。
+- Group 新增 `archived: boolean` 字段，与 `starred` 互斥；两者任一为 true 时 `folderId` 自动 normalize 为 null。
+- Session card 展示 note 区域，预览弹窗支持添加和修改 note；点击打开链接后自动关闭预览浮层。
+- Open Tabs 优化：多选模式提供全选按钮，拖拽完成后自动退出多选；tab URL 最多显示 3 行；favicon 加载失败时有兜底 icon；全局去重避免同 URL 重复展示。
+- 搜索优化：关闭搜索栏时清空筛选条件，不再保留上次 query。
+- 设置新增 `confirmBeforeDestructive` 选项，默认开启危险操作前二次确认，用户可在 Options 中关闭。
+- 侧边栏分隔线与右侧 topbar border-bottom 视觉对齐，消除左右割裂感。
+- 修复侧边栏收起状态下 icon 初始不居中问题（`sidebarHoverSuppressed` 初始值与 `sidebarCollapsed` 保持一致）。
+- 修复拖动 session 到同一 category 时的 "Invalid state mutation" 验证错误。
+
+判断：
+
+- 三档内置分类比两档更符合"收集 → 整理 → 归档"的工作流演进，Saved 比 Starred 更准确地表达"已整理/重要"的语义。
+- Note 是 session 上下文的重要补充，在 card 上直接可见降低了查找成本。
+- 搜索关闭即清空符合"用完即走"的轻量交互，避免用户误以为筛选仍在生效。
+- 二次确认默认为安全兜底，同时给高级用户关闭选项，平衡安全与效率。
+
+当前状态：Current，全部 603 个测试通过。
 
 ### 2026-07-20: Open Tabs 自身页面过滤与无闪烁刷新
 

@@ -693,6 +693,58 @@ Status:
 
 Accepted。
 
+## D031: Three built-in categories (Inbox / Saved / Archive)
+
+Context:
+
+原有的 Inbox + Starred 两档内置分类不足以覆盖"收集 → 整理 → 归档"的完整工作流。Starred 作为"收藏/重要"的语义不够准确，用户也缺少一个地方来存放不常用但需要保留的工作上下文。自定义 folder 虽然灵活，但大量低频内容会和活跃内容混在一起，降低整理效率。
+
+Decision:
+
+内置分类从 Inbox + Starred 扩展为 Inbox + Saved + Archive 三档。Starred 改名为 Saved，更准确地表达"已整理/重要"的语义；新增 Archive 用于归档不常用但需要保留的 session。`archived` 与 `starred` 互斥，两者任一为 true 时 `folderId` 自动清空为 null。自定义 folder 继续存在，与三档内置分类共同参与排序和拖拽。
+
+Rationale:
+
+- 三档分类符合 GTD 式的工作流演进：Inbox 是待处理的收集区，Saved 是当前活跃/重要的整理区，Archive 是已完成但需要留存的归档区。
+- Saved 比 Starred 更贴近 tab manager 的使用场景——用户保存的是"工作上下文"，不是给内容"加星标"。
+- 内置 Archive 避免了用户为了"归档"而去创建一个叫 Archive 的自定义 folder，同时让归档有明确的系统语义（如未来可支持批量清理老归档）。
+- 三档内置 + 自定义 folder 的结构保持了灵活性，同时给用户提供清晰的默认组织框架。
+
+Trade-offs:
+
+- 从两档扩展到三档增加了一点认知成本，但 Inbox/Saved/Archive 的命名足够直觉，大部分用户能快速理解。
+- `archived` 和 `starred` 两个字段互斥，增加了 state mutation 的校验复杂度，但通过统一的 normalize 和 category 推导函数保持了一致性。
+- 历史 starred 数据自动映射到 Saved category，不需要数据迁移。
+
+Status:
+
+Accepted。
+
+## D032: Destructive action confirmation is configurable (default on)
+
+Context:
+
+之前的设计是"危险操作始终确认，不提供关闭选项"，但高级用户在大量整理 sessions 时会觉得频繁弹窗打断工作流。同时，Bin 的存在已经提供了一层安全网——删除的内容可以恢复，永久删除才是真正的危险操作。
+
+Decision:
+
+新增 `confirmBeforeDestructive` 设置项，默认开启。用户可在 Options > Basic 中关闭该选项，跳过删除、永久删除等危险操作的二次确认弹窗。
+
+Rationale:
+
+- 默认开启保证了新用户和普通用户的安全，避免误删。
+- 高级用户可以关闭，提升整理效率——Bin 已经提供了撤销删除的安全网。
+- 配置项放在 Basic 设置中，容易找到，同时不影响其他设置的组织结构。
+
+Trade-offs:
+
+- 关闭确认后，用户可能更快操作但也更容易误删；但 Bin 的存在降低了这个风险。
+- 增加了一个设置项，让 Options 稍微变长，但这个开关的价值足够高，值得增加。
+
+Status:
+
+Accepted。
+
 ## Decision template
 
 ```md
