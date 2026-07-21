@@ -46,6 +46,14 @@ function HydrationStalled() {
 }
 
 export function ManagerApp() {
+  return (
+    <ErrorBoundary scope="manager">
+      <ManagerAppInner />
+    </ErrorBoundary>
+  );
+}
+
+function ManagerAppInner() {
   const { hydrated } = useStoreHydration();
   const [watchdogTripped, setWatchdogTripped] = useState(false);
 
@@ -79,9 +87,5 @@ export function ManagerApp() {
     );
   }
 
-  return (
-    <ErrorBoundary scope="manager">
-      <AppContent />
-    </ErrorBoundary>
-  );
+  return <AppContent />;
 }
