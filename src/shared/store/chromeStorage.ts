@@ -1,5 +1,6 @@
 import { STATE_KEY } from '../model/constants';
 import { normalizeState, type TabBoardState } from '../model';
+import { logBreadcrumb, logWarning } from '../utils/diagnostics';
 import {
   applyStateMutations,
   InvalidDropMutationError,
@@ -126,11 +127,16 @@ export async function ensureStateViaWorker(): Promise<TabBoardState> {
  */
 export async function ensureStateForHydration(): Promise<TabBoardState> {
   try {
-    return await ensureStateViaWorker();
-  } catch {
+    const viaWorker = await ensureStateViaWorker();
+    logBreadcrumb('hydration', 'ensured state via service worker');
+    return viaWorker;
+  } catch (error: unknown) {
     // Worker asleep, cold-start race, or torn-down message port. Read the
     // authoritative state straight from local storage instead of failing.
-    return ensureState();
+    logWarning('hydration', 'worker ensure-state failed, falling back to local storage', error);
+    const local = await ensureState();
+    logBreadcrumb('hydration', 'ensured state via local storage fallback');
+    return local;
   }
 }
 

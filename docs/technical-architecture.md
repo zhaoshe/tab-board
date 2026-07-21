@@ -561,6 +561,39 @@ git diff --check
 - 打开第一张/最后一张 session 的 More，确认 fixed menu 不被裁切。
 - 保存当前窗口、搜索、分类、restore、导入 OneTab 文本。
 
+## Diagnostics (Crash-Surviving Log)
+
+白屏会销毁页面 console，因此 TabBoard 将一条轻量的面包屑/错误轨迹持久化到 `chrome.storage.local` 中独立于应用状态的 key（`tabboardDiagnostics`），即使 React 树挂掉或状态损坏也能在刷新后读回来排查。
+
+**核心模块**：`src/shared/utils/diagnostics.ts`
+
+- 入口：`logBreadcrumb(scope, message, detail?)`、`logWarning(...)`、`logError(...)`
+- 读取：`readDiagnostics()` → `DiagnosticEntry[]`，会等待 in-flight 写入完成后再读
+- 清除：`clearDiagnostics()`
+- 全局捕获：`installGlobalErrorCapture(scope)` 安装 `error` + `unhandledrejection` 监听
+- Ring buffer 上限：`DIAGNOSTICS_LIMIT = 100`，最新 100 条
+- 写入串行化：内部 `writeChain` 保证并发日志不会互相覆盖
+- **永不抛错**：所有 storage 访问都被 try/catch 包裹，diagnostics 本身不能成为第二故障源
+
+**白屏后取回日志的方式**：
+
+1. 在管理器页面（即使白屏/ErrorBoundary 页）打开 DevTools Console。
+2. 执行：
+   ```js
+   chrome.storage.local.get('tabboardDiagnostics', r => console.table(r.tabboardDiagnostics))
+   ```
+3. 或点击 ErrorBoundary 恢复面板上的「Copy diagnostics」按钮。
+
+**已埋点的关键轨迹**：
+- `manager: manager entry script loaded` — 入口脚本已执行
+- `manager: ManagerApp mounted` — React 根组件已挂载
+- `hydration: ensured state via service worker` / `via local storage fallback` — 水合走了哪条路径
+- 全局未捕获错误 / unhandled rejection
+
+**ErrorBoundary**：`src/manager/components/shell/ErrorBoundary.tsx` 包裹整个 ManagerApp，在 React 渲染级崩溃时展示错误信息、刷新按钮、复制诊断日志按钮，以及可展开的完整日志详情。
+
+**Hydration 看门狗**：`ManagerApp` 中有 8 秒看门狗（`HYDRATION_WATCHDOG_MS`），如果 `useStoreHydration` 超过 8 秒仍未完成，不再显示空 LoadingOverlay，而是展示一个「页面加载停滞」面板，附刷新按钮和诊断信息。
+
 ## 维护建议
 
 1. 按 React Manager 边界维护功能

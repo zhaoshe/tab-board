@@ -1488,3 +1488,66 @@
   border-radius: var(--mantine-radius-sm);
   background: var(--mantine-color-default-hover);
 }
+
+.tabboard-error-boundary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--mantine-color-body);
+  color: var(--mantine-color-text);
+}
+
+.tabboard-error-boundary__panel {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tabboard-error-boundary__title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.tabboard-error-boundary__message {
+  margin: 0;
+  color: var(--mantine-color-red-6);
+  font-weight: 500;
+}
+
+.tabboard-error-boundary__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tabboard-error-boundary__actions button {
+  padding: 6px 14px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-default);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.tabboard-error-boundary__actions button:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.tabboard-error-boundary__log {
+  max-height: 320px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 10px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-default-hover);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+

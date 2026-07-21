@@ -38,6 +38,27 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 当前状态:Current,`npm run check`、`npm test`(614 通过)通过;Playwright e2e(含 worker 不可达场景,10 通过)本地按需运行通过。
 
+### 2026-07-21: 增加 crash-surviving diagnostics + ErrorBoundary + hydration 看门狗
+
+用户反馈白屏仍然偶发,且白屏后页面 console 也跟着没了,无法事后排查。截图显示是 React minified error #185(max update depth / infinite loop)出现在 `useStoreHydration` 中,说明除了 worker 挂起外还有渲染级崩溃的可能。
+
+变化:
+
+- 新增 `src/shared/utils/diagnostics.ts`:独立于 `tabboardState` 的 ring buffer(`tabboardDiagnostics`,上限 100 条),写入 `chrome.storage.local`,白屏/刷新后仍可读取。含 `logBreadcrumb` / `logWarning` / `logError` / `readDiagnostics` / `clearDiagnostics` / `installGlobalErrorCapture`。所有 storage 访问 fire-and-forget 且 try/catch,diagnostics 自身永不成为第二故障源。
+- 新增 `src/manager/components/shell/ErrorBoundary.tsx`:class 组件包裹整个 ManagerApp,捕获 React 渲染级错误,展示错误信息、刷新按钮、「Copy diagnostics」按钮,以及可展开的完整诊断日志。
+- `ManagerApp` 增加 hydration 看门狗(8 秒):水合超时不再显示空白 LoadingOverlay,而是展示停滞面板 + 刷新按钮 + 诊断信息,避免用户看到纯白板。
+- `main.tsx` 入口增加 `installGlobalErrorCapture('manager')` + boot breadcrumb + initial render try/catch,捕获脚本加载阶段的错误。
+- `ensureStateForHydration` 在 worker 成功 / worker 失败降级 / 本地降级三个分支都埋了 breadcrumb。
+- 新增 `src/shared/utils/diagnostics.test.ts`(7 单元测试)和 `tests/e2e/diagnostics.e2e.ts`(3 E2E:启动轨迹、worker-fallback 记录、刷新后存活)。
+
+判断:
+
+- 白屏的根因可能有多种(worker 冷启动、React 无限重渲染、状态损坏、网络资源加载失败),只修一个已知原因不足以覆盖全部场景。
+- 与其继续猜下一个原因,不如先给页面装上"黑匣子":任何崩溃都留下可追溯的轨迹,下一次白屏时用户可以直接把日志贴过来,我们再从证据出发定位。
+- ErrorBoundary + 看门狗 + 全局错误捕获 是三层防御:渲染崩溃有恢复页、水合卡住有停滞页、脚本级错误有持久化轨迹。
+
+当前状态:Current,`npm run check` 通过,`npm test`(621 通过)通过,Playwright e2e diagnostics(3 通过)本地按需运行通过。
+
 ### 2026-07-21: Session 键盘拖拽无障碍修复
 
 上一轮新增的 Playwright e2e 暴露出一个无障碍缺口：session card 的拖拽 activator 是不可聚焦的 `<header>`，只 spread 了 `@dnd-kit` listeners、没有 attributes，因此键盘用户无法拿起并重排 session。
