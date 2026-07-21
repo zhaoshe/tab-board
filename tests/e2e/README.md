@@ -38,15 +38,17 @@ for deterministic session seeds.
 
 - Pure drop resolution (ownership, indices, no-op detection, workspace
   boundaries): `src/manager/core/dnd.test.ts` (Vitest) — the primary regression.
-- Browser drag lifecycle (overlay appears/tears down, Escape cancel), boot, and
-  reload recovery: this directory.
+- Browser drag lifecycle (overlay appears/tears down, Escape cancel), keyboard
+  reorder, boot, and reload recovery: this directory.
 
-## Known gap surfaced by these tests
+## Drag and drop coverage
 
-The session-card drag activator (`.session-card__header`) spreads `@dnd-kit`
-`listeners` but not `attributes`, so it exposes no `tabindex` / `role` /
-`aria-roledescription`. As a result the `KeyboardSensor` cannot be activated by
-tabbing to a session and pressing Space — keyboard-only session reordering does
-not work today. The e2e suite therefore exercises the pointer path. If keyboard
-DnD becomes a requirement, spread `attributes` onto the activator element and add
-a keyboard-drag spec here.
+Both drag paths are exercised here:
+
+- **Pointer**: press-and-move on the session header activates a drag; the suite
+  checks the overlay appears and tears down, and that Escape cancels cleanly.
+- **Keyboard**: each session card exposes a focusable `.session-card__drag-handle`
+  (carrying `@dnd-kit`'s `setActivatorNodeRef` + `attributes` + `listeners`), and
+  the `KeyboardSensor` uses `sortableKeyboardCoordinates` so arrow keys traverse
+  whole session columns. `reorders sessions using only the keyboard` proves an
+  end-to-end keyboard-only reorder.

@@ -10,6 +10,7 @@ import {
 import {
   IconDots,
   IconFileText,
+  IconGripVertical,
   IconLink,
   IconLock,
   IconLockOpen,
@@ -86,6 +87,7 @@ export function SessionCard({
   const { showError, showSuccess } = useToast();
 
   const {
+    attributes,
     listeners,
     setNodeRef,
     setActivatorNodeRef,
@@ -375,22 +377,30 @@ export function SessionCard({
       onKeyDown={isDragOverlay ? undefined : (event) => openSessionMenu(event)}
     >
       <header
-        ref={isDragOverlay ? undefined : setActivatorNodeRef}
         className="session-card__header"
-        {...(!isDragOverlay ? listeners : {})}
         onPointerDown={(event) => {
           if (event.target instanceof Element && event.target.closest('button, input, textarea, a, [data-no-drag]')) {
             return;
           }
           listeners?.onPointerDown?.(event);
         }}
-        onKeyDown={(event) => {
-          if (event.target instanceof Element && event.target.closest('button, input, textarea, a, [data-no-drag]')) {
-            return;
-          }
-          listeners?.onKeyDown?.(event);
-        }}
       >
+        {isDragOverlay ? (
+          <span className="session-card__drag-handle session-card__drag-handle--static" aria-hidden="true">
+            <IconGripVertical size={16} />
+          </span>
+        ) : (
+          <button
+            type="button"
+            ref={setActivatorNodeRef}
+            className="session-card__drag-handle"
+            aria-label={`Drag ${group.title} to reorder`}
+            {...attributes}
+            {...listeners}
+          >
+            <IconGripVertical size={16} />
+          </button>
+        )}
         <div className="session-card__heading">
           {isEditingTitle ? (
             <TextInput

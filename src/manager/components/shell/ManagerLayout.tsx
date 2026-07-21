@@ -18,6 +18,7 @@ import {
 } from '@dnd-kit/core';
 import type { ClientRect } from '@dnd-kit/core';
 import { Sidebar } from '../sidebar/Sidebar';
+import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { ImportModal } from '../import-export/ImportModal';
 import { ExportModal } from '../import-export/ExportModal';
 import { WorkspaceContent } from '../workspace/WorkspaceContent';
@@ -378,7 +379,12 @@ export function ManagerLayout() {
         tolerance: 5,
       },
     }),
-    useSensor(KeyboardSensor)
+    useSensor(KeyboardSensor, {
+      // Keyboard drag moves by resolving the next sortable position instead of
+      // fixed pixel steps, so arrow keys traverse whole session columns and the
+      // custom geometry collision detection can lock onto an adjacent target.
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
   );
 
   const activeGroup = groups.find((g) => `group-${g.id}` === activeId);

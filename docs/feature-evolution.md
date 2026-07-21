@@ -21,6 +21,24 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-07-21: Session 键盘拖拽无障碍修复
+
+上一轮新增的 Playwright e2e 暴露出一个无障碍缺口：session card 的拖拽 activator 是不可聚焦的 `<header>`，只 spread 了 `@dnd-kit` listeners、没有 attributes，因此键盘用户无法拿起并重排 session。
+
+变化：
+
+- 在 session card header 内新增独立的 `.session-card__drag-handle` 按钮，承载 `setActivatorNodeRef` + `@dnd-kit` `attributes` + `listeners`；handle 提供 `role="button"`、`tabindex=0`、`aria-roledescription="sortable"` 和描述性 `aria-label`。
+- `KeyboardSensor` 配置 `coordinateGetter: sortableKeyboardCoordinates`，让方向键按 sortable 位置跨越整列 session，从而命中自定义 collision detection 的 `group-insert` 目标。
+- header 仍保留 pointer listeners，鼠标拖整块 header 的体验不变；handle 默认低调，hover/focus 时才显现，保持"dense but calm"。
+- 新增键盘拖拽 e2e（`reorders sessions using only the keyboard`）与 handle a11y 断言，`session-rendering.test.ts` 增补 handle/activator 结构契约。
+
+判断：
+
+- 采用独立 handle 而不是把 attributes spread 到 `<header>`，避免在包含 title/Restore/More 的容器上产生非法 `role="button"` 与重复 tab stop。
+- 键盘拖拽是 direct-manipulation 的可达性底线，值得作为独立修复而非顺带改动。
+
+当前状态：Current，`tsc`、`npm test`、`npm run check` 通过；Playwright e2e（含键盘拖拽）本地按需运行通过。
+
 ### 2026-07-21: 架构文档校正与死字段清理
 
 在一次全项目审查中发现文档与实现漂移，并清理了 React 重写后遗留的死 schema 字段。

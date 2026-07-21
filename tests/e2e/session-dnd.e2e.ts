@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { twoInboxSessions } from './fixtures';
+import { threeInboxSessions, twoInboxSessions } from './fixtures';
 
 const PREVIEW_PATH = '/dev/manager-preview.html';
 const OVERLAY = '.manager-drag-overlay__preview';
@@ -64,5 +64,53 @@ test.describe('Session drag lifecycle (@dnd-kit pointer sensor)', () => {
 
     const titlesAfter = await page.locator('.session-card__title').allTextContents();
     expect(titlesAfter).toEqual(titlesBefore);
+  });
+});
+
+test.describe('Session drag lifecycle (@dnd-kit keyboard sensor)', () => {
+  test.beforeEach(async ({ page }) => {
+    const seed = threeInboxSessions();
+    await page.addInitScript((options) => {
+      (window as unknown as { __TABBOARD_PREVIEW__: unknown }).__TABBOARD_PREVIEW__ = options;
+    }, seed);
+    await page.goto(PREVIEW_PATH);
+    await expect(page.locator('#session-card-group_alpha')).toBeVisible();
+  });
+
+  test('exposes an accessible, focusable drag handle', async ({ page }) => {
+    const handle = page.locator('#session-card-group_alpha .session-card__drag-handle');
+    await expect(handle).toHaveAttribute('role', 'button');
+    await expect(handle).toHaveAttribute('tabindex', '0');
+    await expect(handle).toHaveAttribute('aria-roledescription', 'sortable');
+    await expect(handle).toHaveAttribute('aria-label', /drag .* to reorder/i);
+  });
+
+  test('reorders sessions using only the keyboard', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+
+    await expect(page.locator('.session-card__title')).toHaveText([
+      'Alpha Session',
+      'Beta Session',
+      'Gamma Session',
+    ]);
+
+    const handle = page.locator('#session-card-group_alpha .session-card__drag-handle');
+    await handle.focus();
+    await page.keyboard.press('Space');
+    await expect(page.locator(OVERLAY)).toBeVisible();
+
+    // Move past Beta's insertion point so the drop is not an adjacent no-op.
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('Space');
+
+    await expect(page.locator(OVERLAY)).toBeHidden();
+    await expect(page.locator('.session-card__title')).toHaveText([
+      'Beta Session',
+      'Alpha Session',
+      'Gamma Session',
+    ]);
+    expect(errors, `unexpected page errors: ${errors.join('\n')}`).toHaveLength(0);
   });
 });

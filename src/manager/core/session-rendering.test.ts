@@ -189,6 +189,22 @@ describe('Task108 session rendering contracts', () => {
     expect(row).toContain('data-tab-id={tab.id}');
   });
 
+  it('exposes an accessible keyboard drag handle carrying the sortable activator', () => {
+    // The activator lives on a focusable button (not the non-focusable header),
+    // so @dnd-kit's KeyboardSensor can pick up and reorder sessions. Spreading
+    // attributes provides role/tabindex/aria-roledescription for AT.
+    expect(card).toContain('ref={setActivatorNodeRef}');
+    expect(card).toContain('className="session-card__drag-handle"');
+    expect(card).toContain('aria-label={`Drag ${group.title} to reorder`}');
+    expect(card).toContain('{...attributes}');
+    expect(card).toContain('setActivatorNodeRef');
+    // The header no longer owns the activator ref or keyboard listeners.
+    expect(card).not.toContain('ref={isDragOverlay ? undefined : setActivatorNodeRef}');
+    // The keyboard sensor uses sortable coordinates so arrows traverse columns.
+    expect(layout).toContain('sortableKeyboardCoordinates');
+    expect(layout).toContain('coordinateGetter: sortableKeyboardCoordinates');
+  });
+
   it('uses immutable drag-start geometry for source placeholders', () => {
     expect(placeholder).not.toContain('height = 200');
     expect(placeholder).not.toContain('height,');

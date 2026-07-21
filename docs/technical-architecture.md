@@ -426,7 +426,8 @@ Drop target 类型（`DropTarget`，由 `useDroppable` 容器通过 `data.dnd.ta
 
 DnD 生命周期（React 侧，`ManagerLayout`）：
 
-- Sensors：`PointerSensor`（`activationConstraint.distance = 5px`，避免点击误触发拖拽）、`TouchSensor`（`delay 200ms` + `tolerance 5px`）、`KeyboardSensor`（键盘可达）。
+- Sensors：`PointerSensor`（`activationConstraint.distance = 5px`，避免点击误触发拖拽）、`TouchSensor`（`delay 200ms` + `tolerance 5px`）、`KeyboardSensor`（`coordinateGetter: sortableKeyboardCoordinates`，让方向键按 sortable 位置跨越整列 session，而不是固定像素步进）。
+- Session 拖拽 activator 是 session card header 内的独立 handle button（`.session-card__drag-handle`，携带 `setActivatorNodeRef` + `attributes` + `listeners`）。它提供 `role="button"`、`tabindex=0`、`aria-roledescription="sortable"` 与描述性 `aria-label`，因此 pointer 与键盘（Space 拿起 / 方向键移动 / Space 放下 / Esc 取消）两条路径都能拖拽；header 自身保留 pointer listeners，整块 header 仍可鼠标拖拽。
 - Collision detection：自定义 `createGeometryCollisionDetection()` 取代默认算法。它按指针到候选 rect 的距离排序、用 `isCompatibleTarget()` 过滤掉当前 payload 不支持的 target（例如 session drag 不会被 tab row 抢走），并对 `tab-before` 用 `getTabDropPlacement()`（上/下 25% 边缘 → before/after，中间 50% → 收敛为 `group-body`）细化落点。
 - Target 锁定：`lockDropTarget()` 用 `DROP_TARGET_RELEASE_MARGIN`（12px）hysteresis 保持已选 target，减少横向 board 重排导致的边界回闪；`category-column` 命中时优先直接选中，不参与锁定。
 - `onDragStart` 记录 `event.active.rect.current.initial` 作为 `sourceRect`，并快照 `dragReplacementKey`（workspace + category + view + groups 指纹）。`onDragOver` 由 collision 结果算出 `target` 与 `markerForTarget()` 生成的插入标记。`onDragEnd` 用 `getDragEndTarget()` 取最终 target。
@@ -454,7 +455,7 @@ Intent 解析与提交：
 
 - DnD 逻辑仍是最脆弱的区域之一，但脆弱点已从"原生事件时序"转移到"collision detection 几何 + target 锁定 hysteresis + 拖拽中布局失效"三者的交互。
 - `resolveDrop` 是行为契约的中心，任何落点语义调整都应先在 `src/manager/core/dnd.test.ts` 加用例，再改 UI。
-- 自动化只覆盖 typed resolver / 几何 / 生命周期契约，真实指针/键盘事件时序仍需浏览器验证。修改拖拽逻辑时应同时手工验证：
+- 自动化覆盖 typed resolver / 几何 / 生命周期契约，加上 `tests/e2e/`（Playwright）里的 pointer 与键盘拖拽冒烟；更细的真实事件时序仍建议在 unpacked extension 手工验证。修改拖拽逻辑时应同时手工验证：
   - 拖 session 起始位置。
   - 拖 session 到同 category 前/后。
   - 拖 session 到其它 category。
@@ -462,7 +463,7 @@ Intent 解析与提交：
   - 拖 saved tab 到新 session placeholder。
   - 多选 saved tabs 拖拽。
   - 多选 open tabs 拖入已有 session 与新建 session。
-  - 键盘（Space 拿起 / 方向键移动 / Space 放下 / Esc 取消）拖拽路径。
+  - 键盘拖拽：Tab 聚焦 session 的 `.session-card__drag-handle`，Space 拿起、方向键移动、Space 放下、Esc 取消。
 
 ## UI 架构
 

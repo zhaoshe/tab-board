@@ -78,6 +78,33 @@ export function twoInboxSessions(): PreviewChromeOptions {
 }
 
 /**
+ * Three Inbox sessions, so a keyboard drag can move a card past an adjacent
+ * insertion point (which would be a no-op) and commit a real reorder.
+ */
+export function threeInboxSessions(): PreviewChromeOptions {
+  return {
+    state: {
+      version: 1,
+      workspaces: [
+        { id: WORKSPACE_ID, name: 'Personal', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+      ],
+      activeWorkspaceId: WORKSPACE_ID,
+      groups: [
+        session('group_alpha', 'Alpha Session', [['tab_a1', 'Alpha One', 'https://alpha.example/one']]),
+        session('group_beta', 'Beta Session', [['tab_b1', 'Beta One', 'https://beta.example/one']]),
+        session('group_gamma', 'Gamma Session', [['tab_g1', 'Gamma One', 'https://gamma.example/one']]),
+      ],
+      folders: [],
+      categoryOrderByWorkspace: {},
+      bin: [],
+      settings: {},
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  };
+}
+
+/**
  * A large Inbox board (default 60 sessions) to exercise the content-visibility
  * perf path: only near-viewport slots should paint, but every card stays in the
  * DOM and remains reachable.

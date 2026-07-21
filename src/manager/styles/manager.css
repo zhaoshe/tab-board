@@ -988,12 +988,52 @@
 
 .session-card__header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   flex: 0 0 auto;
   align-items: flex-start;
   gap: 6px;
   min-width: 0;
   cursor: grab;
+}
+
+.session-card__drag-handle {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 22px;
+  margin-inline-start: -2px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--mantine-radius-sm);
+  background: transparent;
+  color: var(--mantine-color-dimmed);
+  cursor: grab;
+  /* Calm by default; reveal on hover/focus like other secondary controls. */
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.session-card__header:hover .session-card__drag-handle,
+.session-card__header:focus-within .session-card__drag-handle,
+.session-card__drag-handle:focus-visible {
+  opacity: 1;
+}
+
+.session-card__drag-handle:focus-visible {
+  outline: 2px solid var(--mantine-color-blue-5);
+  outline-offset: 1px;
+}
+
+.session-card__drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Overlay clone: keep the grip visible and non-interactive. */
+.session-card__drag-handle--static {
+  opacity: 1;
+  cursor: grabbing;
 }
 
 .session-card__heading {
