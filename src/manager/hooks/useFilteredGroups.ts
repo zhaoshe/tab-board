@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
-import { getVisibleGroups, type CategoryFilter } from '../core/selectors';
-import type { Group } from '../../shared/model';
+import { getActiveWorkspaceState, getVisibleGroups, type CategoryFilter } from '../core/selectors';
+import type { Group, TabBoardState } from '../../shared/model';
 
 const SEARCH_KEY = 'tabboardSearch';
 const SEARCH_CHANGE_EVENT = 'tabboard-search-change';
@@ -27,15 +27,38 @@ function setGlobalQuery(value: string) {
   listeners.forEach((listener) => listener(value));
 }
 
-export function useFilteredGroups(category: CategoryFilter): Group[] {
-  const state = useTabBoardStore(
-    useShallow((currentState) => ({
+type VisibleGroupsSelectorState = Pick<TabBoardState, 'activeWorkspaceId' | 'workspaces' | 'folders' | 'groups'>;
+
+type VisibleGroupsSlice = VisibleGroupsSelectorState;
+
+function createVisibleGroupsSelector(): (state: VisibleGroupsSelectorState) => VisibleGroupsSlice {
+  let previousWorkspaceId: string | null = null;
+  let previousFolders: TabBoardState['folders'] | null = null;
+
+  return (currentState) => {
+    const { workspaceId } = getActiveWorkspaceState(currentState);
+    const nextFolders = currentState.folders.filter((folder) => folder.workspaceId === workspaceId);
+    const previous = previousFolders;
+    const canReuseFolders = previousWorkspaceId === workspaceId
+      && previous !== null
+      && previous.length === nextFolders.length
+      && nextFolders.every((folder, index) => folder === previous[index]);
+    const folders = canReuseFolders ? previous : nextFolders;
+
+    previousWorkspaceId = workspaceId;
+    previousFolders = folders;
+    return {
       activeWorkspaceId: currentState.activeWorkspaceId,
       workspaces: currentState.workspaces,
-      folders: currentState.folders,
+      folders,
       groups: currentState.groups,
-    })),
-  );
+    };
+  };
+}
+
+export function useFilteredGroups(category: CategoryFilter): Group[] {
+  const selectVisibleGroupsState = useMemo(createVisibleGroupsSelector, []);
+  const state = useTabBoardStore(useShallow(selectVisibleGroupsState));
   const searchQuery = useSearchQuery();
 
   return useMemo(

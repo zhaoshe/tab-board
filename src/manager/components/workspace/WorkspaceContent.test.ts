@@ -20,6 +20,7 @@ type TestGroup = {
 
 type TestState = {
   activeWorkspaceId: string;
+  workspaces: readonly { id: string }[];
   groups: readonly TestGroup[];
   folders: readonly TestFolder[];
 };
@@ -31,7 +32,6 @@ interface TestStore {
 
 const testHarness = vi.hoisted(() => ({
   store: null as TestStore | null,
-  groups: [] as readonly TestGroup[],
   sessionCardRenderCount: 0,
 }));
 
@@ -94,11 +94,6 @@ vi.mock('../../../shared/store/useTabBoardStore', () => ({
   },
 }));
 
-vi.mock('../../hooks/useFilteredGroups', () => ({
-  useFilteredGroups: () => testHarness.groups,
-  useSearchQuery: () => '',
-}));
-
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root | null = null;
@@ -107,6 +102,7 @@ let container: HTMLDivElement | null = null;
 function createTestStore(): TestStore {
   return create<TestState>(() => ({
     activeWorkspaceId: currentFolder.workspaceId,
+    workspaces: [{ id: currentFolder.workspaceId }, { id: otherFolder.workspaceId }],
     groups: [group],
     folders: [currentFolder, otherFolder],
   }));
@@ -115,7 +111,6 @@ function createTestStore(): TestStore {
 async function mountWorkspaceContent(): Promise<TestStore> {
   const store = createTestStore();
   testHarness.store = store;
-  testHarness.groups = [group];
   const { WorkspaceContent } = await import('./WorkspaceContent');
   root = createRoot(container!);
   await act(async () => {
@@ -178,12 +173,10 @@ describe('WorkspaceContent folder selector updates', () => {
     expect(boardLabel()).toBe('Workspace Renamed folder sessions');
     expect(testHarness.sessionCardRenderCount).toBeGreaterThan(initialRenderCount);
 
-    const renamedRenderCount = testHarness.sessionCardRenderCount;
     await act(async () => {
       store.setState({ folders: [otherFolder] });
     });
 
     expect(boardLabel()).toBe('Workspace Category sessions');
-    expect(testHarness.sessionCardRenderCount).toBeGreaterThan(renamedRenderCount);
   });
 });
