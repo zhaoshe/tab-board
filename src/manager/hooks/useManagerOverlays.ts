@@ -19,6 +19,7 @@ import { IconBrowser } from '@tabler/icons-react';
 
 export const OPEN_DELAY_MS = 180;
 export const CLOSE_DELAY_MS = 120;
+export const MANAGER_HOVER_SUPPRESSED_ATTRIBUTE = 'data-tabboard-hover-suppressed';
 const PREVIEW_PLACEMENT = 'right-start';
 const PREVIEW_DISTANCE = 10;
 
@@ -249,6 +250,10 @@ function getTarget(target: EventTarget | null): Element | null {
 
 function isInside(element: HTMLElement | null, target: EventTarget | null): boolean {
   return Boolean(element && target instanceof Node && element.contains(target));
+}
+
+function isManagerHoverSuppressed(): boolean {
+  return document.documentElement.hasAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE);
 }
 
 function getFocusableTarget(element: HTMLElement | null): HTMLElement | null {
@@ -608,6 +613,7 @@ export function useManagerOverlays({
       };
     };
     const handlePointerDown = (event: PointerEvent) => {
+      document.documentElement.removeAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE);
       advanceFocusEpoch();
       if (isInside(menuElementRef.current, event.target) || isInside(previewElementRef.current, event.target)) return;
       if (menu?.trigger && isInside(menu.trigger, event.target)) return;
@@ -645,7 +651,27 @@ export function useManagerOverlays({
     };
     const handleViewportChange = () => closeOverlays();
     const handleDragStart = () => closeOverlays();
+    const handleWindowBlur = () => {
+      document.documentElement.setAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE, '');
+      advanceFocusEpoch();
+      closeOverlays();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') handleWindowBlur();
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!isManagerHoverSuppressed()) return;
+      if (event.movementX === 0 && event.movementY === 0) return;
+      document.documentElement.removeAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE);
+      const trigger = getTarget(event.target)?.closest<HTMLElement>('[data-info-popover]');
+      const options = trigger ? getPreviewOptions(trigger) : null;
+      if (options) schedulePreview(options);
+    };
+    const handleInteractionKeyDown = () => {
+      document.documentElement.removeAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE);
+    };
     const handleMouseOver = (event: MouseEvent) => {
+      if (isManagerHoverSuppressed()) return;
       const trigger = getTarget(event.target)?.closest<HTMLElement>('[data-info-popover]');
       if (!trigger || trigger.contains(event.relatedTarget as Node | null)) return;
       const options = getPreviewOptions(trigger);
@@ -662,6 +688,7 @@ export function useManagerOverlays({
       scheduleClosePreview();
     };
     const handleFocusIn = (event: FocusEvent) => {
+      if (isManagerHoverSuppressed()) return;
       const trigger = getTarget(event.target)?.closest<HTMLElement>('[data-info-popover]');
       const wasRestoredFocus = restoredFocusRef.current === trigger;
       restoredFocusRef.current = null;
@@ -700,6 +727,10 @@ export function useManagerOverlays({
     document.addEventListener('click', handleOutsideClick, true);
     document.addEventListener('scroll', handleViewportChange, true);
     document.addEventListener('dragstart', handleDragStart, true);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('pointermove', handlePointerMove, true);
+    document.addEventListener('keydown', handleInteractionKeyDown, true);
+    window.addEventListener('blur', handleWindowBlur);
     window.addEventListener('resize', handleViewportChange);
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown, true);
@@ -713,6 +744,10 @@ export function useManagerOverlays({
       document.removeEventListener('click', handleOutsideClick, true);
       document.removeEventListener('scroll', handleViewportChange, true);
       document.removeEventListener('dragstart', handleDragStart, true);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('pointermove', handlePointerMove, true);
+      document.removeEventListener('keydown', handleInteractionKeyDown, true);
+      window.removeEventListener('blur', handleWindowBlur);
       window.removeEventListener('resize', handleViewportChange);
       clearOpenTimer();
       clearCloseTimer();
@@ -723,6 +758,7 @@ export function useManagerOverlays({
     isProviderMountedRef.current = true;
     return () => {
       isProviderMountedRef.current = false;
+      document.documentElement.removeAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE);
       invalidateOverlayLifecycle();
       closeOverlays();
     };
@@ -880,7 +916,14 @@ export function ManagerOverlayPortal({
   onOpenTabPreviewChange,
 }: ManagerOverlayPortalProps = {}): ReactNode {
   const controller = useManagerOverlayController();
-  const { menu, preview } = controller;
+  const {
+    menu,
+    preview,
+    closeMenu,
+    closePreview,
+    setMenuPosition,
+    setPreviewPosition,
+  } = controller;
 
   useEffect(() => {
     onOpenTabPreviewChange?.(preview?.kind === 'open');
@@ -889,7 +932,7 @@ export function ManagerOverlayPortal({
 
   useLayoutEffect(() => {
     if (menu?.trigger && !menu.trigger.isConnected) {
-      controller.closeMenu();
+      closeMenu();
       return;
     }
     const element = (menu ? document.querySelector<HTMLElement>('.manager-overlay-menu') : null);
@@ -899,7 +942,7 @@ export function ManagerOverlayPortal({
       { width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height },
       { width: window.innerWidth, height: window.innerHeight },
     );
-    controller.setMenuPosition(position);
+    setMenuPosition(position);
   });
 
   useLayoutEffect(() => {
@@ -908,12 +951,14 @@ export function ManagerOverlayPortal({
   }, [menu]);
 
   useLayoutEffect(() => {
-    const element = (preview ? document.querySelector<HTMLElement>('.manager-info-popover') : null);
-    if (!preview || !element) return;
+    if (!preview) return;
     if (!preview.trigger.isConnected) {
-      controller.closePreview();
+      closePreview();
       return;
     }
+    if (preview.position) return;
+    const element = document.querySelector<HTMLElement>('.manager-info-popover');
+    if (!element) return;
     const triggerRect = preview.trigger.getBoundingClientRect();
     const savedRowRect = preview.kind === 'saved'
       ? preview.trigger.closest('.tab-item-row')?.getBoundingClientRect()
@@ -923,8 +968,8 @@ export function ManagerOverlayPortal({
       { width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height },
       { width: window.innerWidth, height: window.innerHeight },
     );
-    controller.setPreviewPosition(position);
-  }, [controller, preview]);
+    setPreviewPosition(position);
+  });
 
   if (typeof document === 'undefined' || (!menu && !preview)) return null;
   const menuStyle: CSSProperties = {

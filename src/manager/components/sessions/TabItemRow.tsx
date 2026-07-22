@@ -134,8 +134,10 @@ export function TabItemRow({
     }
   }, [isEditingNote]);
 
-  const handleClick = () => {
+  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     if (tab.itemType === ITEM_LINK && tab.url) {
+      event.stopPropagation();
+      if (event.detail !== 0) event.currentTarget.blur();
       closeOverlays();
       void runtime.openSavedTab(tab.url);
     }

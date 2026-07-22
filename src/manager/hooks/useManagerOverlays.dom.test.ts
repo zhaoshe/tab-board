@@ -10,6 +10,7 @@ import {
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  MANAGER_HOVER_SUPPRESSED_ATTRIBUTE,
   ManagerOverlayPortal,
   ManagerOverlaysProvider,
   useManagerInfoTrigger,
@@ -280,6 +281,48 @@ describe('mounted manager overlay behavior', () => {
     await act(async () => mounted.removeTrigger());
 
     expect(document.querySelector('.manager-overlay-menu')).toBeNull();
+    await unmountOverlay(mounted);
+  });
+
+  it('suppresses stale hover previews across window blur until real pointer movement', async () => {
+    const mounted = await mountOverlay();
+
+    await act(async () => {
+      mounted.trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+    });
+    await act(async () => vi.advanceTimersByTime(180));
+    expect(document.querySelector('.manager-info-popover')).not.toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(new FocusEvent('blur'));
+    });
+    expect(document.documentElement.hasAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE)).toBe(true);
+    expect(document.querySelector('.manager-info-popover')).toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(new FocusEvent('focus'));
+      mounted.trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+      mounted.trigger.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true,
+        movementX: 0,
+        movementY: 0,
+      }));
+      vi.advanceTimersByTime(180);
+    });
+    expect(document.documentElement.hasAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE)).toBe(true);
+    expect(document.querySelector('.manager-info-popover')).toBeNull();
+
+    await act(async () => {
+      mounted.trigger.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true,
+        movementX: 1,
+        movementY: 0,
+      }));
+      vi.advanceTimersByTime(180);
+    });
+    expect(document.documentElement.hasAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE)).toBe(false);
+    expect(document.querySelector('.manager-info-popover')).not.toBeNull();
+
     await unmountOverlay(mounted);
   });
 });

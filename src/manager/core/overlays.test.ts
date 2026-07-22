@@ -252,6 +252,14 @@ describe('centralized manager overlay contracts', () => {
     expect(hook).toContain('right-start');
     expect(hook).toContain('PREVIEW_DISTANCE = 10');
     expect(hook).toContain('Escape');
+    expect(hook).toContain('if (preview.position) return;');
+    expect(hook).not.toContain('}, [controller, preview]);');
+    expect(row).toContain('event.stopPropagation();');
+    expect(hook).toContain("window.addEventListener('blur'");
+    expect(hook).toContain("document.addEventListener('visibilitychange'");
+    expect(hook).toContain('MANAGER_HOVER_SUPPRESSED_ATTRIBUTE');
+    expect(hook).toContain('event.movementX === 0 && event.movementY === 0');
+    expect(css).toContain('html[data-tabboard-hover-suppressed]');
   });
 
   it('closes overlays on workspace/category/list replacement and detached triggers', () => {

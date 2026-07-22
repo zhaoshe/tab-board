@@ -21,6 +21,28 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-07-21: 修复 saved link 返回后的 preview 定位循环
+
+用户从 saved session 打开链接后切回 TabBoard 时出现 React error #185。最终生产堆栈直接命中 `ManagerOverlayPortal → setPreviewPosition`：preview 定位的 layout effect 在每次 commit 都派发 position state，而 controller 又包含 preview state；同时 saved-link click 在组件 handler 中关闭浮层后继续冒泡到 document preview handler，将本应关闭的 preview 重新打开。两者叠加后形成同步定位更新闭环。
+
+变化：
+
+- preview layout effect 在 `preview.position` 已存在时立即退出，不再重复派发定位 state；仍保留每次 commit 检查 detached trigger 的生命周期保护。
+- saved link click 停止冒泡，先关闭 overlay，再打开 Chrome tab，避免 document preview handler 在同一 click 末尾重新打开它。
+- window blur 或 document hidden 时立即关闭 overlays、取消 pending preview/focus restore，并在根节点设置临时 hover suppression。Chrome 回前台产生的合成 hover/focus 不能解除 suppression；只有用户真实移动指针、点击或键盘交互后才恢复 progressive disclosure。
+- hover suppression 同时压回 saved/open tab 的 checkbox、delete、row highlight 和 session 次级 actions；selection mode 的显式勾选控件仍保持可见。
+- 新增 80 个 open tabs 的 StrictMode DOM 回归：点击 saved link、连续触发 focus refresh、再打开 Open Tab preview，验证列表更新、preview 可见且不进入 ErrorBoundary。
+- 增加 Chromium e2e 场景覆盖同一 saved-link / focus / preview 序列。
+- 移除排查期的全局 render counter。该 counter 会把一次父 render 中的每个 tab row 都累计为“render 次数”，60 个以上 tabs 时会自行抛错，属于诊断误报而非真实循环。
+
+判断：
+
+- 重复 focus/tab refresh 是暴露问题的触发器，不是同步循环根因；现有 in-flight + queued refresh 已限制请求并发，无需用防抖掩盖。
+- 早期堆栈中的 Mantine `ScrollArea` 是循环重渲染时经过的组件链，不是根因；已撤回替换它的 workaround。
+- 最终修复只收敛 overlay click 与定位 state 语义，不改变 open-tab 数据、选择、DnD、滚动或 refresh 行为。
+
+当前状态：Current，623 个自动化测试通过，`npm run build` 与 `npm run check` 通过，Chromium e2e（saved-link / blur / hover suppression 场景）通过；用户在 unpacked Chrome 中按原复现路径复测：React #185 白屏已消失，切回 TabBoard 后 checkbox/delete/preview 不再残留，Chrome 从后台 app 返回前台时 preview 不自动恢复，真实指针移动后才恢复 hover。
+
 ### 2026-07-21: 修复 manager 白屏（hydration 与 MV3 worker 解耦）
 
 用户反馈 manager 页面运行中经常白屏。定位到根因:manager 是可长时间开着的新标签页,而 MV3 service worker 空闲约 30s 就会被 Chrome 挂起。此前 `hydrate()` 用**单次 `sendMessage({type:'tabboard-ensure-state'})`** 读初始 state,worker 处于挂起/冷启动竞态/通道断开时该调用 reject,导致 `hydrated` 永远为 false、页面卡在空的 `LoadingOverlay` 上——即白屏,且不会自愈。
