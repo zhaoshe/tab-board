@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, createElement, type ReactNode } from 'react';
+import { act, createElement, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -21,6 +21,8 @@ import type { DropTarget } from '../../core/dnd';
 const testHarness = vi.hoisted(() => {
   const state = {
     activeWorkspaceId: 'workspace_default',
+    workspaces: [{ id: 'workspace_default' }],
+    folders: [],
     groups: [],
     applyDropIntent: vi.fn(),
   };
@@ -108,7 +110,6 @@ vi.mock('../../core/dnd', async () => {
 
 const source = readFileSync(resolve(process.cwd(), 'src/manager/components/shell/ManagerLayout.tsx'), 'utf8');
 const runtimeSource = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useOpenTabsRuntime.ts'), 'utf8');
-const filteredGroupsSource = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useFilteredGroups.ts'), 'utf8');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -190,10 +191,31 @@ describe('tooltip dismissal', () => {
 });
 
 describe('visible group memoization', () => {
-  it('memoizes visible groups by state, category, and search query', () => {
-    expect(filteredGroupsSource).toMatch(
-      /return useMemo\(\s*\(\) => getVisibleGroups\(state, category, searchQuery\),\s*\[state, category, searchQuery\],\s*\);/s,
+  it('returns the same groups reference when stable inputs survive a rerender', async () => {
+    const { useFilteredGroups } = await vi.importActual<typeof import('../../hooks/useFilteredGroups')>(
+      '../../hooks/useFilteredGroups',
     );
+    const observed = { current: null as ReturnType<typeof useFilteredGroups> | null };
+    const forceRender = { current: null as (() => void) | null };
+
+    function HookProbe() {
+      const [, setRenderCount] = useState(0);
+      forceRender.current = () => setRenderCount((count) => count + 1);
+      observed.current = useFilteredGroups('inbox');
+      return null;
+    }
+
+    root = createRoot(container!);
+    await act(async () => {
+      root?.render(createElement(HookProbe));
+    });
+    const firstGroups = observed.current;
+
+    await act(async () => {
+      forceRender.current?.();
+    });
+
+    expect(observed.current).toBe(firstGroups);
   });
 });
 
