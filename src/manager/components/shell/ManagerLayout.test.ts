@@ -5,6 +5,7 @@ import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  createGeometryCollisionDetection,
   getCollisionSelection,
   getDragEndTarget,
   getFinishedDragState,
@@ -255,6 +256,78 @@ describe('drag end lifecycle', () => {
   it('suppresses no-op session targets before rendering a marker', () => {
     expect(source).toContain("payload?.kind === 'group' && !resolveDrop({ payload, target, state: useTabBoardStore.getState() })");
     expect(source).toContain('target: null, marker: null');
+  });
+});
+
+describe('geometry collision detector integration', () => {
+  const workspaceId = 'workspace_default';
+  const collisionRect = { left: 0, right: 100, top: 0, bottom: 100, width: 100, height: 100 };
+  const createDroppable = (id: string, target: DropTarget) => ({
+    id,
+    data: { current: { dnd: { targets: [target] } } },
+  });
+
+  function runDetector(
+    droppableContainers: Array<{ id: string; data: unknown }>,
+    droppableRects: Map<string, typeof collisionRect>,
+    pointerCoordinates: { x: number; y: number },
+  ) {
+    const lockedTargetRef = { current: null as DropTarget | null };
+    const detector = createGeometryCollisionDetection(lockedTargetRef);
+    const collisions = detector({
+      active: {
+        data: {
+          current: {
+            dnd: {
+              payload: { kind: 'tabs', refs: [], workspaceId },
+            },
+          },
+        },
+      },
+      pointerCoordinates,
+      collisionRect,
+      droppableRects,
+      droppableContainers,
+    } as never);
+    return { collisions, lockedTargetRef };
+  }
+
+  it('prioritizes a category in an overlapping rect and returns its original droppable', () => {
+    const ordinary = createDroppable('ordinary', { kind: 'group-body', groupId: 'group', workspaceId });
+    const categoryTarget: DropTarget = { kind: 'category-column', category: 'inbox', workspaceId };
+    const category = createDroppable('category', categoryTarget);
+    const rects = new Map([
+      ['ordinary', collisionRect],
+      ['category', collisionRect],
+    ]);
+
+    const { collisions, lockedTargetRef } = runDetector([ordinary, category], rects, { x: 50, y: 50 });
+
+    expect(collisions).toHaveLength(1);
+    expect(collisions[0]?.id).toBe('category');
+    expect(collisions[0]?.data?.droppableContainer).toBe(category);
+    expect(lockedTargetRef.current).toEqual(categoryTarget);
+  });
+
+  it('resolves tab edge placement while preserving the original droppable id', () => {
+    const tabTarget: DropTarget = {
+      kind: 'tab-before',
+      groupId: 'group',
+      tabId: 'tab',
+      index: 0,
+      workspaceId,
+    };
+    const tabDroppable = createDroppable('tab-edge', tabTarget);
+    const { collisions, lockedTargetRef } = runDetector(
+      [tabDroppable],
+      new Map([['tab-edge', collisionRect]]),
+      { x: 50, y: 10 },
+    );
+
+    expect(collisions).toHaveLength(1);
+    expect(collisions[0]?.id).toBe('tab-edge');
+    expect(collisions[0]?.data?.droppableContainer).toBe(tabDroppable);
+    expect(lockedTargetRef.current).toEqual({ ...tabTarget, placement: 'before' });
   });
 });
 

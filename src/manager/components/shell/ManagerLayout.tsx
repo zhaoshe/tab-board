@@ -252,7 +252,7 @@ function markerForTarget(target: DropTarget | null): DragUiState['marker'] {
   return { kind: 'category-reorder', categoryId: target.categoryId, placement: target.placement };
 }
 
-function createGeometryCollisionDetection(
+export function createGeometryCollisionDetection(
   lockedTargetRef: { current: DropTarget | null },
 ): CollisionDetection {
   return ({ active, pointerCoordinates, collisionRect, droppableRects, droppableContainers }) => {
