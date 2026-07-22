@@ -71,11 +71,14 @@ export function WorkspaceContent({
 }: WorkspaceContentProps) {
   const groups = useFilteredGroups(category);
   const searchQuery = useSearchQuery();
-  const { activeWorkspaceId, groups: allGroups, folders } = useTabBoardStore(
+  const folderId = category.startsWith('folder:') ? category.slice('folder:'.length) : null;
+  const { activeWorkspaceId, groups: allGroups, currentFolder } = useTabBoardStore(
     useShallow((state) => ({
       activeWorkspaceId: state.activeWorkspaceId,
       groups: state.groups,
-      folders: state.folders,
+      currentFolder: folderId
+        ? state.folders.find((folder) => folder.id === folderId) ?? null
+        : null,
     })),
   );
   const categoryGroups = allGroups.filter((group) => {
@@ -83,7 +86,6 @@ export function WorkspaceContent({
     if (category === 'saved') return group.starred && !group.archived;
     if (category === 'archive') return group.archived;
     if (category === 'inbox') return !group.starred && !group.archived && group.folderId === null;
-    const folderId = category.slice('folder:'.length);
     return !group.starred && !group.archived && group.folderId === folderId;
   });
   const hasSearch = searchQuery.trim().length > 0;
@@ -92,9 +94,7 @@ export function WorkspaceContent({
     if (category === 'saved') return 'Saved';
     if (category === 'archive') return 'Archive';
     if (category === 'inbox') return 'Inbox';
-    const folderId = category.slice('folder:'.length);
-    const folder = folders.find((f) => f.id === folderId);
-    return folder?.name || 'Category';
+    return currentFolder?.name || 'Category';
   };
 
   const getEmptyState = () => {
