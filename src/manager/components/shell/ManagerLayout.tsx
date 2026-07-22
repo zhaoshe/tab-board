@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Group as MantineGroup } from '@mantine/core';
 import {
   DndContext,
@@ -34,7 +34,7 @@ import {
   useTabFilterUrl,
   type CaptureCompletedEventDetail,
 } from '../../hooks/useOpenTabsRuntime';
-import type { TabItem } from '../../../shared/model';
+import type { Group, TabItem } from '../../../shared/model';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import {
   DROP_TARGET_RELEASE_MARGIN,
@@ -96,6 +96,43 @@ function targetEquals(left: DropTarget | null, right: DropTarget | null): boolea
   return Boolean(left && right && JSON.stringify(left) === JSON.stringify(right));
 }
 
+export interface GeometryCandidate {
+  container: DroppableContainer;
+  target: DropTarget;
+  distance: number;
+}
+
+interface CollisionSelectionInput {
+  nearestCandidate: GeometryCandidate | null;
+  categoryCandidate: GeometryCandidate | null;
+  lockedTarget: DropTarget | null;
+  lockedCandidate: GeometryCandidate | null;
+}
+
+export function getCollisionSelection({
+  nearestCandidate,
+  categoryCandidate,
+  lockedTarget,
+  lockedCandidate,
+}: CollisionSelectionInput): { candidate: GeometryCandidate; target: DropTarget } | null {
+  const candidate = categoryCandidate ?? nearestCandidate;
+  if (!candidate) return null;
+
+  const target = categoryCandidate?.target ?? lockDropTarget(
+    lockedTarget,
+    candidate.target,
+    {
+      distance: lockedCandidate?.distance ?? Number.POSITIVE_INFINITY,
+      releaseMargin: DROP_TARGET_RELEASE_MARGIN,
+    },
+  );
+  if (!target) return null;
+
+  const selectedCandidate = categoryCandidate
+    ?? (lockedCandidate && targetEquals(target, lockedCandidate.target) ? lockedCandidate : nearestCandidate);
+  return selectedCandidate ? { candidate: selectedCandidate, target } : null;
+}
+
 export function getDragEndTarget(
   over: Over | null,
   lockedTarget: DropTarget | null,
@@ -110,6 +147,20 @@ export interface DragReplacementSnapshot {
   category: CategoryFilter;
   view: string;
   groups: string;
+}
+
+export function getDragReplacementSnapshot(
+  workspaceId: string,
+  category: CategoryFilter,
+  showBin: boolean,
+  groups: Group[],
+): DragReplacementSnapshot {
+  return {
+    workspaceId,
+    category,
+    view: showBin ? 'bin' : 'workspace',
+    groups: groups.map((group) => `${group.id}:${group.updatedAt}:${group.tabs.map((tab) => `${tab.id}:${tab.updatedAt}`).join(',')}`).join('|'),
+  };
 }
 
 export function shouldInvalidateDragReplacement(
@@ -212,42 +263,53 @@ function createGeometryCollisionDetection(
     const payload = getPayload(active.data.current);
     if (!payload) return [];
 
-    const candidates = droppableContainers.flatMap((container) => {
+    let nearestCandidate: GeometryCandidate | null = null;
+    let categoryCandidate: GeometryCandidate | null = null;
+    let lockedCandidate: GeometryCandidate | null = null;
+    const lockedTarget = lockedTargetRef.current;
+
+    for (const container of droppableContainers) {
       const rect = droppableRects.get(container.id);
-      if (!rect) return [];
+      if (!rect) continue;
       const target = getTargets(container.data.current).find((candidate) => isCompatibleTarget(payload, candidate));
-      if (!target) return [];
-      if (target.kind === 'category-column' && !isPointWithinRect(pointer, rect)) return [];
-      const resolvedTarget = resolveTabEdgeTarget(target, pointer, rect, droppableContainers);
-      return [{ container, rect, target: resolvedTarget, distance: distanceToRect(pointer, rect) }];
+      if (!target) continue;
+      if (target.kind === 'category-column' && !isPointWithinRect(pointer, rect)) continue;
+
+      const candidate: GeometryCandidate = {
+        container,
+        target: resolveTabEdgeTarget(target, pointer, rect, droppableContainers),
+        distance: distanceToRect(pointer, rect),
+      };
+      if (target.kind === 'category-column') {
+        if (!categoryCandidate || candidate.distance < categoryCandidate.distance) {
+          categoryCandidate = candidate;
+        }
+      } else if (!nearestCandidate || candidate.distance < nearestCandidate.distance) {
+        nearestCandidate = candidate;
+      }
+      if (lockedTarget && targetEquals(candidate.target, lockedTarget)
+        && (!lockedCandidate || candidate.distance < lockedCandidate.distance)) {
+        lockedCandidate = candidate;
+      }
+    }
+
+    const selection = getCollisionSelection({
+      nearestCandidate,
+      categoryCandidate,
+      lockedTarget,
+      lockedCandidate,
     });
-    if (!candidates.length) {
+    if (!selection) {
       lockedTargetRef.current = null;
       return [];
     }
 
-    candidates.sort((left, right) => left.distance - right.distance);
-    const categoryCandidate = candidates.find((item) => item.target.kind === 'category-column');
-    const candidate = categoryCandidate ?? candidates[0];
-    const locked = lockedTargetRef.current;
-    const lockedCandidate = locked
-      ? candidates.find((item) => targetEquals(item.target, locked))
-      : undefined;
-    const target = categoryCandidate?.target ?? lockDropTarget(
-      locked,
-      candidate.target,
-      {
-        distance: lockedCandidate?.distance ?? Number.POSITIVE_INFINITY,
-        releaseMargin: DROP_TARGET_RELEASE_MARGIN,
-      },
-    );
-    lockedTargetRef.current = target;
-    const selected = candidates.find((item) => targetEquals(item.target, target)) ?? candidate;
+    lockedTargetRef.current = selection.target;
     return [{
-      id: selected.container.id,
+      id: selection.candidate.container.id,
       data: {
-        droppableContainer: selected.container,
-        value: -selected.distance,
+        droppableContainer: selection.candidate.container,
+        value: -selection.candidate.distance,
       },
     }];
   };
@@ -339,12 +401,10 @@ export function ManagerLayout() {
     groups: string;
   } | null>(null);
   const openTabsSourceKeyRef = useRef<string | null>(null);
-  const dragReplacementKey = {
-    workspaceId: activeWorkspaceId,
-    category: selectedCategory,
-    view: showBin ? 'bin' : 'workspace',
-    groups: groups.map((group) => `${group.id}:${group.updatedAt}:${group.tabs.map((tab) => `${tab.id}:${tab.updatedAt}`).join(',')}`).join('|'),
-  };
+  const dragReplacementSnapshot = useMemo(
+    () => getDragReplacementSnapshot(activeWorkspaceId, selectedCategory, showBin, groups),
+    [activeWorkspaceId, selectedCategory, showBin, groups],
+  );
   const collisionDetection = createGeometryCollisionDetection(lockedTargetRef);
   const applyDragUiState = useCallback((next: DragUiState) => {
     dragUiStateRef.current = next;
@@ -405,7 +465,7 @@ export function ManagerLayout() {
   const handleDragStart = (event: DragStartEvent) => {
     const payload = getPayload(event.active.data.current);
     const initial = event.active.rect.current.initial;
-    dragReplacementKeyRef.current = dragReplacementKey;
+    dragReplacementKeyRef.current = dragReplacementSnapshot;
     applyDragUiState({
       payload,
       target: null,
@@ -486,12 +546,7 @@ export function ManagerLayout() {
     if (!activeId) return;
     const payload = dragUiStateRef.current.payload;
     const dragReplacementKey = dragReplacementKeyRef.current;
-    const currentReplacementKey: DragReplacementSnapshot = {
-      workspaceId: activeWorkspaceId,
-      category: selectedCategory,
-      view: showBin ? 'bin' : 'workspace',
-      groups: groups.map((group) => `${group.id}:${group.updatedAt}:${group.tabs.map((tab) => `${tab.id}:${tab.updatedAt}`).join(',')}`).join('|'),
-    };
+    const currentReplacementKey = dragReplacementSnapshot;
     if (shouldInvalidateDragReplacement(
       activeId,
       payload,
@@ -501,7 +556,7 @@ export function ManagerLayout() {
     )) {
       finishDrag();
     }
-  }, [activeId, activeWorkspaceId, finishDrag, groups, selectedCategory, showBin]);
+  }, [activeId, dragReplacementSnapshot, finishDrag, groups]);
 
   useEffect(() => () => finishDrag(), [finishDrag]);
 

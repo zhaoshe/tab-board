@@ -5,6 +5,7 @@ import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  getCollisionSelection,
   getDragEndTarget,
   getFinishedDragState,
   isPointWithinRect,
@@ -12,6 +13,7 @@ import {
   ManagerLayout,
   persistDropWithFeedback,
   shouldInvalidateDragReplacement,
+  type GeometryCandidate,
 } from './ManagerLayout';
 import type { DropTarget } from '../../core/dnd';
 
@@ -258,15 +260,75 @@ describe('drag end lifecycle', () => {
 
 describe('category drag targets', () => {
   const categoryRect = { left: 100, right: 200, top: 20, bottom: 60 } as DOMRect;
+  const workspaceId = 'workspace_default';
+  const groupTarget = (groupId: string): DropTarget => ({ kind: 'group-body', groupId, workspaceId });
+  const categoryTarget: DropTarget = { kind: 'category-column', category: 'inbox', workspaceId };
+  const candidate = (id: string, target: DropTarget, distance: number): GeometryCandidate => ({
+    container: { id } as never,
+    target,
+    distance,
+  });
 
   it('only activates when the pointer is inside the category itself', () => {
     expect(isPointWithinRect({ x: 150, y: 40 }, categoryRect)).toBe(true);
     expect(isPointWithinRect({ x: 99, y: 40 }, categoryRect)).toBe(false);
   });
 
-  it('prioritizes the category under the pointer over an existing insertion lock', () => {
-    expect(source).toContain("const categoryCandidate = candidates.find((item) => item.target.kind === 'category-column');");
-    expect(source).toContain('const target = categoryCandidate?.target ?? lockDropTarget(');
+  it('selects the nearest category before a nearer ordinary candidate', () => {
+    const ordinary = candidate('ordinary', groupTarget('ordinary'), 2);
+    const category = candidate('category', categoryTarget, 10);
+
+    expect(getCollisionSelection({
+      nearestCandidate: ordinary,
+      categoryCandidate: category,
+      lockedTarget: null,
+      lockedCandidate: null,
+    })).toEqual({ candidate: category, target: categoryTarget });
+  });
+
+  it('selects the nearest ordinary candidate when no category is under the pointer', () => {
+    const nearest = candidate('nearest', groupTarget('nearest'), 2);
+    const farther = candidate('farther', groupTarget('farther'), 10);
+
+    expect(getCollisionSelection({
+      nearestCandidate: nearest,
+      categoryCandidate: null,
+      lockedTarget: null,
+      lockedCandidate: farther,
+    })).toEqual({ candidate: nearest, target: nearest.target });
+  });
+
+  it('keeps a matching locked target inside the release margin', () => {
+    const locked = candidate('locked', groupTarget('locked'), 8);
+    const nearest = candidate('nearest', groupTarget('nearest'), 2);
+
+    expect(getCollisionSelection({
+      nearestCandidate: nearest,
+      categoryCandidate: null,
+      lockedTarget: locked.target,
+      lockedCandidate: locked,
+    })).toEqual({ candidate: locked, target: locked.target });
+  });
+
+  it('releases a matching locked target beyond the release margin', () => {
+    const locked = candidate('locked', groupTarget('locked'), 13);
+    const nearest = candidate('nearest', groupTarget('nearest'), 2);
+
+    expect(getCollisionSelection({
+      nearestCandidate: nearest,
+      categoryCandidate: null,
+      lockedTarget: locked.target,
+      lockedCandidate: locked,
+    })).toEqual({ candidate: nearest, target: nearest.target });
+  });
+
+  it('returns no selection when no candidate is available', () => {
+    expect(getCollisionSelection({
+      nearestCandidate: null,
+      categoryCandidate: null,
+      lockedTarget: null,
+      lockedCandidate: null,
+    })).toBeNull();
   });
 });
 
