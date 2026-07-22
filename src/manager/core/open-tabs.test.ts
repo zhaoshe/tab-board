@@ -5,6 +5,7 @@ import {
   deriveSelectedStorableRecords,
   deriveSelectedStorableTabIds,
   filterOpenTabs,
+  getSelectableOpenTabIds,
   getOpenTabDragData,
   resolveSelectedWindow,
   sameOpenTabSelection,
@@ -180,6 +181,14 @@ describe('Open Tabs selection and drag data', () => {
       tabIds: [41],
     });
   });
+
+  it('returns only unpinned storable IDs for selection actions', () => {
+    const regular = tab(51, 'Regular', 'https://regular.test');
+    const pinned = { ...tab(52, 'Pinned', 'https://pinned.test'), pinned: true };
+    const blocked = tab(53, 'Blocked', 'https://blocked.test', false);
+
+    expect(getSelectableOpenTabIds(windowInfo(1, false, [regular, pinned, blocked]))).toEqual([51]);
+  });
 });
 
 describe('capture policy', () => {
@@ -256,6 +265,14 @@ describe('Task107 source contracts', () => {
     expect(hook).toContain('tab.storable === true');
     expect(hook).toContain('.sort((left, right) => left - right)');
     expect(hook).toContain('sameOpenTabSelection');
+  });
+
+  it('keeps selection actions aligned with pinned drag constraints', () => {
+    const hook = read('manager/hooks/useOpenTabsRuntime.ts');
+
+    expect(hook).toContain('getSelectableOpenTabIds(selectedWindow)');
+    expect(hook).toContain('tab.storable === true && !tab.pinned');
+    expect(hook).toContain('tab.storable && !tab.pinned');
   });
 
   it('uses pure capture policy at the service-worker boundary and preserves response contracts', () => {
