@@ -271,6 +271,7 @@ describe('Task107 source contracts', () => {
     const hook = read('manager/hooks/useOpenTabsRuntime.ts');
 
     expect(hook).toContain('getSelectableOpenTabIds(selectedWindow)');
+    expect(hook).toContain('getSelectableOpenTabIds(nextSelectedWindow)');
     expect(hook).toContain('tab.storable === true && !tab.pinned');
     expect(hook).toContain('tab.storable && !tab.pinned');
   });

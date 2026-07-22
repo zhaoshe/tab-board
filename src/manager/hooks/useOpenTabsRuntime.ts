@@ -235,11 +235,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
         const previousWindowId = selectedWindowIdRef.current;
         const nextSelectedWindow = resolveSelectedWindow(nextWindows, previousWindowId);
         const nextSelectedWindowId = nextSelectedWindow?.id ?? null;
-        const allowedIds = new Set(
-          nextSelectedWindow?.tabs
-            .filter((tab) => tab.storable === true && Number.isSafeInteger(tab.id))
-            .map((tab) => tab.id as number) ?? [],
-        );
+        const allowedIds = new Set(getSelectableOpenTabIds(nextSelectedWindow));
 
         setWindows(nextWindows);
         selectedWindowIdRef.current = nextSelectedWindowId;
