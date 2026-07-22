@@ -1,19 +1,20 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { filterOpenTabs, resolveSelectedWindow, sameOpenTabSelection } from './open-tabs';
+import {
+  deriveSelectedStorableRecords,
+  deriveSelectedStorableTabIds,
+  filterOpenTabs,
+  getOpenTabDragData,
+  resolveSelectedWindow,
+  sameOpenTabSelection,
+} from './open-tabs';
 import {
   getCaptureCandidateReason,
   isStorableCaptureCandidate,
 } from '../../shared/model/capture-policy';
 import type { Settings } from '../../shared/model';
 import type { OpenTabInfo, OpenWindowInfo } from './open-tabs';
-import {
-  deriveSelectedStorableRecords,
-  deriveSelectedStorableTabIds,
-  getOpenTabDragData,
-  isOpenTabClosing,
-} from '../components/sidebar/OpenTabsPanel';
 
 const settings: Settings = {
   actionClick: 'store',
@@ -157,9 +158,9 @@ describe('Open Tabs selection and drag data', () => {
     const invalid = { ...open, id: undefined };
     const closingTabIdSet = new Set<number>([closing.id as number]);
 
-    expect(isOpenTabClosing(closing, closingTabIdSet)).toBe(true);
-    expect(isOpenTabClosing(open, closingTabIdSet)).toBe(false);
-    expect(isOpenTabClosing(invalid, closingTabIdSet)).toBe(false);
+    expect(Number.isSafeInteger(closing.id) && closingTabIdSet.has(closing.id as number)).toBe(true);
+    expect(Number.isSafeInteger(open.id) && closingTabIdSet.has(open.id as number)).toBe(false);
+    expect(Number.isSafeInteger(invalid.id)).toBe(false);
   });
 });
 
@@ -264,6 +265,14 @@ describe('Task107 source contracts', () => {
     expect(worker).toContain('focus-open-tab');
   });
 
+  it('keeps core tests independent from the UI component boundary', () => {
+    const testSource = read('manager/core/open-tabs.test.ts');
+
+    expect(testSource).not.toMatch(/from ['"]\.\.\/components\/sidebar\/OpenTabsPanel/);
+    expect(testSource).not.toMatch(/from ['"]@mantine\/core/);
+    expect(testSource).not.toMatch(/from ['"]@dnd-kit\/core/);
+  });
+
   it('derives selection data once at panel scope instead of scanning each row', () => {
     const panel = read('manager/components/sidebar/OpenTabsPanel.tsx');
     const triggerStart = panel.indexOf('function OpenTabContentTrigger');
@@ -274,6 +283,8 @@ describe('Task107 source contracts', () => {
     expect(panel).toContain('selectedStorableRecords');
     expect(panel).toContain('selectedStorableTabIds');
     expect(panel).toContain('closingTabIdSet');
+    expect(panel).toContain('const isClosing = isValidTabId(tab.id) && closingTabIdSet.has(tab.id);');
+    expect(panel).toContain('disabled={!isValidTabId(tab.id) || isClosing}');
     expect(triggerSource).toContain('selectedTabIdSet.has');
     expect(triggerSource).not.toContain('selectedTabIds.includes');
     expect(triggerSource).not.toContain('availableTabs.filter');

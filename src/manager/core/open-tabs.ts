@@ -22,6 +22,43 @@ export interface OpenWindowInfo {
   tabs: OpenTabInfo[];
 }
 
+function isValidOpenTabId(id: number | undefined): id is number {
+  return Number.isSafeInteger(id);
+}
+
+export function deriveSelectedStorableRecords(
+  selectedWindow: OpenWindowInfo | null,
+  selectedTabIdSet: ReadonlySet<number>,
+): OpenTabInfo[] {
+  return selectedWindow?.tabs.filter((record) =>
+    record.storable === true && isValidOpenTabId(record.id) && selectedTabIdSet.has(record.id),
+  ) ?? [];
+}
+
+export function deriveSelectedStorableTabIds(records: readonly OpenTabInfo[]): number[] {
+  return records.flatMap((record) => isValidOpenTabId(record.id) ? [record.id] : []);
+}
+
+export interface OpenTabDragData {
+  records: OpenTabInfo[];
+  tabIds: number[];
+}
+
+export function getOpenTabDragData(
+  tab: OpenTabInfo,
+  isSelectedDrag: boolean,
+  selectedStorableRecords: OpenTabInfo[],
+  selectedStorableTabIds: number[],
+): OpenTabDragData {
+  if (isSelectedDrag && selectedStorableRecords.length > 0) {
+    return { records: selectedStorableRecords, tabIds: selectedStorableTabIds };
+  }
+  return {
+    records: [tab],
+    tabIds: isValidOpenTabId(tab.id) ? [tab.id] : [],
+  };
+}
+
 export function resolveSelectedWindow(
   windows: OpenWindowInfo[],
   selectedWindowId: number | null,

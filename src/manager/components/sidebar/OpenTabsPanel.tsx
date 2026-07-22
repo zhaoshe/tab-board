@@ -30,7 +30,13 @@ import {
   useManagerOverlayController,
   useManagerOverlayLifecycle,
 } from '../../hooks/useManagerOverlays';
-import type { OpenTabInfo, OpenWindowInfo } from '../../core/open-tabs';
+import {
+  deriveSelectedStorableRecords,
+  deriveSelectedStorableTabIds,
+  getOpenTabDragData,
+  type OpenTabInfo,
+  type OpenWindowInfo,
+} from '../../core/open-tabs';
 
 export const OPEN_TABS_FILTER_INPUT_ID = 'open-tabs-filter-input';
 
@@ -74,43 +80,6 @@ function windowAccessibleLabel(window: OpenWindowInfo): string {
 
 function isValidTabId(id: number | undefined): id is number {
   return Number.isSafeInteger(id);
-}
-
-export function deriveSelectedStorableRecords(
-  selectedWindow: OpenWindowInfo | null,
-  selectedTabIdSet: ReadonlySet<number>,
-): OpenTabInfo[] {
-  return selectedWindow?.tabs.filter((record) =>
-    record.storable === true && isValidTabId(record.id) && selectedTabIdSet.has(record.id),
-  ) ?? [];
-}
-
-export function deriveSelectedStorableTabIds(records: readonly OpenTabInfo[]): number[] {
-  return records.flatMap((record) => isValidTabId(record.id) ? [record.id] : []);
-}
-
-export interface OpenTabDragData {
-  records: OpenTabInfo[];
-  tabIds: number[];
-}
-
-export function getOpenTabDragData(
-  tab: OpenTabInfo,
-  isSelectedDrag: boolean,
-  selectedStorableRecords: OpenTabInfo[],
-  selectedStorableTabIds: number[],
-): OpenTabDragData {
-  if (isSelectedDrag && selectedStorableRecords.length > 0) {
-    return { records: selectedStorableRecords, tabIds: selectedStorableTabIds };
-  }
-  return {
-    records: [tab],
-    tabIds: isValidTabId(tab.id) ? [tab.id] : [],
-  };
-}
-
-export function isOpenTabClosing(tab: OpenTabInfo, closingTabIdSet: ReadonlySet<number>): boolean {
-  return isValidTabId(tab.id) && closingTabIdSet.has(tab.id);
 }
 
 function getOpenTabOverlayLifecycleKey(tab: OpenTabInfo): string {
@@ -445,7 +414,7 @@ export function OpenTabsPanel({
           {selectedWindow && filteredTabs.map((tab) => {
             const canSelect = tab.storable === true && isValidTabId(tab.id);
             const isSelected = isValidTabId(tab.id) && selectedTabIdSet.has(tab.id);
-            const isClosing = isOpenTabClosing(tab, closingTabIdSet);
+            const isClosing = isValidTabId(tab.id) && closingTabIdSet.has(tab.id);
             const hasValidTabId = isValidTabId(tab.id);
             return (
               <MantineGroup
