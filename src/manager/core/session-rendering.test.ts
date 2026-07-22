@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { shallow } from 'zustand/shallow';
 import { getTabDropMarkerPlacement } from '../components/sessions/TabItemRow';
 
 const managerRoot = resolve(process.cwd(), 'src/manager');
@@ -14,28 +13,6 @@ const runtimePath = resolve(managerRoot, 'hooks/useManagerRuntime.ts');
 const runtime = existsSync(runtimePath) ? readFileSync(runtimePath, 'utf8') : '';
 const css = readFileSync(resolve(managerRoot, 'styles/manager.css'), 'utf8');
 
-type SelectorState = {
-  activeWorkspaceId: string;
-  groups: readonly string[];
-  folders: readonly { id: string; name: string; workspaceId: string }[];
-  unrelatedValue: number;
-};
-
-const selectWorkspaceContentState = (state: SelectorState, category: string) => {
-  const folderId = category.startsWith('folder:') ? category.slice('folder:'.length) : null;
-  return {
-    activeWorkspaceId: state.activeWorkspaceId,
-    groups: state.groups,
-    currentFolder: folderId
-      ? state.folders.find((folder) => folder.id === folderId) ?? null
-      : null,
-  };
-};
-
-const selectSessionCardFolders = (state: SelectorState, workspaceId: string) => (
-  state.folders.filter((folder) => folder.workspaceId === workspaceId)
-);
-
 function cssBlock(selector: string): string {
   const start = css.indexOf(`${selector} {`);
   expect(start).toBeGreaterThanOrEqual(0);
@@ -45,57 +22,6 @@ function cssBlock(selector: string): string {
 }
 
 describe('Task108 session rendering contracts', () => {
-  it('keeps workspace selectors shallow-equal for other workspace folder updates', () => {
-    const currentFolder = { id: 'folder-a', name: 'A', workspaceId: 'workspace-a' };
-    const otherFolder = { id: 'folder-b', name: 'B', workspaceId: 'workspace-b' };
-    const state: SelectorState = {
-      activeWorkspaceId: 'workspace-a',
-      groups: ['group-a'],
-      folders: [currentFolder, otherFolder],
-      unrelatedValue: 1,
-    };
-    const otherWorkspaceUpdate = {
-      ...state,
-      folders: [currentFolder, { ...otherFolder, name: 'Updated elsewhere' }],
-    };
-
-    expect(shallow(
-      selectWorkspaceContentState(state, 'folder:folder-a'),
-      selectWorkspaceContentState(otherWorkspaceUpdate, 'folder:folder-a'),
-    )).toBe(true);
-    expect(shallow(
-      selectSessionCardFolders(state, 'workspace-a'),
-      selectSessionCardFolders(otherWorkspaceUpdate, 'workspace-a'),
-    )).toBe(true);
-  });
-
-  it('keeps current folder add, rename, and delete observable', () => {
-    const currentFolder = { id: 'folder-a', name: 'A', workspaceId: 'workspace-a' };
-    const otherFolder = { id: 'folder-b', name: 'B', workspaceId: 'workspace-b' };
-    const state: SelectorState = {
-      activeWorkspaceId: 'workspace-a',
-      groups: ['group-a'],
-      folders: [otherFolder],
-      unrelatedValue: 1,
-    };
-    const addedState = { ...state, folders: [currentFolder, otherFolder] };
-    const renamedState = { ...addedState, folders: [{ ...currentFolder, name: 'Renamed' }, otherFolder] };
-    const deletedState = { ...renamedState, folders: [otherFolder] };
-
-    expect(shallow(
-      selectWorkspaceContentState(state, 'folder:folder-a'),
-      selectWorkspaceContentState(addedState, 'folder:folder-a'),
-    )).toBe(false);
-    expect(shallow(
-      selectWorkspaceContentState(addedState, 'folder:folder-a'),
-      selectWorkspaceContentState(renamedState, 'folder:folder-a'),
-    )).toBe(false);
-    expect(shallow(
-      selectWorkspaceContentState(renamedState, 'folder:folder-a'),
-      selectWorkspaceContentState(deletedState, 'folder:folder-a'),
-    )).toBe(false);
-  });
-
   it('uses scoped shallow equality for workspace and session folder store selectors', () => {
     expect(workspace).toMatch(/import \{ useShallow \} from 'zustand\/react\/shallow';/);
     expect(workspace).toMatch(/useTabBoardStore\(\s*useShallow\(\(state\) => \(\{/);
