@@ -498,7 +498,7 @@ export function ManagerLayout() {
       return;
     }
     try {
-      const payload = dragUiStateRef.current.payload ?? getPayload(event.active.data.current);
+      const payload = dragUiStateRef.current.payload;
       const target = getDragEndTarget(
         event.over,
         lockedTargetRef.current,

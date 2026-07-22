@@ -31,6 +31,8 @@ const testHarness = vi.hoisted(() => {
 
   return {
     dndOnDragEnd: null as ((event: unknown) => Promise<void>) | null,
+    dndOnDragStart: null as ((event: unknown) => void) | null,
+    onOpenTabsSourceKeyChange: null as ((key: string) => void) | null,
     resolveDrop: vi.fn(() => ({
       kind: 'create-session' as const,
       source: { kind: 'open-tabs' as const, tabIds: [1], windowId: 1 },
@@ -55,8 +57,14 @@ vi.mock('@dnd-kit/core', () => ({
   DndContext: ({
     children,
     onDragEnd,
-  }: { children?: ReactNode; onDragEnd: (event: unknown) => Promise<void> }) => {
+    onDragStart,
+  }: {
+    children?: ReactNode;
+    onDragEnd: (event: unknown) => Promise<void>;
+    onDragStart: (event: unknown) => void;
+  }) => {
     testHarness.dndOnDragEnd = onDragEnd;
+    testHarness.dndOnDragStart = onDragStart;
     return children;
   },
   DragOverlay: ({ children }: { children?: ReactNode }) => children,
@@ -69,7 +77,12 @@ vi.mock('@dnd-kit/core', () => ({
 }));
 
 vi.mock('@dnd-kit/sortable', () => ({ sortableKeyboardCoordinates: () => undefined }));
-vi.mock('../sidebar/Sidebar', () => ({ Sidebar: () => null }));
+vi.mock('../sidebar/Sidebar', () => ({
+  Sidebar: ({ onOpenTabsSourceKeyChange }: { onOpenTabsSourceKeyChange: (key: string) => void }) => {
+    testHarness.onOpenTabsSourceKeyChange = onOpenTabsSourceKeyChange;
+    return null;
+  },
+}));
 vi.mock('../import-export/ImportModal', () => ({ ImportModal: () => null }));
 vi.mock('../import-export/ExportModal', () => ({ ExportModal: () => null }));
 vi.mock('../workspace/WorkspaceContent', () => ({ WorkspaceContent: () => null }));
@@ -121,6 +134,8 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.append(container);
   testHarness.dndOnDragEnd = null;
+  testHarness.dndOnDragStart = null;
+  testHarness.onOpenTabsSourceKeyChange = null;
   testHarness.resolveDrop.mockClear();
   testHarness.showSuccess.mockClear();
   testHarness.showInfo.mockClear();
@@ -146,25 +161,33 @@ async function mountManagerLayout(): Promise<void> {
     root?.render(createElement(ManagerLayout));
   });
   expect(testHarness.dndOnDragEnd).not.toBeNull();
+  expect(testHarness.dndOnDragStart).not.toBeNull();
+  expect(testHarness.onOpenTabsSourceKeyChange).not.toBeNull();
+}
+
+function createOpenTabsDragActive(): unknown {
+  return {
+    id: 'open-tab-1',
+    data: {
+      current: {
+        dnd: {
+          payload: {
+            kind: 'open-tabs',
+            tabIds: [1],
+            windowId: 1,
+            workspaceId: 'workspace_default',
+          },
+          records: [],
+        },
+      },
+    },
+    rect: { current: { initial: null } },
+  };
 }
 
 function createOpenTabsDragEndEvent(): unknown {
   return {
-    active: {
-      data: {
-        current: {
-          dnd: {
-            payload: {
-              kind: 'open-tabs',
-              tabIds: [1],
-              windowId: 1,
-              workspaceId: 'workspace_default',
-            },
-            records: [],
-          },
-        },
-      },
-    },
+    active: createOpenTabsDragActive(),
     over: {
       data: {
         current: {
@@ -485,6 +508,7 @@ describe('drag persistence feedback', () => {
 
     try {
       await act(async () => {
+        testHarness.dndOnDragStart?.({ active: createOpenTabsDragActive() });
         await testHarness.dndOnDragEnd?.(createOpenTabsDragEndEvent());
       });
 
@@ -502,6 +526,7 @@ describe('drag persistence feedback', () => {
 
     try {
       await act(async () => {
+        testHarness.dndOnDragStart?.({ active: createOpenTabsDragActive() });
         await testHarness.dndOnDragEnd?.(createOpenTabsDragEndEvent());
       });
 
@@ -511,6 +536,20 @@ describe('drag persistence feedback', () => {
     } finally {
       window.removeEventListener('tabboard-open-tabs-dropped', dropped);
     }
+  });
+
+  it('cancels a drag whose Open Tabs source changed before release', async () => {
+    await mountManagerLayout();
+
+    await act(async () => {
+      testHarness.onOpenTabsSourceKeyChange?.('source-before-drag');
+      testHarness.dndOnDragStart?.({ active: createOpenTabsDragActive() });
+      testHarness.onOpenTabsSourceKeyChange?.('source-after-drag');
+      await testHarness.dndOnDragEnd?.(createOpenTabsDragEndEvent());
+    });
+
+    expect(testHarness.state.applyDropIntent).not.toHaveBeenCalled();
+    expect(testHarness.showSuccess).not.toHaveBeenCalled();
   });
 });
 

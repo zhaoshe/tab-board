@@ -245,6 +245,8 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
             ? current.filter((id) => allowedIds.has(id))
             : [];
           selectedTabIdsRef.current = next;
+          selectionModeRef.current = next.length > 0;
+          setSelectionMode(next.length > 0);
           return next;
         });
       } catch (error: unknown) {
