@@ -1349,19 +1349,26 @@ async function listOpenTabs(): Promise<{ windows: OpenWindowInfo[] }> {
   const settings = await getSettings();
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ['normal'] });
   const extensionBaseUrl = chrome.runtime.getURL('').toLowerCase();
-  const openWindows: OpenWindowInfo[] = [];
-  for (const window of windows) {
-    const tabs: OpenTabInfo[] = [];
-    for (const tab of window.tabs || []) {
+  const browserGroupReads = new Map<number, Promise<BrowserGroup | null>>();
+  const getBrowserGroup = (tab: chrome.tabs.Tab): Promise<BrowserGroup | null> => {
+    if (!Number.isFinite(tab.groupId) || tab.groupId < 0) return Promise.resolve(null);
+    const existing = browserGroupReads.get(tab.groupId);
+    if (existing) return existing;
+    const read = readBrowserGroup(tab);
+    browserGroupReads.set(tab.groupId, read);
+    return read;
+  };
+  const openWindows = await Promise.all(windows.map(async (window): Promise<OpenWindowInfo> => {
+    const tabs = (await Promise.all((window.tabs || []).map(async (tab): Promise<OpenTabInfo | null> => {
       const url = resolveTabUrl(tab);
-      if (url.toLowerCase().startsWith(extensionBaseUrl)) continue;
-      if (matchesCustomUrlFilter(url, settings)) continue;
+      if (url.toLowerCase().startsWith(extensionBaseUrl)) return null;
+      if (matchesCustomUrlFilter(url, settings)) return null;
       const reason = getCaptureCandidateReason(
         { id: tab?.id, url, pinned: tab?.pinned },
         settings,
         extensionBaseUrl,
       );
-      tabs.push({
+      return {
         id: tab.id,
         windowId: tab.windowId,
         title: tab.title || url || 'Untitled',
@@ -1370,19 +1377,19 @@ async function listOpenTabs(): Promise<{ windows: OpenWindowInfo[] }> {
         active: Boolean(tab.active),
         pinned: Boolean(tab.pinned),
         index: tab.index || 0,
-        browserGroup: await readBrowserGroup(tab),
+        browserGroup: await getBrowserGroup(tab),
         storable: reason === null,
         reason,
-      });
-    }
-    openWindows.push({
+      };
+    }))).filter((tab): tab is OpenTabInfo => tab !== null);
+    return {
       id: window.id,
       focused: Boolean(window.focused),
       incognito: Boolean(window.incognito),
       tabCount: tabs.length,
       tabs,
-    });
-  }
+    };
+  }));
   return { windows: openWindows };
 }
 

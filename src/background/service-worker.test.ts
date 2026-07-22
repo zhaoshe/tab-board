@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEmptyState, type Group, type TabBoardState } from '../shared/model';
+import { createEmptyState, type BrowserGroup, type Group, type TabBoardState } from '../shared/model';
 import type { StateMutation } from '../shared/store/stateMutations';
 
 const TRUSTED_EXTENSION_ID = 'test-extension-id';
@@ -39,6 +39,16 @@ function createTab(
     autoDiscardable: true,
     groupId: -1,
     ...overrides,
+  };
+}
+
+function createTabGroup(id: number, windowId = 1): chrome.tabGroups.TabGroup {
+  return {
+    id,
+    windowId,
+    title: `Group ${id}`,
+    color: 'blue',
+    collapsed: false,
   };
 }
 
@@ -98,6 +108,7 @@ interface ChromeHarnessOptions {
   tabs?: chrome.tabs.Tab[];
   windows?: chrome.windows.Window[];
   getTab?: (tabId: number) => chrome.tabs.Tab | undefined | Promise<chrome.tabs.Tab | undefined>;
+  getTabGroup?: (groupId: number) => chrome.tabGroups.TabGroup | Promise<chrome.tabGroups.TabGroup>;
 }
 
 function createChromeHarness(initialState: TabBoardState, options: ChromeHarnessOptions = {}) {
@@ -170,7 +181,15 @@ function createChromeHarness(initialState: TabBoardState, options: ChromeHarness
       getAll: vi.fn(async () => openWindows),
       update: vi.fn(async () => undefined),
     },
-    tabGroups: {},
+    tabGroups: {
+      get: vi.fn(async (groupId: number) => options.getTabGroup?.(groupId) || {
+        id: groupId,
+        windowId: 1,
+        title: `Group ${groupId}`,
+        color: 'blue',
+        collapsed: false,
+      }),
+    },
   };
 
   return { action, contextMenus, runtimeMessage, state, tabs, writes, chromeMock };
@@ -308,6 +327,117 @@ describe('Task194 runtime sender allowlist', () => {
     expect(harness.chromeMock.windows.get).not.toHaveBeenCalled();
     expect(harness.chromeMock.windows.getAll).not.toHaveBeenCalled();
     expect(harness.chromeMock.windows.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('listOpenTabs browser group metadata', () => {
+  it('deduplicates same-group lookups while preserving tab order', async () => {
+    const first = createTab(20, 'First', { groupId: 7, index: 0 });
+    const second = createTab(10, 'Second', { groupId: 7, index: 1 });
+    const third = createTab(30, 'Third', { groupId: 3, index: 2 });
+    const getTabGroup = vi.fn((groupId: number) => createTabGroup(groupId));
+    const harness = createChromeHarness(createState(), {
+      tabs: [first, second, third],
+      windows: [{ id: 1, type: 'normal', incognito: false, focused: true, alwaysOnTop: false, tabs: [first, second, third] }],
+      getTabGroup,
+    });
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    const response = await sendMessage(harness.runtimeMessage.getListener(), {
+      type: 'list-open-tabs',
+    }) as {
+      ok: boolean;
+      result: { windows: Array<{ tabs: Array<{ id: number; browserGroup: BrowserGroup | null }> }> };
+    };
+
+    expect(response.ok).toBe(true);
+    expect(response.result.windows[0]?.tabs.map((tab) => tab.id)).toEqual([20, 10, 30]);
+    expect(harness.chromeMock.tabGroups.get).toHaveBeenCalledTimes(2);
+    expect(harness.chromeMock.tabGroups.get).toHaveBeenNthCalledWith(1, 7);
+    expect(harness.chromeMock.tabGroups.get).toHaveBeenNthCalledWith(2, 3);
+    expect(response.result.windows[0]?.tabs.slice(0, 2).map((tab) => tab.browserGroup?.sourceGroupId)).toEqual([7, 7]);
+  });
+
+  it('starts different-group reads concurrently across windows', async () => {
+    const first = createTab(1, 'First', { groupId: 11, windowId: 1 });
+    const second = createTab(2, 'Second', { groupId: 22, windowId: 2 });
+    const pending = new Map<number, () => void>();
+    let activeReads = 0;
+    let maxActiveReads = 0;
+    const getTabGroup = vi.fn((groupId: number) => new Promise<chrome.tabGroups.TabGroup>((resolve) => {
+      activeReads += 1;
+      maxActiveReads = Math.max(maxActiveReads, activeReads);
+      pending.set(groupId, () => {
+        activeReads -= 1;
+        resolve(createTabGroup(groupId, groupId === 11 ? 1 : 2));
+      });
+    }));
+    const harness = createChromeHarness(createState(), {
+      tabs: [first, second],
+      windows: [
+        { id: 1, type: 'normal', incognito: false, focused: true, alwaysOnTop: false, tabs: [first] },
+        { id: 2, type: 'normal', incognito: false, focused: false, alwaysOnTop: false, tabs: [second] },
+      ],
+      getTabGroup,
+    });
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    const responsePromise = sendMessage(harness.runtimeMessage.getListener(), {
+      type: 'list-open-tabs',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(getTabGroup).toHaveBeenCalledTimes(2);
+    expect(maxActiveReads).toBe(2);
+    pending.get(11)?.();
+    pending.get(22)?.();
+    const response = await responsePromise as { ok: boolean; result: { windows: Array<{ tabs: Array<{ id: number }> }> } };
+
+    expect(response.ok).toBe(true);
+    expect(response.result.windows.map((window) => window.tabs.map((tab) => tab.id))).toEqual([[1], [2]]);
+  });
+
+  it('does not query tab groups for ungrouped tabs', async () => {
+    const tab = createTab(1, 'Ungrouped');
+    const getTabGroup = vi.fn((groupId: number) => createTabGroup(groupId));
+    const harness = createChromeHarness(createState(), {
+      tabs: [tab],
+      windows: [{ id: 1, type: 'normal', incognito: false, focused: true, alwaysOnTop: false, tabs: [tab] }],
+      getTabGroup,
+    });
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    const response = await sendMessage(harness.runtimeMessage.getListener(), {
+      type: 'list-open-tabs',
+    }) as { ok: boolean; result: { windows: Array<{ tabs: Array<{ browserGroup: BrowserGroup | null }> }> } };
+
+    expect(response.ok).toBe(true);
+    expect(harness.chromeMock.tabGroups.get).not.toHaveBeenCalled();
+    expect(response.result.windows[0]?.tabs[0]?.browserGroup).toBeNull();
+  });
+
+  it('keeps the listing successful when a tab group read rejects', async () => {
+    const tab = createTab(1, 'Unavailable group', { groupId: 9 });
+    const harness = createChromeHarness(createState(), {
+      tabs: [tab],
+      windows: [{ id: 1, type: 'normal', incognito: false, focused: true, alwaysOnTop: false, tabs: [tab] }],
+      getTabGroup: () => Promise.reject(new Error('group unavailable')),
+    });
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    const response = await sendMessage(harness.runtimeMessage.getListener(), {
+      type: 'list-open-tabs',
+    }) as {
+      ok: boolean;
+      result: { windows: Array<{ tabCount: number; tabs: Array<{ browserGroup: BrowserGroup | null }> }> };
+    };
+
+    expect(response.ok).toBe(true);
+    expect(response.result.windows[0]).toMatchObject({ tabCount: 1, tabs: [{ browserGroup: null }] });
   });
 });
 
