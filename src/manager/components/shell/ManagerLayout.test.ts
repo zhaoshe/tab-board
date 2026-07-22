@@ -1,18 +1,180 @@
+// @vitest-environment happy-dom
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { act, createElement, type ReactNode } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getDragEndTarget,
   getFinishedDragState,
   isPointWithinRect,
   getWorkspaceFiltersAfterDelete,
+  ManagerLayout,
   persistDropWithFeedback,
   shouldInvalidateDragReplacement,
 } from './ManagerLayout';
 import type { DropTarget } from '../../core/dnd';
 
+const testHarness = vi.hoisted(() => {
+  const state = {
+    activeWorkspaceId: 'workspace_default',
+    groups: [],
+    applyDropIntent: vi.fn(),
+  };
+  const useStore = vi.fn((selector: (value: typeof state) => unknown) => selector(state));
+  Object.assign(useStore, { getState: () => state });
+
+  return {
+    dndOnDragEnd: null as ((event: unknown) => Promise<void>) | null,
+    resolveDrop: vi.fn(() => ({
+      kind: 'create-session' as const,
+      source: { kind: 'open-tabs' as const, tabIds: [1], windowId: 1 },
+      category: 'inbox' as const,
+      index: 0,
+      workspaceId: 'workspace_default',
+    })),
+    showSuccess: vi.fn(),
+    showInfo: vi.fn(),
+    showError: vi.fn(),
+    setSearchQuery: vi.fn(),
+    state,
+    useStore,
+  };
+});
+
+vi.mock('@mantine/core', () => ({
+  Group: ({ children }: { children?: ReactNode }) => children,
+}));
+
+vi.mock('@dnd-kit/core', () => ({
+  DndContext: ({
+    children,
+    onDragEnd,
+  }: { children?: ReactNode; onDragEnd: (event: unknown) => Promise<void> }) => {
+    testHarness.dndOnDragEnd = onDragEnd;
+    return children;
+  },
+  DragOverlay: ({ children }: { children?: ReactNode }) => children,
+  KeyboardSensor: class KeyboardSensor {},
+  PointerSensor: class PointerSensor {},
+  TouchSensor: class TouchSensor {},
+  useDndMonitor: () => undefined,
+  useSensor: () => ({}),
+  useSensors: () => [],
+}));
+
+vi.mock('@dnd-kit/sortable', () => ({ sortableKeyboardCoordinates: () => undefined }));
+vi.mock('../sidebar/Sidebar', () => ({ Sidebar: () => null }));
+vi.mock('../import-export/ImportModal', () => ({ ImportModal: () => null }));
+vi.mock('../import-export/ExportModal', () => ({ ExportModal: () => null }));
+vi.mock('../workspace/WorkspaceContent', () => ({ WorkspaceContent: () => null }));
+vi.mock('../bin/BinView', () => ({ BinView: () => null }));
+vi.mock('../sessions/SessionCard', () => ({ SessionCard: () => null }));
+vi.mock('../sessions/TabItemRow', () => ({ TabItemRow: () => null }));
+vi.mock('../workspace/WorkspaceHeader', () => ({ WorkspaceHeader: () => null }));
+
+vi.mock('../../hooks/useFilteredGroups', () => ({
+  useCurrentWorkspace: () => ({ id: 'workspace_default', name: 'Workspace' }),
+  useFilteredGroups: () => [],
+  useSearchQuery: () => '',
+  useSetSearchQuery: () => testHarness.setSearchQuery,
+}));
+vi.mock('../../hooks/useOpenTabsRuntime', () => ({
+  CAPTURE_COMPLETED_EVENT: 'tabboard-capture-completed',
+  useTabFilterUrl: () => null,
+}));
+vi.mock('../../hooks/useManagerRuntime', () => ({ useManagerRuntime: () => ({}) }));
+vi.mock('../../hooks/useToast', () => ({
+  useToast: () => ({
+    showSuccess: testHarness.showSuccess,
+    showInfo: testHarness.showInfo,
+    showError: testHarness.showError,
+  }),
+}));
+vi.mock('./useToastNotifications', () => ({ useToastNotifications: () => undefined }));
+vi.mock('../../hooks/useManagerOverlays', () => ({
+  ManagerOverlayPortal: () => null,
+  ManagerOverlaysProvider: ({ children }: { children?: ReactNode }) => children,
+  useManagerOverlayController: () => ({ closeOverlays: vi.fn() }),
+}));
+vi.mock('../../../shared/store/useTabBoardStore', () => ({ useTabBoardStore: testHarness.useStore }));
+vi.mock('../../core/dnd', async () => {
+  const actual = await vi.importActual<typeof import('../../core/dnd')>('../../core/dnd');
+  return { ...actual, resolveDrop: testHarness.resolveDrop };
+});
+
 const source = readFileSync(resolve(process.cwd(), 'src/manager/components/shell/ManagerLayout.tsx'), 'utf8');
 const runtimeSource = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useOpenTabsRuntime.ts'), 'utf8');
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+let root: Root | null = null;
+let container: HTMLDivElement | null = null;
+
+beforeEach(() => {
+  document.body.innerHTML = '';
+  container = document.createElement('div');
+  document.body.append(container);
+  testHarness.dndOnDragEnd = null;
+  testHarness.resolveDrop.mockClear();
+  testHarness.showSuccess.mockClear();
+  testHarness.showInfo.mockClear();
+  testHarness.showError.mockClear();
+  testHarness.setSearchQuery.mockClear();
+  testHarness.state.applyDropIntent.mockReset();
+  testHarness.state.applyDropIntent.mockResolvedValue(undefined);
+});
+
+afterEach(async () => {
+  if (root) {
+    await act(async () => root?.unmount());
+  }
+  root = null;
+  container?.remove();
+  container = null;
+  vi.restoreAllMocks();
+});
+
+async function mountManagerLayout(): Promise<void> {
+  root = createRoot(container!);
+  await act(async () => {
+    root?.render(createElement(ManagerLayout));
+  });
+  expect(testHarness.dndOnDragEnd).not.toBeNull();
+}
+
+function createOpenTabsDragEndEvent(): unknown {
+  return {
+    active: {
+      data: {
+        current: {
+          dnd: {
+            payload: {
+              kind: 'open-tabs',
+              tabIds: [1],
+              windowId: 1,
+              workspaceId: 'workspace_default',
+            },
+            records: [],
+          },
+        },
+      },
+    },
+    over: {
+      data: {
+        current: {
+          dnd: {
+            targets: [{
+              kind: 'category-column',
+              category: 'inbox',
+              workspaceId: 'workspace_default',
+            }],
+          },
+        },
+      },
+    },
+  };
+}
 
 describe('tooltip dismissal', () => {
   it('dismisses active tooltips whenever a pointer press starts', () => {
@@ -147,6 +309,42 @@ describe('drag persistence feedback', () => {
     expect(showSuccess).not.toHaveBeenCalled();
     expect(showError).toHaveBeenCalledTimes(1);
     expect(showError).toHaveBeenCalledWith('worker failure', 'Drop failed');
+  });
+
+  it('does not dispatch open-tabs dropped when persistence fails', async () => {
+    await mountManagerLayout();
+    testHarness.state.applyDropIntent.mockRejectedValueOnce(new Error('persistence failed'));
+    const dropped = vi.fn();
+    window.addEventListener('tabboard-open-tabs-dropped', dropped);
+
+    try {
+      await act(async () => {
+        await testHarness.dndOnDragEnd?.(createOpenTabsDragEndEvent());
+      });
+
+      expect(dropped).not.toHaveBeenCalled();
+      expect(testHarness.showError).toHaveBeenCalledWith('persistence failed', 'Drop failed');
+    } finally {
+      window.removeEventListener('tabboard-open-tabs-dropped', dropped);
+    }
+  });
+
+  it('dispatches open-tabs dropped when persistence succeeds', async () => {
+    await mountManagerLayout();
+    const dropped = vi.fn();
+    window.addEventListener('tabboard-open-tabs-dropped', dropped);
+
+    try {
+      await act(async () => {
+        await testHarness.dndOnDragEnd?.(createOpenTabsDragEndEvent());
+      });
+
+      expect(dropped).toHaveBeenCalledTimes(1);
+      expect(testHarness.state.applyDropIntent).toHaveBeenCalledTimes(1);
+      expect(testHarness.showSuccess).toHaveBeenCalledWith('Drop saved', 'Drop complete');
+    } finally {
+      window.removeEventListener('tabboard-open-tabs-dropped', dropped);
+    }
   });
 });
 

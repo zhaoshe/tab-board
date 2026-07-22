@@ -4,7 +4,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { build as viteBuild, createServer, type Plugin } from 'vite';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const projectRoot = resolve(process.cwd());
 
@@ -130,8 +130,9 @@ describe('Manager production entry', () => {
       await server.ssrLoadModule(tempModulePath);
       expect(globalWithChrome.chrome).toBeDefined();
       expect(previewRoots).toHaveLength(1);
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(document.getElementById('root')?.childElementCount).toBeGreaterThan(0);
+      await vi.waitFor(() => {
+        expect(document.getElementById('root')?.childElementCount).toBeGreaterThan(0);
+      }, { timeout: 2_000, interval: 10 });
     } finally {
       [...previewRoots].reverse().forEach((root) => root.unmount());
       document.body.innerHTML = '';
@@ -221,5 +222,5 @@ describe('Manager production entry', () => {
     } finally {
       await rm(outputDir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });

@@ -77,7 +77,7 @@ const NARROW_SIDEBAR_QUERY = '(max-width: 900px)';
 function getStoredSidebarCollapsed(): boolean {
   if (typeof window === 'undefined') return false;
   return window.matchMedia(NARROW_SIDEBAR_QUERY).matches
-    || window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
+    || window.localStorage?.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
 }
 
 function getPayload(data: unknown): DragPayload | null {
@@ -454,12 +454,12 @@ export function ManagerLayout() {
         openTabs,
       });
       if (!intent) return;
-      await persistDropWithFeedback(
+      const persisted = await persistDropWithFeedback(
         () => applyDropIntent(intent, openTabs as OpenTabInfo[]),
         showSuccess,
         showError,
       );
-      if (payload.kind === 'open-tabs') {
+      if (persisted && payload.kind === 'open-tabs') {
         window.dispatchEvent(new CustomEvent('tabboard-open-tabs-dropped'));
       }
     } finally {
@@ -523,7 +523,7 @@ export function ManagerLayout() {
   };
 
   useEffect(() => {
-    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
+    window.localStorage?.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
   }, [sidebarCollapsed]);
 
   useEffect(() => {
