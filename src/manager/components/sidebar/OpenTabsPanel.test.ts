@@ -27,10 +27,16 @@ const testHarness = vi.hoisted(() => ({
 
 vi.mock('@mantine/core', async () => {
   const { createElement, forwardRef } = await import('react');
-  function NativeElement({ children, ...props }: NativeProps) {
+  function NativeElement({
+    children,
+    openDelay: _openDelay,
+    lineClamp: _lineClamp,
+    scrollbarSize: _scrollbarSize,
+    ...props
+  }: NativeProps) {
     return createElement('div', props, children);
   }
-  const ActionIcon = forwardRef<HTMLButtonElement, NativeProps>(({ children, ...props }, ref) =>
+  const ActionIcon = forwardRef<HTMLButtonElement, NativeProps>(({ children, loading: _loading, ...props }, ref) =>
     createElement('button', { ...props, ref }, children as ReactNode));
   const Checkbox = ({ children: _children, ...props }: NativeProps) =>
     createElement('input', { ...props, type: 'checkbox' });
