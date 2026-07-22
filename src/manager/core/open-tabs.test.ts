@@ -8,6 +8,12 @@ import {
 } from '../../shared/model/capture-policy';
 import type { Settings } from '../../shared/model';
 import type { OpenTabInfo, OpenWindowInfo } from './open-tabs';
+import {
+  deriveSelectedStorableRecords,
+  deriveSelectedStorableTabIds,
+  getOpenTabDragData,
+  isOpenTabClosing,
+} from '../components/sidebar/OpenTabsPanel';
 
 const settings: Settings = {
   actionClick: 'store',
@@ -102,6 +108,58 @@ describe('open tabs core', () => {
     expect(sameOpenTabSelection(left, [2, 4, Number.NaN])).toBe(false);
     expect(left).toEqual([7, 2, 4]);
     expect(right).toEqual([4, 7, 2]);
+  });
+});
+
+describe('Open Tabs selection and drag data', () => {
+  it('builds a single selected drag payload without scanning rows', () => {
+    const first = tab(11, 'First', 'https://first.test');
+    const second = tab(12, 'Second', 'https://second.test');
+    const selectedTabIdSet = new Set<number>([first.id as number]);
+    const selectedStorableRecords = deriveSelectedStorableRecords(
+      windowInfo(1, false, [first, second]),
+      selectedTabIdSet,
+    );
+    const selectedStorableTabIds = deriveSelectedStorableTabIds(selectedStorableRecords);
+
+    expect(getOpenTabDragData(first, selectedTabIdSet.has(first.id as number), selectedStorableRecords, selectedStorableTabIds)).toEqual({
+      records: [first],
+      tabIds: [11],
+    });
+    expect(getOpenTabDragData(second, selectedTabIdSet.has(second.id as number), selectedStorableRecords, selectedStorableTabIds)).toEqual({
+      records: [second],
+      tabIds: [12],
+    });
+  });
+
+  it('builds an ordered multi-selected payload and excludes non-storable tabs', () => {
+    const first = tab(21, 'First', 'https://first.test');
+    const blocked = tab(22, 'Blocked', 'chrome://settings', false);
+    const third = tab(23, 'Third', 'https://third.test');
+    const selectedTabIdSet = new Set<number>([third.id as number, blocked.id as number, first.id as number]);
+    const selectedStorableRecords = deriveSelectedStorableRecords(
+      windowInfo(1, false, [first, blocked, third]),
+      selectedTabIdSet,
+    );
+    const selectedStorableTabIds = deriveSelectedStorableTabIds(selectedStorableRecords);
+
+    expect(selectedStorableRecords).toEqual([first, third]);
+    expect(selectedStorableTabIds).toEqual([21, 23]);
+    expect(getOpenTabDragData(third, selectedTabIdSet.has(third.id as number), selectedStorableRecords, selectedStorableTabIds)).toEqual({
+      records: [first, third],
+      tabIds: [21, 23],
+    });
+  });
+
+  it('preserves close loading semantics through a shared closing ID set', () => {
+    const closing = tab(31, 'Closing', 'https://closing.test');
+    const open = tab(32, 'Open', 'https://open.test');
+    const invalid = { ...open, id: undefined };
+    const closingTabIdSet = new Set<number>([closing.id as number]);
+
+    expect(isOpenTabClosing(closing, closingTabIdSet)).toBe(true);
+    expect(isOpenTabClosing(open, closingTabIdSet)).toBe(false);
+    expect(isOpenTabClosing(invalid, closingTabIdSet)).toBe(false);
   });
 });
 
@@ -204,5 +262,21 @@ describe('Task107 source contracts', () => {
     expect(worker).toContain('tabSnapshots');
     expect(worker).toContain('pendingUrl');
     expect(worker).toContain('focus-open-tab');
+  });
+
+  it('derives selection data once at panel scope instead of scanning each row', () => {
+    const panel = read('manager/components/sidebar/OpenTabsPanel.tsx');
+    const triggerStart = panel.indexOf('function OpenTabContentTrigger');
+    const triggerEnd = panel.indexOf('export function OpenTabsPanel', triggerStart);
+    const triggerSource = panel.slice(triggerStart, triggerEnd);
+
+    expect(panel).toContain('useMemo(() => new Set(selectedTabIds)');
+    expect(panel).toContain('selectedStorableRecords');
+    expect(panel).toContain('selectedStorableTabIds');
+    expect(panel).toContain('closingTabIdSet');
+    expect(triggerSource).toContain('selectedTabIdSet.has');
+    expect(triggerSource).not.toContain('selectedTabIds.includes');
+    expect(triggerSource).not.toContain('availableTabs.filter');
+    expect(triggerSource).not.toContain('new Set(');
   });
 });

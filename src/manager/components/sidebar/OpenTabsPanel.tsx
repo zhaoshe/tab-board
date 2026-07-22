@@ -76,6 +76,43 @@ function isValidTabId(id: number | undefined): id is number {
   return Number.isSafeInteger(id);
 }
 
+export function deriveSelectedStorableRecords(
+  selectedWindow: OpenWindowInfo | null,
+  selectedTabIdSet: ReadonlySet<number>,
+): OpenTabInfo[] {
+  return selectedWindow?.tabs.filter((record) =>
+    record.storable === true && isValidTabId(record.id) && selectedTabIdSet.has(record.id),
+  ) ?? [];
+}
+
+export function deriveSelectedStorableTabIds(records: readonly OpenTabInfo[]): number[] {
+  return records.flatMap((record) => isValidTabId(record.id) ? [record.id] : []);
+}
+
+export interface OpenTabDragData {
+  records: OpenTabInfo[];
+  tabIds: number[];
+}
+
+export function getOpenTabDragData(
+  tab: OpenTabInfo,
+  isSelectedDrag: boolean,
+  selectedStorableRecords: OpenTabInfo[],
+  selectedStorableTabIds: number[],
+): OpenTabDragData {
+  if (isSelectedDrag && selectedStorableRecords.length > 0) {
+    return { records: selectedStorableRecords, tabIds: selectedStorableTabIds };
+  }
+  return {
+    records: [tab],
+    tabIds: isValidTabId(tab.id) ? [tab.id] : [],
+  };
+}
+
+export function isOpenTabClosing(tab: OpenTabInfo, closingTabIdSet: ReadonlySet<number>): boolean {
+  return isValidTabId(tab.id) && closingTabIdSet.has(tab.id);
+}
+
 function getOpenTabOverlayLifecycleKey(tab: OpenTabInfo): string {
   return JSON.stringify([
     tab.id,
@@ -95,8 +132,9 @@ function getOpenTabOverlayLifecycleKey(tab: OpenTabInfo): string {
 interface OpenTabContentTriggerProps {
   tab: OpenTabInfo;
   workspaceId: string;
-  selectedTabIds: number[];
-  availableTabs: OpenTabInfo[];
+  selectedTabIdSet: ReadonlySet<number>;
+  selectedStorableRecords: OpenTabInfo[];
+  selectedStorableTabIds: number[];
   previewKey: string;
   onCloseTab: (tabId: number | undefined) => Promise<void>;
   onPinTab: (tabId: number | undefined) => Promise<void>;
@@ -105,8 +143,9 @@ interface OpenTabContentTriggerProps {
 function OpenTabContentTrigger({
   tab,
   workspaceId,
-  selectedTabIds,
-  availableTabs,
+  selectedTabIdSet,
+  selectedStorableRecords,
+  selectedStorableTabIds,
   previewKey,
   onCloseTab,
   onPinTab,
@@ -149,12 +188,13 @@ function OpenTabContentTrigger({
       ),
     },
   });
-  const isSelectedDrag = tab.id !== undefined && selectedTabIds.includes(tab.id);
-  const selectedRecords = availableTabs.filter((record) =>
-    record.storable === true && isValidTabId(record.id) && selectedTabIds.includes(record.id),
+  const isSelectedDrag = isValidTabId(tab.id) && selectedTabIdSet.has(tab.id);
+  const { records: dragRecords, tabIds: dragTabIds } = getOpenTabDragData(
+    tab,
+    isSelectedDrag,
+    selectedStorableRecords,
+    selectedStorableTabIds,
   );
-  const dragRecords = isSelectedDrag && selectedRecords.length > 0 ? selectedRecords : [tab];
-  const dragTabIds = dragRecords.flatMap((record) => isValidTabId(record.id) ? [record.id] : []);
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: `open-tab-${tab.windowId ?? 'window'}-${tab.id ?? tab.index}`,
     disabled: tab.storable !== true || !isValidTabId(tab.id),
@@ -257,6 +297,17 @@ export function OpenTabsPanel({
     [filteredTabs, selectedWindowId],
   );
   useManagerOverlayLifecycle(overlayItemKey);
+
+  const selectedTabIdSet = useMemo(() => new Set(selectedTabIds), [selectedTabIds]);
+  const closingTabIdSet = useMemo(() => new Set(closingTabIds), [closingTabIds]);
+  const selectedStorableRecords = useMemo(
+    () => deriveSelectedStorableRecords(selectedWindow, selectedTabIdSet),
+    [selectedTabIdSet, selectedWindow],
+  );
+  const selectedStorableTabIds = useMemo(
+    () => deriveSelectedStorableTabIds(selectedStorableRecords),
+    [selectedStorableRecords],
+  );
 
   useEffect(() => {
     onSourceKeyChange?.(overlayItemKey);
@@ -393,8 +444,8 @@ export function OpenTabsPanel({
           )}
           {selectedWindow && filteredTabs.map((tab) => {
             const canSelect = tab.storable === true && isValidTabId(tab.id);
-            const isSelected = isValidTabId(tab.id) && selectedTabIds.includes(tab.id);
-            const isClosing = isValidTabId(tab.id) && closingTabIds.includes(tab.id);
+            const isSelected = isValidTabId(tab.id) && selectedTabIdSet.has(tab.id);
+            const isClosing = isOpenTabClosing(tab, closingTabIdSet);
             const hasValidTabId = isValidTabId(tab.id);
             return (
               <MantineGroup
@@ -431,8 +482,9 @@ export function OpenTabsPanel({
                 <OpenTabContentTrigger
                   tab={tab}
                   workspaceId={workspaceId}
-                  selectedTabIds={selectedTabIds}
-                  availableTabs={selectedWindow.tabs}
+                  selectedTabIdSet={selectedTabIdSet}
+                  selectedStorableRecords={selectedStorableRecords}
+                  selectedStorableTabIds={selectedStorableTabIds}
                   previewKey={`open:${tab.id ?? tab.index}`}
                   onCloseTab={onCloseTab}
                   onPinTab={onPinTab}
