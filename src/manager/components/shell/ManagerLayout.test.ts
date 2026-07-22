@@ -108,6 +108,7 @@ vi.mock('../../core/dnd', async () => {
 
 const source = readFileSync(resolve(process.cwd(), 'src/manager/components/shell/ManagerLayout.tsx'), 'utf8');
 const runtimeSource = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useOpenTabsRuntime.ts'), 'utf8');
+const filteredGroupsSource = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useFilteredGroups.ts'), 'utf8');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -185,6 +186,14 @@ describe('tooltip dismissal', () => {
     expect(source).toContain("document.querySelectorAll<HTMLElement>('[aria-describedby]')");
     expect(source).toContain("new MouseEvent('mouseout'");
     expect(source).toContain("document.addEventListener('pointerdown', dismiss, true)");
+  });
+});
+
+describe('visible group memoization', () => {
+  it('memoizes visible groups by state, category, and search query', () => {
+    expect(filteredGroupsSource).toMatch(
+      /return useMemo\(\s*\(\) => getVisibleGroups\(state, category, searchQuery\),\s*\[state, category, searchQuery\],\s*\);/s,
+    );
   });
 });
 

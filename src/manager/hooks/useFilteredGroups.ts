@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
 import { getVisibleGroups, type CategoryFilter } from '../core/selectors';
@@ -38,7 +38,10 @@ export function useFilteredGroups(category: CategoryFilter): Group[] {
   );
   const searchQuery = useSearchQuery();
 
-  return getVisibleGroups(state, category, searchQuery);
+  return useMemo(
+    () => getVisibleGroups(state, category, searchQuery),
+    [state, category, searchQuery],
+  );
 }
 
 export function useSearchQuery(): string {
