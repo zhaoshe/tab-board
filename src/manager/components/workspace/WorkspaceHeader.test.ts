@@ -97,10 +97,13 @@ describe('WorkspaceHeader source contracts', () => {
 
   it('uses concrete shallow store selectors and an exact category projection', () => {
     const selectorPattern = /useTabBoardStore\(\s*useShallow\(\(currentState\) => \(\{/;
+    const memoizedSelectorPattern = /useTabBoardStore\(\s*useShallow\(\s*selectVisibleGroupsState\s*\)\s*\)/;
     expect(source).toMatch(selectorPattern);
     expect(searchSource).toMatch(selectorPattern);
-    expect(filteredGroupsSource).toMatch(selectorPattern);
+    expect(filteredGroupsSource).toMatch(memoizedSelectorPattern);
+    expect(filteredGroupsSource).toContain('const selectVisibleGroupsState = useMemo(createVisibleGroupsSelector, []);');
     expect(source).not.toMatch(/useTabBoardStore\(\s*\)/);
+    expect(filteredGroupsSource).not.toMatch(/useTabBoardStore\(\s*\)/);
 
     expect(selectorsSource).toMatch(/export type CategoryStripState = Pick<\s*TabBoardState,\s*'activeWorkspaceId'\s*\|\s*'workspaces'\s*\|\s*'folders'\s*\|\s*'groups'\s*\|\s*'categoryOrderByWorkspace'\s*>;/);
     expect(selectorsSource).toContain('getCategoryStrip(state: CategoryStripState)');
