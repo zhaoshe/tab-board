@@ -166,7 +166,7 @@ function OpenTabContentTrigger({
   );
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: `open-tab-${tab.windowId ?? 'window'}-${tab.id ?? tab.index}`,
-    disabled: tab.storable !== true || !isValidTabId(tab.id),
+    disabled: tab.storable !== true || tab.pinned || !isValidTabId(tab.id),
     data: {
       type: 'open-tab',
       dnd: {
@@ -412,7 +412,7 @@ export function OpenTabsPanel({
             </MantineGroup>
           )}
           {selectedWindow && filteredTabs.map((tab) => {
-            const canSelect = tab.storable === true && isValidTabId(tab.id);
+            const canSelect = tab.storable === true && !tab.pinned && isValidTabId(tab.id);
             const isSelected = isValidTabId(tab.id) && selectedTabIdSet.has(tab.id);
             const isClosing = isValidTabId(tab.id) && closingTabIdSet.has(tab.id);
             const hasValidTabId = isValidTabId(tab.id);

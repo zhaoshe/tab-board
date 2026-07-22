@@ -162,6 +162,24 @@ describe('Open Tabs selection and drag data', () => {
     expect(Number.isSafeInteger(open.id) && closingTabIdSet.has(open.id as number)).toBe(false);
     expect(Number.isSafeInteger(invalid.id)).toBe(false);
   });
+
+  it('excludes pinned storable tabs from selected drag records', () => {
+    const regular = tab(41, 'Regular', 'https://regular.test');
+    const pinned = { ...tab(42, 'Pinned', 'https://pinned.test'), pinned: true };
+    const selectedTabIdSet = new Set<number>([regular.id as number, pinned.id as number]);
+    const selectedStorableRecords = deriveSelectedStorableRecords(
+      windowInfo(1, false, [regular, pinned]),
+      selectedTabIdSet,
+    );
+    const selectedStorableTabIds = deriveSelectedStorableTabIds(selectedStorableRecords);
+
+    expect(selectedStorableRecords).toEqual([regular]);
+    expect(selectedStorableTabIds).toEqual([41]);
+    expect(getOpenTabDragData(regular, true, selectedStorableRecords, selectedStorableTabIds)).toEqual({
+      records: [regular],
+      tabIds: [41],
+    });
+  });
 });
 
 describe('capture policy', () => {

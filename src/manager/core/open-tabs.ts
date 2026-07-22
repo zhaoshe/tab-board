@@ -31,7 +31,7 @@ export function deriveSelectedStorableRecords(
   selectedTabIdSet: ReadonlySet<number>,
 ): OpenTabInfo[] {
   return selectedWindow?.tabs.filter((record) =>
-    record.storable === true && isValidOpenTabId(record.id) && selectedTabIdSet.has(record.id),
+    record.storable === true && !record.pinned && isValidOpenTabId(record.id) && selectedTabIdSet.has(record.id),
   ) ?? [];
 }
 
