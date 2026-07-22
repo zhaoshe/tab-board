@@ -21,6 +21,7 @@ import {
 } from '@tabler/icons-react';
 import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { useShallow } from 'zustand/react/shallow';
 import type { Group } from '../../../shared/model';
 import type { CategoryFilter } from '../../core/selectors';
 import {
@@ -111,7 +112,9 @@ export function SessionCard({
   });
 
   const updateGroup = useTabBoardStore((state) => state.updateGroup);
-  const folders = useTabBoardStore((state) => state.folders.filter((folder) => folder.workspaceId === group.workspaceId));
+  const folders = useTabBoardStore(
+    useShallow((state) => state.folders.filter((folder) => folder.workspaceId === group.workspaceId)),
+  );
   const deleteGroup = useTabBoardStore((state) => state.deleteGroup);
   const lockGroup = useTabBoardStore((state) => state.lockGroup);
   const addTabToGroup = useTabBoardStore((state) => state.addTabToGroup);

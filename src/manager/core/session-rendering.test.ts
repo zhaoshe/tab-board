@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { shallow } from 'zustand/shallow';
 import { getTabDropMarkerPlacement } from '../components/sessions/TabItemRow';
 
 const managerRoot = resolve(process.cwd(), 'src/manager');
@@ -13,6 +14,23 @@ const runtimePath = resolve(managerRoot, 'hooks/useManagerRuntime.ts');
 const runtime = existsSync(runtimePath) ? readFileSync(runtimePath, 'utf8') : '';
 const css = readFileSync(resolve(managerRoot, 'styles/manager.css'), 'utf8');
 
+type SelectorState = {
+  activeWorkspaceId: string;
+  groups: readonly string[];
+  folders: readonly { id: string; name: string; workspaceId: string }[];
+  unrelatedValue: number;
+};
+
+const selectWorkspaceContentState = (state: SelectorState) => ({
+  activeWorkspaceId: state.activeWorkspaceId,
+  groups: state.groups,
+  folders: state.folders,
+});
+
+const selectSessionCardFolders = (state: SelectorState, workspaceId: string) => (
+  state.folders.filter((folder) => folder.workspaceId === workspaceId)
+);
+
 function cssBlock(selector: string): string {
   const start = css.indexOf(`${selector} {`);
   expect(start).toBeGreaterThanOrEqual(0);
@@ -22,6 +40,46 @@ function cssBlock(selector: string): string {
 }
 
 describe('Task108 session rendering contracts', () => {
+  it('stabilizes workspace selectors across unrelated state changes', () => {
+    const folder = { id: 'folder-a', name: 'A', workspaceId: 'workspace-a' };
+    const state: SelectorState = {
+      activeWorkspaceId: 'workspace-a',
+      groups: ['group-a'],
+      folders: [folder],
+      unrelatedValue: 1,
+    };
+    const unrelatedState = { ...state, unrelatedValue: 2 };
+
+    expect(shallow(selectWorkspaceContentState(state), selectWorkspaceContentState(unrelatedState))).toBe(true);
+    expect(shallow(selectSessionCardFolders(state, 'workspace-a'), selectSessionCardFolders(unrelatedState, 'workspace-a'))).toBe(true);
+  });
+
+  it('keeps workspace folder changes observable to session selectors', () => {
+    const folder = { id: 'folder-a', name: 'A', workspaceId: 'workspace-a' };
+    const state: SelectorState = {
+      activeWorkspaceId: 'workspace-a',
+      groups: ['group-a'],
+      folders: [folder],
+      unrelatedValue: 1,
+    };
+
+    const addedState = { ...state, folders: [...state.folders, { id: 'folder-b', name: 'B', workspaceId: 'workspace-a' }] };
+    const deletedState = { ...state, folders: [] };
+    const renamedState = { ...state, folders: [{ ...folder, name: 'Renamed' }] };
+
+    for (const changedState of [addedState, deletedState, renamedState]) {
+      expect(shallow(selectWorkspaceContentState(state), selectWorkspaceContentState(changedState))).toBe(false);
+      expect(shallow(selectSessionCardFolders(state, 'workspace-a'), selectSessionCardFolders(changedState, 'workspace-a'))).toBe(false);
+    }
+  });
+
+  it('uses shallow equality for workspace and session folder store selectors', () => {
+    expect(workspace).toMatch(/import \{ useShallow \} from 'zustand\/react\/shallow';/);
+    expect(workspace).toMatch(/useTabBoardStore\(\s*useShallow\(\(state\) => \(\{/);
+    expect(card).toMatch(/import \{ useShallow \} from 'zustand\/react\/shallow';/);
+    expect(card).toMatch(/useTabBoardStore\(\s*useShallow\(\(state\) => state\.folders\.filter\(/);
+  });
+
   it('uses a horizontal fixed-width board with a persistent new-session drop target', () => {
     expect(workspace).not.toContain('<SimpleGrid');
     expect(workspace).toContain('className="manager-board"');

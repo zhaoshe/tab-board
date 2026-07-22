@@ -2,6 +2,7 @@ import { Box, Text } from '@mantine/core';
 import { IconArchive, IconFolder, IconSearch, IconStar } from '@tabler/icons-react';
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
+import { useShallow } from 'zustand/react/shallow';
 import { useFilteredGroups, useSearchQuery } from '../../hooks/useFilteredGroups';
 import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
@@ -70,11 +71,13 @@ export function WorkspaceContent({
 }: WorkspaceContentProps) {
   const groups = useFilteredGroups(category);
   const searchQuery = useSearchQuery();
-  const { activeWorkspaceId, groups: allGroups, folders } = useTabBoardStore((state) => ({
-    activeWorkspaceId: state.activeWorkspaceId,
-    groups: state.groups,
-    folders: state.folders,
-  }));
+  const { activeWorkspaceId, groups: allGroups, folders } = useTabBoardStore(
+    useShallow((state) => ({
+      activeWorkspaceId: state.activeWorkspaceId,
+      groups: state.groups,
+      folders: state.folders,
+    })),
+  );
   const categoryGroups = allGroups.filter((group) => {
     if (group.workspaceId !== activeWorkspaceId) return false;
     if (category === 'saved') return group.starred && !group.archived;
