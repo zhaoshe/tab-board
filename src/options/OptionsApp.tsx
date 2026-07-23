@@ -27,6 +27,7 @@ import { theme } from '../shared/styles/theme';
 import { useTabBoardStore } from '../shared/store/useTabBoardStore';
 import { useStoreHydration } from '../shared/hooks/useStoreHydration';
 import { DEFAULT_SETTINGS } from '../shared/model';
+import { DataStorageCard } from './components/DataStorageCard';
 
 export function OptionsApp() {
   const { hydrated } = useStoreHydration();
@@ -305,6 +306,8 @@ export function OptionsApp() {
               </Stack>
             </Stack>
           </Card>
+
+          <DataStorageCard />
 
           <Card withBorder shadow="sm" padding="lg">
             <Stack gap="md">
