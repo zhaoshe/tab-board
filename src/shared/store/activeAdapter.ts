@@ -179,6 +179,16 @@ export async function getActiveAdapter(): Promise<StorageAdapter> {
  * tests so a previously-initialized adapter does not leak into the next test.
  */
 export function resetActiveAdapterForTests(): void {
+  resetActiveAdapter();
+}
+
+/**
+ * Reset the singleton adapter in production contexts (e.g. after the Options
+ * page notifies the service worker that storage mode has switched). The next
+ * call to getActiveAdapter() re-reads the bootstrap config and builds a fresh
+ * adapter. Safe to call even if no adapter has been initialized yet.
+ */
+export function resetActiveAdapter(): void {
   cleanupPingSubscription();
   cachedAdapter = null;
   initPromise = null;

@@ -4,6 +4,7 @@ import {
   nowIso,
   ITEM_LINK,
   STATE_KEY,
+  FILE_PING_KEY,
   normalizeState,
   isRestorableTab,
   tabMatchesQuery,
@@ -23,8 +24,8 @@ import {
   type Settings,
   type TabRef,
 } from '../shared/model';
-import { getState, setState, getSettings, ensureState } from '../shared/store/chromeStorage';
-import { createStatePersistence } from './statePersistence';
+import { getActiveAdapter, resetActiveAdapter } from '../shared/store/activeAdapter';
+import { createStatePersistence, type StatePersistence } from './statePersistence';
 import {
   applyStateMutation,
   createDropMutationBatchContext,
@@ -41,7 +42,40 @@ import {
 
 const MANAGER_PAGE = 'manager.html';
 const POPUP_PAGE = 'popup.html';
-const statePersistence = createStatePersistence({ getState, setState, ensureState });
+
+async function getState(): Promise<TabBoardState> {
+  const adapter = await getActiveAdapter();
+  return adapter.getState();
+}
+
+async function setState(state: TabBoardState): Promise<void> {
+  const adapter = await getActiveAdapter();
+  return adapter.setState(state);
+}
+
+async function ensureState(): Promise<TabBoardState> {
+  const adapter = await getActiveAdapter();
+  return adapter.ensureState();
+}
+
+async function getSettings(): Promise<Settings> {
+  const state = await getState();
+  return state.settings;
+}
+
+let persistencePromise: Promise<StatePersistence> | null = null;
+
+function getPersistence(): Promise<StatePersistence> {
+  if (!persistencePromise) {
+    persistencePromise = Promise.resolve(createStatePersistence({ getState, setState, ensureState }));
+  }
+  return persistencePromise;
+}
+
+function resetPersistence(): void {
+  persistencePromise = null;
+}
+
 let restoreQueue: Promise<unknown> = Promise.resolve();
 
 function enqueueRestore<T>(operation: () => Promise<T>): Promise<T> {
@@ -51,7 +85,7 @@ function enqueueRestore<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 chrome.runtime.onInstalled.addListener(async ({ reason }) => {
-  await enqueueRestore(() => statePersistence.ensureState());
+  await enqueueRestore(async () => (await getPersistence()).ensureState());
   await refreshContextMenus();
   await applyActionPopup();
   if (reason === 'install') {
@@ -110,11 +144,22 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
+
+  // STATE_KEY changes happen in browser mode. Compare old/new to detect
+  // actionClick setting changes so we can update the toolbar popup.
   const stateChange = changes[STATE_KEY];
-  if (!stateChange) return;
-  const previousActionClick = getStoredActionClick(stateChange.oldValue);
-  const nextActionClick = getStoredActionClick(stateChange.newValue);
-  if (previousActionClick !== nextActionClick) void applyActionPopup(nextActionClick);
+  if (stateChange) {
+    const previousActionClick = getStoredActionClick(stateChange.oldValue);
+    const nextActionClick = getStoredActionClick(stateChange.newValue);
+    if (previousActionClick !== nextActionClick) void applyActionPopup(nextActionClick);
+  }
+
+  // FILE_PING_KEY changes mean another context (manager/popup/options)
+  // committed a write through the file adapter. Re-read current settings so
+  // the toolbar popup action stays in sync in file mode.
+  if (changes[FILE_PING_KEY]) {
+    void applyActionPopup();
+  }
 });
 
 chrome.omnibox.setDefaultSuggestion({
@@ -299,7 +344,7 @@ async function applyWorkerMutations(input: unknown): Promise<TabBoardState> {
   let persisted = state;
   if (persistableMutations.length) {
     try {
-      persisted = await statePersistence.applyMutations(persistableMutations);
+      persisted = await (await getPersistence()).applyMutations(persistableMutations);
     } catch (error: unknown) {
       if (!(error instanceof InvalidDropMutationError)) throw error;
       const mapIndexes = (indexes: readonly number[]): number[] => indexes.flatMap((index) => {
@@ -380,7 +425,14 @@ async function handleMessage(message: { type?: string; action?: string; [key: st
     case 'tabboard-state-mutations':
       return enqueueRestore(() => applyWorkerMutations(message.mutations));
     case 'tabboard-ensure-state':
-      return enqueueRestore(() => statePersistence.ensureState());
+      return enqueueRestore(async () => (await getPersistence()).ensureState());
+    case 'tabboard-storage-switched':
+      // Options page has switched storage mode and completed migration.
+      // Reset the singleton adapter and cached persistence so the next
+      // operation rebuilds against the freshly-written bootstrap config.
+      resetActiveAdapter();
+      resetPersistence();
+      return enqueueRestore(async () => (await getPersistence()).ensureState());
     case 'capture':
     case 'saveCurrentWindow': {
       const request = validateCaptureRequest(message, action === 'saveCurrentWindow');
@@ -655,7 +707,7 @@ async function captureTabs(
   );
   let persistedGroupIds = new Set<string>();
   if (groups.length) {
-    const persistedState = await statePersistence.applyMutations([
+    const persistedState = await (await getPersistence()).applyMutations([
       { type: 'prepend-groups', groups, updatedAt: nowIso() },
     ]);
     const targetWorkspacePersisted = persistedState.workspaces.some(
@@ -1116,7 +1168,7 @@ async function removeRestoredRefs(refs: TabRefWithSource[]) {
   if (!refs.length) {
     return;
   }
-  await statePersistence.applyMutations([
+  await (await getPersistence()).applyMutations([
     { type: 'remove-restored-refs', refs, updatedAt: nowIso() },
   ]);
 }
@@ -1195,7 +1247,7 @@ async function deleteSavedGroupInternal(groupId: string) {
   if (!binEntry) {
     return { deleted: false };
   }
-  await statePersistence.applyMutations([
+  await (await getPersistence()).applyMutations([
     { type: 'delete-group', id, binEntry, updatedAt: nowIso() },
   ]);
   return { deleted: true };

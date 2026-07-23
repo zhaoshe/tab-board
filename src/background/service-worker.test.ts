@@ -277,6 +277,76 @@ describe('Chrome action settings synchronization', () => {
 
     expect(harness.chromeMock.action.setTitle).toHaveBeenCalledWith({ title: 'Open TabBoard' });
   });
+
+  it('refreshes the action popup when a file ping arrives', async () => {
+    const state = createState();
+    const harness = createChromeHarness(state);
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    // Simulate another context having switched settings to popup mode and
+    // written a file ping (without a STATE_KEY change, since file mode does
+    // not write STATE_KEY).
+    harness.state.current = {
+      ...state,
+      settings: { ...state.settings, actionClick: 'popup' },
+    };
+
+    const listener = harness.chromeMock.storage.onChanged.getListener();
+    if (!listener) throw new Error('Expected storage change listener was not registered.');
+
+    listener({
+      tabboardFilePing: {
+        oldValue: undefined,
+        newValue: { mutationRevision: 7, updatedAt: '2026-01-02T00:00:00.000Z' },
+      },
+    }, 'local');
+    await vi.waitFor(() => {
+      expect(harness.chromeMock.action.setPopup).toHaveBeenCalledWith({ popup: 'popup.html' });
+    });
+    expect(harness.chromeMock.action.setTitle).toHaveBeenCalledWith({ title: 'Open TabBoard' });
+  });
+});
+
+describe('tabboard-storage-switched message', () => {
+  it('resets the active adapter and re-ensures state without breaking the queue', async () => {
+    const state = createState();
+    const harness = createChromeHarness(state);
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    const listener = harness.runtimeMessage.getListener();
+    if (!listener) throw new Error('Expected message listener was not registered.');
+
+    // Drive a mutation through so the persistence promise is cached.
+    await sendMessage(listener, {
+      type: 'tabboard-state-mutations',
+      mutations: [{
+        type: 'set-active-workspace',
+        workspaceId: 'workspace-b',
+        updatedAt: new Date().toISOString(),
+      }],
+    });
+    expect(harness.state.current.activeWorkspaceId).toBe('workspace-b');
+
+    // Send the storage-switched notification. It should reset the adapter and
+    // re-run ensureState, returning ok and leaving the queue usable.
+    const switchResp = await sendMessage(listener, { type: 'tabboard-storage-switched' }) as {
+      ok: boolean;
+    };
+    expect(switchResp.ok).toBe(true);
+
+    // Subsequent mutations still flow through to storage.
+    await sendMessage(listener, {
+      type: 'tabboard-state-mutations',
+      mutations: [{
+        type: 'set-active-workspace',
+        workspaceId: 'workspace-a',
+        updatedAt: new Date().toISOString(),
+      }],
+    });
+    expect(harness.state.current.activeWorkspaceId).toBe('workspace-a');
+  });
 });
 
 describe('Task194 runtime sender allowlist', () => {
