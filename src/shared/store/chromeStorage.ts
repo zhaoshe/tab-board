@@ -1,18 +1,23 @@
-import { STATE_KEY } from '../model/constants';
 import { normalizeState, type TabBoardState } from '../model';
 import { logBreadcrumb, logWarning } from '../utils/diagnostics';
 import {
   applyStateMutations,
   InvalidDropMutationError,
 } from './stateMutations';
+import { createChromeStorageAdapter } from './chromeStorageAdapter';
+import type { StorageAdapter } from './storageAdapter';
+
+// Default adapter instance used by all the exported convenience functions.
+// Call sites that import the legacy function API keep working transparently;
+// new code can import createChromeStorageAdapter() directly.
+const defaultAdapter: StorageAdapter = createChromeStorageAdapter();
 
 export async function getState(): Promise<TabBoardState> {
-  const result = await chrome.storage.local.get(STATE_KEY);
-  return normalizeState(result[STATE_KEY]);
+  return defaultAdapter.getState();
 }
 
 export async function setState(state: TabBoardState): Promise<void> {
-  await chrome.storage.local.set({ [STATE_KEY]: state });
+  return defaultAdapter.setState(state);
 }
 
 let localHarnessChrome: unknown;
@@ -155,26 +160,9 @@ export async function getSettings() {
 }
 
 export async function ensureState(): Promise<TabBoardState> {
-  const result = await chrome.storage.local.get(STATE_KEY);
-  if (result[STATE_KEY]) {
-    return normalizeState(result[STATE_KEY]);
-  }
-
-  const state = normalizeState(null);
-  await setState(state);
-  return state;
+  return defaultAdapter.ensureState();
 }
 
 export function subscribeState(callback: (state: TabBoardState) => void): () => void {
-  const listener = (
-    changes: Record<string, chrome.storage.StorageChange>,
-    area: string
-  ) => {
-    if (area !== 'local' || !changes[STATE_KEY]) {
-      return;
-    }
-    callback(normalizeState(changes[STATE_KEY].newValue));
-  };
-  chrome.storage.onChanged.addListener(listener);
-  return () => chrome.storage.onChanged.removeListener(listener);
+  return defaultAdapter.subscribeState(callback);
 }
