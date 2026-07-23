@@ -279,3 +279,22 @@ export async function switchToBrowserMode(copyFileData: boolean): Promise<void> 
   // The chrome adapter is the new active singleton.
   cachedAdapter = chromeAdapter;
 }
+
+/**
+ * Reconnect to a file-storage folder after a fallback (e.g. permission was
+ * re-granted or the user re-selected the folder). Saves the root handle,
+ * writes bootstrap='file', and tears down the current singleton so the next
+ * getActiveAdapter() call rebuilds a fresh FileStorageAdapter from the folder.
+ * Does NOT seed initial state (the folder is expected to already contain data).
+ */
+export async function reconnectFolder(root: FileSystemDirectoryHandle): Promise<void> {
+  logBreadcrumb('file-storage: reconnect', 'reconnecting to file folder');
+  await saveRootHandle(root, testIdbFactory);
+  await writeBootstrapMode('file');
+  cleanupPingSubscription();
+  cachedAdapter = null;
+  initPromise = null;
+  lastSeenRevision = -1;
+  // The next getActiveAdapter() call will re-read from disk; we don't
+  // pre-build the adapter here so callers control timing.
+}
