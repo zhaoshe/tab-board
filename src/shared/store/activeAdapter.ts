@@ -14,7 +14,7 @@
 
 import type { TabBoardState } from '../model';
 import { STATE_KEY } from '../model/constants';
-import { logWarning } from '../utils/diagnostics';
+import { logBreadcrumb, logWarning } from '../utils/diagnostics';
 import { createChromeStorageAdapter } from './chromeStorageAdapter';
 import { createFileStorageAdapter } from './fileStorage';
 import {
@@ -50,6 +50,7 @@ let pingUnsubscribe: (() => void) | null = null;
 const fallbackListeners = new Set<(reason: string) => void>();
 
 function emitFallback(reason: string): void {
+  logWarning('file-storage: fallback', reason);
   for (const cb of Array.from(fallbackListeners)) {
     try {
       cb(reason);
@@ -100,6 +101,7 @@ async function initAdapter(): Promise<StorageAdapter> {
   if (mode === 'browser') {
     cachedAdapter = createChromeStorageAdapter();
     lastSeenRevision = -1;
+    logBreadcrumb('file-storage: init', 'browser storage active');
     return cachedAdapter;
   }
 
@@ -135,6 +137,7 @@ async function initAdapter(): Promise<StorageAdapter> {
       lastSeenRevision = -1;
     }
     setupPingSubscription(adapter);
+    logBreadcrumb('file-storage: init', `file adapter active, revision=${lastSeenRevision}`);
     return cachedAdapter;
   } catch (err) {
     logWarning('activeAdapter', 'File adapter initialization failed; falling back to browser storage', err);
@@ -215,6 +218,7 @@ export async function switchToFileMode(
   root: FileSystemDirectoryHandle,
   initialState: TabBoardState,
 ): Promise<void> {
+  logBreadcrumb('file-storage: migration', `switching to file mode, revision=${initialState.mutationRevision}`);
   await saveRootHandle(root, testIdbFactory);
   await writeBootstrapMode('file');
   // Tear down current adapter/ping before rebuilding.
@@ -235,6 +239,7 @@ export async function switchToFileMode(
  * ChromeStorageAdapter.
  */
 export async function switchToBrowserMode(copyFileData: boolean): Promise<void> {
+  logBreadcrumb('file-storage: migration', `switching to browser mode, copyFileData=${copyFileData}`);
   let fileStateToCopy: TabBoardState | null = null;
   if (copyFileData && cachedAdapter && isFileAdapter(cachedAdapter)) {
     try {

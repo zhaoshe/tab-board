@@ -38,7 +38,7 @@ import {
   type TabBoardState,
 } from '../model';
 import type { Group } from '../model/types';
-import { logWarning } from '../utils/diagnostics';
+import { logBreadcrumb, logWarning } from '../utils/diagnostics';
 import {
   atomicWriteFile,
   atomicDeleteFile,
@@ -269,13 +269,17 @@ export async function initFileStorageDirectory(
 
   const metaResult = await readJsonFile<StoredMeta>(root, META_FILE);
   if (!metaResult.found) {
+    logBreadcrumb('file-storage: init', 'empty directory, no existing state');
     return { state: null, hasExistingData: false };
   }
   const meta = metaResult.value as StoredMeta;
+  const recoveryActions: string[] = [];
   if (meta.writeInProgress || meta.migrationInProgress) {
+    recoveryActions.push(`writeInProgress=${!!meta.writeInProgress}`);
+    recoveryActions.push(`migrationInProgress=${!!meta.migrationInProgress}`);
     logWarning(
       'fileStorage',
-      `Previous write did not complete cleanly (writeInProgress=${!!meta.writeInProgress}, migrationInProgress=${!!meta.migrationInProgress}); loading last good state.`,
+      `Previous write did not complete cleanly (${recoveryActions.join(', ')}); loading last good state.`,
     );
   }
 
@@ -322,6 +326,7 @@ export async function initFileStorageDirectory(
   };
 
   const state = assembleState(parts);
+  logBreadcrumb('file-storage: read', `revision=${state.mutationRevision} sessions=${sessions.size}${recoveryActions.length ? ` recovery=${recoveryActions.join(',')}` : ''}`);
   return { state, hasExistingData: true };
 }
 
@@ -407,6 +412,7 @@ class FileStorageAdapterImpl implements StorageAdapter {
   }
 
   private async writeCommit(nextState: TabBoardState): Promise<void> {
+    const start = Date.now();
     const cached = this.cachedState;
     const parts = splitState(nextState);
 
@@ -488,6 +494,9 @@ class FileStorageAdapterImpl implements StorageAdapter {
 
     // Same-context notification.
     this.dispatchStateChanged(committedState);
+
+    const duration = Date.now() - start;
+    logBreadcrumb('file-storage: write', `revision=${nextState.mutationRevision} wrote=${toWrite.length} deleted=${toDelete.length} duration=${duration}ms`);
 
     // Cross-context ping.
     try {
