@@ -8,7 +8,9 @@ import {
   createNoteRecord,
   DROP_OPERATION_LEDGER_LIMIT,
 } from '../model';
-import { ensureStateForHydration, getState, sendStateMutations, subscribeState } from './chromeStorage';
+import { ensureStateForHydration, sendStateMutations } from './chromeStorage';
+import { getActiveAdapter, onFallback } from './activeAdapter';
+import type { StorageAdapter } from './storageAdapter';
 import type { StateMutation } from './stateMutations';
 import {
   applyStateMutation,
@@ -25,6 +27,58 @@ import type { DropIntent } from '../../manager/core/dnd';
 import type { OpenTabInfo } from '../../manager/core/open-tabs';
 import { emitEvent, AppEvents } from '../utils/events';
 import { structurallyShareState } from './stateStructuralSharing';
+
+// ---------- active adapter resolution ----------
+// The store module is loaded when a page imports it; the active adapter is
+// resolved lazily on first use and cached as a promise so concurrent callers
+// share a single initialization.
+
+let adapterPromise: Promise<StorageAdapter> | null = null;
+
+function getAdapter(): Promise<StorageAdapter> {
+  if (!adapterPromise) {
+    adapterPromise = getActiveAdapter();
+  }
+  return adapterPromise;
+}
+
+async function adapterGetState(): Promise<TabBoardState> {
+  return (await getAdapter()).getState();
+}
+
+function adapterSubscribeState(callback: (state: TabBoardState) => void): () => void {
+  let activeUnsub: (() => void) | null = null;
+  let cancelled = false;
+  getAdapter().then((adapter) => {
+    if (cancelled) return;
+    activeUnsub = adapter.subscribeState(callback);
+  });
+  return () => {
+    cancelled = true;
+    if (activeUnsub) {
+      activeUnsub();
+      activeUnsub = null;
+    }
+  };
+}
+
+// Subscribe to file-storage fallback events so that a degraded backend (file
+// mode failed, dropped back to browser storage) surfaces as a persistenceError
+// in the UI. The subscription is module-level so it lives for the lifetime of
+// the page; we don't want to miss a fallback that happens before hydrate().
+const unsubscribeFallback = onFallback((reason: string) => {
+  // eslint-disable-next-line no-console
+  console.warn('[TabBoard] Storage adapter fell back to browser storage:', reason);
+  useTabBoardStore.setState({ persistenceError: reason });
+});
+
+// Best-effort cleanup on page unload (no-op if the page is already terminating).
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('beforeunload', () => {
+    try { unsubscribeFallback(); } catch { /* ignore */ }
+  }, { once: true });
+}
+
 interface TabBoardStore extends TabBoardState {
   hydrated: boolean;
   persistenceError: string | null;
@@ -443,7 +497,7 @@ function committedState(error: unknown): TabBoardState | null {
 async function recoverAuthoritativeState(): Promise<TabBoardState | null> {
   let recovered: TabBoardState | null = null;
   try {
-    recovered = await getState();
+    recovered = await adapterGetState();
   } catch {
     recovered = null;
   }
@@ -696,7 +750,7 @@ function sendPendingBatch(additional: readonly StateMutation[] = []): Promise<Ta
       if (!reconciliationState && (isTerminalOrdinaryFailure || isRestoreCollision || (!hasRetryBudget
         && batch.some((mutation) => mutation.type === 'drop-intent')))) {
         try {
-          reconciliationState = await getState();
+          reconciliationState = await adapterGetState();
         } catch {
           reconciliationState = null;
         }
@@ -871,7 +925,7 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
         if (generation !== hydrationGeneration) return;
 
         activeHydrationUnsubscribe?.();
-        activeHydrationUnsubscribe = subscribeState((newState) => {
+        activeHydrationUnsubscribe = adapterSubscribeState((newState) => {
           if (generation !== hydrationGeneration) return;
           if (!get().hydrated) {
             pendingHydrationState = newState;
@@ -887,7 +941,7 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
           set({ ...sharedState, hydrated: true });
         });
 
-        const saved = await getState();
+        const saved = await adapterGetState();
         if (generation !== hydrationGeneration) return;
 
         const hydratedState = newestRemoteState(saved, pendingHydrationState);

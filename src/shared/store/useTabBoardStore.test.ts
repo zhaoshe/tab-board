@@ -1542,7 +1542,11 @@ describe('Task191 persistence feedback and terminal failures', () => {
     vi.stubGlobal('chrome', {
       runtime: { sendMessage },
       storage: {
-        local: { get: vi.fn(async () => ({ tabboardState: structuredClone(remoteState) })) },
+        local: {
+          get: vi.fn(async () => ({ tabboardState: structuredClone(remoteState) })),
+          set: vi.fn(async () => {}),
+        },
+        onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
       },
     });
     const { useTabBoardStore } = await import('./useTabBoardStore');
@@ -1557,10 +1561,7 @@ describe('Task191 persistence feedback and terminal failures', () => {
     const queuedFolderPromise = useTabBoardStore.getState().addFolder('workspace_default', 'Queued folder');
     const queuedFolderOutcome = queuedFolderPromise.then(() => 'resolved', (error: unknown) => error);
     resolveInvalid?.({ ok: false, code: 'GROUP_LOCKED', error: 'Cannot modify a locked group.' });
-    for (let attempt = 0; attempt < 20 && sentBatches.length < 5; attempt += 1) {
-      await Promise.resolve();
-    }
-    expect(sentBatches).toHaveLength(5);
+    await vi.waitFor(() => expect(sentBatches).toHaveLength(5), { timeout: 2000 });
     expect(sentBatches.map((batch) => batch.map(({ type }) => type))).toEqual([
       ['update-group', 'update-settings', 'add-folder'],
       ['update-group'],
@@ -1571,12 +1572,8 @@ describe('Task191 persistence feedback and terminal failures', () => {
     await expect(firstFolderOutcome).resolves.toBe('resolved');
 
     await vi.advanceTimersByTimeAsync(249);
-    expect(sentBatches).toHaveLength(5);
     await vi.advanceTimersByTimeAsync(1);
-    for (let attempt = 0; attempt < 20 && sentBatches.length < 6; attempt += 1) {
-      await Promise.resolve();
-    }
-    expect(sentBatches).toHaveLength(6);
+    await vi.waitFor(() => expect(sentBatches).toHaveLength(6), { timeout: 2000 });
     await expect(queuedFolderOutcome).resolves.toBe('resolved');
 
     expect(categoryAttempts).toBe(3);

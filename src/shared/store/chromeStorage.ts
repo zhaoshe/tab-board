@@ -5,7 +5,7 @@ import {
   applyStateMutations,
   InvalidDropMutationError,
 } from './stateMutations';
-import { createChromeStorageAdapter } from './chromeStorageAdapter';
+import { getActiveAdapter } from './activeAdapter';
 import type { StorageAdapter } from './storageAdapter';
 
 export interface FilePing {
@@ -46,17 +46,24 @@ export function subscribePing(callback: (ping: FilePing) => void): () => void {
   return () => chrome.storage.onChanged.removeListener(listener);
 }
 
-// Default adapter instance used by all the exported convenience functions.
-// Call sites that import the legacy function API keep working transparently;
-// new code can import createChromeStorageAdapter() directly.
-const defaultAdapter: StorageAdapter = createChromeStorageAdapter();
+// The convenience functions (getState/setState/ensureState/subscribeState)
+// delegate to the active StorageAdapter resolved via getActiveAdapter(). This
+// keeps legacy call sites working while routing persistence through either the
+// Chrome storage backend or the file backend based on bootstrap config.
+//
+// subscribeState is the one call that cannot be a simple async delegation
+// because it synchronously returns an unsubscribe function. We resolve the
+// adapter lazily and track the active unsubscribe so the caller can tear down
+// immediately even if adapter resolution is still pending.
 
 export async function getState(): Promise<TabBoardState> {
-  return defaultAdapter.getState();
+  const adapter = await getActiveAdapter();
+  return adapter.getState();
 }
 
 export async function setState(state: TabBoardState): Promise<void> {
-  return defaultAdapter.setState(state);
+  const adapter = await getActiveAdapter();
+  return adapter.setState(state);
 }
 
 let localHarnessChrome: unknown;
@@ -199,9 +206,22 @@ export async function getSettings() {
 }
 
 export async function ensureState(): Promise<TabBoardState> {
-  return defaultAdapter.ensureState();
+  const adapter = await getActiveAdapter();
+  return adapter.ensureState();
 }
 
 export function subscribeState(callback: (state: TabBoardState) => void): () => void {
-  return defaultAdapter.subscribeState(callback);
+  let activeUnsub: (() => void) | null = null;
+  let cancelled = false;
+  getActiveAdapter().then((adapter) => {
+    if (cancelled) return;
+    activeUnsub = adapter.subscribeState(callback);
+  });
+  return () => {
+    cancelled = true;
+    if (activeUnsub) {
+      activeUnsub();
+      activeUnsub = null;
+    }
+  };
 }
