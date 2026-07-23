@@ -16,6 +16,7 @@ import {
 import {
   filterOpenTabs,
   getSelectableOpenTabIds,
+  isNewTabUrl,
   resolveSelectedWindow,
   sameOpenTabSelection,
   type OpenTabInfo,
@@ -232,7 +233,11 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
       refreshFailureRef.current = null;
       try {
         const result = await sendWorkerMessage<{ windows: OpenWindowInfo[] }>({ type: 'list-open-tabs' });
-        const nextWindows = Array.isArray(result.windows) ? result.windows : [];
+        const rawWindows = Array.isArray(result.windows) ? result.windows : [];
+        const nextWindows = rawWindows.map((window) => {
+          const visibleTabs = window.tabs.filter((tab) => !isNewTabUrl(tab.url));
+          return { ...window, tabs: visibleTabs, tabCount: visibleTabs.length };
+        });
         const previousWindowId = selectedWindowIdRef.current;
         const nextSelectedWindow = resolveSelectedWindow(nextWindows, previousWindowId);
         const nextSelectedWindowId = nextSelectedWindow?.id ?? null;

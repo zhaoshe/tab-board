@@ -257,6 +257,8 @@
   height: 1px;
   background: var(--mantine-color-default-border);
   z-index: 1;
+  opacity: 0;
+  pointer-events: none;
 }
 
 @media (min-width: 901px) {
@@ -276,6 +278,18 @@
   margin-inline: calc(-1 * var(--mantine-spacing-xs));
   content-visibility: auto;
   contain-intrinsic-size: auto 36px;
+}
+
+.manager-open-tabs-toolbar {
+  min-height: 48px;
+  margin: var(--mantine-spacing-xs) calc(-1 * var(--mantine-spacing-xs)) 0;
+  padding: 0 4px;
+  border-bottom: 1px solid transparent;
+}
+
+.manager-open-tabs-toolbar[data-selection-mode] {
+  border-bottom-color: var(--mantine-color-default-border);
+  background: color-mix(in srgb, var(--mantine-color-blue-9) 12%, var(--mantine-color-body));
 }
 
 .manager-open-tab-content {
@@ -325,6 +339,25 @@
 
 .manager-open-tab-favicon img {
   object-fit: cover;
+  z-index: 1;
+}
+
+.manager-open-tab-favicon:has(img[data-loaded="true"]) .manager-open-tab-favicon__fallback {
+  display: none;
+}
+
+.manager-info-card-favicon .manager-open-tab-favicon img {
+  width: 16px;
+  height: 16px;
+}
+
+.manager-info-card-favicon .manager-open-tab-favicon__fallback {
+  width: 16px;
+  height: 16px;
+}
+
+.manager-info-card-favicon .manager-open-tab-favicon:has(img[data-loaded="true"]) .manager-open-tab-favicon__fallback {
+  display: none;
 }
 
 .manager-open-tab-row:hover .manager-open-tab-select,
@@ -356,11 +389,8 @@ html[data-tabboard-hover-suppressed] .manager-open-tab-close {
 
 .manager-open-tabs-selection-actions {
   min-height: 48px;
-  margin-inline: -8px;
-  margin-bottom: -8px;
   padding: 5px 4px;
-  border-top: 1px solid var(--mantine-color-default-border);
-  background: color-mix(in srgb, var(--mantine-color-blue-9) 12%, var(--mantine-color-body));
+  align-items: center;
 }
 
 .manager-open-tabs-selection-actions__count {
@@ -500,10 +530,13 @@ html[data-tabboard-hover-suppressed] .manager-open-tab-close {
   width: var(--manager-sidebar-expanded-width);
 }
 
-.manager-shell--open-tabs-drag-active .manager-sidebar__overlay,
-.manager-shell--open-tabs-drag-active .manager-sidebar__overlay:hover,
-.manager-shell--open-tabs-drag-active .manager-sidebar__overlay:focus-within {
+.manager-shell--open-tabs-drag-active .manager-sidebar__overlay {
   pointer-events: none;
+}
+
+.manager-shell--sidebar-collapsed.manager-shell--open-tabs-drag-active .manager-sidebar__overlay,
+.manager-shell--sidebar-collapsed.manager-shell--open-tabs-drag-active .manager-sidebar__overlay:hover,
+.manager-shell--sidebar-collapsed.manager-shell--open-tabs-drag-active .manager-sidebar__overlay:focus-within {
   opacity: 0;
   visibility: hidden;
   transform: translateX(-8px);
@@ -807,6 +840,11 @@ html[data-tabboard-hover-suppressed] .manager-open-tab-close {
 
 .manager-sidebar-rail-tab img {
   object-fit: cover;
+  z-index: 1;
+}
+
+.manager-sidebar-rail-tab:has(img[data-loaded="true"]) .manager-sidebar-rail-tab__fallback {
+  display: none;
 }
 
 .manager-sidebar-rail-filter {

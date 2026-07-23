@@ -70,6 +70,9 @@ function SidebarRail({
                   <img
                     src={tab.favIconUrl}
                     alt=""
+                    onLoad={(event) => {
+                      event.currentTarget.dataset.loaded = 'true';
+                    }}
                     onError={(event) => {
                       event.currentTarget.style.display = 'none';
                     }}

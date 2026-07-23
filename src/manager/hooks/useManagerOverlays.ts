@@ -96,6 +96,9 @@ export function renderManagerInfoPopoverContent(model: ManagerInfoPopoverModel):
           ? createElement('img', {
             src: model.favIconUrl,
             alt: '',
+            onLoad: (event: React.SyntheticEvent<HTMLImageElement>) => {
+              event.currentTarget.dataset.loaded = 'true';
+            },
             onError: (event: React.SyntheticEvent<HTMLImageElement>) => {
               event.currentTarget.style.display = 'none';
             },

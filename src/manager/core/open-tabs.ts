@@ -22,6 +22,12 @@ export interface OpenWindowInfo {
   tabs: OpenTabInfo[];
 }
 
+const NEWTAB_URL_PATTERN = /^(chrome|edge|brave|firefox|about):\/\/newtab\/?$|^about:newtab$/i;
+
+export function isNewTabUrl(url: string): boolean {
+  return NEWTAB_URL_PATTERN.test(url);
+}
+
 function isValidOpenTabId(id: number | undefined): id is number {
   return Number.isSafeInteger(id);
 }

@@ -366,9 +366,10 @@ describe('centralized manager overlay contracts', () => {
     expect(closeOverlays).toContain('setMenu(null);');
   });
 
-  it('keeps Open Tab content preview-only and guards invalid preview actions', () => {
+  it('keeps Open Tab single-click preview-only while double-click activates the tab', () => {
     expect(openTabs).not.toContain('onClick={() => void onFocusTab(tab.id, tab.windowId)}');
-    expect(openTabs).not.toContain('void onFocusTab(tab.id, tab.windowId);');
+    expect(openTabs).toContain('onDoubleClick={() => {');
+    expect(openTabs).toContain('void onFocusTab(tab.id, tab.windowId);');
     expect(openTabs).toMatch(/isValidTabId\(tab\.id\) && \([\s\S]*Close tab/);
   });
 
