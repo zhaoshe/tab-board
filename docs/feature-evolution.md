@@ -21,6 +21,29 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-07-23: 本地文件夹存储（可选替代 chrome.storage.local）
+
+新增可选本地文件存储：用户可在 Options 中选择一个本地文件夹，TabBoard 将数据以纯 JSON 文件形式写入该文件夹，而非仅保存在 `chrome.storage.local`。
+
+变化：
+
+- 存储层抽象为 `StorageAdapter` 接口，`ChromeStorageAdapter`（既有行为）与 `FileStorageAdapter`（新）实现同一契约；启动时由 bootstrap key 决定激活哪个 adapter。
+- 文件夹下按拆分结构写入：`meta.json`（提交点版本/修订号/时间戳/`writeInProgress` 标记）+ 顶层文件 `settings.json`、`workspaces.json`、`folders.json`、`categoryOrder.json`、`bin.json`、`ledger.json`，以及 `sessions/<id>.json`（每个 session 独立文件）。
+- 写入采用两阶段提交：先写 `meta.json` 置 `writeInProgress: true`，再原子写各数据文件（tmp 兄弟文件 + rename），最后写 `meta.json` 提交并递增 `revision`，实现崩溃安全。
+- 文件夹句柄持久化在 IndexedDB 单一 object store，扩展重启后仍可恢复写权限；无需新增 manifest 权限（复用 File System Access API）。
+- 启用时提供三种迁移模式：`use-file`（立即切换并把当前浏览器存储数据写入文件夹）、`export-browser`（写出文件夹但保持浏览器存储为当前存储）、`merge`（读文件夹数据合并到浏览器存储后再切换）。
+- 任何文件写入失败自动降级回浏览器存储，并通过 UI 通知用户；降级期间写入仍可继续，不会丢数据。
+- Options 新增 Data Storage 分组：当前存储模式、文件夹名、选择文件夹、断开并切回浏览器存储入口。
+
+判断：
+
+- `chrome.storage.local` 在扩展被卸载时会被清除，且不便于用户查看或在设备间同步；本地文件存储让数据在重装后可直接重新接入，也可放入 iCloud/Dropbox/OneDrive 等同步文件夹实现跨设备同步。
+- 采用 File System Access API 而非 Native Messaging/伴随程序，零安装，用户只需选择文件夹，无需后台主机进程。
+- 按 session 拆文件而不是单一大文件，避免每次写入都重写全量 state，也方便用户直接检视/备份单个 session。
+- 两阶段提交保证崩溃后下一次启动可通过 `meta.json` 的 `writeInProgress` 标记发现未完成写入并恢复；substitute 模式（切换即切换，不双写）简化了一致性模型，代价是切换时一次性迁移。
+
+当前状态：Experimental 但功能完整，`npm run build`、`npm run check`、`npm test` 通过；仍建议在真实 Chrome 中手工验证迁移、断开、强制降级和同步文件夹场景。
+
 ### 2026-07-22: React 运行时性能优化收尾
 
 性能审查识别出 DnD、Open Tabs、authoritative state 和 overlay 的重复工作。本轮在不改变产品行为、不新增依赖、不引入 JS virtualization 的前提下完成全部 11 项优化。

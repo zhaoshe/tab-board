@@ -771,6 +771,186 @@ Status:
 
 Accepted。
 
+## D034: File System Access API for local file storage (no companion app)
+
+Context:
+
+`chrome.storage.local` 在扩展卸载时丢失，数据也无法跨设备同步。用户希望把数据存在本地文件夹里，以便重装后保留、并通过 iCloud/Dropbox/OneDrive 等同步。可选路径包括 Native Messaging 伴随程序和 File System Access API。
+
+Decision:
+
+使用 File System Access API（`showDirectoryPicker` + `FileSystemFileHandle`），由用户在 Options 中选择一个文件夹；不引入 Native Messaging host 或独立伴随程序。
+
+Rationale:
+
+- 零安装：用户在浏览器内选文件夹即可，不需要下载或运行额外进程。
+- 不需要新增 manifest 权限；File System Access API 由浏览器原生提供，权限通过用户手势授予。
+- 文件夹句柄可通过 IndexedDB 持久化，扩展重启后仍可恢复读写权限。
+
+Trade-offs:
+
+- File System Access API 需要 Chrome 86+；TabBoard 目标环境已满足。
+- 用户必须主动授予文件夹权限；权限在扩展重启后由浏览器决定是否保留（IndexedDB 持久化 handle + `requestPermission` 兜底）。
+- 相比 Native Messaging，无法做原生文件 watch 或跨进程协同，但 TabBoard 不需要这些能力。
+
+Status:
+
+Accepted。
+
+## D035: Per-session file layout with a commit-point meta.json
+
+Context:
+
+如果把所有 state 写入一个大 JSON 文件，每次小改动（比如改一个 session 标题或加一个 tab）都要重写整个文件；文件也不便于用户直接检视或用版本控制跟踪。
+
+Decision:
+
+文件夹下采用拆分结构：根目录 `meta.json`、`settings.json`、`workspaces.json`、`folders.json`、`categoryOrder.json`、`bin.json`、`ledger.json`，以及 `sessions/<id>.json`（每个 session 一个独立文件）。`meta.json` 作为提交点记录 `version`、`revision`、`createdAt`、`updatedAt`、`writeInProgress`。
+
+Rationale:
+
+- 写入单个 session 时只改一个 session 文件加 meta，避免重写全量 state。
+- 用户可直接打开 `sessions/` 查看、备份或用 git/Dropbox 跟踪单个 session 的变化。
+- 顶层文件按业务实体拆分，文件大小和职责都清晰。
+
+Trade-offs:
+
+- 写入涉及多个文件时需要两阶段提交保证原子性，增加了少量实现复杂度。
+- 删除 session 时需要清理对应文件；残留文件会在下次加载时忽略。
+
+Status:
+
+Accepted。
+
+## D036: Two-phase commit with tmp-sibling atomic writes
+
+Context:
+
+文件系统写入可能在任意时刻崩溃（断电、扩展崩溃、标签页关闭），必须保证下次启动不会读到半写文件或新旧数据混搭。
+
+Decision:
+
+所有数据文件使用"写 tmp 兄弟文件 + rename"原子替换；批次写入采用两阶段提交：
+
+1. 先写 `meta.json`，置 `writeInProgress: true` 并递增 `pendingRevision`。
+2. 依次写所有需要变更的数据文件（tmp + rename）。
+3. 最后写 `meta.json`，置 `writeInProgress: false` 并把 `revision` 推进到 `pendingRevision`。
+
+启动时若发现 `writeInProgress: true`，丢弃上次未完成批次（数据文件要么是上次完整提交的版本，要么是 tmp 文件被清理），以上一次完整 revision 为准。
+
+Rationale:
+
+- 在同一文件系统内，tmp-sibling rename 在 POSIX 和 Windows 上都是原子操作。
+- 两阶段提交让 `meta.json` 成为唯一的崩溃恢复判定点：要么全有要么全无。
+
+Trade-offs:
+
+- 批次写入需要两次 meta.json 写；对于 TabBoard 的写入频率（用户操作级别）可忽略。
+- 不做跨文件系统事务；假设所选文件夹在单一文件系统上。
+
+Status:
+
+Accepted。
+
+## D037: Automatic fallback to browser storage on file errors
+
+Context:
+
+用户选择的文件夹可能被移动、删除、权限被撤销，或同步盘暂时不可用。此时不能让 TabBoard 停止工作或丢失后续写入。
+
+Decision:
+
+任何文件读写失败（权限丢失、IO 错误、配额不足等）都会自动降级回浏览器存储（`chrome.storage.local`），并通过 UI toast/通知用户。降级后后续写入继续走浏览器存储，不会阻塞用户操作；用户可在 Options 中重新选择文件夹或明确切回浏览器存储。
+
+Rationale:
+
+- 可降级保证 TabBoard 始终可用，文件存储是可选增强而非硬依赖。
+- 自动降级而非抛错让用户在同步盘临时不可用时不会丢数据。
+
+Trade-offs:
+
+- 降级期间浏览器存储和文件存储会分叉；重新连接文件夹时需要用户选择迁移方向（merge 或覆盖）。
+- 需要清晰的 UI 提示当前处于哪种存储模式和降级原因。
+
+Status:
+
+Accepted。
+
+## D038: Raw IndexedDB for folder handle persistence (no wrapper library)
+
+Context:
+
+File System Access API 的 `FileSystemDirectoryHandle` 需要持久化才能在扩展重启后继续使用；常见做法是用 IndexedDB 存储 handle。可选择引入 `idb` 或类似轻量封装。
+
+Decision:
+
+直接使用原生 IndexedDB API（一个 database、一个 object store，只做 put/get/delete），不引入新的依赖库。
+
+Rationale:
+
+- 只需要三个操作（存句柄、取句柄、删句柄），原生 API 代码量极小，不值得引入额外依赖。
+- 符合项目"不新增运行时依赖除非有明确收益"的原则。
+
+Trade-offs:
+
+- 原生 IndexedDB API 基于事件回调，代码略繁琐，但封装在一个小模块内即可。
+
+Status:
+
+Accepted。
+
+## D039: Substitute storage mode (not dual-write)
+
+Context:
+
+切换存储后端时有两种一致性策略：双写（同时写两份，读时仲裁）和 substitute（切换后只写新后端）。
+
+Decision:
+
+采用 substitute 模式：切换时执行一次性迁移（把当前存储的数据完整写入新后端），切换完成后后续读写只走新后端；不双写。一个 bootstrap key（极小的标记）留在 `chrome.storage.local` 中，记录当前激活的存储模式（`browser` 或 `file`）和文件夹标识，供启动时判定。
+
+Rationale:
+
+- 单写模型的一致性推理简单，不存在双写部分失败后的仲裁难题。
+- bootstrap key 体积极小（仅几个字段），留在 `chrome.storage.local` 不违反隐私预期，也能在文件存储完全不可用时回退判定。
+
+Trade-offs:
+
+- 切换是一次性操作；如果迁移中途失败需要回滚到原存储，不能指望双写自动恢复。
+- 用户必须通过 Options 显式切换，TabBoard 不会静默改变存储后端。
+
+Status:
+
+Accepted。
+
+## D040: Three migration modes when connecting a folder
+
+Context:
+
+用户连接本地文件夹时，浏览器存储和文件夹中可能各自有数据，单一覆盖策略可能丢失一边的内容。
+
+Decision:
+
+提供三种迁移模式：
+
+- `use-file`：以文件夹中现有数据为准，切换到文件存储；浏览器存储中的数据保留但不再作为主存储。
+- `export-browser`：把当前浏览器存储数据完整写入文件夹，但保持浏览器存储为激活后端（相当于导出/备份）。
+- `merge`：读取文件夹数据与浏览器存储数据按 ID 合并（文件夹中已有的 session 以文件夹为准，浏览器中独有的追加），合并完成后切换到文件存储。
+
+Rationale:
+
+- 三种模式覆盖了"我已有数据在文件夹里"、"我只是想备份"、"我想把两边合在一起"三类场景。
+- 合并策略保守（同 ID 以文件夹为准），避免误覆盖用户在文件夹侧的改动。
+
+Trade-offs:
+
+- merge 不是 CRDT 级别的合并；同一 session 两边都有修改时以文件夹为准，用户需在合并前自行备份。
+- 迁移是一次性同步操作，数据量大时可能短暂阻塞写入。
+
+Status:
+
+Accepted。
+
 ## Decision template
 
 ```md

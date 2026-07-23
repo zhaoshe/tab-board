@@ -12,7 +12,8 @@ TabBoard 是 Chrome Manifest V3 extension，使用 React + TypeScript 开发，�
 - Manifest V3 service worker。
 - Vite + `@crxjs/vite-plugin` 构建链；`manager.html` 的生产入口是 `src/manager/main.tsx`。
 - React 18、Mantine v7、Zustand、`@dnd-kit`、`@tabler/icons-react`。
-- `chrome.storage.local`。
+- `chrome.storage.local`（默认后端，也存放 bootstrap key）。
+- File System Access API（可选本地文件后端）和 IndexedDB（持久化目录句柄）。
 - `chrome.tabs` / `chrome.windows` / `chrome.tabGroups` / `chrome.contextMenus` / `chrome.omnibox` / `chrome.runtime`。
 
 React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/main.tsx` 构建产物。
@@ -73,12 +74,15 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 
 负责客户端状态和持久化边界：
 
-- `chromeStorage.ts` 封装 `chrome.storage.local`。
+- 持久化层抽象为 `StorageAdapter` 接口（`src/shared/store/storageAdapter.ts`，约定 `getState()` / `setState(state)` / `clear()` 等方法），当前有两个实现：
+  - `ChromeStorageAdapter`（`chromeStorageAdapter.ts`）：封装 `chrome.storage.local["tabboardState"]`，是默认后端。
+  - `FileStorageAdapter`（`fileStorage.ts` + `fileSerialization.ts` + `fsAtomic.ts`）：通过 File System Access API 把数据写入用户选择的本地文件夹；详见下文「File Store Layout」。
+- `activeAdapter` 工厂在启动时读 `chrome.storage.local["tabboardStorageConfig"]`（BOOTSTRAP_KEY，一个极小的 bootstrap key：`{ mode: 'browser' | 'file' }`）决定激活哪个 adapter。`mode === 'file'` 时从 IndexedDB 读取持久化的 `FileSystemDirectoryHandle`，若句柄缺失或权限失效则回退到 `ChromeStorageAdapter` 并通过 fallback listener 通知 UI。
 - `stateMutations.ts` 以 immutable commands 应用普通 state mutation，并拒绝无效引用、locked 目标和 link/note URL 形态错误。
 - `mutationValidation.ts` 负责 untrusted/raw mutation boundary。
 - `useTabBoardStore.ts` 提供 React 状态投影和 mutation 入口。
 
-所有写入先 normalize；跨页面更新按 revision/hydration 规则应用，不能让旧快照覆盖较新 state。
+所有写入先 normalize，再交给当前激活的 adapter 原子提交；跨页面更新按 revision/hydration 规则应用，不能让旧快照覆盖较新 state。
 
 ### `src/background/`
 
@@ -106,7 +110,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 
 ## State Schema
 
-State canonical key 是 `chrome.storage.local["tabboardState"]`。`quickList` 字段已从 schema 移除（Quick list / Pinned workflow 于 2026-07-06 下线）；`normalizeState()` 读到历史数据里的 `quickList` 时，会把其中的 items 迁移成一个名为 `Former Quick list` 的普通 session 插到 groups 头部，保证不丢数据，之后不再保留该字段。
+State canonical key 在浏览器存储后端下是 `chrome.storage.local["tabboardState"]`；当启用文件存储后端时，state 拆分为本地文件夹中的多个 JSON 文件（见「File Store Layout」），`chrome.storage.local` 仍保留一个极小的 bootstrap key `tabboardStorageConfig`（`BOOTSTRAP_KEY`，内容为 `{ mode: 'browser' | 'file' }`）用于启动时判定激活哪个后端。`quickList` 字段已从 schema 移除（Quick list / Pinned workflow 于 2026-07-06 下线）；`normalizeState()` 读到历史数据里的 `quickList` 时，会把其中的 items 迁移成一个名为 `Former Quick list` 的普通 session 插到 groups 头部，保证不丢数据，之后不再保留该字段。
 
 顶层结构：
 
@@ -274,10 +278,65 @@ Bin entry 用于恢复删除内容。
   restoreNextToCurrent: true,
   theme: 'system',
   confirmBeforeDestructive: true,
+  storageMode: 'browser',
+  storageFolderName: '',
 }
 ```
 
-`customUrlFilter` 由 shared capture policy 统一用于 Open Tabs、capture 和 DnD eligibility；命中规则的 open tab 不返回给列表，实际 Chrome 权限限制仍由平台决定。
+`customUrlFilter` 由 shared capture policy 统一用于 Open Tabs、capture 和 DnD eligibility；命中规则的 open tab 不返回给列表，实际 Chrome 权限限制仍由平台决定。`storageMode` 与 `storageFolderName` 只记录 UI 展示用的当前存储模式与文件夹名；真正的启动判定以 `chrome.storage.local["tabboardStorageConfig"]`（`BOOTSTRAP_KEY`）中的 bootstrap key 为准。
+
+### File Store Layout
+
+当 `storageMode === 'file'` 时，`FileStorageAdapter` 在用户选择的目录下维护如下结构：
+
+```text
+<chosen-folder>/
+  meta.json
+  settings.json
+  workspaces.json
+  folders.json
+  categoryOrder.json
+  bin.json
+  ledger.json
+  sessions/
+    <groupId>.json
+    ...
+```
+
+- `meta.json` 是提交点（commit point），字段：`version`、`revision`、`pendingRevision?`、`createdAt`、`updatedAt`、`writeInProgress`。它是崩溃恢复的唯一判定点。
+- 顶层文件分别对应 state 中同名字段；`categoryOrder.json` 存储 `categoryOrderByWorkspace`，`ledger.json` 存储 `dropOperationLedger`。
+- `sessions/<id>.json` 存储单个 group/session 对象；文件名为 group id。
+
+所有文件写入采用两阶段提交（参见「Persistence / 两阶段提交」）：
+
+1. 写 `meta.json` 置 `writeInProgress: true`、记录 `pendingRevision`。
+2. 对本次需要变更的每个数据文件，先写同目录临时文件（如 `settings.json.tmp-<uuid>`），完成后 rename 覆盖目标文件，保证单文件原子替换。
+3. 最后写 `meta.json` 置 `writeInProgress: false`，把 `revision` 推进到 `pendingRevision`。
+
+加载时若 `meta.json.writeInProgress === true`，表示上一次写入未完成，丢弃该批次，以上一次 `revision` 对应的文件集合为准。`sessions/` 中未被任何 workspace/group 索引引用的孤立文件不会被加载，也不会在正常写入中主动删除；清理动作通过显式的 garbage collect 路径触发。
+
+文件夹句柄通过原生 IndexedDB（单 database、单 object store，仅 put/get/delete）持久化，不引入额外依赖。启动时由 `activeAdapter` 读取 bootstrap key 并解析句柄；若句柄缺失、权限被撤销或 IO 失败，自动降级为 `ChromeStorageAdapter`。
+
+### Migration（存储后端切换）
+
+Options 中连接本地文件夹时提供三种迁移模式（由 UI 派发迁移消息给 adapter 层执行）：
+
+- `use-file`：加载文件夹现有数据并切换激活后端为 file；浏览器存储数据保留但不再是权威源。
+- `export-browser`：把当前浏览器存储的完整 normalized state 写入文件夹（走两阶段提交），但保持激活后端为 `browser`，相当于手动备份。
+- `merge`：读取文件夹数据 + 浏览器存储数据，按 ID 合并（同 ID 以文件侧为准，浏览器侧独有追加），合并结果写回文件夹后切换激活后端为 file。
+
+迁移完成后更新 bootstrap key 与 settings 中的 `storageMode` / `storageFolderName`。迁移中途失败时保持原后端不变，不修改 bootstrap key。
+
+### Fallback（错误自动降级）
+
+`FileStorageAdapter` 的 `loadState()` 或 `saveState()` 抛出错误（权限丢失、文件夹被删除/移动、IO 错误、配额不足等）时：
+
+1. 记录 diagnostics breadcrumb。
+2. 切换为 in-memory fallback adapter 并复用最近一次内存中的 normalized state，保证 UI 可继续操作。
+3. 后台把后续写入同步持久化到 `ChromeStorageAdapter`（浏览器存储），避免丢失。
+4. 通过 manager/options UI 显示 toast 或 banner，告知用户已降级、原因、并提供"重新选择文件夹"或"保持使用浏览器存储"入口。
+
+降级状态下，用户可在 Options 里重新选择文件夹触发 merge 迁移，或显式断开文件夹并正式切回浏览器存储。
 
 ## 关键流程
 

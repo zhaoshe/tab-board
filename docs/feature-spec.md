@@ -522,6 +522,44 @@ Advanced：
 - Chrome shortcuts entry。
 - Reset settings。
 
+### Data Storage
+
+TabBoard 默认把数据保存在浏览器内置的 `chrome.storage.local` 中；数据仅存在本机，卸载扩展会被浏览器清除。TabBoard 也支持把数据保存到你自己选择的本地文件夹，作为可选替代后端。
+
+为什么考虑本地文件夹：
+
+- 数据在你自己的文件夹里，卸载扩展或更换浏览器后不会丢，重新选择文件夹即可恢复。
+- 可以把文件夹放在 iCloud、Dropbox、OneDrive、Syncthing 等同步目录里，让多台电脑上的 TabBoard 共享同一份数据（同步冲突由同步盘处理，建议在同一时间只在一台电脑上写入）。
+- 所有数据都是普通 JSON 文件，可以直接打开查看、备份、纳入版本控制。
+
+启用方式：
+
+1. 打开 Options（右上角 toolbar 的齿轮图标，或 Popup 的 Settings 入口）。
+2. 在 Data Storage 分组中点击「Choose folder」。
+3. 在系统文件夹选择对话框中，选择一个空文件夹或专门为 TabBoard 新建的文件夹；不要选择受系统保护的目录或其他应用的数据目录。
+4. 按提示选择迁移方式：
+   - Use this folder：以文件夹中已有的 TabBoard 数据为准，立即切换到文件存储。
+   - Export browser data to folder：把当前浏览器里的数据完整写入该文件夹，但仍保持浏览器存储为当前后端（相当于先备份）。
+   - Merge folder with browser data：读取文件夹中已有的数据，与浏览器中的数据合并（同一项以文件夹版本为准），合并完成后切换到文件存储。
+5. 迁移完成后 Settings 会显示当前存储模式为 File，并展示所选文件夹名称。
+
+切换回浏览器存储：
+
+- 在 Options > Data Storage 中点击「Disconnect folder and use browser storage」。
+- 文件夹中的文件不会被删除；断开后浏览器存储中保留当前可见的完整数据，后续写入不再访问该文件夹。
+- 之后随时可以再次选择文件夹（同一份或新文件夹）重新启用文件存储。
+
+恢复与降级行为：
+
+- 如果文件夹被移动、删除、权限被撤销，或同步盘暂时不可用，TabBoard 会自动降级回浏览器存储并弹出通知，保证你可以继续使用而不丢最近的写入。
+- 降级期间新写入会保存在浏览器存储里；待文件夹恢复可用后，可在 Options 中重新连接并选择 merge 迁移，把降级期间积累的数据合并回文件夹。
+- 任何情况下都建议定期使用 Export 做额外备份。
+
+注意：
+
+- TabBoard 不会主动在多个打开的 manager/扩展实例之间做实时同步；如果同时在两台设备上写入同一个同步文件夹，最后一次写入会覆盖之前的改动。
+- 不要手动编辑文件夹内的 JSON 文件除非你清楚自己在做什么；写错格式可能导致下次加载时数据被忽略。
+
 ## Legacy / Removed Features
 
 Quick list / Pinned workflow：
