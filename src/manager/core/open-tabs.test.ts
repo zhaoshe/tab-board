@@ -32,6 +32,8 @@ const settings: Settings = {
   restoreNextToCurrent: false,
   confirmBeforeDestructive: true,
   theme: 'system',
+  storageMode: 'browser',
+  storageFolderName: '',
 };
 
 function windowInfo(id: number, focused = false, tabs: OpenTabInfo[] = []): OpenWindowInfo {

@@ -156,6 +156,12 @@ export function normalizeState(raw: unknown): TabBoardState {
   state.settings.theme = (['system', 'light', 'dark'] as const).includes(state.settings.theme)
     ? state.settings.theme
     : 'system';
+  state.settings.storageMode = (['browser', 'file'] as const).includes(state.settings.storageMode)
+    ? state.settings.storageMode
+    : 'browser';
+  if (typeof state.settings.storageFolderName !== 'string') {
+    state.settings.storageFolderName = '';
+  }
   return state;
 }
 

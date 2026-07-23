@@ -16,6 +16,8 @@ export interface Settings {
   restoreNextToCurrent: boolean;
   theme: 'system' | 'light' | 'dark';
   confirmBeforeDestructive: boolean;
+  storageMode: 'browser' | 'file';
+  storageFolderName: string;
 }
 
 export interface Workspace {

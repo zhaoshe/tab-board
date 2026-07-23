@@ -10,6 +10,14 @@ export const LEGACY_ITEM_TODO = 'todo';
 export const URL_PATTERN = /^[a-z][a-z0-9+.-]*:\/\//i;
 export const SPECIAL_URL_PATTERN = /^(about|chrome|edge|brave|vivaldi|opera|file|ftp):/i;
 
+// File-storage layout and bootstrap constants
+export const FILE_LAYOUT_VERSION = 1;
+export const BOOTSTRAP_KEY = 'tabboardStorageConfig';
+export const FILE_PING_KEY = 'tabboardFilePing';
+export const FILE_STORE_DB = 'tabboard-fs';
+export const FILE_STORE_STORE = 'handlers';
+export const FILE_STORE_HANDLE_KEY = 'root';
+
 import type { Settings } from './types';
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = {
@@ -27,4 +35,6 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   restoreNextToCurrent: true,
   theme: 'system',
   confirmBeforeDestructive: true,
+  storageMode: 'browser',
+  storageFolderName: '',
 };

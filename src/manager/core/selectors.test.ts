@@ -107,6 +107,8 @@ function makeState(overrides: Partial<TabBoardState> = {}): TabBoardState {
       restoreNextToCurrent: false,
       confirmBeforeDestructive: true,
       theme: 'system',
+      storageMode: 'browser',
+      storageFolderName: '',
     },
     createdAt: timestamp,
     updatedAt: timestamp,
