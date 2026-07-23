@@ -375,6 +375,27 @@ class FileStorageAdapterImpl implements StorageAdapter {
     return clone(this.cachedState);
   }
 
+  /**
+   * Re-read all files from disk and update cache. Used by the active adapter
+   * layer when a cross-context ping indicates another context wrote newer data.
+   * Notifies same-context subscribers if the state actually changed.
+   */
+  async reloadFromDisk(): Promise<void> {
+    // Wait for any in-flight write in THIS context to settle before reading
+    // so we do not observe a writeInProgress=true meta from our own commit.
+    await this.writeQueue.catch(() => undefined);
+    // Bypass ensureInitialized's cached-state fast path by forcing a fresh read.
+    const info = await initFileStorageDirectory(this.root);
+    const next = info.state ? clone(info.state) : null;
+    this.initialized = true;
+    this.initPromise = null;
+    const changed = !statesEqual(this.cachedState, next);
+    this.cachedState = next;
+    if (changed && next) {
+      this.dispatchStateChanged(clone(next));
+    }
+  }
+
   async setState(nextState: TabBoardState): Promise<void> {
     await this.ensureInitialized();
     const done = this.writeQueue.then(async () => {
@@ -540,5 +561,11 @@ function groupsEqual(a: Group, b: Group): boolean {
   // Shallow-safe compare: use serialized JSON. The groups are plain data
   // (no functions/DOM nodes) so structural equality via JSON is acceptable
   // and avoids pulling in a deep-equal dependency.
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function statesEqual(a: TabBoardState | null, b: TabBoardState | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
   return JSON.stringify(a) === JSON.stringify(b);
 }
