@@ -7,12 +7,28 @@ import { ManagerLayout } from './components/shell/ManagerLayout';
 import { ErrorBoundary } from './components/shell/ErrorBoundary';
 import { useStoreHydration } from '../shared/hooks/useStoreHydration';
 import { useColorScheme } from '../shared/hooks/useColorScheme';
-import { ToastProvider } from './hooks/useToast';
+import { ToastProvider, useToast } from './hooks/useToast';
+import { onFallback } from '../shared/store/activeAdapter';
 import { logBreadcrumb, logWarning } from '../shared/utils/diagnostics';
 
 // If hydration has not completed within this window, stop showing a blank
 // loading overlay and offer a recovery action instead of an endless white page.
 const HYDRATION_WATCHDOG_MS = 8000;
+
+function FileStorageFallbackToast() {
+  const { showError } = useToast();
+  useEffect(() => {
+    const unsub = onFallback((reason: string) => {
+      logWarning('manager', `file storage fallback: ${reason}`);
+      showError(
+        'File storage is unavailable — using browser storage for now. Open settings to reconnect.',
+        'Storage fallback',
+      );
+    });
+    return unsub;
+  }, [showError]);
+  return null;
+}
 
 function AppContent() {
   const colorScheme = useColorScheme();
@@ -20,6 +36,7 @@ function AppContent() {
   return (
     <MantineProvider theme={theme} forceColorScheme={colorScheme}>
       <ToastProvider>
+        <FileStorageFallbackToast />
         <ManagerLayout />
       </ToastProvider>
     </MantineProvider>
