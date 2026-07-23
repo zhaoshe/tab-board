@@ -109,9 +109,12 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes[STATE_KEY]) {
-    void applyActionPopup();
-  }
+  if (area !== 'local') return;
+  const stateChange = changes[STATE_KEY];
+  if (!stateChange) return;
+  const previousActionClick = getStoredActionClick(stateChange.oldValue);
+  const nextActionClick = getStoredActionClick(stateChange.newValue);
+  if (previousActionClick !== nextActionClick) void applyActionPopup(nextActionClick);
 });
 
 chrome.omnibox.setDefaultSuggestion({
@@ -503,11 +506,18 @@ async function refreshContextMenus() {
   });
 }
 
-async function applyActionPopup() {
-  const settings = await getSettings();
-  await chrome.action.setPopup({ popup: settings.actionClick === 'popup' ? POPUP_PAGE : '' });
+function getStoredActionClick(value: unknown): 'store' | 'popup' {
+  if (!value || typeof value !== 'object') return 'store';
+  const settings = (value as { settings?: unknown }).settings;
+  if (!settings || typeof settings !== 'object') return 'store';
+  return (settings as { actionClick?: unknown }).actionClick === 'popup' ? 'popup' : 'store';
+}
+
+async function applyActionPopup(actionClick?: 'store' | 'popup') {
+  const mode = actionClick ?? (await getSettings()).actionClick;
+  await chrome.action.setPopup({ popup: mode === 'popup' ? POPUP_PAGE : '' });
   await chrome.action.setTitle({
-    title: settings.actionClick === 'popup' ? 'Open TabBoard' : 'Save tabs to TabBoard',
+    title: mode === 'popup' ? 'Open TabBoard' : 'Save tabs to TabBoard',
   });
 }
 

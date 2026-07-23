@@ -158,7 +158,7 @@ describe('overlay focus restoration scheduling', () => {
     )).toBeNull();
     expect(hook).toContain('restoreFocusOnClose: options.restoreFocusOnClose === true');
     expect(hook).toContain('openPreview({ ...options, restoreFocusOnClose: true })');
-    expect(hook).toContain('restoreFocusOnClose: preview?.trigger === trigger && preview.restoreFocusOnClose');
+    expect(hook).toContain('restoreFocusOnClose: previewRef.current?.trigger === trigger');
     expect(hook).toContain('getOverlayFocusRestoreTarget(null, currentPreview, shouldRestore)');
   });
 
@@ -330,11 +330,11 @@ describe('centralized manager overlay contracts', () => {
     expect(card).toContain('aria-haspopup="menu"');
     expect(card).toContain('aria-expanded={isSessionMenuOpen}');
     expect(row).toContain("aria-haspopup={isDragOverlay ? undefined : 'dialog'}");
-    expect(row).toContain('aria-expanded={isDragOverlay ? undefined : isPreviewOpen(infoKey)}');
+    expect(row).toContain('aria-expanded={isDragOverlay ? undefined : isPreviewOpen}');
     expect(row).toMatch(/aria-label="Delete"[\s\S]*disabled=\{locked\}[\s\S]*onClick=\{handleDelete\}/);
     expect(row).not.toContain('aria-label="More"');
     expect(openTabs).toContain('aria-haspopup="dialog"');
-    expect(openTabs).toContain('aria-expanded={isPreviewOpen(previewKey)}');
+    expect(openTabs).toContain('aria-expanded={isPreviewOpen}');
     expect(openTabs).not.toContain('onContextMenu');
     expect(header).toContain('aria-label="Category options"');
     expect(header).toContain('Manage categories');
@@ -343,9 +343,9 @@ describe('centralized manager overlay contracts', () => {
 
   it('keeps shared preview triggers as dialogs when Open Tab filtering is unavailable', () => {
     expect(row).toContain("aria-haspopup={isDragOverlay ? undefined : 'dialog'}");
-    expect(row).toContain('aria-expanded={isDragOverlay ? undefined : isPreviewOpen(infoKey)}');
+    expect(row).toContain('aria-expanded={isDragOverlay ? undefined : isPreviewOpen}');
     expect(openTabs).toContain('aria-haspopup="dialog"');
-    expect(openTabs).toContain('aria-expanded={isPreviewOpen(previewKey)}');
+    expect(openTabs).toContain('aria-expanded={isPreviewOpen}');
     expect(row).not.toContain('event.stopPropagation(); handleClick()');
   });
 

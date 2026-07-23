@@ -218,6 +218,27 @@ describe('capture policy', () => {
 });
 
 describe('Task107 source contracts', () => {
+  it('defers long-list filtering while preserving CSS-contained rows', () => {
+    const runtime = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useOpenTabsRuntime.ts'), 'utf8');
+    const css = readFileSync(resolve(process.cwd(), 'src/manager/styles/manager.css'), 'utf8');
+    const rowStart = css.indexOf('.manager-open-tab-row {');
+    const rowEnd = css.indexOf('}', rowStart);
+    const row = css.slice(rowStart, rowEnd + 1);
+
+    expect(runtime).toContain('useDeferredValue');
+    expect(runtime).toContain('const deferredQuery = useDeferredValue(query)');
+    expect(runtime).toContain('filterOpenTabs(selectedWindow?.tabs ?? [], deferredQuery)');
+    expect(row).toContain('content-visibility: auto');
+    expect(row).toContain('contain-intrinsic-size:');
+  });
+
+  it('structurally shares direct selected-capture reconciliation before publishing it', () => {
+    const runtime = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useOpenTabsRuntime.ts'), 'utf8');
+
+    expect(runtime).toContain("import { structurallyShareState } from '../../shared/store/stateStructuralSharing';");
+    expect(runtime).toContain('useTabBoardStore.setState(structurallyShareState(currentState, stateToApply))');
+  });
+
   const root = resolve(process.cwd(), 'src');
   const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
 

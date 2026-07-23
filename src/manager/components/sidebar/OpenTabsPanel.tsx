@@ -27,8 +27,9 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   ManagerMenuItem,
   useManagerInfoTrigger,
-  useManagerOverlayController,
+  useManagerOverlayCommands,
   useManagerOverlayLifecycle,
+  useManagerPreviewOpen,
 } from '../../hooks/useManagerOverlays';
 import {
   deriveSelectedStorableRecords,
@@ -119,7 +120,7 @@ function OpenTabContentTrigger({
   onCloseTab,
   onPinTab,
 }: OpenTabContentTriggerProps) {
-  const { isPreviewOpen } = useManagerOverlayController();
+  const isPreviewOpen = useManagerPreviewOpen(previewKey);
   const [faviconFailed, setFaviconFailed] = useState(false);
   const showFavicon = Boolean(tab.favIconUrl) && !faviconFailed;
   const infoTriggerRef = useManagerInfoTrigger(previewKey, {
@@ -195,7 +196,7 @@ function OpenTabContentTrigger({
       data-info-key={previewKey}
       className="manager-open-tab-content"
       aria-haspopup="dialog"
-      aria-expanded={isPreviewOpen(previewKey)}
+      aria-expanded={isPreviewOpen}
       style={{
         transform: CSS.Translate.toString(transform),
         display: 'flex',
@@ -260,7 +261,7 @@ export function OpenTabsPanel({
   const {
     captureFocusRestoreIntent,
     restoreFocusAfterMutation,
-  } = useManagerOverlayController();
+  } = useManagerOverlayCommands();
   const overlayItemKey = useMemo(
     () => `${selectedWindowId ?? 'none'}:${filteredTabs.map(getOpenTabOverlayLifecycleKey).join('|')}`,
     [filteredTabs, selectedWindowId],

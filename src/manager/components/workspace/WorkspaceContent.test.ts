@@ -3,6 +3,8 @@ import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { create } from 'zustand';
+import type { DragMarker } from '../../core/dnd';
+import { getSessionCardDragMarker } from './WorkspaceContent';
 
 type TestFolder = {
   id: string;
@@ -178,5 +180,20 @@ describe('WorkspaceContent folder selector updates', () => {
     });
 
     expect(boardLabel()).toBe('Workspace Category sessions');
+  });
+});
+
+describe('WorkspaceContent drag marker scoping', () => {
+  it('only passes a tab marker to its target session card', () => {
+    const marker: DragMarker = {
+      kind: 'tab',
+      groupId: 'group-current',
+      tabId: 'tab-current',
+      placement: 'before',
+    };
+
+    expect(getSessionCardDragMarker(marker, 'group-current')).toBe(marker);
+    expect(getSessionCardDragMarker(marker, 'group-other')).toBeNull();
+    expect(getSessionCardDragMarker({ kind: 'group', index: 0 }, 'group-current')).toBeNull();
   });
 });

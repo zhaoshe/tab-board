@@ -36,7 +36,7 @@ import { useSearchQuery } from '../../hooks/useFilteredGroups';
 import { SearchBar } from '../search/SearchBar';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import { validateFolderName, type FolderNameValidation } from '../../../shared/model';
-import { useManagerOverlayController } from '../../hooks/useManagerOverlays';
+import { useManagerOverlayCommands } from '../../hooks/useManagerOverlays';
 
 const FOLDER_COLORS = [
   '#228be6',
@@ -268,7 +268,7 @@ export function WorkspaceHeader({
     categoryOrderByWorkspace: state.categoryOrderByWorkspace,
   });
   const [isSearchExpanded, setIsSearchExpanded] = useState(() => getInitialSearchExpanded(query));
-  const { closeOverlays } = useManagerOverlayController();
+  const { closeOverlays } = useManagerOverlayCommands();
   const [categoryManagerOpened, setCategoryManagerOpened] = useState(false);
   const [createModalOpened, setCreateModalOpened] = useState(false);
   const [renameModalOpened, setRenameModalOpened] = useState(false);

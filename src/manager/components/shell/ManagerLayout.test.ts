@@ -114,6 +114,7 @@ vi.mock('../../hooks/useManagerOverlays', () => ({
   ManagerOverlayPortal: () => null,
   ManagerOverlaysProvider: ({ children }: { children?: ReactNode }) => children,
   useManagerOverlayController: () => ({ closeOverlays: vi.fn() }),
+  useManagerOverlayCommands: () => ({ closeOverlays: vi.fn() }),
 }));
 vi.mock('../../../shared/store/useTabBoardStore', () => ({ useTabBoardStore: testHarness.useStore }));
 vi.mock('../../core/dnd', async () => {

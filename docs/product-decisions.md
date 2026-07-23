@@ -745,6 +745,32 @@ Status:
 
 Accepted。
 
+## D033: Preserve full DOM while optimizing runtime hot paths
+
+Context:
+
+大量 sessions/open tabs 时，重复 collection 扫描、authoritative normalization 引用重建、overlay context fan-out 和 drag marker 全量传播会增加交互成本。直接使用 JS virtualization 虽能减少挂载数量，但会影响 `@dnd-kit` measurement、focus restoration、preview anchors、find-in-page 和 accessibility。
+
+Decision:
+
+保留 session board 与 Open Tabs 的完整 DOM。运行时通过单次派生、semantic structural sharing、stable listeners、细粒度 overlay state subscription、marker-local props、`useDeferredValue` 和 CSS `content-visibility` 降低成本；不新增 virtualization 或性能依赖。
+
+Rationale:
+
+- 现有热点可以在原有边界内消除，不需要牺牲 DnD/focus 行为。
+- Structural sharing 在 authoritative publication 边界统一复用语义未变实体，比组件层不断增加 equality workaround 更可靠。
+- `content-visibility` 与 deferred filtering 能降低不可见绘制和输入阻塞，同时所有交互目标仍保留在 DOM。
+
+Trade-offs:
+
+- 完整 DOM 的内存成本仍随列表长度增长；若未来达到数百或上千 rows，需要基于 profiler 重新评估。
+- Semantic equality 需要随 state schema 演进维护；新增嵌套字段时必须补 structural-sharing 回归。
+- CSS containment 的收益依赖浏览器支持，Chrome extension 目标环境满足当前要求。
+
+Status:
+
+Accepted。
+
 ## Decision template
 
 ```md

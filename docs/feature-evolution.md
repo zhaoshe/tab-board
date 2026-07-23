@@ -21,6 +21,27 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-07-22: React 运行时性能优化收尾
+
+性能审查识别出 DnD、Open Tabs、authoritative state 和 overlay 的重复工作。本轮在不改变产品行为、不新增依赖、不引入 JS virtualization 的前提下完成全部 11 项优化。
+
+变化：
+
+- DnD collision detection 改为单次扫描，visible groups 与 drag replacement snapshot 保持稳定；drag marker 在 `WorkspaceContent` 中先缩窄到目标 card/insert target，memoized card 不再因无关 marker 更新重渲染。
+- Open Tabs browser-group 查询按请求复用 Promise 并并行转换；selection records/IDs 使用面板级 memo + `Set`；query 使用 `useDeferredValue`，off-screen rows 使用 CSS `content-visibility`。
+- `SessionCard` 以一次线性 `useMemo` 派生 visible tabs、counts、selected refs 和 canonical index。
+- Authoritative state 发布前执行语义 structural sharing，复用未变化的 workspace/folder/group/tab 等实体引用，跨 workspace 写入不再扰动当前 board。
+- Chrome action 只在 `settings.actionClick` 变化时更新。
+- Overlay 全局 listeners 只绑定一次；commands 与 observable state 分离，menu/preview key 通过细粒度外部存储订阅，避免全 board context fan-out。
+
+判断：
+
+- 优先消除已验证的重复扫描、API 调用和 render fan-out，比替换 Mantine、拆 bundle 或引入 virtualization 风险更低、收益更直接。
+- Structural sharing 放在 authoritative publication 边界，而不是继续堆局部 selector，能统一解决 normalization 重建引用的问题。
+- Open Tabs 与 session board 都保留完整 DOM，以维持 `@dnd-kit` measurement、focus restore、preview anchors、find-in-page 和 accessibility。
+
+当前状态：Current。`npm run build`、`npm run check`、664 项 Vitest 与 14 项 Playwright 通过；production `dist/` 在隔离 Chromium extension profile 中完成同分类/跨分类/saved tab/Open Tabs existing+new session DnD、browser group refresh 和 overlay focus lifecycle 验收。
+
 ### 2026-07-21: 修复 saved link 返回后的 preview 定位循环
 
 用户从 saved session 打开链接后切回 TabBoard 时出现 React error #185。最终生产堆栈直接命中 `ManagerOverlayPortal → setPreviewPosition`：preview 定位的 layout effect 在每次 commit 都派发 position state，而 controller 又包含 preview state；同时 saved-link click 在组件 handler 中关闭浮层后继续冒泡到 document preview handler，将本应关闭的 preview 重新打开。两者叠加后形成同步定位更新闭环。

@@ -59,7 +59,7 @@ import { useManagerRuntime } from '../../hooks/useManagerRuntime';
 import {
   ManagerOverlayPortal,
   ManagerOverlaysProvider,
-  useManagerOverlayController,
+  useManagerOverlayCommands,
 } from '../../hooks/useManagerOverlays';
 import {
   sameCaptureCategorySnapshot,
@@ -323,7 +323,7 @@ export function getWorkspaceFiltersAfterDelete(): {
 }
 
 function ManagerOverlayDragLifecycle() {
-  const { closeOverlays } = useManagerOverlayController();
+  const { closeOverlays } = useManagerOverlayCommands();
   useDndMonitor({ onDragStart: () => closeOverlays() });
   return null;
 }

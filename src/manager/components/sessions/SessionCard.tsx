@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionIcon,
   Box,
@@ -22,7 +22,7 @@ import {
 import { useSortable, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useShallow } from 'zustand/react/shallow';
-import type { Group } from '../../../shared/model';
+import type { Group, TabItem } from '../../../shared/model';
 import type { CategoryFilter } from '../../core/selectors';
 import {
   getDragPlaceholderStyle,
@@ -46,7 +46,8 @@ import { SessionPlaceholder } from './SessionPlaceholder';
 import {
   ManagerMenuItem,
   isContextMenuKey,
-  useManagerOverlayController,
+  useManagerMenuOpen,
+  useManagerOverlayCommands,
   useManagerOverlayLifecycle,
 } from '../../hooks/useManagerOverlays';
 
@@ -62,7 +63,7 @@ interface SessionCardProps {
   sourceRect?: DragSourceRect | null;
 }
 
-export function SessionCard({
+export const SessionCard = memo(function SessionCard({
   group,
   runtime,
   searchQuery = '',
@@ -77,9 +78,9 @@ export function SessionCard({
   const [titleValue, setTitleValue] = useState(group.title);
   const [isEditingNote, setIsEditingNote] = useState(false);
   const [noteValue, setNoteValue] = useState(group.note);
-  const { openMenu, closeOverlays, isMenuOpen } = useManagerOverlayController();
+  const { openMenu, closeOverlays } = useManagerOverlayCommands();
   const menuKey = `session:${group.id}`;
-  const isSessionMenuOpen = isMenuOpen(menuKey);
+  const isSessionMenuOpen = useManagerMenuOpen(menuKey);
   useManagerOverlayLifecycle(`${group.id}:${group.updatedAt}:${group.tabs.map((tab) => tab.id).join(',')}`);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const noteTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -120,17 +121,36 @@ export function SessionCard({
   const addTabToGroup = useTabBoardStore((state) => state.addTabToGroup);
   const addNoteToGroup = useTabBoardStore((state) => state.addNoteToGroup);
 
-  const restorableTabs = group.tabs.filter(isRestorableTab);
   const normalizedQuery = normalizeSearch(searchQuery);
   const titleMatches = normalizedQuery.length > 0 && group.title.toLowerCase().includes(normalizedQuery);
-  const visibleTabs = useMemo(
-    () => !normalizedQuery || titleMatches
-      ? group.tabs
-      : group.tabs.filter((tab) => tabMatchesQuery(tab, normalizedQuery)),
-    [group.tabs, normalizedQuery, titleMatches],
-  );
-  const linkCount = group.tabs.filter((tab) => tab.itemType === ITEM_LINK).length;
-  const noteCount = group.tabs.filter((tab) => tab.itemType === ITEM_NOTE).length;
+  const tabMetadata = useMemo(() => {
+    const visibleTabs: TabItem[] = [];
+    const selectedRefs: SavedTabRef[] = [];
+    const canonicalIndexByTabId = new Map<string, number>();
+    let restorableTabCount = 0;
+    let linkCount = 0;
+    let noteCount = 0;
+
+    group.tabs.forEach((tab, index) => {
+      canonicalIndexByTabId.set(tab.id, index);
+      if (isRestorableTab(tab)) restorableTabCount += 1;
+      if (tab.itemType === ITEM_LINK) linkCount += 1;
+      if (tab.itemType === ITEM_NOTE) noteCount += 1;
+      if (selectedTabIds.has(tab.id)) selectedRefs.push({ groupId: group.id, tabId: tab.id });
+      if (!normalizedQuery || titleMatches || tabMatchesQuery(tab, normalizedQuery)) {
+        visibleTabs.push(tab);
+      }
+    });
+
+    return {
+      canonicalIndexByTabId,
+      linkCount,
+      noteCount,
+      restorableTabCount,
+      selectedRefs,
+      visibleTabs,
+    };
+  }, [group.id, group.tabs, normalizedQuery, selectedTabIds, titleMatches]);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -291,10 +311,6 @@ export function SessionCard({
     });
   };
 
-  const selectedRefs: SavedTabRef[] = group.tabs
-    .filter((tab) => selectedTabIds.has(tab.id))
-    .map((tab) => ({ groupId: group.id, tabId: tab.id }));
-
   const moveMenuItems = () => (
     <>
       {categoryOptions.map((category) => (
@@ -428,7 +444,7 @@ export function SessionCard({
           )}
         </div>
         <div className="session-card__actions" data-overlay-open={isSessionMenuOpen ? 'true' : undefined}>
-          {restorableTabs.length > 0 && (
+          {tabMetadata.restorableTabCount > 0 && (
             <Tooltip label="Restore">
               <ActionIcon size="sm" variant="subtle" color="blue" disabled={isDragOverlay} onClick={handleRestore} aria-label="Restore">
                 <IconRestore size={16} />
@@ -453,8 +469,8 @@ export function SessionCard({
           </Tooltip>
         </div>
         <div className="session-card__meta" aria-label="Session details">
-          {linkCount > 0 && <span className="session-card__meta-item"><IconLink size={12} />{linkCount} link{linkCount === 1 ? '' : 's'}</span>}
-          {noteCount > 0 && <span className="session-card__meta-item"><IconFileText size={12} />{noteCount} note{noteCount === 1 ? '' : 's'}</span>}
+          {tabMetadata.linkCount > 0 && <span className="session-card__meta-item"><IconLink size={12} />{tabMetadata.linkCount} link{tabMetadata.linkCount === 1 ? '' : 's'}</span>}
+          {tabMetadata.noteCount > 0 && <span className="session-card__meta-item"><IconFileText size={12} />{tabMetadata.noteCount} note{tabMetadata.noteCount === 1 ? '' : 's'}</span>}
           {group.locked && <span className="session-card__meta-item"><IconLock size={12} />Locked</span>}
           <Text className="session-card__created" size="xs" c="dimmed">
             {new Date(group.createdAt).toLocaleDateString()}
@@ -489,20 +505,18 @@ export function SessionCard({
 
       <div className="session-card__tabs" role="list">
         <SortableContext
-          items={visibleTabs.map((tab) => `tab-${group.id}-${tab.id}`)}
+          items={tabMetadata.visibleTabs.map((tab) => `tab-${group.id}-${tab.id}`)}
           strategy={verticalListSortingStrategy}
         >
-          {visibleTabs.map((tab) => {
-            const canonicalTabIndex = group.tabs.findIndex((item) => item.id === tab.id);
-            return (
+          {tabMetadata.visibleTabs.map((tab) => (
             <TabItemRow
               key={tab.id}
               tab={tab}
               groupId={group.id}
               workspaceId={group.workspaceId}
-              tabIndex={canonicalTabIndex}
+              tabIndex={tabMetadata.canonicalIndexByTabId.get(tab.id) ?? 0}
               dropMarker={dragMarker}
-              selectedRefs={selectedRefs}
+              selectedRefs={tabMetadata.selectedRefs}
               runtime={runtime}
               locked={group.locked}
               selectionMode={selectedTabIds.size > 0}
@@ -512,16 +526,15 @@ export function SessionCard({
               sourceRect={sourceRect}
               isDragOverlay={isDragOverlay}
             />
-            );
-          })}
+          ))}
           {dragMarker?.kind === 'tab'
             && dragMarker.groupId === group.id
             && dragMarker?.placement === 'body' && (
             <span className="session-card__drop-marker" aria-hidden="true" />
           )}
         </SortableContext>
-        {normalizedQuery && visibleTabs.length === 0 && <Text size="xs" c="dimmed">No matching tabs</Text>}
+        {normalizedQuery && tabMetadata.visibleTabs.length === 0 && <Text size="xs" c="dimmed">No matching tabs</Text>}
       </div>
     </article>
   );
-}
+});

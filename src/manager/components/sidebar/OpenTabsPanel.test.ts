@@ -100,6 +100,11 @@ vi.mock('../../hooks/useManagerOverlays', async () => {
       isPreviewOpen: () => false,
       restoreFocusAfterMutation: () => undefined,
     }),
+    useManagerOverlayCommands: () => ({
+      captureFocusRestoreIntent: () => ({}),
+      restoreFocusAfterMutation: () => undefined,
+    }),
+    useManagerPreviewOpen: () => false,
     useManagerOverlayLifecycle: () => undefined,
   };
 });

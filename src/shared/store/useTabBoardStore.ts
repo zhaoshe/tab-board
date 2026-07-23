@@ -24,6 +24,7 @@ import {
 import type { DropIntent } from '../../manager/core/dnd';
 import type { OpenTabInfo } from '../../manager/core/open-tabs';
 import { emitEvent, AppEvents } from '../utils/events';
+import { structurallyShareState } from './stateStructuralSharing';
 interface TabBoardStore extends TabBoardState {
   hydrated: boolean;
   persistenceError: string | null;
@@ -320,7 +321,6 @@ function reconcileAuthoritativeState(
   const reconciledBase = hasDistinctNewerRemoteState(authoritative, buffered)
     ? replayCommittedMutations(reconciledRemoteState, authoritative, committedMutations)
     : reconciledRemoteState;
-  lastAuthoritativeState = reconciledBase;
   const failures: ReconciliationFailure[] = [];
   const retainedPending: StateMutation[] = [];
   let optimistic = reconciledBase;
@@ -337,8 +337,13 @@ function reconcileAuthoritativeState(
     }
   });
   pendingMutations = retainedPending;
+  const sharedOptimistic = structurallyShareState(persistedSnapshot(state), optimistic);
+  lastAuthoritativeState = structurallyShareState(
+    lastAuthoritativeState || persistedSnapshot(state),
+    reconciledBase,
+  );
   useTabBoardStore.setState({
-    ...optimistic,
+    ...sharedOptimistic,
     hydrated: state.hydrated,
     persistenceError: useTabBoardStore.getState().persistenceError,
   });
@@ -876,16 +881,19 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
             pendingRemoteState = newState;
             return;
           }
-          lastAuthoritativeState = newState;
-          set({ ...newState, hydrated: true });
+          const current = persistedSnapshot(get());
+          const sharedState = structurallyShareState(current, newState);
+          lastAuthoritativeState = sharedState;
+          set({ ...sharedState, hydrated: true });
         });
 
         const saved = await getState();
         if (generation !== hydrationGeneration) return;
 
         const hydratedState = newestRemoteState(saved, pendingHydrationState);
-        lastAuthoritativeState = hydratedState;
-        set({ ...hydratedState, hydrated: true, persistenceError: null });
+        const sharedState = structurallyShareState(persistedSnapshot(get()), hydratedState);
+        lastAuthoritativeState = sharedState;
+        set({ ...sharedState, hydrated: true, persistenceError: null });
         pendingHydrationState = null;
       } catch (error: unknown) {
         if (generation !== hydrationGeneration) return;

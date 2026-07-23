@@ -52,6 +52,76 @@ afterEach(() => {
 });
 
 describe('TabBoard store remote persistence reconciliation', () => {
+  it('preserves current-workspace entity references for an authoritative write in another workspace', async () => {
+    const workspaceA = {
+      id: 'workspace-a',
+      name: 'A',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const workspaceB = {
+      id: 'workspace-b',
+      name: 'B',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const folderA = {
+      id: 'folder-a',
+      name: 'Folder A',
+      color: 'slate',
+      workspaceId: 'workspace-a',
+      collapsed: false,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    let stored: TabBoardState = {
+      ...createEmptyState(),
+      workspaces: [workspaceA, workspaceB],
+      activeWorkspaceId: 'workspace-a',
+      folders: [folderA],
+      groups: [group('group-a', 'workspace-a'), group('group-b', 'workspace-b')],
+    };
+    const listeners: Array<(changes: Record<string, { newValue: TabBoardState }>, area: string) => void> = [];
+    vi.stubGlobal('chrome', {
+      runtime: {
+        sendMessage: vi.fn(async () => ({ ok: true, result: structuredClone(stored) })),
+      },
+      storage: {
+        local: { get: vi.fn(async () => ({ tabboardState: structuredClone(stored) })) },
+        onChanged: {
+          addListener: (listener: (changes: Record<string, { newValue: TabBoardState }>, area: string) => void) => {
+            listeners.push(listener);
+          },
+          removeListener: vi.fn(),
+        },
+      },
+    });
+    const { useTabBoardStore } = await import('./useTabBoardStore');
+    await useTabBoardStore.getState().hydrate();
+    const before = useTabBoardStore.getState();
+    const currentGroup = before.groups.find(({ id }) => id === 'group-a');
+    const currentFolder = before.folders.find(({ id }) => id === 'folder-a');
+    const currentWorkspace = before.workspaces.find(({ id }) => id === 'workspace-a');
+
+    stored = {
+      ...stored,
+      mutationRevision: stored.mutationRevision + 1,
+      groups: stored.groups.map((item) => item.id === 'group-b'
+        ? { ...item, title: 'Remote workspace B update' }
+        : item),
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+    listeners.forEach((listener) => listener({
+      tabboardState: { newValue: structuredClone(stored) },
+    }, 'local'));
+
+    const after = useTabBoardStore.getState();
+    expect(after.groups.find(({ id }) => id === 'group-a')).toBe(currentGroup);
+    expect(after.folders.find(({ id }) => id === 'folder-a')).toBe(currentFolder);
+    expect(after.workspaces.find(({ id }) => id === 'workspace-a')).toBe(currentWorkspace);
+    expect(after.groups.find(({ id }) => id === 'group-b')?.title).toBe('Remote workspace B update');
+  });
+
   it('keeps newer remote storage state observed during an in-flight RPC', async () => {
     let stored: TabBoardState = applyStateMutations(createEmptyState(), [{
       type: 'add-group',

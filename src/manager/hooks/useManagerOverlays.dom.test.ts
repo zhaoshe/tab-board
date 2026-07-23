@@ -3,6 +3,7 @@ import {
   act,
   createElement,
   Fragment,
+  memo,
   type ReactNode,
   useRef,
   useState,
@@ -14,6 +15,7 @@ import {
   ManagerOverlayPortal,
   ManagerOverlaysProvider,
   useManagerInfoTrigger,
+  useManagerOverlayCommands,
   useManagerOverlayController,
   type ManagerOverlaysController,
 } from './useManagerOverlays';
@@ -92,7 +94,21 @@ interface MountedOverlay {
 
 let activeMount: MountedOverlay | null = null;
 
-function OverlayHarness({ onReady }: { onReady: (value: { trigger: HTMLButtonElement; controller: ManagerOverlaysController; removeTrigger: () => void }) => void }): ReactNode {
+const OverlayCommandRenderProbe = memo(function OverlayCommandRenderProbe(
+  { onRender }: { onRender: () => void },
+): ReactNode {
+  useManagerOverlayCommands();
+  onRender();
+  return null;
+});
+
+function OverlayHarness({
+  onReady,
+  onCommandRender,
+}: {
+  onReady: (value: { trigger: HTMLButtonElement; controller: ManagerOverlaysController; removeTrigger: () => void }) => void;
+  onCommandRender?: () => void;
+}): ReactNode {
   const [isTriggerVisible, setTriggerVisible] = useState(true);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const controller = useManagerOverlayController();
@@ -122,11 +138,12 @@ function OverlayHarness({ onReady }: { onReady: (value: { trigger: HTMLButtonEle
           'data-info-popover': 'open',
         }, 'Preview')
       : null,
+    onCommandRender ? createElement(OverlayCommandRenderProbe, { onRender: onCommandRender }) : null,
     createElement(ManagerOverlayPortal),
   );
 }
 
-async function mountOverlay(): Promise<MountedOverlay> {
+async function mountOverlay(onCommandRender?: () => void): Promise<MountedOverlay> {
   const container = document.createElement('div');
   document.body.append(container);
   let ready: { trigger: HTMLButtonElement; controller: ManagerOverlaysController; removeTrigger: () => void } | null = null;
@@ -135,7 +152,7 @@ async function mountOverlay(): Promise<MountedOverlay> {
     root.render(createElement(
       ManagerOverlaysProvider,
       null,
-      createElement(OverlayHarness, { onReady: (value) => { ready = value; } }),
+      createElement(OverlayHarness, { onReady: (value) => { ready = value; }, onCommandRender }),
     ));
   });
   const readyValue = ready as { trigger: HTMLButtonElement; controller: ManagerOverlaysController; removeTrigger: () => void } | null;
@@ -175,6 +192,60 @@ afterEach(async () => {
 });
 
 describe('mounted manager overlay behavior', () => {
+  it('binds global listeners once across menu and preview state changes', async () => {
+    const addListener = vi.spyOn(document, 'addEventListener');
+    const removeListener = vi.spyOn(document, 'removeEventListener');
+    const mounted = await mountOverlay();
+    const pointerAddsAfterMount = addListener.mock.calls.filter(([type]) => type === 'pointerdown').length;
+    const scrollAddsAfterMount = addListener.mock.calls.filter(([type]) => type === 'scroll').length;
+
+    await act(async () => {
+      mounted.controller.openMenu({
+        id: 'stable-listener-menu',
+        kind: 'open-tab',
+        anchor: { x: 10, y: 10 },
+        content: createElement('button', { role: 'menuitem', type: 'button' }, 'Action'),
+        trigger: mounted.trigger,
+      });
+    });
+    await act(async () => mounted.controller.closeMenu());
+    await act(async () => {
+      mounted.trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    });
+
+    expect(addListener.mock.calls.filter(([type]) => type === 'pointerdown')).toHaveLength(pointerAddsAfterMount);
+    expect(addListener.mock.calls.filter(([type]) => type === 'scroll')).toHaveLength(scrollAddsAfterMount);
+    expect(removeListener.mock.calls.filter(([type]) => type === 'pointerdown')).toHaveLength(0);
+    expect(removeListener.mock.calls.filter(([type]) => type === 'scroll')).toHaveLength(0);
+
+    await unmountOverlay(mounted);
+  });
+
+  it('does not rerender command-only consumers when overlay state changes', async () => {
+    let commandRenderCount = 0;
+    const mounted = await mountOverlay(() => {
+      commandRenderCount += 1;
+    });
+    expect(commandRenderCount).toBe(1);
+
+    await act(async () => {
+      mounted.controller.openMenu({
+        id: 'command-render-menu',
+        kind: 'open-tab',
+        anchor: { x: 10, y: 10 },
+        content: createElement('button', { role: 'menuitem', type: 'button' }, 'Action'),
+        trigger: mounted.trigger,
+      });
+    });
+    await act(async () => mounted.controller.closeMenu());
+    await act(async () => {
+      mounted.trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    });
+
+    expect(commandRenderCount).toBe(1);
+    await unmountOverlay(mounted);
+  });
+
   it('restores trigger focus after focusin, keyboard click, and Escape only after preview unmounts', async () => {
     const raf = installRafController();
     const mounted = await mountOverlay();

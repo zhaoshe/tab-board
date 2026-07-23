@@ -106,8 +106,13 @@ describe('Task108 session rendering contracts', () => {
   it('renders every matching tab and uses canonical indexes for filtered targets', () => {
     expect(card).not.toContain('slice(0, 5)');
     expect(card).toContain('group.tabs');
-    expect(card).toContain('const canonicalTabIndex = group.tabs.findIndex');
-    expect(card).toContain('tabIndex={canonicalTabIndex}');
+    expect(card).toContain('const tabMetadata = useMemo');
+    expect(card).toContain('canonicalIndexByTabId');
+    expect(card).toContain('selectedRefs');
+    expect(card).toContain('linkCount');
+    expect(card).toContain('noteCount');
+    expect(card).toContain('tabIndex={tabMetadata.canonicalIndexByTabId.get(tab.id) ?? 0}');
+    expect(card).not.toContain('group.tabs.findIndex');
     const title = cssBlock('.tab-item-row__title');
     expect(title).toContain('white-space: nowrap');
     expect(title).toContain('text-overflow: ellipsis');
@@ -149,6 +154,13 @@ describe('Task108 session rendering contracts', () => {
     expect(row).toContain('tab-item-row__drop-marker');
     expect(card).toContain('session-card__drop-marker');
     expect(card).toContain("dragMarker?.placement === 'body'");
+  });
+
+  it('memoizes session cards and scopes drag markers before passing props', () => {
+    expect(card).toContain('export const SessionCard = memo(function SessionCard');
+    expect(workspace).toContain('const GroupInsertionTarget = memo(function GroupInsertionTarget');
+    expect(workspace).toContain('dragMarker={getSessionCardDragMarker(dragMarker, group.id)}');
+    expect(workspace).not.toMatch(/<SessionCard[\s\S]*?dragMarker=\{dragMarker\}/);
   });
 
   it('keeps Chrome APIs behind the typed runtime boundary', () => {

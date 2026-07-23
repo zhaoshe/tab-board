@@ -274,6 +274,8 @@
   position: relative;
   min-height: 36px;
   margin-inline: calc(-1 * var(--mantine-spacing-xs));
+  content-visibility: auto;
+  contain-intrinsic-size: auto 36px;
 }
 
 .manager-open-tab-content {

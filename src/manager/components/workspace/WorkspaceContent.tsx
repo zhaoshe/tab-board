@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Box, Text } from '@mantine/core';
 import { IconArchive, IconFolder, IconSearch, IconStar } from '@tabler/icons-react';
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable';
@@ -24,16 +25,16 @@ interface GroupInsertionTargetProps {
   category: CategoryFilter;
   index: number;
   workspaceId: string;
-  dragMarker?: DragMarker | null;
+  isMarker?: boolean;
   isEndTarget?: boolean;
 }
 
-function GroupInsertionTarget({
+const GroupInsertionTarget = memo(function GroupInsertionTarget({
   id,
   category,
   index,
   workspaceId,
-  dragMarker = null,
+  isMarker = false,
   isEndTarget = false,
 }: GroupInsertionTargetProps) {
   const { setNodeRef } = useDroppable({
@@ -45,8 +46,6 @@ function GroupInsertionTarget({
       } satisfies DndData,
     },
   });
-  const isMarker = dragMarker?.kind === 'group'
-    && dragMarker.index === index;
   // data-drop-target="new-group" remains oracle marker for end insertion targets.
   return (
     <div
@@ -59,6 +58,15 @@ function GroupInsertionTarget({
       {isMarker && <span className="session-board__drop-marker" aria-hidden="true" />}
     </div>
   );
+});
+
+export function getSessionCardDragMarker(
+  dragMarker: DragMarker | null,
+  groupId: string,
+): DragMarker | null {
+  return dragMarker?.kind === 'tab' && dragMarker.groupId === groupId
+    ? dragMarker
+    : null;
 }
 
 export function WorkspaceContent({
@@ -169,7 +177,7 @@ export function WorkspaceContent({
               category={category}
               index={categoryGroups.length}
               workspaceId={activeWorkspaceId}
-              dragMarker={dragMarker}
+              isMarker={dragMarker?.kind === 'group' && dragMarker.index === categoryGroups.length}
               isEndTarget
             />
           </div>
@@ -186,7 +194,7 @@ export function WorkspaceContent({
                     category={category}
                     index={groupIndex}
                     workspaceId={activeWorkspaceId}
-                    dragMarker={dragMarker}
+                    isMarker={dragMarker?.kind === 'group' && dragMarker.index === groupIndex}
                   />
                   <SessionCard
                     group={group}
@@ -195,7 +203,7 @@ export function WorkspaceContent({
                     groupIndex={groupIndex}
                     groupCategory={category}
                     highlighted={highlightedGroupId === group.id}
-                    dragMarker={dragMarker}
+                    dragMarker={getSessionCardDragMarker(dragMarker, group.id)}
                     sourceRect={sourceRect}
                   />
                 </div>
@@ -206,7 +214,7 @@ export function WorkspaceContent({
               category={category}
               index={categoryGroups.length}
               workspaceId={activeWorkspaceId}
-              dragMarker={dragMarker}
+              isMarker={dragMarker?.kind === 'group' && dragMarker.index === categoryGroups.length}
               isEndTarget
             />
           </div>

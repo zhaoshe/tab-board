@@ -32,7 +32,8 @@ import {
 import { useToast } from '../../hooks/useToast';
 import {
   useManagerInfoTrigger,
-  useManagerOverlayController,
+  useManagerOverlayCommands,
+  useManagerPreviewOpen,
 } from '../../hooks/useManagerOverlays';
 
 export function getTabDropMarkerPlacement(
@@ -84,8 +85,9 @@ export function TabItemRow({
   const [isEditingNote, setIsEditingNote] = useState(false);
   const [noteValue, setNoteValue] = useState(tab.note);
   const noteTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const { closeOverlays, isPreviewOpen } = useManagerOverlayController();
+  const { closeOverlays } = useManagerOverlayCommands();
   const infoKey = `saved:${groupId}:${tab.id}`;
+  const isPreviewOpen = useManagerPreviewOpen(infoKey);
   const { showError, showSuccess } = useToast();
   const updateTab = useTabBoardStore((state) => state.updateTab);
   const deleteTab = useTabBoardStore((state) => state.deleteTab);
@@ -334,7 +336,7 @@ export function TabItemRow({
               data-info-popover={isDragOverlay ? undefined : 'saved'}
               data-info-key={isDragOverlay ? undefined : infoKey}
               aria-haspopup={isDragOverlay ? undefined : 'dialog'}
-              aria-expanded={isDragOverlay ? undefined : isPreviewOpen(infoKey)}
+              aria-expanded={isDragOverlay ? undefined : isPreviewOpen}
               onClick={isDragOverlay ? undefined : handleClick}
               disabled={isDragOverlay}
               tabIndex={isDragOverlay ? -1 : undefined}
@@ -350,7 +352,7 @@ export function TabItemRow({
               data-info-popover={isDragOverlay ? undefined : 'saved'}
               data-info-key={isDragOverlay ? undefined : infoKey}
               aria-haspopup={isDragOverlay ? undefined : 'dialog'}
-              aria-expanded={isDragOverlay ? undefined : isPreviewOpen(infoKey)}
+              aria-expanded={isDragOverlay ? undefined : isPreviewOpen}
               tabIndex={isDragOverlay ? -1 : 0}
             >
               {tab.note || tab.title}

@@ -228,6 +228,57 @@ afterEach(() => {
   vi.resetModules();
 });
 
+describe('Chrome action settings synchronization', () => {
+  it('does not update the action when an unrelated state write keeps actionClick unchanged', async () => {
+    const state = createState();
+    const harness = createChromeHarness(state);
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    const listener = harness.chromeMock.storage.onChanged.getListener();
+    if (!listener) throw new Error('Expected storage change listener was not registered.');
+
+    listener({
+      tabboardState: {
+        oldValue: state,
+        newValue: {
+          ...state,
+          updatedAt: '2026-01-02T00:00:00.000Z',
+        },
+      },
+    }, 'local');
+    await Promise.resolve();
+
+    expect(harness.chromeMock.action.setPopup).not.toHaveBeenCalled();
+    expect(harness.chromeMock.action.setTitle).not.toHaveBeenCalled();
+  });
+
+  it('updates the action when actionClick changes', async () => {
+    const state = createState();
+    const harness = createChromeHarness(state);
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    const listener = harness.chromeMock.storage.onChanged.getListener();
+    if (!listener) throw new Error('Expected storage change listener was not registered.');
+
+    listener({
+      tabboardState: {
+        oldValue: state,
+        newValue: {
+          ...state,
+          settings: { ...state.settings, actionClick: 'popup' },
+        },
+      },
+    }, 'local');
+    await vi.waitFor(() => {
+      expect(harness.chromeMock.action.setPopup).toHaveBeenCalledWith({ popup: 'popup.html' });
+    });
+
+    expect(harness.chromeMock.action.setTitle).toHaveBeenCalledWith({ title: 'Open TabBoard' });
+  });
+});
+
 describe('Task194 runtime sender allowlist', () => {
   it('allows trusted extension senders with missing or own extension URLs', async () => {
     const harness = createChromeHarness(createState());

@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -235,6 +236,17 @@ export interface ManagerOverlaysController {
   setPreviewPosition: (position: { left: number; top: number }) => void;
 }
 
+export type ManagerOverlayCommands = Omit<
+  ManagerOverlaysController,
+  'menu' | 'preview' | 'isMenuOpen' | 'isPreviewOpen'
+>;
+
+interface ManagerOverlayStateStore {
+  menu: MenuState | null;
+  preview: PreviewState | null;
+  listeners: Set<() => void>;
+}
+
 interface ManagerOverlaysProviderProps {
   children: ReactNode;
   workspaceKey?: string;
@@ -243,6 +255,8 @@ interface ManagerOverlaysProviderProps {
 }
 
 const ManagerOverlaysContext = createContext<ManagerOverlaysController | null>(null);
+const ManagerOverlayCommandsContext = createContext<ManagerOverlayCommands | null>(null);
+const ManagerOverlayStateStoreContext = createContext<ManagerOverlayStateStore | null>(null);
 
 function getTarget(target: EventTarget | null): Element | null {
   return target instanceof Element ? target : null;
@@ -454,7 +468,7 @@ export function useManagerOverlays({
   }, [cancelPendingFocusRestore, clearCloseTimer, clearOpenTimer, deferFocusRestore]);
 
   const captureFocusRestoreIntent = useCallback((triggerOverride?: HTMLElement | null): ManagerFocusRestoreIntent => {
-    const trigger = triggerOverride ?? menu?.trigger ?? preview?.trigger ?? null;
+    const trigger = triggerOverride ?? menuRef.current?.trigger ?? previewRef.current?.trigger ?? null;
     return {
       trigger,
       fallbackSelectors: getFocusRestoreSelectors(trigger),
@@ -464,7 +478,7 @@ export function useManagerOverlays({
       categoryKey,
       itemKey,
     };
-  }, [categoryKey, itemKey, menu, preview, workspaceKey]);
+  }, [categoryKey, itemKey, workspaceKey]);
 
   const restoreFocusAfterMutation = useCallback((intent: ManagerFocusRestoreIntent) => {
     cancelPendingFocusRestore();
@@ -616,20 +630,20 @@ export function useManagerOverlays({
       document.documentElement.removeAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE);
       advanceFocusEpoch();
       if (isInside(menuElementRef.current, event.target) || isInside(previewElementRef.current, event.target)) return;
-      if (menu?.trigger && isInside(menu.trigger, event.target)) return;
-      if (preview?.trigger && isInside(preview.trigger, event.target)) return;
+      if (menuRef.current?.trigger && isInside(menuRef.current.trigger, event.target)) return;
+      if (previewRef.current?.trigger && isInside(previewRef.current.trigger, event.target)) return;
       closeOverlays();
     };
     const handleOutsideClick = (event: MouseEvent) => {
       if (isInside(menuElementRef.current, event.target) || isInside(previewElementRef.current, event.target)) return;
-      if (menu?.trigger && isInside(menu.trigger, event.target)) return;
-      if (preview?.trigger && isInside(preview.trigger, event.target)) return;
+      if (menuRef.current?.trigger && isInside(menuRef.current.trigger, event.target)) return;
+      if (previewRef.current?.trigger && isInside(previewRef.current.trigger, event.target)) return;
       closeOverlays();
     };
     const handleMenuKeyDown = (event: globalThis.KeyboardEvent) => {
       const isArrowDown = event.key === 'ArrowDown';
       const isArrowUp = event.key === 'ArrowUp';
-      if (!menu || (!isArrowDown && !isArrowUp)) return;
+      if (!menuRef.current || (!isArrowDown && !isArrowUp)) return;
       const target = getTarget(event.target);
       if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
       const menuElement = menuElementRef.current;
@@ -644,7 +658,7 @@ export function useManagerOverlays({
       menuItems[nextIndex]?.focus();
     };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape' || (!menu && !preview)) return;
+      if (event.key !== 'Escape' || (!menuRef.current && !previewRef.current)) return;
       event.preventDefault();
       event.stopPropagation();
       closeOverlays({ restoreFocus: true });
@@ -678,7 +692,8 @@ export function useManagerOverlays({
       if (options) {
         schedulePreview({
           ...options,
-          restoreFocusOnClose: preview?.trigger === trigger && preview.restoreFocusOnClose,
+          restoreFocusOnClose: previewRef.current?.trigger === trigger
+            && previewRef.current.restoreFocusOnClose,
         });
       }
     };
@@ -752,7 +767,7 @@ export function useManagerOverlays({
       clearOpenTimer();
       clearCloseTimer();
     };
-  }, [advanceFocusEpoch, clearCloseTimer, clearOpenTimer, closeOverlays, menu, openPreview, scheduleClosePreview, schedulePreview, preview]);
+  }, [advanceFocusEpoch, clearCloseTimer, clearOpenTimer, closeOverlays, openPreview, scheduleClosePreview, schedulePreview]);
 
   useEffect(() => {
     isProviderMountedRef.current = true;
@@ -793,7 +808,61 @@ export function useManagerOverlays({
 
 export function ManagerOverlaysProvider(props: ManagerOverlaysProviderProps): ReactNode {
   const controller = useManagerOverlays(props);
-  return createElement(ManagerOverlaysContext.Provider, { value: controller }, props.children);
+  const stateStoreRef = useRef<ManagerOverlayStateStore>({
+    menu: controller.menu,
+    preview: controller.preview,
+    listeners: new Set(),
+  });
+  const stateStore = stateStoreRef.current;
+  useLayoutEffect(() => {
+    stateStore.menu = controller.menu;
+    stateStore.preview = controller.preview;
+    stateStore.listeners.forEach((listener) => listener());
+  }, [controller.menu, controller.preview, stateStore]);
+  const commands = useMemo<ManagerOverlayCommands>(() => ({
+    openMenu: controller.openMenu,
+    closeMenu: controller.closeMenu,
+    openPreview: controller.openPreview,
+    schedulePreview: controller.schedulePreview,
+    scheduleClosePreview: controller.scheduleClosePreview,
+    cancelClosePreview: controller.cancelClosePreview,
+    closePreview: controller.closePreview,
+    closeOverlays: controller.closeOverlays,
+    invalidateOverlayLifecycle: controller.invalidateOverlayLifecycle,
+    captureFocusRestoreIntent: controller.captureFocusRestoreIntent,
+    restoreFocusAfterMutation: controller.restoreFocusAfterMutation,
+    registerInfoTrigger: controller.registerInfoTrigger,
+    registerMenuElement: controller.registerMenuElement,
+    registerPreviewElement: controller.registerPreviewElement,
+    setMenuPosition: controller.setMenuPosition,
+    setPreviewPosition: controller.setPreviewPosition,
+  }), [
+    controller.cancelClosePreview,
+    controller.captureFocusRestoreIntent,
+    controller.closeMenu,
+    controller.closeOverlays,
+    controller.closePreview,
+    controller.invalidateOverlayLifecycle,
+    controller.openMenu,
+    controller.openPreview,
+    controller.registerInfoTrigger,
+    controller.registerMenuElement,
+    controller.registerPreviewElement,
+    controller.restoreFocusAfterMutation,
+    controller.scheduleClosePreview,
+    controller.schedulePreview,
+    controller.setMenuPosition,
+    controller.setPreviewPosition,
+  ]);
+  return createElement(
+    ManagerOverlayCommandsContext.Provider,
+    { value: commands },
+    createElement(
+      ManagerOverlayStateStoreContext.Provider,
+      { value: stateStore },
+      createElement(ManagerOverlaysContext.Provider, { value: controller }, props.children),
+    ),
+  );
 }
 
 export function useManagerOverlayController(): ManagerOverlaysController {
@@ -802,16 +871,54 @@ export function useManagerOverlayController(): ManagerOverlaysController {
   return controller;
 }
 
+export function useManagerOverlayCommands(): ManagerOverlayCommands {
+  const commands = useContext(ManagerOverlayCommandsContext);
+  if (!commands) throw new Error('ManagerOverlaysProvider is required.');
+  return commands;
+}
+
+function useManagerOverlayOpenState(
+  getSnapshot: (store: ManagerOverlayStateStore) => boolean,
+): boolean {
+  const store = useContext(ManagerOverlayStateStoreContext);
+  if (!store) throw new Error('ManagerOverlaysProvider is required.');
+  const subscribe = useCallback((listener: () => void) => {
+    store.listeners.add(listener);
+    return () => store.listeners.delete(listener);
+  }, [store]);
+  return useSyncExternalStore(
+    subscribe,
+    () => getSnapshot(store),
+    () => false,
+  );
+}
+
+export function useManagerMenuOpen(id: string): boolean {
+  const getSnapshot = useCallback(
+    (store: ManagerOverlayStateStore) => store.menu?.itemKey === id,
+    [id],
+  );
+  return useManagerOverlayOpenState(getSnapshot);
+}
+
+export function useManagerPreviewOpen(id: string): boolean {
+  const getSnapshot = useCallback(
+    (store: ManagerOverlayStateStore) => store.preview?.id === id,
+    [id],
+  );
+  return useManagerOverlayOpenState(getSnapshot);
+}
+
 export function useManagerInfoTrigger(
   id: string,
   entry: Omit<InfoTriggerEntry, 'element'>,
 ): (element: HTMLElement | null) => void {
-  const { registerInfoTrigger } = useManagerOverlayController();
+  const { registerInfoTrigger } = useManagerOverlayCommands();
   return useCallback((element: HTMLElement | null) => registerInfoTrigger(id, entry, element), [entry, id, registerInfoTrigger]);
 }
 
 export function useManagerOverlayLifecycle(itemKey: string): void {
-  const { closeOverlays, invalidateOverlayLifecycle } = useManagerOverlayController();
+  const { closeOverlays, invalidateOverlayLifecycle } = useManagerOverlayCommands();
   const previousKey = useRef(itemKey);
   useEffect(() => {
     if (previousKey.current !== itemKey) {
@@ -865,7 +972,7 @@ export function ManagerMenuItem({
   preventFocusRestore = false,
   lifecycleAllowance,
 }: ManagerMenuItemProps): ReactNode {
-  const { closeOverlays, captureFocusRestoreIntent, restoreFocusAfterMutation } = useManagerOverlayController();
+  const { closeOverlays, captureFocusRestoreIntent, restoreFocusAfterMutation } = useManagerOverlayCommands();
   return createElement(
     'button',
     {

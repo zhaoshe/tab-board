@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchQuery, useSetSearchQuery } from './useFilteredGroups';
 import {
   canRevealCapture,
@@ -23,6 +23,7 @@ import {
 } from '../core/open-tabs';
 import { groupMatchesQuery, normalizeState, type TabBoardState } from '../../shared/model';
 import { getState as getPersistedState } from '../../shared/store/chromeStorage';
+import { structurallyShareState } from '../../shared/store/stateStructuralSharing';
 import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
 
 export const CAPTURE_COMPLETED_EVENT = 'tabboard-capture-completed';
@@ -330,9 +331,10 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
     () => resolveSelectedWindow(windows, selectedWindowId),
     [windows, selectedWindowId],
   );
+  const deferredQuery = useDeferredValue(query);
   const filteredTabs = useMemo(
-    () => filterOpenTabs(selectedWindow?.tabs ?? [], query),
-    [query, selectedWindow],
+    () => filterOpenTabs(selectedWindow?.tabs ?? [], deferredQuery),
+    [deferredQuery, selectedWindow],
   );
 
   const selectWindow = useCallback((windowId: number) => {
@@ -542,7 +544,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
               captureSnapshot.workspaceId,
             );
           if (stateToApply !== currentState) {
-            useTabBoardStore.setState(stateToApply);
+             useTabBoardStore.setState(structurallyShareState(currentState, stateToApply));
           }
         }
         refreshFailureRef.current = null;

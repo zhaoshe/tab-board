@@ -491,11 +491,14 @@ manager.html
 2. shared mutation layer 验证 immutable state preconditions，包括 ownership、locked、URL、index 和 workspace。
 3. `useTabBoardStore` 与 background persistence queue 应用 normalized state。
 4. `chrome.storage.onChanged` 通过 hydration/runtime hooks 回流；revision guard 丢弃过期快照。
-5. React 根据 authoritative state 重绘，并由 capture outcome/overlay lifecycle 恢复 feedback 与 focus。
+5. Store 在发布 authoritative state 前执行 semantic structural sharing，复用未变化的 workspace/folder/group/tab 等实体引用。
+6. React 根据共享后的 authoritative state 重绘，并由 capture outcome/overlay lifecycle 恢复 feedback 与 focus。
 
 ### 大 board 性能
 
 `WorkspaceContent` 一次渲染当前 active category 的全部 session card（横向 track），不做 JS 虚拟化，以保持 `@dnd-kit` 的 collision/measurement、浏览器 find-in-page 与 `scrollIntoView` 正常工作。为控制成本，`.session-board__group-slot` 使用 CSS `content-visibility: auto` + `contain-intrinsic-size`：滚出视口的 session slot 跳过 layout/paint，但仍留在 DOM 中，可被拖拽 measurement、搜索定位和滚动命中。该行为由 `src/manager/core/layout.test.ts` 的 CSS 契约和 `tests/e2e/large-board.e2e.ts`（60 sessions 全部在 DOM、远端 card 可滚动可见）守护。若单 category 达到数百 session 仍出现压力，再评估引入真正的虚拟列表及其与 `@dnd-kit` 的兼容性。
+
+Open Tabs 同样保留全部 rows 与每行的 DnD/focus/preview hooks。`useOpenTabsRuntime()` 用 `useDeferredValue` 延后 query 对长列表的派生，`.manager-open-tab-row` 使用 `content-visibility: auto` 与 intrinsic size 跳过 off-screen layout/paint。Overlay provider 的 document/window listeners 在生命周期内只绑定一次；commands 与 menu/preview observable state 分离，普通 row/card 只订阅自身 key 的 open boolean。
 
 ## Search
 
