@@ -281,14 +281,13 @@
 }
 
 .manager-open-tabs-toolbar {
-  min-height: 48px;
+  min-height: 36px;
   margin: var(--mantine-spacing-xs) calc(-1 * var(--mantine-spacing-xs)) 0;
   padding: 0 4px;
-  border-bottom: 1px solid transparent;
+  border-bottom: 1px solid var(--mantine-color-default-border);
 }
 
 .manager-open-tabs-toolbar[data-selection-mode] {
-  border-bottom-color: var(--mantine-color-default-border);
   background: color-mix(in srgb, var(--mantine-color-blue-9) 12%, var(--mantine-color-body));
 }
 
@@ -388,8 +387,8 @@ html[data-tabboard-hover-suppressed] .manager-open-tab-close {
 }
 
 .manager-open-tabs-selection-actions {
-  min-height: 48px;
-  padding: 5px 4px;
+  min-height: 36px;
+  padding: 2px 4px;
   align-items: center;
 }
 
@@ -407,7 +406,7 @@ html[data-tabboard-hover-suppressed] .manager-open-tab-close {
 }
 
 .manager-open-tabs-selection-actions__tools > * {
-  flex: 0 0 32px;
+  flex: 0 0 28px;
 }
 
 .manager-sidebar-content {
