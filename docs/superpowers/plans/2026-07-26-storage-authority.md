@@ -189,7 +189,7 @@ Co-authored-by: TRAE CLI <noreply@bytedance.com>"
 - Preserves: `switchToFileMode(root, initialState)`, `switchToBrowserMode(copyFileData)`, `reconnectFolder(root)`.
 - Guarantees: bootstrap mode changes only after target backend validation and required data write.
 
-- [ ] **Step 1: Add a failing migration commit-order test**
+- [x] **Step 1: Add a failing migration commit-order test**
 
 Make File seeding fail and assert:
 
@@ -199,24 +199,24 @@ expect(readBootstrap()).toBe('browser');
 expect(await isFileModeActive()).toBe(false);
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `npx vitest run src/shared/store/activeAdapter.test.ts -t "failed file migration"`  
 Expected: FAIL because bootstrap currently changes before File seeding.
 
-- [ ] **Step 3: Add a failing reconnect validation test**
+- [x] **Step 3: Add a failing reconnect validation test**
 
 Use a denied or corrupt folder and assert bootstrap and active mode remain unchanged.
 
-- [ ] **Step 4: Implement transactional ordering**
+- [x] **Step 4: Implement transactional ordering**
 
 Construct and seed/validate the target adapter before committing bootstrap and installing it in the authority. Restore the previous handle/bootstrap when a pre-commit operation fails.
 
-- [ ] **Step 5: Update Options callers**
+- [x] **Step 5: Update Options callers**
 
 Options continues showing existing success/error states, but only reloads after the authority transition succeeds. It must not directly detect File-specific capabilities.
 
-- [ ] **Step 6: Run migration and Options tests**
+- [x] **Step 6: Run migration and Options tests**
 
 Run:
 
@@ -226,7 +226,7 @@ npx vitest run src/shared/store/activeAdapter.test.ts src/options/components/Fol
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/shared/store/activeAdapter.ts src/shared/store/activeAdapter.test.ts src/options/components/FolderPickerDialog.tsx src/options/components/DataStorageCard.tsx

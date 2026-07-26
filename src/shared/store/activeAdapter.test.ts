@@ -19,6 +19,7 @@ import {
   getActiveAdapter,
   isFileModeActive,
   onFallback,
+  reconnectFolder,
   resetActiveAdapterForTests,
   switchToBrowserMode,
   switchToFileMode,
@@ -614,6 +615,29 @@ describe('activeAdapter', () => {
     expect(saved).toBe(root);
   });
 
+  it('failed file migration leaves browser authority, bootstrap, and handle unchanged', async () => {
+    const authority = await getActiveAdapter();
+    const browserState = knownState({ mutationRevision: 90 });
+    await authority.setState(browserState);
+    const root = createMemoryDirectory('unwritable');
+    withPermission(root);
+    root.getDirectoryHandle = vi.fn(async () => {
+      throw new DOMException('Target folder is offline', 'NotFoundError');
+    }) as typeof root.getDirectoryHandle;
+
+    await expect(switchToFileMode(
+      root,
+      knownState({ mutationRevision: 91 }),
+    )).rejects.toThrow('Target folder is offline');
+
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toBeUndefined();
+    expect(await isFileModeActive()).toBe(false);
+    expect(await getActiveAdapter()).toBe(authority);
+    expect((await authority.getState()).mutationRevision).toBe(90);
+    const { loadRootHandle } = await import('./fsDirectory');
+    expect(await loadRootHandle(idbFactory)).toBeNull();
+  });
+
   it('switchToBrowserMode(copyFileData:true) copies file data to chrome storage', async () => {
     // First, get into file mode with some state
     await writeBootstrap('file', chromeMock);
@@ -673,6 +697,43 @@ describe('activeAdapter', () => {
     expect(chromeMock.storage.local.data[STATE_KEY]).toEqual({ unrelated: true, mutationRevision: 0 });
 
     // Handle was cleared
+    const { loadRootHandle } = await import('./fsDirectory');
+    expect(await loadRootHandle(idbFactory)).toBeNull();
+  });
+
+  it('failed browser copy-back keeps file authority, bootstrap, and handle active', async () => {
+    await writeBootstrap('file', chromeMock);
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const { loadRootHandle, saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(root, idbFactory);
+    const authority = await getActiveAdapter();
+    await authority.setState(knownState({ mutationRevision: 44 }));
+    chromeMock.storage.local.set.mockImplementationOnce(async () => {
+      throw new Error('chrome storage unavailable');
+    });
+
+    await expect(switchToBrowserMode(true)).rejects.toThrow('chrome storage unavailable');
+
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toEqual({ mode: 'file' });
+    expect(await isFileModeActive()).toBe(true);
+    expect(await getActiveAdapter()).toBe(authority);
+    expect(await loadRootHandle(idbFactory)).toBe(root);
+    expect((await authority.getState()).mutationRevision).toBe(44);
+  });
+
+  it('failed reconnect validation leaves browser authority and bootstrap unchanged', async () => {
+    const authority = await getActiveAdapter();
+    const root = createMemoryDirectory('denied');
+    withPermission(root, 'denied');
+
+    await expect(reconnectFolder(root)).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+    });
+
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toBeUndefined();
+    expect(await isFileModeActive()).toBe(false);
+    expect(await getActiveAdapter()).toBe(authority);
     const { loadRootHandle } = await import('./fsDirectory');
     expect(await loadRootHandle(idbFactory)).toBeNull();
   });

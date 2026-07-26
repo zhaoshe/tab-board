@@ -454,11 +454,11 @@ export async function switchToFileMode(
   initialState: TabBoardState,
 ): Promise<void> {
   logBreadcrumb('file-storage: migration', `switching to file mode, revision=${initialState.mutationRevision}`);
+  const adapter = await createFileStorageAdapter(root);
+  await adapter.setState(initialState);
   await saveRootHandle(root, testIdbFactory);
   await writeBootstrapMode('file');
-  const activeAuthority = getAuthority();
-  activeAuthority.resetBackend();
-  await activeAuthority.setState(initialState);
+  await getAuthority().install('file', adapter, initialState);
 }
 
 /**
@@ -481,19 +481,17 @@ export async function switchToBrowserMode(copyFileData: boolean): Promise<void> 
     }
   }
 
-  try {
-    await clearRootHandle(testIdbFactory);
-  } catch (err) {
-    logWarning('activeAdapter', 'Failed to clear root handle during switch to browser mode', err);
-  }
-  await writeBootstrapMode('browser');
-
-  // Get a fresh chrome adapter and, if requested, write the copied state.
   const chromeAdapter = createChromeStorageAdapter();
   if (fileStateToCopy) {
     await chromeAdapter.setState(fileStateToCopy);
   }
   const state = await chromeAdapter.getState();
+  await writeBootstrapMode('browser');
+  try {
+    await clearRootHandle(testIdbFactory);
+  } catch (err) {
+    logWarning('activeAdapter', 'Failed to clear root handle during switch to browser mode', err);
+  }
   await activeAuthority.install('browser', chromeAdapter, state);
 }
 
@@ -506,7 +504,9 @@ export async function switchToBrowserMode(copyFileData: boolean): Promise<void> 
  */
 export async function reconnectFolder(root: FileSystemDirectoryHandle): Promise<void> {
   logBreadcrumb('file-storage: reconnect', 'reconnecting to file folder');
+  const adapter = await createFileStorageAdapter(root);
+  const state = await adapter.getState();
   await saveRootHandle(root, testIdbFactory);
   await writeBootstrapMode('file');
-  getAuthority().resetBackend();
+  await getAuthority().install('file', adapter, state);
 }
