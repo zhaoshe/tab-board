@@ -9,8 +9,11 @@ import {
   DROP_OPERATION_LEDGER_LIMIT,
 } from '../model';
 import { ensureStateForHydration, sendStateMutations } from './chromeStorage';
-import { getActiveAdapter, onFallback } from './activeAdapter';
-import type { StorageAdapter } from './storageAdapter';
+import {
+  getActiveState,
+  onFallback,
+  subscribeActiveState,
+} from './activeAdapter';
 import type { StateMutation } from './stateMutations';
 import {
   applyStateMutation,
@@ -28,38 +31,12 @@ import type { OpenTabInfo } from '../../manager/core/open-tabs';
 import { emitEvent, AppEvents } from '../utils/events';
 import { structurallyShareState } from './stateStructuralSharing';
 
-// ---------- active adapter resolution ----------
-// The store module is loaded when a page imports it; the active adapter is
-// resolved lazily on first use and cached as a promise so concurrent callers
-// share a single initialization.
-
-let adapterPromise: Promise<StorageAdapter> | null = null;
-
-function getAdapter(): Promise<StorageAdapter> {
-  if (!adapterPromise) {
-    adapterPromise = getActiveAdapter();
-  }
-  return adapterPromise;
-}
-
 async function adapterGetState(): Promise<TabBoardState> {
-  return (await getAdapter()).getState();
+  return getActiveState();
 }
 
 function adapterSubscribeState(callback: (state: TabBoardState) => void): () => void {
-  let activeUnsub: (() => void) | null = null;
-  let cancelled = false;
-  getAdapter().then((adapter) => {
-    if (cancelled) return;
-    activeUnsub = adapter.subscribeState(callback);
-  });
-  return () => {
-    cancelled = true;
-    if (activeUnsub) {
-      activeUnsub();
-      activeUnsub = null;
-    }
-  };
+  return subscribeActiveState(callback);
 }
 
 // Subscribe to file-storage fallback events so that a degraded backend (file

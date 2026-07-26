@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BOOTSTRAP_KEY, FILE_PING_KEY, STATE_KEY } from '../model/constants';
+import {
+  BOOTSTRAP_KEY,
+  FILE_PING_KEY,
+  STATE_KEY,
+  STORAGE_FALLBACK_KEY,
+} from '../model/constants';
 import {
   createEmptyState,
   createGroupFromTabRecords,
@@ -482,6 +487,108 @@ describe('activeAdapter', () => {
     });
     await new Promise((r) => setTimeout(r, 10));
     expect(stateCb).not.toHaveBeenCalled();
+  });
+
+  it('runtime file write failure degrades the stable authority and preserves the last committed state', async () => {
+    await writeBootstrap('file', chromeMock);
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const { saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(root, idbFactory);
+
+    const authority = await getActiveAdapter();
+    const committed = knownState({ mutationRevision: 10 });
+    await authority.setState(committed);
+    const fallbackCb = vi.fn();
+    onFallback(fallbackCb);
+
+    root.getDirectoryHandle = vi.fn(async () => {
+      throw new DOMException('Folder disappeared', 'NotFoundError');
+    }) as typeof root.getDirectoryHandle;
+    const uncommitted = knownState({ mutationRevision: 11 });
+
+    await expect(authority.setState(uncommitted)).rejects.toThrow('Folder disappeared');
+
+    expect(await getActiveAdapter()).toBe(authority);
+    expect(await isFileModeActive()).toBe(false);
+    expect(fallbackCb).toHaveBeenCalledTimes(1);
+    expect((await authority.getState()).mutationRevision).toBe(10);
+    expect((chromeMock.storage.local.data[STATE_KEY] as TabBoardState).mutationRevision).toBe(10);
+
+    const retried = knownState({ mutationRevision: 11 });
+    await authority.setState(retried);
+    expect((chromeMock.storage.local.data[STATE_KEY] as TabBoardState).mutationRevision).toBe(11);
+  });
+
+  it('runtime file reload failure degrades instead of leaving a broken file backend active', async () => {
+    await writeBootstrap('file', chromeMock);
+    const root = createMemoryDirectory('root');
+    let permission: PermissionState = 'granted';
+    (root as unknown as {
+      queryPermission: () => Promise<PermissionState>;
+      requestPermission: () => Promise<PermissionState>;
+    }).queryPermission = async () => permission;
+    (root as unknown as {
+      queryPermission: () => Promise<PermissionState>;
+      requestPermission: () => Promise<PermissionState>;
+    }).requestPermission = async () => permission;
+    const { saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(root, idbFactory);
+
+    const authority = await getActiveAdapter();
+    const committed = knownState({ mutationRevision: 12 });
+    await authority.setState(committed);
+    const fallbackCb = vi.fn();
+    onFallback(fallbackCb);
+    permission = 'denied';
+
+    chromeMock.storage.onChanged._fire({
+      [FILE_PING_KEY]: {
+        newValue: {
+          mutationRevision: 13,
+          updatedAt: '2026-07-26T10:02:00.000Z',
+        },
+      },
+    });
+
+    await vi.waitFor(async () => {
+      expect(await isFileModeActive()).toBe(false);
+    });
+    expect(fallbackCb).toHaveBeenCalledTimes(1);
+    expect((await authority.getState()).mutationRevision).toBe(12);
+  });
+
+  it('remote fallback event moves a live authority to browser storage exactly once', async () => {
+    await writeBootstrap('file', chromeMock);
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const { saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(root, idbFactory);
+
+    const authority = await getActiveAdapter();
+    const committed = knownState({ mutationRevision: 14 });
+    await authority.setState(committed);
+    const fallbackCb = vi.fn();
+    onFallback(fallbackCb);
+    const event = {
+      eventId: 'remote-fallback-1',
+      reason: 'Cloud folder went offline',
+      occurredAt: '2026-07-26T10:03:00.000Z',
+    };
+
+    chromeMock.storage.onChanged._fire({
+      [STORAGE_FALLBACK_KEY]: { newValue: event },
+    });
+    chromeMock.storage.onChanged._fire({
+      [STORAGE_FALLBACK_KEY]: { newValue: event },
+    });
+
+    await vi.waitFor(async () => {
+      expect(await isFileModeActive()).toBe(false);
+    });
+    expect(fallbackCb).toHaveBeenCalledTimes(1);
+    expect(await getActiveAdapter()).toBe(authority);
+    expect((await authority.getState()).mutationRevision).toBe(14);
   });
 
   it('switchToFileMode persists handle, writes bootstrap, and seeds initial state', async () => {

@@ -12,9 +12,12 @@
  * two file adapters (which could race on disk writes).
  */
 
-import type { TabBoardState } from '../model';
-import { STATE_KEY } from '../model/constants';
-import { logBreadcrumb, logWarning } from '../utils/diagnostics';
+import {
+  createId,
+  nowIso,
+  type TabBoardState,
+} from '../model';
+import { logBreadcrumb, logError, logWarning } from '../utils/diagnostics';
 import { createChromeStorageAdapter } from './chromeStorageAdapter';
 import { createFileStorageAdapter } from './fileStorage';
 import {
@@ -24,8 +27,17 @@ import {
   type IdbFactory,
 } from './fsDirectory';
 import { readBootstrapMode, writeBootstrapMode } from './fsBootstrap';
-import type { StorageAdapter } from './storageAdapter';
-import { subscribeFilePing } from './storageEvents';
+import type {
+  ReloadableStorageAdapter,
+  StorageAdapter,
+  StorageMode,
+} from './storageAdapter';
+import {
+  subscribeFilePing,
+  subscribeStorageFallback,
+  writeStorageFallback,
+  type StorageFallbackEvent,
+} from './storageEvents';
 
 // ---------- test injection seam ----------
 
@@ -40,13 +52,6 @@ export function _setActiveAdapterIdbFactory(factory: IdbFactory | undefined): vo
   testIdbFactory = factory;
 }
 
-// ---------- module state ----------
-
-let cachedAdapter: StorageAdapter | null = null;
-let initPromise: Promise<StorageAdapter> | null = null;
-let lastSeenRevision = -1;
-let pingUnsubscribe: (() => void) | null = null;
-
 const fallbackListeners = new Set<(reason: string) => void>();
 
 function emitFallback(reason: string): void {
@@ -60,98 +65,310 @@ function emitFallback(reason: string): void {
   }
 }
 
-function cleanupPingSubscription(): void {
-  if (pingUnsubscribe) {
-    try {
-      pingUnsubscribe();
-    } catch {
-      // ignore
-    }
-    pingUnsubscribe = null;
+function fallbackReason(error: unknown): string {
+  const code = (error as { code?: string })?.code;
+  if (code === 'PERMISSION_DENIED') {
+    return 'Permission to access the storage folder was denied. Please re-select the folder in Options.';
   }
+  if (code === 'FILE_CORRUPT') {
+    return 'The storage folder appears corrupted. Please re-select the folder in Options.';
+  }
+  if (error instanceof DOMException && error.name === 'NotFoundError') {
+    return 'The storage folder is unavailable. Please re-select the folder in Options.';
+  }
+  return `File storage error: ${error instanceof Error ? error.message : String(error)}`;
 }
 
-/**
- * Internal type for the file adapter, which exposes reloadFromDisk() for
- * cross-context ping refresh.
- */
-interface FileStorageAdapterInternal extends StorageAdapter {
-  reloadFromDisk(): Promise<void>;
+interface AuthorityBackend {
+  mode: StorageMode;
+  adapter: StorageAdapter;
 }
 
-function isFileAdapter(a: StorageAdapter): a is FileStorageAdapterInternal {
-  return typeof (a as FileStorageAdapterInternal).reloadFromDisk === 'function';
+function isReloadableAdapter(adapter: StorageAdapter): adapter is ReloadableStorageAdapter {
+  return typeof (adapter as ReloadableStorageAdapter).reloadFromDisk === 'function';
 }
 
-function setupPingSubscription(adapter: FileStorageAdapterInternal): void {
-  cleanupPingSubscription();
-  pingUnsubscribe = subscribeFilePing((ping) => {
-    if (ping.mutationRevision > lastSeenRevision) {
-      lastSeenRevision = ping.mutationRevision;
-      // Fire-and-forget: reload from disk notifies same-context subscribers.
-      adapter.reloadFromDisk().catch((err) => {
-        logWarning('activeAdapter', 'Failed to reload file state from ping', err);
+class StorageAuthority implements StorageAdapter {
+  private backend: AuthorityBackend | null = null;
+  private initPromise: Promise<AuthorityBackend> | null = null;
+  private backendUnsubscribe: (() => void) | null = null;
+  private readonly subscribers = new Set<(state: TabBoardState) => void>();
+  private readonly handledFallbackEvents = new Set<string>();
+  private lastKnownState: TabBoardState | null = null;
+  private lastSeenRevision = -1;
+  private operationQueue: Promise<unknown> = Promise.resolve();
+  private pingUnsubscribe: (() => void) | null = null;
+  private fallbackUnsubscribe: (() => void) | null = null;
+
+  private bindFileEvents(): void {
+    this.unbindFileEvents();
+    this.pingUnsubscribe = subscribeFilePing((ping) => {
+      if (ping.mutationRevision <= this.lastSeenRevision) return;
+      void this.enqueueOperation(async () => {
+        const backend = await this.ensureBackend();
+        if (backend.mode !== 'file' || !isReloadableAdapter(backend.adapter)) return;
+        this.lastSeenRevision = ping.mutationRevision;
+        try {
+          await backend.adapter.reloadFromDisk();
+        } catch (error: unknown) {
+          await this.degradeToBrowser(error, true);
+        }
+      });
+    });
+    this.fallbackUnsubscribe = subscribeStorageFallback((event) => {
+      if (this.handledFallbackEvents.has(event.eventId)) return;
+      this.handledFallbackEvents.add(event.eventId);
+      void this.enqueueOperation(async () => {
+        const backend = await this.ensureBackend();
+        if (backend.mode !== 'file') return;
+        await this.degradeToBrowser(new Error(event.reason), false, event);
+      });
+    });
+  }
+
+  private unbindFileEvents(): void {
+    this.pingUnsubscribe?.();
+    this.pingUnsubscribe = null;
+    this.fallbackUnsubscribe?.();
+    this.fallbackUnsubscribe = null;
+  }
+
+  private enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.operationQueue.then(operation);
+    this.operationQueue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  private async initializeBackend(): Promise<AuthorityBackend> {
+    const mode = await readBootstrapMode();
+    if (mode === 'browser') {
+      const adapter = createChromeStorageAdapter();
+      this.installBackend({ mode, adapter });
+      const state = await adapter.getState();
+      this.recordState(state);
+      logBreadcrumb('file-storage: init', 'browser storage active');
+      return { mode, adapter };
+    }
+
+    try {
+      const root = await loadRootHandle(testIdbFactory);
+      if (!root) {
+        throw Object.assign(
+          new Error('No saved folder handle. Select a folder in Options to use file storage.'),
+          { code: 'NO_HANDLE' },
+        );
+      }
+      const adapter = await createFileStorageAdapter(root);
+      this.installBackend({ mode: 'file', adapter });
+      const state = await adapter.getState();
+      this.recordState(state);
+      logBreadcrumb('file-storage: init', `file adapter active, revision=${state.mutationRevision}`);
+      return { mode: 'file', adapter };
+    } catch (error: unknown) {
+      logWarning('activeAdapter', 'File adapter initialization failed; falling back to browser storage', error);
+      const reason = (error as { code?: string })?.code === 'NO_HANDLE'
+        ? (error as Error).message
+        : fallbackReason(error);
+      const adapter = createChromeStorageAdapter();
+      this.installBackend({ mode: 'browser', adapter });
+      const state = await adapter.getState();
+      this.recordState(state);
+      await this.publishFallback(reason);
+      return { mode: 'browser', adapter };
+    }
+  }
+
+  private async ensureBackend(): Promise<AuthorityBackend> {
+    if (this.backend) return this.backend;
+    if (!this.initPromise) {
+      this.initPromise = this.initializeBackend().finally(() => {
+        this.initPromise = null;
       });
     }
-  });
+    return this.initPromise;
+  }
+
+  private installBackend(backend: AuthorityBackend, state?: TabBoardState): void {
+    this.backendUnsubscribe?.();
+    if (backend.mode === 'file') {
+      this.bindFileEvents();
+    } else {
+      this.unbindFileEvents();
+    }
+    this.backend = backend;
+    if (state) {
+      this.lastKnownState = state;
+      this.lastSeenRevision = state.mutationRevision;
+    } else if (backend.mode === 'browser') {
+      this.lastSeenRevision = -1;
+    }
+    this.backendUnsubscribe = backend.adapter.subscribeState((nextState) => {
+      this.recordState(nextState);
+      this.notifyState(nextState);
+    });
+  }
+
+  private recordState(state: TabBoardState): void {
+    if (this.lastKnownState) {
+      if (state.mutationRevision < this.lastKnownState.mutationRevision) return;
+      if (state.mutationRevision === this.lastKnownState.mutationRevision
+        && Date.parse(state.updatedAt) < Date.parse(this.lastKnownState.updatedAt)) {
+        return;
+      }
+    }
+    this.lastKnownState = state;
+    this.lastSeenRevision = Math.max(this.lastSeenRevision, state.mutationRevision);
+  }
+
+  private notifyState(state: TabBoardState): void {
+    for (const callback of Array.from(this.subscribers)) {
+      try {
+        callback(state);
+      } catch {
+        // A subscriber must not stop authority publication.
+      }
+    }
+  }
+
+  private async publishFallback(reason: string): Promise<void> {
+    emitFallback(reason);
+    const event: StorageFallbackEvent = {
+      eventId: createId('storage-fallback'),
+      reason,
+      occurredAt: nowIso(),
+    };
+    this.handledFallbackEvents.add(event.eventId);
+    try {
+      await writeStorageFallback(event);
+    } catch (error: unknown) {
+      logWarning('activeAdapter', 'Failed to publish storage fallback event', error);
+    }
+  }
+
+  private async degradeToBrowser(
+    error: unknown,
+    broadcast: boolean,
+    remoteEvent?: StorageFallbackEvent,
+  ): Promise<void> {
+    const current = this.backend;
+    if (!current || current.mode !== 'file') return;
+    const reason = remoteEvent?.reason || fallbackReason(error);
+    logError('file-storage: fallback', reason, error);
+    const adapter = createChromeStorageAdapter();
+    if (this.lastKnownState) {
+      try {
+        await adapter.setState(this.lastKnownState);
+      } catch (chromeError: unknown) {
+        logError('activeAdapter', 'Failed to preserve the last file snapshot in browser storage', chromeError);
+        throw chromeError;
+      }
+    }
+    const state = await adapter.getState();
+    this.installBackend({ mode: 'browser', adapter }, state);
+    this.notifyState(state);
+    if (broadcast) {
+      await this.publishFallback(reason);
+    } else {
+      emitFallback(reason);
+    }
+  }
+
+  async getState(): Promise<TabBoardState> {
+    await this.operationQueue.catch(() => undefined);
+    const backend = await this.ensureBackend();
+    try {
+      const state = await backend.adapter.getState();
+      this.recordState(state);
+      return this.lastKnownState || state;
+    } catch (error: unknown) {
+      if (backend.mode !== 'file') throw error;
+      await this.enqueueOperation(() => this.degradeToBrowser(error, true));
+      return (await this.ensureBackend()).adapter.getState();
+    }
+  }
+
+  setState(state: TabBoardState): Promise<void> {
+    return this.enqueueOperation(async () => {
+      const backend = await this.ensureBackend();
+      try {
+        await backend.adapter.setState(state);
+        this.recordState(state);
+      } catch (error: unknown) {
+        if (backend.mode === 'file') {
+          await this.degradeToBrowser(error, true);
+        }
+        throw error;
+      }
+    });
+  }
+
+  ensureState(): Promise<TabBoardState> {
+    return this.enqueueOperation(async () => {
+      const backend = await this.ensureBackend();
+      try {
+        const state = await backend.adapter.ensureState();
+        this.recordState(state);
+        return this.lastKnownState || state;
+      } catch (error: unknown) {
+        if (backend.mode !== 'file') throw error;
+        await this.degradeToBrowser(error, true);
+        const state = await (await this.ensureBackend()).adapter.ensureState();
+        this.recordState(state);
+        return this.lastKnownState || state;
+      }
+    });
+  }
+
+  subscribeState(callback: (state: TabBoardState) => void): () => void {
+    this.subscribers.add(callback);
+    return () => this.subscribers.delete(callback);
+  }
+
+  async isFileMode(): Promise<boolean> {
+    return (await this.ensureBackend()).mode === 'file';
+  }
+
+  async currentBackend(): Promise<AuthorityBackend> {
+    return this.ensureBackend();
+  }
+
+  async install(mode: StorageMode, adapter: StorageAdapter, state?: TabBoardState): Promise<void> {
+    await this.enqueueOperation(async () => {
+      this.installBackend({ mode, adapter }, state);
+    });
+  }
+
+  resetBackend(): void {
+    this.backendUnsubscribe?.();
+    this.backendUnsubscribe = null;
+    this.unbindFileEvents();
+    this.backend = null;
+    this.initPromise = null;
+    this.lastKnownState = null;
+    this.lastSeenRevision = -1;
+  }
+
+  dispose(): void {
+    this.resetBackend();
+    this.subscribers.clear();
+    this.handledFallbackEvents.clear();
+  }
 }
 
-async function initAdapter(): Promise<StorageAdapter> {
-  const mode = await readBootstrapMode();
-  if (mode === 'browser') {
-    cachedAdapter = createChromeStorageAdapter();
-    lastSeenRevision = -1;
-    logBreadcrumb('file-storage: init', 'browser storage active');
-    return cachedAdapter;
-  }
+let authority: StorageAuthority | null = null;
+let authorityContext: unknown;
 
-  // mode === 'file'
-  let root: FileSystemDirectoryHandle | null = null;
-  try {
-    root = await loadRootHandle(testIdbFactory);
-  } catch (err) {
-    logWarning('activeAdapter', 'Failed to load root handle from IndexedDB, falling back to browser storage', err);
-    emitFallback(`IndexedDB unavailable: ${(err as Error).message}`);
-    cachedAdapter = createChromeStorageAdapter();
-    lastSeenRevision = -1;
-    return cachedAdapter;
+function getAuthority(): StorageAuthority {
+  const context = globalThis.chrome;
+  if (authority && authorityContext !== context) {
+    authority.dispose();
+    authority = null;
   }
-
-  if (!root) {
-    logWarning('activeAdapter', 'No root directory handle found in IndexedDB for file mode; falling back to browser storage');
-    emitFallback('No saved folder handle. Select a folder in Options to use file storage.');
-    cachedAdapter = createChromeStorageAdapter();
-    lastSeenRevision = -1;
-    return cachedAdapter;
+  if (!authority) {
+    authority = new StorageAuthority();
+    authorityContext = context;
   }
-
-  try {
-    const adapter = await createFileStorageAdapter(root) as FileStorageAdapterInternal;
-    cachedAdapter = adapter;
-    // Initialize lastSeenRevision from the adapter's current state revision
-    // so an initial ping at the same revision does not double-notify.
-    try {
-      const currentState = await adapter.getState();
-      lastSeenRevision = currentState.mutationRevision;
-    } catch {
-      lastSeenRevision = -1;
-    }
-    setupPingSubscription(adapter);
-    logBreadcrumb('file-storage: init', `file adapter active, revision=${lastSeenRevision}`);
-    return cachedAdapter;
-  } catch (err) {
-    logWarning('activeAdapter', 'File adapter initialization failed; falling back to browser storage', err);
-    const code = (err as { code?: string })?.code;
-    const reason = code === 'PERMISSION_DENIED'
-      ? 'Permission to access the storage folder was denied. Please re-select the folder in Options.'
-      : code === 'FILE_CORRUPT'
-        ? 'The storage folder appears corrupted. Please re-select the folder in Options.'
-        : `File storage error: ${(err as Error).message}`;
-    emitFallback(reason);
-    cachedAdapter = createChromeStorageAdapter();
-    lastSeenRevision = -1;
-    return cachedAdapter;
-  }
+  return authority;
 }
 
 // ---------- public API ----------
@@ -162,16 +379,27 @@ async function initAdapter(): Promise<StorageAdapter> {
  * return the same adapter.
  */
 export async function getActiveAdapter(): Promise<StorageAdapter> {
-  if (cachedAdapter) {
-    return cachedAdapter;
-  }
-  if (initPromise) {
-    return initPromise;
-  }
-  initPromise = initAdapter().finally(() => {
-    initPromise = null;
-  });
-  return initPromise;
+  const activeAuthority = getAuthority();
+  await activeAuthority.currentBackend();
+  return activeAuthority;
+}
+
+export async function getActiveState(): Promise<TabBoardState> {
+  return getAuthority().getState();
+}
+
+export async function setActiveState(state: TabBoardState): Promise<void> {
+  return getAuthority().setState(state);
+}
+
+export async function ensureActiveState(): Promise<TabBoardState> {
+  return getAuthority().ensureState();
+}
+
+export function subscribeActiveState(
+  callback: (state: TabBoardState) => void,
+): () => void {
+  return getAuthority().subscribeState(callback);
 }
 
 /**
@@ -179,7 +407,10 @@ export async function getActiveAdapter(): Promise<StorageAdapter> {
  * tests so a previously-initialized adapter does not leak into the next test.
  */
 export function resetActiveAdapterForTests(): void {
-  resetActiveAdapter();
+  authority?.dispose();
+  authority = null;
+  authorityContext = undefined;
+  fallbackListeners.clear();
 }
 
 /**
@@ -189,20 +420,14 @@ export function resetActiveAdapterForTests(): void {
  * adapter. Safe to call even if no adapter has been initialized yet.
  */
 export function resetActiveAdapter(): void {
-  cleanupPingSubscription();
-  cachedAdapter = null;
-  initPromise = null;
-  lastSeenRevision = -1;
-  fallbackListeners.clear();
-  // Don't reset testIdbFactory here; tests clear it explicitly if needed.
+  authority?.resetBackend();
 }
 
 /**
  * Convenience: true when the active adapter is the FileStorageAdapter.
  */
 export async function isFileModeActive(): Promise<boolean> {
-  const adapter = await getActiveAdapter();
-  return isFileAdapter(adapter);
+  return getAuthority().isFileMode();
 }
 
 /**
@@ -231,14 +456,9 @@ export async function switchToFileMode(
   logBreadcrumb('file-storage: migration', `switching to file mode, revision=${initialState.mutationRevision}`);
   await saveRootHandle(root, testIdbFactory);
   await writeBootstrapMode('file');
-  // Tear down current adapter/ping before rebuilding.
-  cleanupPingSubscription();
-  cachedAdapter = null;
-  initPromise = null;
-  lastSeenRevision = -1;
-  const adapter = await getActiveAdapter() as FileStorageAdapterInternal;
-  await adapter.setState(initialState);
-  lastSeenRevision = initialState.mutationRevision;
+  const activeAuthority = getAuthority();
+  activeAuthority.resetBackend();
+  await activeAuthority.setState(initialState);
 }
 
 /**
@@ -250,19 +470,16 @@ export async function switchToFileMode(
  */
 export async function switchToBrowserMode(copyFileData: boolean): Promise<void> {
   logBreadcrumb('file-storage: migration', `switching to browser mode, copyFileData=${copyFileData}`);
+  const activeAuthority = getAuthority();
+  const current = await activeAuthority.currentBackend();
   let fileStateToCopy: TabBoardState | null = null;
-  if (copyFileData && cachedAdapter && isFileAdapter(cachedAdapter)) {
+  if (copyFileData && current.mode === 'file') {
     try {
-      fileStateToCopy = await cachedAdapter.getState();
+      fileStateToCopy = await current.adapter.getState();
     } catch (err) {
       logWarning('activeAdapter', 'Failed to read file state while switching to browser mode', err);
     }
   }
-
-  cleanupPingSubscription();
-  cachedAdapter = null;
-  initPromise = null;
-  lastSeenRevision = -1;
 
   try {
     await clearRootHandle(testIdbFactory);
@@ -276,8 +493,8 @@ export async function switchToBrowserMode(copyFileData: boolean): Promise<void> 
   if (fileStateToCopy) {
     await chromeAdapter.setState(fileStateToCopy);
   }
-  // The chrome adapter is the new active singleton.
-  cachedAdapter = chromeAdapter;
+  const state = await chromeAdapter.getState();
+  await activeAuthority.install('browser', chromeAdapter, state);
 }
 
 /**
@@ -291,10 +508,5 @@ export async function reconnectFolder(root: FileSystemDirectoryHandle): Promise<
   logBreadcrumb('file-storage: reconnect', 'reconnecting to file folder');
   await saveRootHandle(root, testIdbFactory);
   await writeBootstrapMode('file');
-  cleanupPingSubscription();
-  cachedAdapter = null;
-  initPromise = null;
-  lastSeenRevision = -1;
-  // The next getActiveAdapter() call will re-read from disk; we don't
-  // pre-build the adapter here so callers control timing.
+  getAuthority().resetBackend();
 }

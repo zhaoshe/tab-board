@@ -104,7 +104,7 @@ Co-authored-by: TRAE CLI <noreply@bytedance.com>"
 - Produces: `getActiveState()`, `setActiveState()`, `ensureActiveState()`, `subscribeActiveState()`.
 - Consumes: storage event transport from Task 1.
 
-- [ ] **Step 1: Add a failing write-fallback test**
+- [x] **Step 1: Add a failing write-fallback test**
 
 Use an injected File adapter whose first `setState()` rejects after one committed state exists. Assert:
 
@@ -118,16 +118,16 @@ expect(chromeState()).toEqual(retried);
 expect(await getActiveAdapter()).toBe(authority);
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `npx vitest run src/shared/store/activeAdapter.test.ts -t "runtime file write failure"`  
 Expected: FAIL because File remains active and Chrome is not seeded.
 
-- [ ] **Step 3: Add failing read and ping-reload fallback tests**
+- [x] **Step 3: Add failing read and ping-reload fallback tests**
 
 Assert a File `getState()` failure returns the last committed state through Chrome, and a newer ping whose `reloadFromDisk()` rejects transitions the authority to Chrome and emits one fallback event.
 
-- [ ] **Step 4: Implement the stable authority**
+- [x] **Step 4: Implement the stable authority**
 
 The authority stores:
 
@@ -149,16 +149,16 @@ It owns:
 
 The first failed File write rejects after transition. Reads continue from Chrome.
 
-- [ ] **Step 5: Add active-state convenience functions**
+- [x] **Step 5: Add active-state convenience functions**
 
 Delegate through the stable authority and preserve synchronous unsubscribe semantics.
 
-- [ ] **Step 6: Run focused authority tests**
+- [x] **Step 6: Run focused authority tests**
 
 Run: `npx vitest run src/shared/store/activeAdapter.test.ts`  
 Expected: PASS.
 
-- [ ] **Step 7: Run store and worker regression tests**
+- [x] **Step 7: Run store and worker regression tests**
 
 Run:
 
@@ -168,7 +168,7 @@ npx vitest run src/shared/store/useTabBoardStore.test.ts src/background/service-
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/shared/store/activeAdapter.ts src/shared/store/activeAdapter.test.ts src/shared/store/storageAdapter.ts

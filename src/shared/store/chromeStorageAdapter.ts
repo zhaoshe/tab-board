@@ -31,6 +31,7 @@ class ChromeStorageAdapterImpl implements StorageAdapter {
   }
 
   subscribeState(callback: (state: TabBoardState) => void): () => void {
+    const onChanged = chrome.storage.onChanged;
     const listener = (
       changes: Record<string, chrome.storage.StorageChange>,
       area: string,
@@ -40,8 +41,8 @@ class ChromeStorageAdapterImpl implements StorageAdapter {
       }
       callback(normalizeState(changes[STATE_KEY].newValue));
     };
-    chrome.storage.onChanged.addListener(listener);
-    return () => chrome.storage.onChanged.removeListener(listener);
+    onChanged.addListener(listener);
+    return () => onChanged.removeListener(listener);
   }
 }
 

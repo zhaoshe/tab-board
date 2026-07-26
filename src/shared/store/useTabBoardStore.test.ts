@@ -2146,7 +2146,11 @@ describe('TabBoard store hydration lifecycle', () => {
       },
       storage: {
         local: {
-          get: vi.fn(async () => ({ tabboardState: structuredClone(persisted) })),
+          get: vi.fn(async (key: string) => (
+            key === 'tabboardStorageConfig'
+              ? {}
+              : { tabboardState: structuredClone(persisted) }
+          )),
         },
         onChanged: {
           addListener: vi.fn((listener: StorageListener) => {
@@ -2158,7 +2162,20 @@ describe('TabBoard store hydration lifecycle', () => {
       },
     };
     vi.stubGlobal('chrome', chromeMock);
-    return { activeListeners, registeredListeners, removeListener, chromeMock, persisted };
+    const publishState = (state: TabBoardState) => {
+      activeListeners.forEach((listener) => listener(
+        { tabboardState: { newValue: state } },
+        'local',
+      ));
+    };
+    return {
+      activeListeners,
+      registeredListeners,
+      removeListener,
+      chromeMock,
+      persisted,
+      publishState,
+    };
   }
 
   it('keeps at most one active listener across repeated hydrate calls', async () => {
@@ -2171,14 +2188,21 @@ describe('TabBoard store hydration lifecycle', () => {
     expect(activeListeners).toHaveLength(1);
   });
 
-  it('removes the active listener on hydration cleanup', async () => {
-    const { activeListeners, removeListener } = setupChrome();
+  it('disconnects store publication on hydration cleanup without tearing down the authority backend', async () => {
+    const { activeListeners, publishState, persisted } = setupChrome();
 
     await useTabBoardStore.getState().hydrate();
     useTabBoardStore.getState().releaseHydration();
+    const before = useTabBoardStore.getState();
+    publishState({
+      ...persisted,
+      groups: [group('ignored-after-release')],
+      updatedAt: '9999-01-01T00:00:00.000Z',
+    });
 
-    expect(removeListener).toHaveBeenCalledTimes(1);
-    expect(activeListeners).toHaveLength(0);
+    expect(activeListeners).toHaveLength(1);
+    expect(useTabBoardStore.getState().groups).toEqual(before.groups);
+    expect(useTabBoardStore.getState().hydrated).toBe(false);
   });
 
   it('captures a storage update during the initial state read', async () => {
@@ -2188,7 +2212,8 @@ describe('TabBoard store hydration lifecycle', () => {
       groups: [group('during-hydrate')],
       updatedAt: '9999-01-01T00:00:00.000Z',
     };
-    chromeMock.storage.local.get.mockImplementationOnce(async () => {
+    chromeMock.storage.local.get.mockImplementation(async (key: string) => {
+      if (key === 'tabboardStorageConfig') return {};
       activeListeners.forEach((listener) => listener(
         { tabboardState: { newValue: remoteState } },
         'local',
@@ -2213,7 +2238,8 @@ describe('TabBoard store hydration lifecycle', () => {
       groups: [group('newer-read')],
       updatedAt: '9999-01-01T00:00:00.000Z',
     };
-    chromeMock.storage.local.get.mockImplementationOnce(async () => {
+    chromeMock.storage.local.get.mockImplementation(async (key: string) => {
+      if (key === 'tabboardStorageConfig') return {};
       activeListeners.forEach((listener) => listener(
         { tabboardState: { newValue: olderRemoteState } },
         'local',
@@ -2273,15 +2299,26 @@ describe('TabBoard store hydration lifecycle', () => {
   });
 
   it('hydrates and subscribes again after a cleanup and new setup', async () => {
-    const { activeListeners, chromeMock } = setupChrome();
+    const { activeListeners, publishState, persisted } = setupChrome();
 
     await useTabBoardStore.getState().hydrate();
     useTabBoardStore.getState().releaseHydration();
-    await useTabBoardStore.getState().hydrate();
+    publishState({
+      ...persisted,
+      groups: [group('ignored-between-hydrations')],
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    expect(useTabBoardStore.getState().groups).toEqual([]);
 
-    expect(chromeMock.storage.onChanged.addListener).toHaveBeenCalledTimes(2);
-    expect(chromeMock.storage.onChanged.removeListener).toHaveBeenCalledTimes(1);
+    await useTabBoardStore.getState().hydrate();
+    publishState({
+      ...persisted,
+      groups: [group('accepted-after-rehydrate')],
+      updatedAt: '9999-01-01T00:00:00.000Z',
+    });
+
     expect(activeListeners).toHaveLength(1);
+    expect(useTabBoardStore.getState().groups.map(({ id }) => id)).toEqual(['accepted-after-rehydrate']);
   });
 
   it('does not attach a stale listener when cleanup wins an in-flight hydrate', async () => {

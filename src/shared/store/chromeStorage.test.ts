@@ -1,11 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { STATE_KEY } from '../model/constants';
 import { createEmptyState } from '../model';
+import { resetActiveAdapterForTests } from './activeAdapter';
 import { ensureStateForHydration } from './chromeStorage';
 
 afterEach(() => {
+  resetActiveAdapterForTests();
   vi.unstubAllGlobals();
 });
+
+function storageChangedMock() {
+  return {
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+  };
+}
 
 describe('ensureStateForHydration (worker-decoupled read)', () => {
   it('uses the service worker response when it is reachable', async () => {
@@ -14,7 +23,7 @@ describe('ensureStateForHydration (worker-decoupled read)', () => {
     const get = vi.fn(async () => ({}));
     vi.stubGlobal('chrome', {
       runtime: { sendMessage },
-      storage: { local: { get, set: vi.fn() } },
+      storage: { local: { get, set: vi.fn() }, onChanged: storageChangedMock() },
     });
 
     const result = await ensureStateForHydration();
@@ -34,7 +43,7 @@ describe('ensureStateForHydration (worker-decoupled read)', () => {
     const set = vi.fn(async () => undefined);
     vi.stubGlobal('chrome', {
       runtime: { sendMessage },
-      storage: { local: { get, set } },
+      storage: { local: { get, set }, onChanged: storageChangedMock() },
     });
 
     const result = await ensureStateForHydration();
@@ -53,7 +62,7 @@ describe('ensureStateForHydration (worker-decoupled read)', () => {
     const set = vi.fn(async () => undefined);
     vi.stubGlobal('chrome', {
       runtime: { sendMessage },
-      storage: { local: { get, set } },
+      storage: { local: { get, set }, onChanged: storageChangedMock() },
     });
 
     const result = await ensureStateForHydration();

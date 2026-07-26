@@ -9,6 +9,10 @@ export interface StorageAdapter {
   subscribeState(callback: (state: TabBoardState) => void): () => void;
 }
 
+export interface ReloadableStorageAdapter extends StorageAdapter {
+  reloadFromDisk(): Promise<void>;
+}
+
 export interface AdapterInitError extends Error {
   code: 'ADAPTER_INIT_FAILED' | 'PERMISSION_DENIED' | 'FILE_CORRUPT' | 'NO_HANDLE';
 }

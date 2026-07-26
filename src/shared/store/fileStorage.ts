@@ -54,7 +54,7 @@ import {
   splitState,
   type FileParts,
 } from './fileSerialization';
-import type { AdapterInitError, StorageAdapter } from './storageAdapter';
+import type { AdapterInitError, ReloadableStorageAdapter } from './storageAdapter';
 
 // ---------- Types for DOM widenings ----------
 
@@ -342,7 +342,7 @@ interface FileStorageAdapterDeps {
 
 const STATE_CHANGED_EVENT = 'state-changed';
 
-class FileStorageAdapterImpl implements StorageAdapter {
+class FileStorageAdapterImpl implements ReloadableStorageAdapter {
   private root: FileSystemDirectoryHandle;
   private cachedState: TabBoardState | null = null;
   private initialized = false;
@@ -558,7 +558,7 @@ class FileStorageAdapterImpl implements StorageAdapter {
 export async function createFileStorageAdapter(
   root: FileSystemDirectoryHandle,
   deps?: FileStorageAdapterDeps,
-): Promise<StorageAdapter> {
+): Promise<ReloadableStorageAdapter> {
   const adapter = new FileStorageAdapterImpl(root, deps);
   await (adapter as unknown as { ensureInitialized(): Promise<void> }).ensureInitialized();
   return adapter;

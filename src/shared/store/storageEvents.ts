@@ -16,6 +16,7 @@ function subscribeStorageValue<T>(
   parse: (value: unknown) => T | null,
   callback: (value: T) => void,
 ): () => void {
+  const onChanged = chrome.storage.onChanged;
   const listener = (
     changes: Record<string, chrome.storage.StorageChange>,
     area: string,
@@ -24,8 +25,8 @@ function subscribeStorageValue<T>(
     const value = parse(changes[key].newValue);
     if (value) callback(value);
   };
-  chrome.storage.onChanged.addListener(listener);
-  return () => chrome.storage.onChanged.removeListener(listener);
+  onChanged.addListener(listener);
+  return () => onChanged.removeListener(listener);
 }
 
 function parseFilePing(value: unknown): FilePing | null {

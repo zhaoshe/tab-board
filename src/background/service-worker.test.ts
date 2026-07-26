@@ -6,6 +6,7 @@ const TRUSTED_EXTENSION_ID = 'test-extension-id';
 
 interface EventHarness {
   addListener: ReturnType<typeof vi.fn>;
+  removeListener: ReturnType<typeof vi.fn>;
   getListener: () => ((...args: unknown[]) => unknown) | undefined;
 }
 
@@ -14,6 +15,9 @@ function createEvent(): EventHarness {
   return {
     addListener: vi.fn((next: (...args: unknown[]) => unknown) => {
       listener = next;
+    }),
+    removeListener: vi.fn((current: (...args: unknown[]) => unknown) => {
+      if (listener === current) listener = undefined;
     }),
     getListener: () => listener,
   };
