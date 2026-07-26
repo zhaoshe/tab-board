@@ -1,4 +1,3 @@
-import { FILE_PING_KEY } from '../model/constants';
 import { normalizeState, type TabBoardState } from '../model';
 import { logBreadcrumb, logWarning } from '../utils/diagnostics';
 import {
@@ -7,44 +6,11 @@ import {
 } from './stateMutations';
 import { getActiveAdapter } from './activeAdapter';
 import type { StorageAdapter } from './storageAdapter';
-
-export interface FilePing {
-  mutationRevision: number;
-  updatedAt: string;
-}
-
-/**
- * Write a file-storage ping to chrome.storage.local. Used by the file adapter
- * after a successful commit so other extension contexts (manager, popup,
- * options) know to reload state from disk.
- */
-export async function writePing(revision: number, updatedAt: string): Promise<void> {
-  await chrome.storage.local.set({
-    [FILE_PING_KEY]: { mutationRevision: revision, updatedAt } satisfies FilePing,
-  });
-}
-
-/**
- * Subscribe to FILE_PING_KEY changes in chrome.storage. The callback fires
- * whenever another context writes a ping after a file commit. Returns an
- * unsubscribe function.
- */
-export function subscribePing(callback: (ping: FilePing) => void): () => void {
-  const listener = (
-    changes: Record<string, chrome.storage.StorageChange>,
-    area: string,
-  ) => {
-    if (area !== 'local' || !changes[FILE_PING_KEY]) {
-      return;
-    }
-    const newValue = changes[FILE_PING_KEY].newValue as FilePing | undefined;
-    if (newValue && typeof newValue.mutationRevision === 'number') {
-      callback(newValue);
-    }
-  };
-  chrome.storage.onChanged.addListener(listener);
-  return () => chrome.storage.onChanged.removeListener(listener);
-}
+export {
+  writeFilePing as writePing,
+  subscribeFilePing as subscribePing,
+  type FilePing,
+} from './storageEvents';
 
 // The convenience functions (getState/setState/ensureState/subscribeState)
 // delegate to the active StorageAdapter resolved via getActiveAdapter(). This

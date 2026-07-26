@@ -14,6 +14,7 @@ export const SPECIAL_URL_PATTERN = /^(about|chrome|edge|brave|vivaldi|opera|file
 export const FILE_LAYOUT_VERSION = 1;
 export const BOOTSTRAP_KEY = 'tabboardStorageConfig';
 export const FILE_PING_KEY = 'tabboardFilePing';
+export const STORAGE_FALLBACK_KEY = 'tabboardStorageFallback';
 export const FILE_STORE_DB = 'tabboard-fs';
 export const FILE_STORE_STORE = 'handlers';
 export const FILE_STORE_HANDLE_KEY = 'root';

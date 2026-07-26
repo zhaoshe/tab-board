@@ -25,7 +25,7 @@ import {
 } from './fsDirectory';
 import { readBootstrapMode, writeBootstrapMode } from './fsBootstrap';
 import type { StorageAdapter } from './storageAdapter';
-import { subscribePing } from './chromeStorage';
+import { subscribeFilePing } from './storageEvents';
 
 // ---------- test injection seam ----------
 
@@ -85,7 +85,7 @@ function isFileAdapter(a: StorageAdapter): a is FileStorageAdapterInternal {
 
 function setupPingSubscription(adapter: FileStorageAdapterInternal): void {
   cleanupPingSubscription();
-  pingUnsubscribe = subscribePing((ping) => {
+  pingUnsubscribe = subscribeFilePing((ping) => {
     if (ping.mutationRevision > lastSeenRevision) {
       lastSeenRevision = ping.mutationRevision;
       // Fire-and-forget: reload from disk notifies same-context subscribers.

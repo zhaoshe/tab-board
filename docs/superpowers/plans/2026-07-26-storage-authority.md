@@ -33,7 +33,7 @@
 - Produces: `FilePing`, `StorageFallbackEvent`, `writeFilePing()`, `subscribeFilePing()`, `writeStorageFallback()`, `subscribeStorageFallback()`.
 - Preserves: `chromeStorage.writePing` and `chromeStorage.subscribePing` as compatibility aliases until callers are migrated.
 
-- [ ] **Step 1: Write failing transport tests**
+- [x] **Step 1: Write failing transport tests**
 
 Add tests that use a real in-memory `chrome.storage.local` event fake and assert:
 
@@ -52,16 +52,16 @@ await writeStorageFallback({
 expect(receivedFallback?.reason).toBe('Folder unavailable');
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `npx vitest run src/shared/store/storageEvents.test.ts`  
 Expected: FAIL because `storageEvents.ts` does not exist.
 
-- [ ] **Step 3: Implement the transport module**
+- [x] **Step 3: Implement the transport module**
 
 The module reads/writes only `FILE_PING_KEY` and a new `STORAGE_FALLBACK_KEY`, validates event shapes, and returns synchronous unsubscribe functions.
 
-- [ ] **Step 4: Migrate ping imports and keep compatibility aliases**
+- [x] **Step 4: Migrate ping imports and keep compatibility aliases**
 
 `activeAdapter.ts` imports `subscribeFilePing` from `storageEvents.ts`. `chromeStorage.ts` re-exports:
 
@@ -73,7 +73,7 @@ export {
 } from './storageEvents';
 ```
 
-- [ ] **Step 5: Run focused and existing adapter tests**
+- [x] **Step 5: Run focused and existing adapter tests**
 
 Run:
 
@@ -83,7 +83,7 @@ npx vitest run src/shared/store/storageEvents.test.ts src/shared/store/activeAda
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/shared/store/storageEvents.ts src/shared/store/storageEvents.test.ts src/shared/store/chromeStorage.ts src/shared/store/activeAdapter.ts src/shared/model/constants.ts
