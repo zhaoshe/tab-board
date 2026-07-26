@@ -859,7 +859,7 @@
     -m "Co-authored-by: TRAE CLI <noreply@bytedance.com>"
   ```
 
-- [ ] **Step 7: 检查 phase commit stack**
+- [x] **Step 7: 检查 phase commit stack**
 
   Run:
 
