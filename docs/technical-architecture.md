@@ -26,11 +26,11 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `manager.html`: 生产 Manager HTML shell，加载 `/src/manager/main.tsx`。
 - `src/manager/main.tsx` / `src/manager/ManagerApp.tsx`: React Manager 启动和应用 composition。
 - `src/manager/components/`: Mantine shell、workspace header、sidebar/Open Tabs、session board、Bin、import/export、search 和 overlays。
-- `src/manager/core/`: selectors、commands、capture、open-tabs、typed DnD 等纯 contracts，以及 core tests。
+- `src/manager/core/`: selectors、capture、Open Tabs workflow、typed DnD interaction resolution、overlay/focus 等纯 contracts，以及 core tests。
 - `src/manager/hooks/`: hydration、runtime message、Open Tabs、overlay 和 derived group 生命周期。
 - `src/background/service-worker.ts`: Chrome API boundary、capture/restore、runtime messages、sender verification。
 - `src/background/statePersistence.ts`: serialized mutation queue、optional Web Locks、normalized atomic writes。
-- `src/shared/model/`: schema/types、normalize、capture policy、import/export 和 search。
+- `src/shared/model/`: schema/types、normalize、category/session semantics、DropIntent contract/validation/execution/replay、capture policy、import/export 和 search。
 - `src/shared/store/`: Storage Authority、Authoritative Publication、immutable state mutations、mutation validation 和 Zustand facade。
 - `src/shared/styles/`: shared theme tokens。
 - `scripts/check-extension.mjs`: extension 文件存在性、构建产物引用和 sanity checks。
@@ -67,6 +67,12 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - workspace/folder/group/tab/note/bin invariants。
 - capture eligibility、import/export text、query matching 和 restorable 判断。
 - 同一 workspace 内 category 名称唯一性校验。
+- `categories.ts` 统一 `CategoryFilter`、orphan-folder → Inbox、category ownership/order、session move和category insertion。
+- `drop-intent.ts` 只定义持久化 DropIntent / SavedTabRef wire contract；不包含 DOM/DnD geometry。
+- `drop-validation.ts` 验证 raw DropIntent、OpenTabInfo 和 payload limits。
+- `drop-operations.ts` 执行五类 DropIntent，并拥有 operation digest、stable generated IDs 和 replay/ledger semantics。
+- `session-operations.ts` 拥有 restore-from-bin 与 import parsing/application。
+- `src/shared/validation.ts` 提供 byte/ID/timestamp/dense-array/canonical-JSON primitive validation；model 不反向依赖 store validation。
 
 不依赖 DOM，也不直接调用 Chrome APIs。
 
@@ -82,7 +88,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - File backend 在初始化、读取、写入或 ping reload 时失败，authority 会切换 backend、重绑 subscription 并通知 UI。本 context 首次发现故障时先把最后一次有效 snapshot 保存到 Chrome；收到其他 context 的 fallback event 时直接读取对方已提交的 Chrome state，禁止用旧 File snapshot 反向覆盖。本次失败写仍 reject，避免把未提交 mutation 误报为成功；既有 persistence retry 会在 Chrome backend 上重试。
 - `authoritativePublication.ts` 是 Manager-side publication owner。它不依赖 Zustand、React、DOM event 或具体 Chrome adapter，独占 optimistic queue、in-flight batch、remote buffer、drop/category waiter、bounded retry、terminal isolation、authoritative reconciliation、structural sharing 和 hydration generation。
 - `stateMutations.ts` 以 immutable commands 应用普通 state mutation，并拒绝无效引用、locked 目标和 link/note URL 形态错误。
-- `mutationValidation.ts` 负责 untrusted/raw mutation boundary。
+- `mutationValidation.ts` 负责 mutation-batch candidate boundary；DropIntent/OpenTab raw shape由 shared model `drop-validation.ts` 负责。
 - `useTabBoardStore.ts` 只提供 Zustand UI projection、领域 action facade、restore/import/export 准备和 AppEvents 映射；它通过窄 ports 创建一个 publication instance，不拥有 persistence queue、retry timer、waiter 或 hydration subscription。
 
 三类 ownership 不应混淆：
@@ -108,8 +114,9 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `main.tsx` 挂载 React app；`ManagerApp.tsx` 组合 Mantine shell、store hydration、runtime hooks 和 overlays。
 - components 渲染 workspace/category topbar、可折叠 sidebar、selected-window Open Tabs、horizontal active-category board、session cards、modals 和 feedback。
 - `src/shared/openTabs.ts` 是 Open Tabs 跨 runtime protocol owner；background、preview、Manager 与 persistence 使用同一 tab/window/list/capture result contract。
-- core modules 提供 selectors、capture snapshot ownership、Open Tabs workflow reducer/projection、commands、typed DnD、overlay/focus contracts；这些模块可在无 Chrome DOM 的测试中执行。
+- core modules 提供 selectors、capture snapshot ownership、Open Tabs workflow reducer/projection、typed DnD interaction resolution、overlay/focus contracts；这些模块可在无 Chrome DOM 的测试中执行。
 - DnD 不复用未类型化 payload；resolver 先校验 workspace/ownership/URL/locked/index 边界，session body 不产生 merge intent。
+- Manager production 不拥有 session/drop execution module；`src/manager/core/commands.ts` 已删除。Shared/background production modules不得导入 Manager。
 - `ManagerLayout` 持有一个 Open Tabs workflow；`Sidebar` / `OpenTabsPanel` 只消费 grouped `model/commands`。capture 使用 selection snapshot 与 pending guard并直接返回 completion evidence；persisted Open Tabs drop 直接调用 `completeDrop()`，不使用全局 DOM event。
 
 ### 图标
@@ -485,7 +492,7 @@ otherwise          -> Inbox
 
 ### Drag and Drop
 
-TabBoard 的 DnD 基于 `@dnd-kit`（`@dnd-kit/core` + `@dnd-kit/sortable`），不再使用原生 HTML5 `draggable` / `dataTransfer` / `setDragImage`。单个 `DndContext` 位于 `src/manager/components/shell/ManagerLayout.tsx`，纯逻辑（payload/target 类型、intent resolver、几何锁定）集中在 `src/manager/core/dnd.ts`，可在 DOM 之外用 Vitest 覆盖。
+TabBoard 的 DnD 基于 `@dnd-kit`（`@dnd-kit/core` + `@dnd-kit/sortable`），不再使用原生 HTML5 `draggable` / `dataTransfer` / `setDragImage`。单个 `DndContext` 位于 `src/manager/components/shell/ManagerLayout.tsx`；interaction logic（drag payload/target、intent resolver、几何锁定）集中在 `src/manager/core/dnd.ts`。Persistent `DropIntent` contract、validation、execution与replay分别由 shared model modules拥有。
 
 Drag payload 类型（`DragPayload`，由各可拖拽组件通过 `useDraggable` / `useSortable` 的 `data.dnd.payload` 声明）：
 
@@ -517,7 +524,7 @@ Intent 解析与提交：
 - `resolveDrop({ payload, target, state, openTabs })` 是唯一裁决点，先校验 workspace 边界（`isValidWorkspaceBoundary`，且 `target.workspaceId === payload.workspaceId`），再按 payload 类型分派，产出 typed `DropIntent`（`move-session` / `reorder-category` / `move-tabs` / `copy-open-tabs` / `create-session`）或返回 `null`。
 - Ownership/边界校验全部在 resolver 内：group/tab 必须属于当前 workspace（`getOwnedGroup` / `getOwnedTab`），category 必须存在（`isOwnedCategory`），插入 index 必须合法（`isValidInsertionIndex`），open-tabs 必须仍是 storable candidate（复用 `isStorableCaptureCandidate`）。同 session 内移动会用 `isSavedTabMoveNoOp()` 剔除 no-op，避免误删或空提交。
 - session body 不会产出 merge intent：拖 session 只能落到 `group-insert` / `category-column`，不能落进另一张 session 内部，从根本上排除"把 A 合并进 B"的误操作。
-- 提交走 `useTabBoardStore.applyDropIntent(intent, openTabs)` → `AuthoritativePublication.commitDrop()`（带 `operationId` 与 `expectedRevision`）。publication 的 Promise 等待 worker authoritative commit；worker `statePersistence` 再执行 normalized 原子写入。`persistDropWithFeedback()` 统一 success/error toast。
+- 提交走 `useTabBoardStore.applyDropIntent(intent, openTabs)` → `AuthoritativePublication.commitDrop()`（带 `operationId` 与 `expectedRevision`）。publication 的 Promise 等待 worker authoritative commit；worker `statePersistence` 调用 shared `stateMutations`，最终由 `drop-operations.ts` 执行 intent并生成replay evidence。`persistDropWithFeedback()` 统一 success/error toast。
 
 拖拽期间的一致性保护：
 
@@ -534,6 +541,7 @@ Intent 解析与提交：
 
 - DnD 逻辑仍是最脆弱的区域之一，但脆弱点已从"原生事件时序"转移到"collision detection 几何 + target 锁定 hysteresis + 拖拽中布局失效"三者的交互。
 - `resolveDrop` 是行为契约的中心，任何落点语义调整都应先在 `src/manager/core/dnd.test.ts` 加用例，再改 UI。
+- `drop-operations.ts` 是持久化执行/replay契约中心；wire shape、stable identity或execution调整先在 shared direct tests加用例。
 - 自动化覆盖 typed resolver / 几何 / 生命周期契约，加上 `tests/e2e/`（Playwright）里的 pointer 与键盘拖拽冒烟；更细的真实事件时序仍建议在 unpacked extension 手工验证。修改拖拽逻辑时应同时手工验证：
   - 拖 session 起始位置。
   - 拖 session 到同 category 前/后。
@@ -563,8 +571,8 @@ manager.html
 
 状态更新路径：
 
-1. UI 事件生成 typed `StateMutation` 或 typed `DropIntent`。
-2. shared mutation layer 验证 immutable state preconditions，包括 ownership、locked、URL、index 和 workspace。
+1. UI DnD resolver生成 shared typed `DropIntent`；其他 UI action生成 typed `StateMutation`。
+2. shared drop validation / mutation layer验证 immutable state preconditions，包括 ownership、locked、URL、index 和 workspace。
 3. `useTabBoardStore` 领域 facade 把 action 交给唯一 Authoritative Publication instance；publication 同步发布 optimistic projection，并按 ordinary/drop/category/restore 语义调度 mutation。
 4. worker `statePersistence` 串行验证并提交 mutation batch，返回 authoritative state、partial commit indexes 或 semantic error evidence。
 5. Storage Authority publication 回流到 publication subscription；有 pending/in-flight work 时先缓冲，batch settle 后按 revision/timestamp 选最新 remote base并安全重放 committed mutation。
@@ -621,7 +629,7 @@ git diff --check
 
 - `npm test`（Vitest，happy-dom）：React/core contracts，包括 selectors、state mutations、Authoritative Publication queue/retry/waiter/reconciliation/lifecycle、worker persistence、capture ownership/feedback、typed DnD、Open Tabs policy、overlays、layout 和 hydration。
 - `build`：`tsc --noEmit` 类型检查加 Vite/CRX 产物构建。
-- `check`：先 `build`，再由 `scripts/check-extension.mjs` 校验 Manifest entry、构建产物引用和 extension sanity；import graph gate 同时禁止 Storage Authority 回到 legacy cycle，并禁止 `authoritativePublication.ts` 依赖 Zustand、React、UI components、DOM event utilities 或 concrete storage adapters。
+- `check`：先 `build`，再由 `scripts/check-extension.mjs` 校验 Manifest entry、构建产物引用和 extension sanity；strict import graph gate拒绝任何 source SCC，并禁止 publication依赖UI/concrete storage、shared/background反向依赖Manager。
 
 当前测试空白：
 

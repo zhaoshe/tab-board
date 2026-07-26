@@ -21,6 +21,30 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-07-26: Session Domain Ownership 深化
+
+Persistent session/category/drop语义原本位于 Manager `commands.ts` / `dnd.ts`，shared mutation validation、background persistence 和 Zustand store反向导入 Manager。即使只把 barrel import改为direct import可以让当时的六模块SCC消失，layering inversion仍会保留。
+
+变化：
+
+- `src/shared/validation.ts` 成为ID/timestamp/byte/dense-array/canonical-JSON primitive owner，切断 `model/schema → store/mutationValidation` 反向依赖。
+- `categories.ts` 统一 `CategoryFilter`、category derivation/ownership/order、session move与category insertion；orphan folder IDs继续归Inbox。
+- `drop-intent.ts` 拥有五类persistent wire contract；Manager DnD只使用contract，不再定义它。
+- `drop-validation.ts` 拥有raw DropIntent/OpenTabInfo/payload-limit validation；store validation不再导入Manager DnD。
+- `drop-operations.ts` 拥有五类intent execution、operation digest、stable generated IDs、ledger/replay semantics；background/store直接依赖shared owner。
+- `session-operations.ts` 拥有restore-from-bin与import parsing/application。
+- Manager `dnd.ts` 收敛为drag payload/target/marker、geometry/hysteresis与intent resolution；production `manager/core/commands.ts` 删除。
+- shared/background production modules对Manager imports降为零；source import graph从六模块SCC收敛为零cycles。
+- `npm run check`升级为strict zero-cycle gate，并继续执行publication与reverse-edge policies。
+
+判断：
+
+- Import graph变绿不是充分条件；真正目标是shared/background不再依赖UI layer。
+- Persistent wire/validation/execution/replay属于shared domain，pointer/keyboard geometry和target resolution属于Manager interaction adapter。
+- 迁移保留成熟算法、wire shape、错误文案、replay identity、import formats和restore placement，不改变产品行为。
+
+当前状态：Current。Shared direct-owner tests与原Manager/store/background regressions共同守护行为。
+
 ### 2026-07-26: Authoritative Publication 深化
 
 Manager 的 optimistic mutation、retry、drop/category waiter、terminal isolation、remote reconciliation 和 hydration 原本与领域 actions 一起堆在 `useTabBoardStore.ts`，由 Zustand 文件中的 module-level globals 隐式共同拥有。文件达到 1227 行后，任何 persistence 时序改动都必须通过完整 singleton store 和 Chrome global mock 验证。

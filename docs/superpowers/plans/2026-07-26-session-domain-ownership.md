@@ -39,7 +39,7 @@
 - `schema.ts` imports primitive validation only from `../validation`.
 - `mutationValidation.ts` re-exports primitive symbols temporarily but no longer defines them.
 
-- [ ] **Step 1: 写 primitive owner RED**
+- [x] **Step 1: 写 primitive owner RED**
 
   新建 `validation.test.ts`，直接导入尚不存在的 `./validation`，用 literals 验证：
 
@@ -57,13 +57,13 @@
 
   该测试捕获 primitive validation 仍由 store-owned module提供的错误边界。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
   Run: `npx vitest run src/shared/validation.test.ts`
 
   Expected: FAIL because `./validation` does not exist.
 
-- [ ] **Step 3: 迁移 primitive implementation**
+- [x] **Step 3: 迁移 primitive implementation**
 
   从 `mutationValidation.ts` 移出 constants/functions；保留 drop/mutation-specific validation。`schema.ts` 改为：
 
@@ -78,7 +78,7 @@
 
   不新增 model/store dependency。
 
-- [ ] **Step 4: 运行 GREEN 与 validation regression**
+- [x] **Step 4: 运行 GREEN 与 validation regression**
 
   Run:
 
@@ -91,11 +91,11 @@
 
   Expected: PASS.
 
-- [ ] **Step 5: 加 architecture assertion**
+- [x] **Step 5: 加 architecture assertion**
 
   用 import graph CLI 对 `src/shared/model/schema.ts` 禁止 `src/shared/store` edge；实际 graph 应无该 edge。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   ```bash
   git add src/shared/validation.ts src/shared/validation.test.ts \
@@ -124,7 +124,7 @@
 - Manager-local type re-exports are allowed only for existing UI imports；`src/shared/**` 与 `src/background/**` 必须直接 import shared owner。
 - `dnd.ts` imports shared types/helpers and retains `DragPayload`, `DropTarget`, geometry and `resolveDrop`.
 
-- [ ] **Step 1: 写 category owner RED**
+- [x] **Step 1: 写 category owner RED**
 
   在 `categories.test.ts` direct import shared module，迁移并补齐 literals：
 
@@ -141,11 +141,11 @@
 
   迁移现有 session move tests：custom folder、Saved/Archive/Inbox、empty category、workspace block、global order、invalid folder/index/group。
 
-- [ ] **Step 2: 写 DropIntent contract RED**
+- [x] **Step 2: 写 DropIntent contract RED**
 
   `drop-intent.test.ts` 用 exhaustive `satisfies DropIntent[]` fixture定义五种 wire shapes；production change that breaks a field/name must fail TypeScript/Vitest import.
 
-- [ ] **Step 3: 运行 RED**
+- [x] **Step 3: 运行 RED**
 
   Run:
 
@@ -156,7 +156,7 @@
 
   Expected: FAIL because modules do not exist.
 
-- [ ] **Step 4: 实现 shared categories/contracts**
+- [x] **Step 4: 实现 shared categories/contracts**
 
   从 `selectors.ts` / `dnd.ts` / `commands.ts` 迁移类型和成熟 category/session move functions。所有 category matching使用：
 
@@ -170,13 +170,13 @@
   }
   ```
 
-- [ ] **Step 5: 切换 Manager type/helper imports**
+- [x] **Step 5: 切换 Manager type/helper imports**
 
   `dnd.ts` 不再定义 `SavedTabRef` / `DropIntent`，可从 shared module re-export type供现有 UI imports平滑迁移；production shared/background不得通过该 re-export。
 
   `selectors.ts` 使用 shared category helpers，保留 query/strip projection。
 
-- [ ] **Step 6: 运行 GREEN**
+- [x] **Step 6: 运行 GREEN**
 
   Run:
 
@@ -189,7 +189,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
   ```bash
   git add src/shared/model/categories.ts src/shared/model/categories.test.ts \
@@ -214,7 +214,7 @@
 - `mutationValidation.ts` owns mutation batch-specific limits and re-exports drop validators for compatibility only.
 - 所有 production callers在 Task 6 gate 前迁到 direct owner；re-export 不得成为 shared dependency graph 中的长期路径。
 
-- [ ] **Step 1: 写 direct malformed/limit RED**
+- [x] **Step 1: 写 direct malformed/limit RED**
 
   在 `drop-validation.test.ts` 直接 import shared owner，覆盖：
 
@@ -228,17 +228,17 @@
   - openTabs forbidden for non-open source；
   - complete OpenTabInfo shape。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
   Run: `npx vitest run src/shared/model/drop-validation.test.ts`
 
   Expected: FAIL because module is absent.
 
-- [ ] **Step 3: 迁移 implementation 与 callers**
+- [x] **Step 3: 迁移 implementation 与 callers**
 
   从 `mutationValidation.ts` 移动 DropIntent/OpenTab-specific code。Store validation imports shared owner；Manager compatibility caller也直接 imports shared owner。
 
-- [ ] **Step 4: 运行 GREEN**
+- [x] **Step 4: 运行 GREEN**
 
   Run:
 
@@ -251,7 +251,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 5: 验证 shared/store 不再导入 Manager DnD types**
+- [x] **Step 5: 验证 shared/store 不再导入 Manager DnD types**
 
   Run:
 
@@ -262,7 +262,7 @@
 
   Expected: no denied cycle for this pair.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   ```bash
   git add src/shared/model/drop-validation.ts \
@@ -294,7 +294,7 @@
 - Reuses shared categories and drop validation.
 - `stateMutations.ts` and background modules import only shared owner.
 
-- [ ] **Step 1: 写 shared execution owner RED**
+- [x] **Step 1: 写 shared execution owner RED**
 
   在 `drop-operations.test.ts` 直接 import尚不存在 module，迁移 behavior fixtures：
 
@@ -308,25 +308,25 @@
   - operation ID stable IDs/byte bounds；
   - ledger replay/eviction/conflict/digest。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
   Run: `npx vitest run src/shared/model/drop-operations.test.ts`
 
   Expected: FAIL because module is absent.
 
-- [ ] **Step 3: 迁移 mature algorithm**
+- [x] **Step 3: 迁移 mature algorithm**
 
   从 `manager/core/commands.ts` 移动 operation ID/replay/execution block（原 lines 27–925中 drop-owned functions），不改算法。所有 category calls改为 shared state-aware helpers。
 
-- [ ] **Step 4: 迁移 authoritative callers**
+- [x] **Step 4: 迁移 authoritative callers**
 
   `stateMutations.ts`、`background/statePersistence.ts`、`background/service-worker.ts` 与 tests直接 import shared owner；不得从 Manager compatibility module导入。
 
-- [ ] **Step 5: 收缩 Manager commands compatibility**
+- [x] **Step 5: 收缩 Manager commands compatibility**
 
   在本任务结束时 `commands.ts` 只暂存 restore/import functions；drop functions删除，不 re-export。Manager DnD tests直接 import shared execution owner。
 
-- [ ] **Step 6: 运行 GREEN**
+- [x] **Step 6: 运行 GREEN**
 
   Run:
 
@@ -341,7 +341,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
   ```bash
   git add src/shared/model/drop-operations.ts \
@@ -368,7 +368,7 @@
 - Import Modal imports shared session operations.
 - No production Manager commands module remains.
 
-- [ ] **Step 1: 写 session operations owner RED**
+- [x] **Step 1: 写 session operations owner RED**
 
   Direct tests迁移现有 fixtures：
 
@@ -378,21 +378,21 @@
   - invalid workspace/folder；
   - import ID regeneration/non-mutation。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
   Run: `npx vitest run src/shared/model/session-operations.test.ts`
 
   Expected: FAIL because module is absent.
 
-- [ ] **Step 3: 迁移 implementation**
+- [x] **Step 3: 迁移 implementation**
 
   从 `commands.ts` 移动 lines 926+ restore/import block，使用 direct model imports而非 barrel where needed to preserve graph direction.
 
-- [ ] **Step 4: 迁移 callers/tests并删除 commands.ts**
+- [x] **Step 4: 迁移 callers/tests并删除 commands.ts**
 
   所有 production/test imports改为 shared owner。`commands.test.ts` 中纯 drop/category tests已在前面任务迁走；剩余 restore tests迁入 shared test，随后删除该 test file if empty。
 
-- [ ] **Step 5: 运行 GREEN**
+- [x] **Step 5: 运行 GREEN**
 
   Run:
 
@@ -405,13 +405,13 @@
 
   Expected: PASS.
 
-- [ ] **Step 6: 验证 production Manager command owner 已消失**
+- [x] **Step 6: 验证 production Manager command owner 已消失**
 
   Run: `test ! -e src/manager/core/commands.ts`
 
   Expected: exit 0.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
   ```bash
   git add src/shared/model/session-operations.ts \
@@ -440,7 +440,7 @@
 - Forbidden edges reject shared/background → manager dependencies.
 - Publication forbidden edges remain enforced.
 
-- [ ] **Step 1: 写 strict gate RED**
+- [x] **Step 1: 写 strict gate RED**
 
   扩展 CLI tests确认：
 
@@ -450,13 +450,13 @@
 
   前两个现有行为已有覆盖基础；新增 production source assertion记录当前 RED。
 
-- [ ] **Step 2: 运行 source graph RED**
+- [x] **Step 2: 运行 source graph RED**
 
   Run: `node scripts/check-import-cycles.mjs`
 
   Expected: FAIL and list the current Manager/shared SCC before final import cleanup.
 
-- [ ] **Step 3: 清理 barrel imports与所有 reverse edges**
+- [x] **Step 3: 清理 barrel imports与所有 reverse edges**
 
   Manager core使用 direct shared imports where barrel would reintroduce schema/validation cycles。检查：
 
@@ -466,7 +466,7 @@
 
   Expected: no production matches.
 
-- [ ] **Step 4: 切换 package gate**
+- [x] **Step 4: 切换 package gate**
 
   Replace targeted script with:
 
@@ -477,7 +477,7 @@
 
   CLI strict mode rejects any cycle when no `--deny-together` is supplied.
 
-- [ ] **Step 5: 更新架构/演进/决策文档**
+- [x] **Step 5: 更新架构/演进/决策文档**
 
   记录：
 
@@ -488,7 +488,7 @@
   - zero source-cycle policy；
   - D043 tradeoff。
 
-- [ ] **Step 6: Review full diff**
+- [x] **Step 6: Review full diff**
 
   核对：
 
@@ -502,7 +502,7 @@
   - `rg -n "from ['\"].*manager/" src/shared src/background` 无 production matches；
   - no unrelated DnD UI behavior changes。
 
-- [ ] **Step 7: 运行 fresh full verification**
+- [x] **Step 7: 运行 fresh full verification**
 
   Run:
 
@@ -515,7 +515,7 @@
 
   Expected: all exit 0；source import graph zero cycles；记录 test files/tests count。
 
-- [ ] **Step 8: 更新状态并 Commit**
+- [x] **Step 8: 更新状态并 Commit**
 
   标记 spec/plan implemented and verified，写入 fresh evidence。
 
@@ -526,13 +526,21 @@
 
 ## Completion Audit
 
-- [ ] `CategoryFilter` / `SavedTabRef` / `DropIntent` 由 shared model拥有。
-- [ ] category/session move实现只有一套且state-aware处理 orphan folder。
-- [ ] raw drop validation不依赖 Manager或store/model barrel cycle。
-- [ ] drop execution/replay/digest/identity 由 shared model拥有。
-- [ ] restore/import state operations由 shared model拥有。
-- [ ] `src/manager/core/dnd.ts` 只保留 interaction/intent resolution。
-- [ ] `src/manager/core/commands.ts` production module已删除。
-- [ ] shared/background production imports Manager 为零。
-- [ ] `npm run check` 对任何 source SCC 失败且当前 graph零 cycle。
-- [ ] 全量 build/check/test/diff check 使用本轮 fresh output。
+- [x] `CategoryFilter` / `SavedTabRef` / `DropIntent` 由 shared model拥有。
+- [x] category/session move实现只有一套且state-aware处理 orphan folder。
+- [x] raw drop validation不依赖 Manager或store/model barrel cycle。
+- [x] drop execution/replay/digest/identity 由 shared model拥有。
+- [x] restore/import state operations由 shared model拥有。
+- [x] `src/manager/core/dnd.ts` 只保留 interaction/intent resolution。
+- [x] `src/manager/core/commands.ts` production module已删除。
+- [x] shared/background production imports Manager 为零。
+- [x] `npm run check` 对任何 source SCC 失败且当前 graph零 cycle。
+- [x] 全量 build/check/test/diff check 使用本轮 fresh output。
+
+## Verification Record
+
+- `npm run build`: PASS，TypeScript + Vite production build，6984 modules。
+- `npm run check`: PASS，extension sanity、6个import-graph CLI tests、123 source files strict zero-cycle/reverse-edge gate。
+- `npm test`: PASS，50 test files，857 tests。
+- `git diff --check`: PASS。
+- `src/manager/core/commands.ts`: deleted；shared/background production imports Manager = 0。

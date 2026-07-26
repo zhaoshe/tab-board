@@ -1029,6 +1029,48 @@ Implementation note（2026-07-26）：
 - ordinary/drop/category/restore 四种 commit 语义、partial commit、retry exhaustion、terminal isolation、queued-during-isolation、context replacement 和 dispose 均有 direct tests。
 - `npm run check` 的 import graph gate 禁止 publication 依赖 Zustand、React、Manager components、DOM event utilities 或 concrete storage adapters。
 
+## D043: Persistent session/drop semantics live in shared domain, not Manager core
+
+Context:
+
+`CategoryFilter`、`DropIntent`、session move、drop execution/replay、restore/import曾由Manager `selectors.ts` / `dnd.ts` / `commands.ts`拥有；shared mutation validation、background persistence和Zustand store因此反向依赖Manager。Barrel imports又形成六模块SCC。只改direct imports可以消除SCC，但不会修复owner inversion。
+
+Decision:
+
+把persistent domain按职责拆到shared：
+
+- primitive validation → `src/shared/validation.ts`；
+- category/session placement → `model/categories.ts`；
+- wire contract → `model/drop-intent.ts`；
+- raw drop validation → `model/drop-validation.ts`；
+- drop execution/replay/digest/stable identity → `model/drop-operations.ts`；
+- restore/import → `model/session-operations.ts`。
+
+Manager `dnd.ts`只保留drag geometry、payload/target、hysteresis和intent resolution；删除production `manager/core/commands.ts`。Shared/background production modules不得导入Manager，source graph必须零cycles。
+
+Rationale:
+
+- DropIntent是跨Manager、worker、store和background的持久化协议，不是UI-local type。
+- Authoritative validation/replay必须由worker/shared可直接调用，不能经由Manager模块。
+- Category derivation只有一套state-aware实现，保证orphan folder在selector、resolver和mutation execution中都归Inbox。
+- 严格零cycle gate能防止未来barrel或reverse import重新模糊ownership。
+
+Trade-offs:
+
+- `drop-operations.ts`集中多种intent execution/replay，文件仍较大；后续是否按execution/replay拆分需基于变更局部性与direct tests评估，不能只按行数拆。
+- Manager tests部分仍保留历史文件名，但imports直接指向shared owner；生产owner已迁移。
+- Shared model承担更多domain logic，但保持无DOM、无React、无Chrome API依赖。
+
+Status:
+
+Accepted。
+
+Implementation note（2026-07-26）：
+
+- DropIntent wire shape、operation ledger、retry policy、DnD geometry、restore/import behavior均未改变。
+- Shared/background production imports Manager = 0；`manager/core/commands.ts` 已删除。
+- `npm run check:cycles` 对任何source SCC失败，并额外禁止shared/background → Manager edges。
+
 ## Decision template
 
 ```md

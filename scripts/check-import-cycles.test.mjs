@@ -71,6 +71,38 @@ test('passes a denied pair when the import graph is acyclic', () => {
   }
 });
 
+test('strict mode rejects any import cycle without a deny filter', () => {
+  const fixture = createFixture({
+    'a.ts': "import './b';\n",
+    'b.ts': "import './a';\n",
+  });
+  try {
+    const result = runCycleCheck(fixture.root);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /Import cycle:/);
+    assert.match(result.stderr, /Denied import cycle count: 1/);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test('strict mode passes an acyclic source graph', () => {
+  const fixture = createFixture({
+    'a.ts': "import './b';\n",
+    'b.ts': 'export const value = 1;\n',
+  });
+  try {
+    const result = runCycleCheck(fixture.root);
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /No denied import cycles/);
+    assert.equal(result.stderr, '');
+  } finally {
+    fixture.dispose();
+  }
+});
+
 test('rejects forbidden external and resolved internal import edges', () => {
   const fixture = createFixture({
     'owner.ts': "import { create } from 'zustand';\nimport './ui/component';\nexport const owner = create;\n",

@@ -1,7 +1,7 @@
 # Session Domain Ownership 深化设计
 
 **日期：** 2026-07-26
-**状态：** 已批准，待实施
+**状态：** 已实现并验证
 **范围：** 统一 category、DropIntent、session move/drop execution、restore/import 的 shared domain ownership，消除 Manager/shared/store 之间的剩余 import cycle。
 
 ## 背景与问题
@@ -458,3 +458,22 @@ node scripts/check-import-cycles.mjs \
 - 不改变 import formats、restore placement 或 Bin behavior。
 - 不重写成熟 drop algorithms；只迁移 owner并去除重复 category semantics。
 - 不引入 runtime dependency。
+
+## 实施结果
+
+- `src/shared/validation.ts` 成为primitive validation owner，`schema.ts` 不再依赖store validation。
+- `categories.ts` 统一category derivation/ownership/order、session move和category insertion；orphan folder继续归Inbox。
+- `drop-intent.ts` 统一五类persistent DropIntent wire contract。
+- `drop-validation.ts` 统一raw DropIntent/OpenTabInfo/payload-limit validation。
+- `drop-operations.ts` 统一五类intent execution、operation digest、stable generated IDs与replay/ledger semantics。
+- `session-operations.ts` 统一restore-from-bin与import parsing/application。
+- `src/manager/core/dnd.ts` 只保留interaction payload/target/geometry/hysteresis与intent resolution。
+- production `src/manager/core/commands.ts` 已删除；shared/background production imports Manager 为零。
+- 原六模块SCC已消失；strict graph gate验证123个source files零cycles/forbidden edges。
+
+## 验证记录
+
+- `npm run build`: PASS，TypeScript + Vite production build，6984 modules。
+- `npm run check`: PASS，extension sanity、6个import-graph CLI tests、123 source files strict zero-cycle/reverse-edge gate。
+- `npm test`: PASS，50 test files，857 tests。
+- `git diff --check`: PASS。
