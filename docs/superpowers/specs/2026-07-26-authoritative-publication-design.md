@@ -1,7 +1,7 @@
 # Authoritative Publication 深化设计
 
 **日期：** 2026-07-26  
-**状态：** 已批准，待实施  
+**状态：** 已实现并验证
 **范围：** 将 optimistic mutation、权威状态发布、重试与错误隔离、等待器和 hydration 生命周期从 Zustand store 中提取为独立 publication owner。
 
 ## 背景与问题
@@ -342,3 +342,18 @@ context replacement：
 - 不在本轮统一 Session move / DnD domain ownership；该问题在下一轮单独处理。
 - 不引入新的状态库、runtime dependency 或公开调试 API。
 - 不把所有 store helper 机械拆成小文件；只移动由 publication 状态机真正拥有的职责。
+
+## 实施结果
+
+- `authoritativePublication.ts` 成为唯一 Manager-side publication owner，独占 optimistic queue、serialized send、remote buffer、retry、waiter、terminal isolation、hydration 和 context generation。
+- `useTabBoardStore.ts` 从 1227 行收敛到 534 行，只保留 Zustand projection、领域 facade、restore/import/export 准备、ports 和 AppEvents 映射。
+- context replacement 增加 in-flight generation 隔离：旧 RPC continuation 不能覆盖新 context；只有旧 context 存在 outstanding work 时才回滚 optimistic projection。
+- `authoritativePublication.test.ts` 以真实 state reducer 和内存 ports 覆盖 ordinary/drop/category/restore、concurrent remote、partial commit、retry exhaustion、terminal isolation、queued-during-isolation、hydration、context replacement 和 dispose。
+- `scripts/check-import-cycles.mjs` 增加 resolved forbidden-import edge policy；`npm run check` 禁止 publication 依赖 Zustand、React、Manager components、DOM event utilities 和 concrete storage adapters。
+
+## 验证记录
+
+- `npm run build`: PASS，TypeScript + Vite production build，6979 modules。
+- `npm run check`: PASS，extension sanity、4 个 import-graph CLI tests、112 source files 的 cycle/forbidden-edge gate。
+- `npm test`: PASS，44 test files，831 tests。
+- `git diff --check`: PASS。

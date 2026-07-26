@@ -31,7 +31,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `src/background/service-worker.ts`: Chrome API boundary、capture/restore、runtime messages、sender verification。
 - `src/background/statePersistence.ts`: serialized mutation queue、optional Web Locks、normalized atomic writes。
 - `src/shared/model/`: schema/types、normalize、capture policy、import/export 和 search。
-- `src/shared/store/`: `chrome.storage.local` adapter、immutable state mutations、mutation validation、Zustand store。
+- `src/shared/store/`: Storage Authority、Authoritative Publication、immutable state mutations、mutation validation 和 Zustand facade。
 - `src/shared/styles/`: shared theme tokens。
 - `scripts/check-extension.mjs`: extension 文件存在性、构建产物引用和 sanity checks。
 
@@ -74,17 +74,24 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 
 负责客户端状态和持久化边界：
 
-- 持久化层抽象为 `StorageAdapter` 接口（`src/shared/store/storageAdapter.ts`，约定 `getState()` / `setState(state)` / `clear()` 等方法），当前有两个实现：
+- 持久化层抽象为 `StorageAdapter` 接口（`src/shared/store/storageAdapter.ts`，约定 `getState()` / `setState(state)` / `ensureState()` / `subscribeState()`），当前有两个实现：
   - `ChromeStorageAdapter`（`chromeStorageAdapter.ts`）：封装 `chrome.storage.local["tabboardState"]`，是默认后端。
   - `FileStorageAdapter`（`fileStorage.ts` + `fileSerialization.ts` + `fsAtomic.ts`）：通过 File System Access API 把数据写入用户选择的本地文件夹；详见下文「File Store Layout」。
 - `activeAdapter` 是稳定的 Storage Authority。启动时读 `chrome.storage.local["tabboardStorageConfig"]`（BOOTSTRAP_KEY，一个极小的 bootstrap key：`{ mode: 'browser' | 'file' }`）决定内部 backend；callers 可长期持有同一个 authority interface，backend 切换不会让 subscription 或缓存引用失效。
 - `storageEvents.ts` 独立承载 file commit ping 与跨 context fallback event；authority 只在 File backend 活跃时绑定这两类 transport，并按 event id 去重。
 - File backend 在初始化、读取、写入或 ping reload 时失败，authority 会切换 backend、重绑 subscription 并通知 UI。本 context 首次发现故障时先把最后一次有效 snapshot 保存到 Chrome；收到其他 context 的 fallback event 时直接读取对方已提交的 Chrome state，禁止用旧 File snapshot 反向覆盖。本次失败写仍 reject，避免把未提交 mutation 误报为成功；既有 persistence retry 会在 Chrome backend 上重试。
+- `authoritativePublication.ts` 是 Manager-side publication owner。它不依赖 Zustand、React、DOM event 或具体 Chrome adapter，独占 optimistic queue、in-flight batch、remote buffer、drop/category waiter、bounded retry、terminal isolation、authoritative reconciliation、structural sharing 和 hydration generation。
 - `stateMutations.ts` 以 immutable commands 应用普通 state mutation，并拒绝无效引用、locked 目标和 link/note URL 形态错误。
 - `mutationValidation.ts` 负责 untrusted/raw mutation boundary。
-- `useTabBoardStore.ts` 提供 React 状态投影和 mutation 入口。
+- `useTabBoardStore.ts` 只提供 Zustand UI projection、领域 action facade、restore/import/export 准备和 AppEvents 映射；它通过窄 ports 创建一个 publication instance，不拥有 persistence queue、retry timer、waiter 或 hydration subscription。
 
-所有写入先 normalize，再交给 authority 当前 backend 原子提交；跨页面更新按 revision/hydration 规则应用，authority 的 last-known snapshot 也按 revision/updatedAt 单调推进，不能让旧快照覆盖较新 state。
+三类 ownership 不应混淆：
+
+1. **Storage Authority** 决定 browser/file backend，维护稳定 adapter identity、backend migration、fallback 和 backend subscription。
+2. **Authoritative Publication** 决定 Manager projection 的 optimistic/authoritative 时序，串行发送 mutation、处理 retry/waiter/remote publication/hydration。
+3. **Worker State Persistence** 在 service worker 内对 mutation batch 做 validation、revision/replay 判定和 normalized atomic write。
+
+所有写入最终交给 Storage Authority 当前 backend 原子提交；跨页面更新由 Authoritative Publication 按 revision/hydration 规则合并。Storage Authority 的 last-known snapshot 与 publication 的 last-authoritative projection 都按 revision/updatedAt 单调推进，不能让旧快照覆盖较新 state。
 
 ### `src/background/`
 
@@ -401,9 +408,9 @@ File backend 的初始化、读取、写入或 `reloadFromDisk()` 抛出错误�
 
 Manager 启动先由 React shell 和 `useStoreHydration()` 生成 normalized default state，准备并渲染可用 layout，同时由 `useOpenTabsRuntime()` 发起 Open Tabs 请求；storage state 在后台异步读取，完成后再应用到当前页面。Mantine render 或 runtime message 失败只影响对应 surface，不应阻断基础 Manager shell。
 
-Hydration 不依赖 MV3 service worker：manager 作为页面可直接读写 `chrome.storage.local`，worker 只在**写入**时用于跨页面串行化。`store.hydrate()` 通过 `ensureStateForHydration()` 读取初始 state——优先发 `tabboard-ensure-state` 给 worker（顺便唤醒它、给空存储播种默认值），但**如果 worker 处于空闲挂起、冷启动竞态或消息通道断开**（典型报错 `Could not establish connection` / `message port closed`），则 catch 后降级为本地 `ensureState()` 直接读 `chrome.storage.local`。这样 worker 不可达时页面仍能正常起来，避免此前"单次 `sendMessage` 失败 → `hydrated` 永远为 false → 无限 loading 白屏"的问题。只有当 worker 与本地存储读取**同时失败**时，`hydrate()` 才会 reject，此时 `useStoreHydration` 记录错误并允许重试。
+Hydration 不依赖 MV3 service worker：manager 页面可以通过 Storage Authority 直接读取当前 backend，worker 只在**写入**时用于跨页面串行化。`store.hydrate()` 委托 Authoritative Publication；publication 先调用 `ensureStateForHydration()`——优先发 `tabboard-ensure-state` 给 worker（顺便唤醒它、给空存储播种默认值），但**如果 worker 处于空闲挂起、冷启动竞态或消息通道断开**（典型报错 `Could not establish connection` / `message port closed`），则 catch 后降级为 authority `ensureState()`。publication 在 initial read 前订阅 authority publication，缓冲 read/subscribe gap 中到达的 state，并用 revision 优先、timestamp 次优选择最新 state。这样 worker 不可达时页面仍能正常起来，避免此前"单次 `sendMessage` 失败 → `hydrated` 永远为 false → 无限 loading 白屏"的问题。只有当 worker 与当前 backend 读取**同时失败**时，`hydrate()` 才会 reject；本 generation subscription 会释放、错误以 `notify: false` 投影，下一次调用可以重试。
 
-异步 storage apply 记录启动 revision；`chrome.storage.onChanged` 到达时先递增 revision 并应用新 state，旧的 storage 快照完成后若 revision 已变化则丢弃，避免旧快照覆盖新 state。错误按阶段降级：popover 失败只关闭信息浮层，storage 失败保留默认 normalized state，migration 失败保留已加载 sessions，shell 失败停止后续启动，Open Tabs 失败保留空面板并提示；loaded/render 失败则保留已启动的基础界面并提示。
+`releaseHydration()` 只使当前 UI generation 和旧 subscription callback 失效，不 teardown Storage Authority backend，也不破坏正在持久化的 mutation。页面或测试 context 整体替换时，publication generation 会拒绝旧 waiter、取消旧 timer、回滚真正未完成的 optimistic projection，并让旧 RPC continuation 无法覆盖新 context。错误按阶段降级：popover 失败只关闭信息浮层，storage 失败保留默认 normalized state，migration 失败保留已加载 sessions，shell 失败停止后续启动，Open Tabs 失败保留空面板并提示；loaded/render 失败则保留已启动的基础界面并提示。
 
 ### Restore
 
@@ -510,7 +517,7 @@ Intent 解析与提交：
 - `resolveDrop({ payload, target, state, openTabs })` 是唯一裁决点，先校验 workspace 边界（`isValidWorkspaceBoundary`，且 `target.workspaceId === payload.workspaceId`），再按 payload 类型分派，产出 typed `DropIntent`（`move-session` / `reorder-category` / `move-tabs` / `copy-open-tabs` / `create-session`）或返回 `null`。
 - Ownership/边界校验全部在 resolver 内：group/tab 必须属于当前 workspace（`getOwnedGroup` / `getOwnedTab`），category 必须存在（`isOwnedCategory`），插入 index 必须合法（`isValidInsertionIndex`），open-tabs 必须仍是 storable candidate（复用 `isStorableCaptureCandidate`）。同 session 内移动会用 `isSavedTabMoveNoOp()` 剔除 no-op，避免误删或空提交。
 - session body 不会产出 merge intent：拖 session 只能落到 `group-insert` / `category-column`，不能落进另一张 session 内部，从根本上排除"把 A 合并进 B"的误操作。
-- 提交走 `useTabBoardStore.applyDropIntent(intent, openTabs)` → `commitDropMutation`（带 `operationId` 与 `expectedRevision`），在 background persistence 队列内做 normalized 原子写入；`persistDropWithFeedback()` 统一 success/error toast。
+- 提交走 `useTabBoardStore.applyDropIntent(intent, openTabs)` → `AuthoritativePublication.commitDrop()`（带 `operationId` 与 `expectedRevision`）。publication 的 Promise 等待 worker authoritative commit；worker `statePersistence` 再执行 normalized 原子写入。`persistDropWithFeedback()` 统一 success/error toast。
 
 拖拽期间的一致性保护：
 
@@ -558,10 +565,11 @@ manager.html
 
 1. UI 事件生成 typed `StateMutation` 或 typed `DropIntent`。
 2. shared mutation layer 验证 immutable state preconditions，包括 ownership、locked、URL、index 和 workspace。
-3. `useTabBoardStore` 与 background persistence queue 应用 normalized state。
-4. `chrome.storage.onChanged` 通过 hydration/runtime hooks 回流；revision guard 丢弃过期快照。
-5. Store 在发布 authoritative state 前执行 semantic structural sharing，复用未变化的 workspace/folder/group/tab 等实体引用。
-6. React 根据共享后的 authoritative state 重绘，并由 capture outcome/overlay lifecycle 恢复 feedback 与 focus。
+3. `useTabBoardStore` 领域 facade 把 action 交给唯一 Authoritative Publication instance；publication 同步发布 optimistic projection，并按 ordinary/drop/category/restore 语义调度 mutation。
+4. worker `statePersistence` 串行验证并提交 mutation batch，返回 authoritative state、partial commit indexes 或 semantic error evidence。
+5. Storage Authority publication 回流到 publication subscription；有 pending/in-flight work 时先缓冲，batch settle 后按 revision/timestamp 选最新 remote base并安全重放 committed mutation。
+6. Publication 在发布 reconciled state 前执行 semantic structural sharing，复用未变化的 workspace/folder/group/tab 等实体引用；drop/category waiter 只在 authoritative outcome 后 settle。
+7. React 根据共享后的 projection 重绘，并由 capture outcome/overlay lifecycle 恢复 feedback 与 focus。
 
 ### 大 board 性能
 
@@ -611,9 +619,9 @@ git diff --check
 
 自动化 proof 当前覆盖：
 
-- `npm test`（Vitest，happy-dom）：React/core contracts，包括 selectors、state mutations、persistence queue、replay、capture ownership/feedback、typed DnD、Open Tabs policy、overlays、layout 和 hydration。
+- `npm test`（Vitest，happy-dom）：React/core contracts，包括 selectors、state mutations、Authoritative Publication queue/retry/waiter/reconciliation/lifecycle、worker persistence、capture ownership/feedback、typed DnD、Open Tabs policy、overlays、layout 和 hydration。
 - `build`：`tsc --noEmit` 类型检查加 Vite/CRX 产物构建。
-- `check`：先 `build`，再由 `scripts/check-extension.mjs` 校验 Manifest entry、构建产物引用和 extension sanity。
+- `check`：先 `build`，再由 `scripts/check-extension.mjs` 校验 Manifest entry、构建产物引用和 extension sanity；import graph gate 同时禁止 Storage Authority 回到 legacy cycle，并禁止 `authoritativePublication.ts` 依赖 Zustand、React、UI components、DOM event utilities 或 concrete storage adapters。
 
 当前测试空白：
 

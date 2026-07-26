@@ -21,6 +21,30 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-07-26: Authoritative Publication 深化
+
+Manager 的 optimistic mutation、retry、drop/category waiter、terminal isolation、remote reconciliation 和 hydration 原本与领域 actions 一起堆在 `useTabBoardStore.ts`，由 Zustand 文件中的 module-level globals 隐式共同拥有。文件达到 1227 行后，任何 persistence 时序改动都必须通过完整 singleton store 和 Chrome global mock 验证。
+
+变化：
+
+- 新增 `createAuthoritativePublication(dependencies)`，以普通 TypeScript instance 独占 pending/in-flight mutation、remote buffer、last authoritative state、serialized queue、bounded retry、waiter、hydration Promise/subscription/generation 和 context generation。
+- publication 通过 projection ports 读写 Zustand，通过 transport ports 访问 Storage Authority 与 worker mutation RPC；模块本身不依赖 Zustand、React、DOM event 或 concrete storage adapter。
+- ordinary mutation 保持 fire-and-forget optimistic commit；drop/category Promise 只在 authoritative outcome 后 settle；restore 同步 collision 仍由 UI adapter 报错而不抛回 action。
+- concurrent authority publication 在有 pending/in-flight work 时缓冲；RPC settle 后按 revision/timestamp 选择最新 remote base，安全重放 committed ordinary mutation，并用 drop ledger 防止 committed drop 重放。
+- terminal ordinary mixed batch 保留逐项隔离；transient failure 继续按 250ms / 1s / 4s 有界重试；isolation 期间新入队 mutation 不丢失。
+- hydration lifecycle 移入 publication：initial read 前订阅、缓冲 read/subscribe gap、共享同 generation Promise、release 使 stale callback 失效、失败后允许 retry。
+- context replacement 会拒绝旧 waiter、取消旧 timer并隔离旧 RPC continuation；只有旧 context 真有 outstanding work 时才回滚 optimistic projection，空闲 context 切换不会覆盖 caller 已设置的新 projection。
+- `useTabBoardStore.ts` 收敛为 534 行领域 facade/React projection/ports/event mapping，不再拥有 queue、retry、waiter、reconciliation 或 hydration globals。
+- import graph gate 禁止 publication 依赖 Zustand、React、Manager components、DOM event utilities、`chromeStorage` 或 `activeAdapter` concrete modules。
+
+判断：
+
+- 只拆 pure helpers 会降低文件长度，却不会改变状态机 ownership；另建第二个 Zustand store会把非 UI 基础设施状态继续绑定到 UI library。
+- 注入式 owner 既能直接用内存 projection/transport 测试，又能让 Zustand、Storage Authority 和 worker transaction 保持各自单一职责。
+- 本轮不机械拆分 publication 内部 policy；先完成 owner cutover并保留成熟算法，下一次架构分析再根据 seam 和变更局部性判断是否继续拆分。
+
+当前状态：Current。Direct publication tests、完整 store regressions、hydration hook、build/check/test 均纳入验证。
+
 ### 2026-07-26: Open Tabs Workflow 深化
 
 Open Tabs 的 runtime contract、selection、refresh、capture feedback、tab filter 和 drag completion 原本分散在 worker、hook、Panel、ManagerLayout 与多个全局 DOM events 中；小规则改动往往需要同步修改 4–5 个模块。

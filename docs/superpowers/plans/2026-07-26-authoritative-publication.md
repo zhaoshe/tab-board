@@ -35,7 +35,7 @@
 - `commitRestore()` 捕获同步 optimistic failure。
 - `commitDrop()` 和 `commitCategory()` 返回 `Promise<void>`。
 
-- [ ] **Step 1: 写最小 failing interface test**
+- [x] **Step 1: 写最小 failing interface test**
 
   在 `authoritativePublication.test.ts` 使用内存 projection fake，导入尚不存在的 `createAuthoritativePublication()`，验证：
 
@@ -53,13 +53,13 @@
 
   该测试捕获“publication 只转发、不拥有 optimistic projection 或 debounce queue”的错误实现。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
   Run: `npx vitest run src/shared/store/authoritativePublication.test.ts`
 
   Expected: FAIL because `./authoritativePublication` does not exist.
 
-- [ ] **Step 3: 实现最小 interface、ports 与 ordinary commit**
+- [x] **Step 3: 实现最小 interface、ports 与 ordinary commit**
 
   创建：
 
@@ -84,13 +84,13 @@
 
   最小实现拥有 pending queue、100ms save timer、serialized send queue，并通过 `readProjection()` / `publishProjection()` 进行 optimistic apply。
 
-- [ ] **Step 4: 运行 GREEN 并增加 structural-sharing assertion**
+- [x] **Step 4: 运行 GREEN 并增加 structural-sharing assertion**
 
   Run: `npx vitest run src/shared/store/authoritativePublication.test.ts`
 
   Expected: PASS；未变化 workspace/group 引用保持相同。
 
-- [ ] **Step 5: 运行 focused direct regressions**
+- [x] **Step 5: 运行 focused direct regressions**
 
   新模块尚未拥有完整 retry/isolation/hydration 语义，因此本任务不切换 production store，避免短暂双 owner 或行为退化。
 
@@ -98,7 +98,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   ```bash
   git add src/shared/store/authoritativePublication.ts \
@@ -117,7 +117,7 @@
 - `acceptAuthoritativeState(authoritative, committedMutations)` chooses newest remote state, replays committed ordinary mutations when required, seeds committed drop ledger, reapplies pending mutations, and publishes structural sharing.
 - `subscribeAuthoritativeState()` callbacks are buffered whenever publication has pending or in-flight mutations.
 
-- [ ] **Step 1: 写 concurrent remote RED tests**
+- [x] **Step 1: 写 concurrent remote RED tests**
 
   增加 direct tests：
 
@@ -128,13 +128,13 @@
 
   测试必须直接调用真实 publication 和真实 `applyStateMutations()`，transport 只 fake 延迟与返回值。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
   Run: `npx vitest run src/shared/store/authoritativePublication.test.ts`
 
   Expected: FAIL because the minimal module overwrites or drops concurrent remote state.
 
-- [ ] **Step 3: 迁移 pure reconciliation helpers**
+- [x] **Step 3: 迁移 pure reconciliation helpers**
 
   从 store 移入并改为 instance-owned：
 
@@ -147,7 +147,7 @@
 
   `publishProjection()` 前使用 `structurallyShareState()`；不得调用 Zustand。
 
-- [ ] **Step 4: 迁移 batch queue 与 success callback**
+- [x] **Step 4: 迁移 batch queue 与 success callback**
 
   `sendPendingBatch()` 在成功时：
 
@@ -159,13 +159,13 @@
 
   只有确认提交的 indexes 才触发 callback。
 
-- [ ] **Step 5: 运行 direct GREEN**
+- [x] **Step 5: 运行 direct GREEN**
 
   Run: `npx vitest run src/shared/store/authoritativePublication.test.ts`
 
   Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   Commit:
 
@@ -186,7 +186,7 @@
 - Retry sequence is exactly 250ms, 1000ms, 4000ms after the initial attempt.
 - `onPersistenceError(error, notify)` receives publication-owned notification policy.
 
-- [ ] **Step 1: 写 waiter/retry RED tests**
+- [x] **Step 1: 写 waiter/retry RED tests**
 
   Direct tests cover:
 
@@ -211,13 +211,13 @@
   - successful category sibling resolves while terminal sibling rejects；
   - unowned final ordinary failure uses `notify: true`，owned final drop uses `notify: false`。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
   Run: `npx vitest run src/shared/store/authoritativePublication.test.ts`
 
   Expected: FAIL on pending/retry/isolation assertions.
 
-- [ ] **Step 3: 迁移 waiters 与 error classification**
+- [x] **Step 3: 迁移 waiters 与 error classification**
 
   移入：
 
@@ -229,7 +229,7 @@
 
   waiter 在 retry queue 中不得提前 settle。
 
-- [ ] **Step 4: 迁移 bounded retry 与 recovery**
+- [x] **Step 4: 迁移 bounded retry 与 recovery**
 
   publication owns：
 
@@ -239,17 +239,17 @@
   - authoritative recovery via `readAuthoritativeState()` then `lastAuthoritativeState`；
   - retry budget reset rules。
 
-- [ ] **Step 5: 迁移 terminal ordinary isolation**
+- [x] **Step 5: 迁移 terminal ordinary isolation**
 
   将 mixed terminal batch 拆为逐项发送。每次 isolate attempt 后重新捕获 isolation 期间新排队的 mutation；成功项触发 commit callback，失败项映射到各自 waiter。
 
-- [ ] **Step 6: 运行 direct GREEN**
+- [x] **Step 6: 运行 direct GREEN**
 
   Run: `npx vitest run src/shared/store/authoritativePublication.test.ts`
 
   Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
   Commit:
 
@@ -271,7 +271,7 @@
 - `dispose()` rejects waiters, clears timers/queues, unsubscribes, and permanently invalidates old continuations.
 - `currentContext()` replacement resets old publication work before accepting a new commit.
 
-- [ ] **Step 1: 写 lifecycle RED tests**
+- [x] **Step 1: 写 lifecycle RED tests**
 
   Direct tests prove：
 
@@ -283,27 +283,27 @@
   - context replacement rejects old drop/category waiter and sends only new-context mutation；
   - dispose clears save/retry timers and rejects waiters。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
   Run: `npx vitest run src/shared/store/authoritativePublication.test.ts`
 
   Expected: FAIL because lifecycle is not yet instance-owned.
 
-- [ ] **Step 3: 实现 hydration state machine**
+- [x] **Step 3: 实现 hydration state machine**
 
   将 hydration generation、Promise、subscription、initial buffered state 移入 publication。所有 await 和 callback 后检查 generation/disposed token。
 
-- [ ] **Step 4: 实现 context replacement 与 dispose**
+- [x] **Step 4: 实现 context replacement 与 dispose**
 
   `syncContext()` 在每次 commit 前调用。replacement/dispose 共用内部 reset primitive，但只有 dispose 设置永久 disposed flag。
 
-- [ ] **Step 5: 运行 lifecycle GREEN**
+- [x] **Step 5: 运行 lifecycle GREEN**
 
   Run: `npx vitest run src/shared/store/authoritativePublication.test.ts`
 
   Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   Commit:
 
@@ -326,17 +326,17 @@
 - Store hydration methods call publication `hydrate()` / `releaseHydration()`.
 - AppEvents and `persistenceError` remain adapter concerns.
 
-- [ ] **Step 1: 写 production wiring RED test**
+- [x] **Step 1: 写 production wiring RED test**
 
   增加 store integration assertion：ordinary、drop、category、restore 和 hydration 均经同一个 publication owner 保持原有对外行为；测试通过真实 store API 和 Chrome boundary 观察，不暴露 publication internals。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
   临时将新 integration test 对准尚未接线的 direct publication-specific行为（例如 context replacement waiter rejection），确认旧 store fails for the intended ownership reason。
 
   Run: `npx vitest run src/shared/store/useTabBoardStore.test.ts -t "publication owner"`
 
-- [ ] **Step 3: 创建 singleton ports**
+- [x] **Step 3: 创建 singleton ports**
 
   在 store 中映射：
 
@@ -364,11 +364,11 @@
 
   transport ports 使用现有 `ensureStateForHydration()`、`getActiveState()`、`subscribeActiveState()` 和 `sendStateMutations()`。
 
-- [ ] **Step 4: 切换所有 commit 与 hydration methods**
+- [x] **Step 4: 切换所有 commit 与 hydration methods**
 
   Store methods变为 publication method calls。`onFallback()` 仍由 UI adapter 映射到 `persistenceError`；publication 不订阅 fallback UI event。
 
-- [ ] **Step 5: 删除全部旧 publication ownership**
+- [x] **Step 5: 删除全部旧 publication ownership**
 
   删除 store 中：
 
@@ -383,7 +383,7 @@
 
   保留领域 facade、snapshot、restore target、AppEvents payload mapping 和 fallback UI mapping。
 
-- [ ] **Step 6: 运行 integration GREEN**
+- [x] **Step 6: 运行 integration GREEN**
 
   Run:
 
@@ -395,7 +395,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
   ```bash
   git add src/shared/store/useTabBoardStore.ts \
@@ -421,7 +421,7 @@
 - Static gate proves publication does not join UI/Zustand/Chrome-global ownership.
 - Plan/spec status and verification record reflect the actual artifact.
 
-- [ ] **Step 1: 写 failing architecture gate test**
+- [x] **Step 1: 写 failing architecture gate test**
 
   扩展 cycle/check CLI，使其可拒绝一个 module 导入指定 forbidden prefixes，测试 fixture 验证违规时 exit non-zero。
 
@@ -433,17 +433,17 @@
   - `src/shared/utils/events`；
   - `chromeStorage` 或 `activeAdapter` concrete modules。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
   Run: `node --test scripts/check-import-cycles.test.mjs`
 
   Expected: FAIL before forbidden-import support exists.
 
-- [ ] **Step 3: 实现 gate 并接入 `npm run check`**
+- [x] **Step 3: 实现 gate 并接入 `npm run check`**
 
   添加精确 CLI option 和 package script；不使用源文本 change-detector，实际解析 import graph 并针对 resolved module edges 判定。
 
-- [ ] **Step 4: 更新架构文档**
+- [x] **Step 4: 更新架构文档**
 
   记录：
 
@@ -453,7 +453,7 @@
   - optimistic → RPC → remote buffer → reconciliation 数据流；
   - error/waiter/hydration lifecycle。
 
-- [ ] **Step 5: Review full diff**
+- [x] **Step 5: Review full diff**
 
   检查：
 
@@ -464,7 +464,7 @@
   - release 与 dispose 语义没有混淆；
   - no unrelated product behavior changes。
 
-- [ ] **Step 6: 运行 fresh full verification**
+- [x] **Step 6: 运行 fresh full verification**
 
   Run:
 
@@ -477,7 +477,7 @@
 
   Expected: all exit 0；记录 test files/tests count。
 
-- [ ] **Step 7: 更新状态并 Commit**
+- [x] **Step 7: 更新状态并 Commit**
 
   将 spec 标记为 `Implemented and verified`，勾选本计划所有步骤，写入实际 verification record。
 
@@ -491,11 +491,19 @@
 
 本轮结束前逐项确认：
 
-- [ ] 新 production module 存在且由 Zustand store 实际使用。
-- [ ] publication queue、retry、waiter、remote buffer、hydration 的 ownership 已全部迁出 store。
-- [ ] ordinary/drop/category/restore 四种 commit 语义均有 direct module tests。
-- [ ] concurrent remote、terminal isolation、retry exhaustion、context replacement、release/dispose 均有 direct tests。
-- [ ] AppEvents payload 与触发时机保持集成测试覆盖。
-- [ ] static architecture gate 在 `npm run check` 中实际执行。
-- [ ] 文档描述与当前 import graph、runtime data flow 一致。
-- [ ] full build/check/test 与 diff check 均使用本轮 fresh output。
+- [x] 新 production module 存在且由 Zustand store 实际使用。
+- [x] publication queue、retry、waiter、remote buffer、hydration 的 ownership 已全部迁出 store。
+- [x] ordinary/drop/category/restore 四种 commit 语义均有 direct module tests。
+- [x] concurrent remote、terminal isolation、retry exhaustion、context replacement、release/dispose 均有 direct tests。
+- [x] AppEvents payload 与触发时机保持集成测试覆盖。
+- [x] static architecture gate 在 `npm run check` 中实际执行。
+- [x] 文档描述与当前 import graph、runtime data flow 一致。
+- [x] full build/check/test 与 diff check 均使用本轮 fresh output。
+
+## Verification Record
+
+- `npm run build`: PASS，TypeScript + Vite production build，6979 modules。
+- `npm run check`: PASS，extension sanity、4 个 import-graph CLI tests、112 source files 的 cycle/forbidden-edge gate。
+- `npm test`: PASS，44 test files，831 tests。
+- `git diff --check`: PASS。
+- `useTabBoardStore.ts`: 1227 行降至 534 行；publication queue/timer/waiter/reconciliation/hydration globals 均已移除。

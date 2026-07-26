@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "check": "npm run build && node scripts/check-extension.mjs && npm run check:cycles:storage",
-    "check:cycles:storage": "node --test scripts/check-import-cycles.test.mjs && node scripts/check-import-cycles.mjs --deny-together src/shared/store/activeAdapter.ts,src/shared/store/chromeStorage.ts",
+    "check:cycles:storage": "node --test scripts/check-import-cycles.test.mjs && node scripts/check-import-cycles.mjs --deny-together src/shared/store/activeAdapter.ts,src/shared/store/chromeStorage.ts --deny-imports src/shared/store/authoritativePublication.ts,zustand,react,src/manager/components,src/shared/utils/events,src/shared/store/chromeStorage.ts,src/shared/store/activeAdapter.ts",
     "icons": "node scripts/generate-icons.mjs",
     "test": "npm run test:react",
     "test:react": "vitest run",

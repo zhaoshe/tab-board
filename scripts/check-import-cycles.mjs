@@ -5,6 +5,7 @@ function parseArgs(argv) {
   const options = {
     root: '.',
     denyTogether: [],
+    denyImports: [],
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -19,11 +20,20 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (argument === '--deny-imports') {
+      const value = argv[index + 1] || '';
+      options.denyImports.push(value.split(',').filter(Boolean));
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown argument: ${argument}`);
   }
   if (!options.root) throw new Error('--root requires a directory');
   if (options.denyTogether.some((group) => group.length < 2)) {
     throw new Error('--deny-together requires at least two comma-separated paths');
+  }
+  if (options.denyImports.some((group) => group.length < 2)) {
+    throw new Error('--deny-imports requires an owner and at least one forbidden target');
   }
   return options;
 }
@@ -67,13 +77,22 @@ function buildGraph(root) {
   const files = listSourceFiles(sourceRoot).map((path) => realpathSync(path));
   const sourceFiles = new Set(files);
   const edges = new Map();
+  const importEdges = [];
   for (const file of files) {
-    const imports = importedSpecifiers(readFileSync(file, 'utf8'))
+    const imports = importedSpecifiers(readFileSync(file, 'utf8'));
+    const resolvedImports = imports
       .map((specifier) => resolveImport(file, specifier, sourceFiles))
       .filter(Boolean);
-    edges.set(file, [...new Set(imports)]);
+    edges.set(file, [...new Set(resolvedImports)]);
+    for (const specifier of imports) {
+      importEdges.push({
+        importer: file,
+        specifier,
+        resolved: resolveImport(file, specifier, sourceFiles),
+      });
+    }
   }
-  return { files, edges };
+  return { files, edges, importEdges };
 }
 
 function stronglyConnectedComponents(files, edges) {
@@ -120,7 +139,7 @@ function stronglyConnectedComponents(files, edges) {
 function main() {
   const options = parseArgs(process.argv.slice(2));
   const root = realpathSync(options.root);
-  const { files, edges } = buildGraph(root);
+  const { files, edges, importEdges } = buildGraph(root);
   const cycles = stronglyConnectedComponents(files, edges)
     .map((component) => component.map((path) => normalizePath(relative(root, path))).sort())
     .sort((left, right) => left[0].localeCompare(right[0]));
@@ -134,9 +153,36 @@ function main() {
     console.log(`Import cycle:\n  ${cycle.join('\n  ')}`);
   }
 
+  const forbiddenImportEdges = options.denyImports.flatMap(([owner, ...targets]) => {
+    const normalizedOwner = normalizePath(owner);
+    return importEdges.flatMap(({ importer, specifier, resolved: resolvedTarget }) => {
+      const normalizedImporter = normalizePath(relative(root, importer));
+      if (normalizedImporter !== normalizedOwner) return [];
+      const target = resolvedTarget
+        ? normalizePath(relative(root, resolvedTarget))
+        : specifier;
+      const forbidden = targets.some((prefix) =>
+        target === normalizePath(prefix)
+        || target.startsWith(`${normalizePath(prefix)}/`)
+        || target.startsWith(`${normalizePath(prefix)}.`));
+      return forbidden ? [`${normalizedImporter} -> ${target}`] : [];
+    });
+  });
+
+  for (const edge of forbiddenImportEdges) {
+    console.error(`Forbidden import edge: ${edge}`);
+  }
+
   if (deniedCycles.length) {
     console.error(`Denied import cycle count: ${deniedCycles.length}`);
     process.exit(1);
+  }
+  if (forbiddenImportEdges.length) {
+    console.error(`Forbidden import edge count: ${forbiddenImportEdges.length}`);
+    process.exit(1);
+  }
+  if (options.denyImports.length) {
+    console.log(`No forbidden import edges (${files.length} source files checked).`);
   }
   console.log(`No denied import cycles (${files.length} source files checked).`);
 }

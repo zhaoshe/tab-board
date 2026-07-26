@@ -994,6 +994,41 @@ Implementation note（2026-07-26）：
 - Panel 消费 grouped model/commands 与单一 selection projection，不再重复派生 records/IDs。
 - Capture、drop 和 tab-filter ownership 使用直接返回值/command/model，删除三条全局 DOM event。
 
+## D042: Use an injected Authoritative Publication owner, not a second UI store
+
+Context:
+
+Manager persistence 需要同时处理 optimistic projection、serialized mutation batch、remote publication buffering、drop/category waiter、bounded retry、terminal isolation 和 hydration lifecycle。此前这些状态全部以 module-level globals 位于 `useTabBoardStore.ts`，与领域 actions 和 Zustand projection 共用一个 1227 行模块。可选方案包括只拆 pure helpers、再建一个 Zustand persistence store，或建立不依赖 UI library 的 publication owner。
+
+Decision:
+
+采用 `createAuthoritativePublication(dependencies)` 注入式 owner。每个 instance 独占 publication 状态机，通过窄 projection ports 读取/发布 UI state，通过 transport ports 调用 Storage Authority 和 worker mutation RPC。
+
+Zustand 只保留 UI projection 与领域 facade；Storage Authority 只保留 backend identity/switch/fallback；worker `statePersistence` 只保留 mutation validation 与 normalized atomic transaction。
+
+Rationale:
+
+- queue、retry、waiter、remote buffer 和 hydration generation 是一个并发状态机，应由同一 instance 拥有，而不是散落在 UI store globals。
+- 第二个 Zustand store会让基础设施状态继续依赖 UI library，并引入两个 store 的同步顺序问题。
+- 注入 ports 后可用真实 reducer + 内存 projection/transport 直接验证并发行为，不需要 DOM、React 或 Chrome global。
+- 一次性 production cutover后，`useTabBoardStore.ts` 从 1227 行降到 534 行，并且没有保留双 owner。
+
+Trade-offs:
+
+- publication owner 本身集中了承担 retry、isolation 和 reconciliation 的复杂状态机，文件仍较大；后续是否拆 pure policy 需根据独立 seam、测试局部性与 import graph 再评估，不能为了行数机械拆分。
+- context replacement 必须同时处理 pending 与 in-flight continuation；因此 owner维护独立 publication generation 和 hydration generation。
+- AppEvents 仍由 Zustand adapter 映射，publication 只决定 success/error outcome 与 `notify` policy。
+
+Status:
+
+Accepted。
+
+Implementation note（2026-07-26）：
+
+- `releaseHydration()` 只释放 UI publication generation，不 teardown Storage Authority backend。
+- ordinary/drop/category/restore 四种 commit 语义、partial commit、retry exhaustion、terminal isolation、queued-during-isolation、context replacement 和 dispose 均有 direct tests。
+- `npm run check` 的 import graph gate 禁止 publication 依赖 Zustand、React、Manager components、DOM event utilities 或 concrete storage adapters。
+
 ## Decision template
 
 ```md

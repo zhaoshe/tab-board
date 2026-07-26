@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
@@ -12,7 +12,9 @@ function createFixture(files) {
   const sourceRoot = join(root, 'src');
   mkdirSync(sourceRoot, { recursive: true });
   for (const [name, source] of Object.entries(files)) {
-    writeFileSync(join(sourceRoot, name), source);
+    const file = join(sourceRoot, name);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, source);
   }
   return {
     root,
@@ -63,6 +65,48 @@ test('passes a denied pair when the import graph is acyclic', () => {
 
     assert.equal(result.status, 0);
     assert.match(result.stdout, /No denied import cycles/);
+    assert.equal(result.stderr, '');
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test('rejects forbidden external and resolved internal import edges', () => {
+  const fixture = createFixture({
+    'owner.ts': "import { create } from 'zustand';\nimport './ui/component';\nexport const owner = create;\n",
+    'ui/component.ts': 'export const component = 1;\n',
+  });
+  try {
+    const result = runCycleCheck(
+      fixture.root,
+      '--deny-imports',
+      'src/owner.ts,zustand,src/ui',
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /forbidden import edge/i);
+    assert.match(result.stderr, /src\/owner\.ts -> zustand/);
+    assert.match(result.stderr, /src\/owner\.ts -> src\/ui\/component\.ts/);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test('passes when forbidden targets are imported by a different owner', () => {
+  const fixture = createFixture({
+    'owner.ts': "import './model';\n",
+    'model.ts': 'export const model = 1;\n',
+    'ui.ts': "import { create } from 'zustand';\nexport const ui = create;\n",
+  });
+  try {
+    const result = runCycleCheck(
+      fixture.root,
+      '--deny-imports',
+      'src/owner.ts,zustand,src/ui',
+    );
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /No forbidden import edges/);
     assert.equal(result.stderr, '');
   } finally {
     fixture.dispose();
