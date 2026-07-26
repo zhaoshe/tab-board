@@ -650,6 +650,66 @@ describe('TabBoard store remote persistence reconciliation', () => {
     await expect(persistencePromise).resolves.toBeUndefined();
   });
 
+  it('uses one publication owner to isolate an in-flight persistence context replacement', async () => {
+    vi.useFakeTimers();
+    const persisted: TabBoardState = {
+      ...createEmptyState(),
+      groups: [group('context-drop-source')],
+    };
+    let resolveOldContext: ((response: unknown) => void) | undefined;
+    const oldSendMessage = vi.fn((message: { mutations?: StateMutation[] }) =>
+      new Promise((resolve) => {
+        resolveOldContext = resolve;
+      }),
+    );
+    vi.stubGlobal('chrome', { runtime: { sendMessage: oldSendMessage } });
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+
+    const oldDrop = useTabBoardStore.getState().applyDropIntent({
+      kind: 'move-session',
+      groupId: 'context-drop-source',
+      category: 'saved',
+      index: 0,
+      workspaceId: 'workspace_default',
+    });
+    const oldDropOutcome = oldDrop.then(
+      () => 'resolved' as const,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    expect(oldSendMessage).toHaveBeenCalledTimes(1);
+
+    const newSendMessage = vi.fn(async (
+      message: { mutations?: StateMutation[] },
+    ) => ({
+      ok: true,
+      result: applyStateMutations(persisted, message.mutations || []),
+    }));
+    vi.stubGlobal('chrome', { runtime: { sendMessage: newSendMessage } });
+    useTabBoardStore.getState().updateSettings({ theme: 'dark' });
+    await vi.advanceTimersByTimeAsync(100);
+    await Promise.resolve();
+
+    expect(newSendMessage).toHaveBeenCalledTimes(1);
+    await expect(oldDropOutcome).resolves.toMatchObject({
+      message: 'Persistence context changed.',
+    });
+    expect(useTabBoardStore.getState().groups[0]?.starred).toBe(false);
+    expect(useTabBoardStore.getState().settings.theme).toBe('dark');
+
+    const oldRequest = oldSendMessage.mock.calls[0]?.[0];
+    resolveOldContext?.({
+      ok: true,
+      result: applyStateMutations(persisted, oldRequest?.mutations || []),
+    });
+    await Promise.resolve();
+    expect(useTabBoardStore.getState().groups[0]?.starred).toBe(false);
+  });
+
   it('keeps a drop promise pending through transient retry recovery', async () => {
     vi.useFakeTimers();
     const persisted: TabBoardState = {

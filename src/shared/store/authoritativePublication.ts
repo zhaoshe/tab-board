@@ -398,13 +398,17 @@ export function createAuthoritativePublication(
   const syncPersistenceContext = (): void => {
     const context = dependencies.currentContext();
     if (persistenceContext !== undefined && persistenceContext !== context) {
+      const hadOutstandingWork = pendingMutations.length > 0
+        || inFlightMutations !== null
+        || pendingPersistenceWaiters.length > 0
+        || inFlightPersistenceWaiters.length > 0;
       publicationGeneration += 1;
       if (saveTimeout) clearTimeout(saveTimeout);
       if (retryTimeout) clearTimeout(retryTimeout);
       saveTimeout = null;
       retryTimeout = null;
       const projection = dependencies.readProjection();
-      if (lastAuthoritativeState) {
+      if (hadOutstandingWork && lastAuthoritativeState) {
         dependencies.publishProjection(
           structurallyShareState(projection.state, lastAuthoritativeState),
           {
