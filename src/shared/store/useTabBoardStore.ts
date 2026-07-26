@@ -31,14 +31,6 @@ import type { OpenTabInfo } from '../../manager/core/open-tabs';
 import { emitEvent, AppEvents } from '../utils/events';
 import { structurallyShareState } from './stateStructuralSharing';
 
-async function adapterGetState(): Promise<TabBoardState> {
-  return getActiveState();
-}
-
-function adapterSubscribeState(callback: (state: TabBoardState) => void): () => void {
-  return subscribeActiveState(callback);
-}
-
 // Subscribe to file-storage fallback events so that a degraded backend (file
 // mode failed, dropped back to browser storage) surfaces as a persistenceError
 // in the UI. The subscription is module-level so it lives for the lifetime of
@@ -474,7 +466,7 @@ function committedState(error: unknown): TabBoardState | null {
 async function recoverAuthoritativeState(): Promise<TabBoardState | null> {
   let recovered: TabBoardState | null = null;
   try {
-    recovered = await adapterGetState();
+    recovered = await getActiveState();
   } catch {
     recovered = null;
   }
@@ -727,7 +719,7 @@ function sendPendingBatch(additional: readonly StateMutation[] = []): Promise<Ta
       if (!reconciliationState && (isTerminalOrdinaryFailure || isRestoreCollision || (!hasRetryBudget
         && batch.some((mutation) => mutation.type === 'drop-intent')))) {
         try {
-          reconciliationState = await adapterGetState();
+          reconciliationState = await getActiveState();
         } catch {
           reconciliationState = null;
         }
@@ -902,7 +894,7 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
         if (generation !== hydrationGeneration) return;
 
         activeHydrationUnsubscribe?.();
-        activeHydrationUnsubscribe = adapterSubscribeState((newState) => {
+        activeHydrationUnsubscribe = subscribeActiveState((newState) => {
           if (generation !== hydrationGeneration) return;
           if (!get().hydrated) {
             pendingHydrationState = newState;
@@ -918,7 +910,7 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
           set({ ...sharedState, hydrated: true });
         });
 
-        const saved = await adapterGetState();
+        const saved = await getActiveState();
         if (generation !== hydrationGeneration) return;
 
         const hydratedState = newestRemoteState(saved, pendingHydrationState);

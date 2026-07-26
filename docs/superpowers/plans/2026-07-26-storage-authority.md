@@ -248,23 +248,23 @@ Co-authored-by: TRAE CLI <noreply@bytedance.com>"
 - Consumes: `getActiveState`, `setActiveState`, `ensureActiveState`, `subscribeActiveState`.
 - Removes: caller-owned adapter promise and duplicate adapter delegates.
 
-- [ ] **Step 1: Add a failing stable-subscription integration test**
+- [x] **Step 1: Add a failing stable-subscription integration test**
 
 Hydrate the real Zustand store, trigger File runtime fallback, then publish a Chrome storage update. Assert the original store subscription receives the Chrome state without rehydrating.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `npx vitest run src/shared/store/useTabBoardStore.test.ts -t "keeps the active subscription"`  
 Expected: FAIL because the cached subscription remains attached to the failed File adapter.
 
-- [ ] **Step 3: Migrate callers**
+- [x] **Step 3: Migrate callers**
 
 - `chromeStorage.ts` delegates state operations to active-state functions.
 - `useTabBoardStore.ts` removes its local adapter promise and subscription coordinator.
 - `service-worker.ts` passes authority functions to `StatePersistence`.
 - `DataStorageCard.tsx` reads status through authority helpers.
 
-- [ ] **Step 4: Run focused integration tests**
+- [x] **Step 4: Run focused integration tests**
 
 Run:
 
@@ -274,7 +274,7 @@ npx vitest run src/shared/store/useTabBoardStore.test.ts src/background/service-
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/shared/store/chromeStorage.ts src/shared/store/useTabBoardStore.ts src/background/service-worker.ts src/options/components/DataStorageCard.tsx

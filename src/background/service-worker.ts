@@ -25,7 +25,12 @@ import {
   type Settings,
   type TabRef,
 } from '../shared/model';
-import { getActiveAdapter, resetActiveAdapter } from '../shared/store/activeAdapter';
+import {
+  ensureActiveState as ensureState,
+  getActiveState as getState,
+  resetActiveAdapter,
+  setActiveState as setState,
+} from '../shared/store/activeAdapter';
 import { createStatePersistence, type StatePersistence } from './statePersistence';
 import {
   applyStateMutation,
@@ -43,21 +48,6 @@ import {
 
 const MANAGER_PAGE = 'manager.html';
 const POPUP_PAGE = 'popup.html';
-
-async function getState(): Promise<TabBoardState> {
-  const adapter = await getActiveAdapter();
-  return adapter.getState();
-}
-
-async function setState(state: TabBoardState): Promise<void> {
-  const adapter = await getActiveAdapter();
-  return adapter.setState(state);
-}
-
-async function ensureState(): Promise<TabBoardState> {
-  const adapter = await getActiveAdapter();
-  return adapter.ensureState();
-}
 
 async function getSettings(): Promise<Settings> {
   const state = await getState();

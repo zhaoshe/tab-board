@@ -16,10 +16,10 @@ import {
   IconPlugConnectedX,
 } from '@tabler/icons-react';
 import {
+  getActiveState,
   isFileModeActive,
   onFallback,
   reconnectFolder,
-  getActiveAdapter,
 } from '../../shared/store/activeAdapter';
 import { FolderPickerDialog } from './FolderPickerDialog';
 import { DisconnectDialog } from './DisconnectDialog';
@@ -39,10 +39,9 @@ async function getFolderNameFromIdb(): Promise<string | null> {
   }
 }
 
-async function readLastSavedFromAdapter(): Promise<string | null> {
+async function readLastSavedFromAuthority(): Promise<string | null> {
   try {
-    const adapter = await getActiveAdapter();
-    const state = await adapter.getState();
+    const state = await getActiveState();
     return state.updatedAt || null;
   } catch {
     return null;
@@ -83,7 +82,7 @@ export function DataStorageCard() {
       if (active) {
         const [name, saved] = await Promise.all([
           getFolderNameFromIdb(),
-          readLastSavedFromAdapter(),
+          readLastSavedFromAuthority(),
         ]);
         setFolderName(name);
         setUpdatedAt(saved);

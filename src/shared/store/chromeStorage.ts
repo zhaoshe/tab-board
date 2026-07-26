@@ -4,32 +4,24 @@ import {
   applyStateMutations,
   InvalidDropMutationError,
 } from './stateMutations';
-import { getActiveAdapter } from './activeAdapter';
-import type { StorageAdapter } from './storageAdapter';
+import {
+  ensureActiveState,
+  getActiveState,
+  setActiveState,
+  subscribeActiveState,
+} from './activeAdapter';
 export {
   writeFilePing as writePing,
   subscribeFilePing as subscribePing,
   type FilePing,
 } from './storageEvents';
 
-// The convenience functions (getState/setState/ensureState/subscribeState)
-// delegate to the active StorageAdapter resolved via getActiveAdapter(). This
-// keeps legacy call sites working while routing persistence through either the
-// Chrome storage backend or the file backend based on bootstrap config.
-//
-// subscribeState is the one call that cannot be a simple async delegation
-// because it synchronously returns an unsubscribe function. We resolve the
-// adapter lazily and track the active unsubscribe so the caller can tear down
-// immediately even if adapter resolution is still pending.
-
 export async function getState(): Promise<TabBoardState> {
-  const adapter = await getActiveAdapter();
-  return adapter.getState();
+  return getActiveState();
 }
 
 export async function setState(state: TabBoardState): Promise<void> {
-  const adapter = await getActiveAdapter();
-  return adapter.setState(state);
+  return setActiveState(state);
 }
 
 let localHarnessChrome: unknown;
@@ -172,22 +164,9 @@ export async function getSettings() {
 }
 
 export async function ensureState(): Promise<TabBoardState> {
-  const adapter = await getActiveAdapter();
-  return adapter.ensureState();
+  return ensureActiveState();
 }
 
 export function subscribeState(callback: (state: TabBoardState) => void): () => void {
-  let activeUnsub: (() => void) | null = null;
-  let cancelled = false;
-  getActiveAdapter().then((adapter) => {
-    if (cancelled) return;
-    activeUnsub = adapter.subscribeState(callback);
-  });
-  return () => {
-    cancelled = true;
-    if (activeUnsub) {
-      activeUnsub();
-      activeUnsub = null;
-    }
-  };
+  return subscribeActiveState(callback);
 }
