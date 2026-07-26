@@ -27,7 +27,7 @@ import {
   isTimestamp,
   utf8ByteLength,
   MAX_CANONICAL_DIGEST_BYTES,
-} from '../store/mutationValidation';
+} from '../validation';
 
 export function nowIso(): string {
   return new Date().toISOString();
