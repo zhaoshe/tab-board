@@ -1,5 +1,5 @@
 import type { DropIntent, SavedTabRef } from '../../manager/core/dnd';
-import type { OpenTabInfo } from '../../manager/core/open-tabs';
+import type { OpenTabInfo } from '../openTabs';
 
 export const MAX_OPERATION_ID_BYTES = 128;
 export const MAX_ENTITY_ID_BYTES = 128;

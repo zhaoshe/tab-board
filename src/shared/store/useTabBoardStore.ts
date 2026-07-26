@@ -27,7 +27,7 @@ import {
   restoreGroupFromBin,
 } from '../../manager/core/commands';
 import type { DropIntent } from '../../manager/core/dnd';
-import type { OpenTabInfo } from '../../manager/core/open-tabs';
+import type { OpenTabInfo } from '../openTabs';
 import { emitEvent, AppEvents } from '../utils/events';
 import { structurallyShareState } from './stateStructuralSharing';
 

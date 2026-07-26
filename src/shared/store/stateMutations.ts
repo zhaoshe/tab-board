@@ -26,7 +26,7 @@ import {
 } from '../../manager/core/commands';
 import type { CategoryFilter } from '../../manager/core/selectors';
 import type { DropIntent } from '../../manager/core/dnd';
-import type { OpenTabInfo } from '../../manager/core/open-tabs';
+import type { OpenTabInfo } from '../openTabs';
 import {
   isBoundedString,
   isDenseArray,

@@ -1,5 +1,5 @@
 import { isStorableCaptureCandidate, type Group, type TabBoardState } from '../../shared/model';
-import type { OpenTabInfo } from './open-tabs';
+import type { OpenTabInfo } from '../../shared/openTabs';
 import type { CategoryFilter } from './selectors';
 
 export type SavedTabRef = { groupId: string; tabId: string };

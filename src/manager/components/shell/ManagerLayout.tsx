@@ -49,7 +49,7 @@ import {
   type DragUiState,
   type DropTarget,
 } from '../../core/dnd';
-import type { OpenTabInfo } from '../../core/open-tabs';
+import type { OpenTabInfo } from '../../../shared/openTabs';
 import { useToastNotifications } from './useToastNotifications';
 import { useToast } from '../../hooks/useToast';
 import { SessionCard } from '../sessions/SessionCard';

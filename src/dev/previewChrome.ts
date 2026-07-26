@@ -10,6 +10,7 @@ import {
   clone,
 } from '../shared/model';
 import type { BrowserGroup, Group, TabBoardState, TabItem } from '../shared/model';
+import type { OpenTabsCaptureResult } from '../shared/openTabs';
 import { getCaptureCandidateReason, isExtensionPageUrl, matchesCustomUrlFilter } from '../shared/model/capture-policy';
 import { applyStateMutations } from '../shared/store/stateMutations';
 
@@ -936,12 +937,9 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
     return run;
   };
 
-  const saveSelectedTabs = async (message: Record<string, unknown>): Promise<{
-    storedTabs: number;
-    storedGroups: number;
-    cleanedDuplicates: number;
-    createdGroupIds: string[];
-  }> => {
+  const saveSelectedTabs = async (
+    message: Record<string, unknown>,
+  ): Promise<OpenTabsCaptureResult> => {
     const tabIds = normalizeRequestedTabIds(message.tabIds);
     const requestedWindowId = message.selectedWindowId;
     if (requestedWindowId !== undefined

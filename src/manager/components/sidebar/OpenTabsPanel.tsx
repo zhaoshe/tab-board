@@ -35,9 +35,8 @@ import {
   deriveSelectedStorableRecords,
   deriveSelectedStorableTabIds,
   getOpenTabDragData,
-  type OpenTabInfo,
-  type OpenWindowInfo,
 } from '../../core/open-tabs';
+import type { OpenTabInfo, OpenWindowInfo } from '../../../shared/openTabs';
 
 export const OPEN_TABS_FILTER_INPUT_ID = 'open-tabs-filter-input';
 

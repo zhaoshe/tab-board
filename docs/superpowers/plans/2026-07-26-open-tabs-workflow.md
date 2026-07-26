@@ -36,12 +36,12 @@
 - Produces: `OpenTabInfo`, `OpenWindowInfo`, `OpenTabsListResult`, `OpenTabsCaptureResult`, `RuntimeResponse<T>`.
 - Preserves: current field names and capture result semantics.
 
-- [ ] Write a failing protocol test that validates a complete list result and rejects malformed tab/window/capture responses.
-- [ ] Run `npx vitest run src/shared/openTabs.test.ts`; verify RED because the shared module is absent.
-- [ ] Implement types and parsers without DOM or Chrome dependencies.
-- [ ] Migrate all production type imports and remove worker-local duplicate interfaces.
-- [ ] Run shared protocol, mutation validation, worker, preview, DnD, and Open Tabs core tests.
-- [ ] Commit.
+- [x] Write a failing protocol test that validates a complete list result and rejects malformed tab/window/capture responses.
+- [x] Run `npx vitest run src/shared/openTabs.test.ts`; verify RED because the shared module is absent.
+- [x] Implement types and parsers without DOM or Chrome dependencies.
+- [x] Migrate all production type imports and remove worker-local duplicate interfaces.
+- [x] Run shared protocol, mutation validation, worker, preview, DnD, and Open Tabs core tests.
+- [x] Commit.
 
 ### Task 2: Centralize workflow state and selection projection
 

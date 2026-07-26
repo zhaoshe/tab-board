@@ -19,9 +19,14 @@ import {
   isNewTabUrl,
   resolveSelectedWindow,
   sameOpenTabSelection,
-  type OpenTabInfo,
-  type OpenWindowInfo,
 } from '../core/open-tabs';
+import type {
+  OpenTabInfo,
+  OpenTabsCaptureResult,
+  OpenTabsListResult,
+  OpenWindowInfo,
+  RuntimeResponse,
+} from '../../shared/openTabs';
 import { groupMatchesQuery, normalizeState, type TabBoardState } from '../../shared/model';
 import { getState as getPersistedState } from '../../shared/store/chromeStorage';
 import { structurallyShareState } from '../../shared/store/stateStructuralSharing';
@@ -68,18 +73,7 @@ export interface CaptureCompletedEventDetail {
   message: string;
 }
 
-export interface CaptureResult {
-  storedTabs: number;
-  storedGroups: number;
-  cleanedDuplicates: number;
-  createdGroupIds: string[];
-}
-
-interface WorkerResponse<T> {
-  ok?: boolean;
-  result?: T;
-  error?: unknown;
-}
+export type CaptureResult = OpenTabsCaptureResult;
 
 export interface OpenTabsRuntime {
   windows: OpenWindowInfo[];
@@ -126,7 +120,7 @@ function isSafeTabId(tabId: number | undefined): tabId is number {
 }
 
 async function sendWorkerMessage<T>(message: Record<string, unknown>): Promise<T> {
-  const response = await chrome.runtime.sendMessage(message) as WorkerResponse<T> | undefined;
+  const response = await chrome.runtime.sendMessage(message) as RuntimeResponse<T> | undefined;
   if (!response?.ok) {
     throw new Error(errorMessage(response?.error));
   }
@@ -232,7 +226,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
       setError(null);
       refreshFailureRef.current = null;
       try {
-        const result = await sendWorkerMessage<{ windows: OpenWindowInfo[] }>({ type: 'list-open-tabs' });
+        const result = await sendWorkerMessage<OpenTabsListResult>({ type: 'list-open-tabs' });
         const rawWindows = Array.isArray(result.windows) ? result.windows : [];
         const nextWindows = rawWindows.map((window) => {
           const visibleTabs = window.tabs.filter((tab) => !isNewTabUrl(tab.url));

@@ -11,8 +11,8 @@ import {
   resolveRestoreGroupPlacement,
   parseOneTabText,
 } from '../../shared/model';
+import type { OpenTabInfo } from '../../shared/openTabs';
 import type { DropIntent, SavedTabRef } from './dnd';
-import type { OpenTabInfo } from './open-tabs';
 import type { CategoryFilter } from './selectors';
 import {
   canonicalJson,

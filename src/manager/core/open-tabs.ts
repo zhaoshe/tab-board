@@ -1,26 +1,6 @@
-import type { BrowserGroup, CaptureCandidateReason } from '../../shared/model';
+import type { OpenTabInfo, OpenWindowInfo } from '../../shared/openTabs';
 
-export interface OpenTabInfo {
-  id: number | undefined;
-  windowId: number | undefined;
-  title: string;
-  url: string;
-  favIconUrl: string;
-  active: boolean;
-  pinned: boolean;
-  index: number;
-  browserGroup: BrowserGroup | null;
-  storable: boolean;
-  reason: CaptureCandidateReason | null;
-}
-
-export interface OpenWindowInfo {
-  id: number | undefined;
-  focused: boolean;
-  incognito: boolean;
-  tabCount: number;
-  tabs: OpenTabInfo[];
-}
+export type { OpenTabInfo, OpenWindowInfo } from '../../shared/openTabs';
 
 const NEWTAB_URL_PATTERN = /^(chrome|edge|brave|firefox|about):\/\/newtab\/?$|^about:newtab$/i;
 

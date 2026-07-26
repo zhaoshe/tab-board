@@ -25,6 +25,12 @@ import {
   type Settings,
   type TabRef,
 } from '../shared/model';
+import type {
+  OpenTabInfo,
+  OpenTabsCaptureResult,
+  OpenTabsListResult,
+  OpenWindowInfo,
+} from '../shared/openTabs';
 import {
   ensureActiveState as ensureState,
   getActiveState as getState,
@@ -598,13 +604,6 @@ interface CaptureOptions {
   workspaceId?: string;
 }
 
-interface CaptureResult {
-  storedTabs: number;
-  storedGroups: number;
-  cleanedDuplicates: number;
-  createdGroupIds: string[];
-}
-
 function requireSafeInteger(value: unknown, field: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`A valid ${field} is required for capture mode.`);
@@ -665,7 +664,7 @@ async function captureTabs(
   mode: CaptureMode,
   anchorTab: chrome.tabs.Tab | null | undefined,
   options: CaptureOptions = {}
-): Promise<CaptureResult> {
+): Promise<OpenTabsCaptureResult> {
   const settings = await getSettings();
   const sourceTabs = sortCapturedTabs(await getTabsForMode(mode, anchorTab, options));
   const eligibleTabs = sourceTabs.filter((tab) => canCaptureTab(tab, settings));
@@ -716,7 +715,7 @@ async function captureTabs(
     persistedGroupIds = new Set(persistedState.groups.map((group) => group.id));
   }
   const persistedGroups = groups.filter((group) => persistedGroupIds.has(group.id));
-  const result: CaptureResult = {
+  const result: OpenTabsCaptureResult = {
     storedTabs: persistedGroups.reduce((total, group) => total + group.tabs.length, 0),
     storedGroups: persistedGroups.length,
     cleanedDuplicates: duplicateTabs.length,
@@ -1376,29 +1375,7 @@ async function focusOpenTab(tabId: number, windowId: number) {
   return { tabId: normalizedTabId, windowId: normalizedWindowId };
 }
 
-interface OpenTabInfo {
-  id: number | undefined;
-  windowId: number | undefined;
-  title: string;
-  url: string;
-  favIconUrl: string;
-  active: boolean;
-  pinned: boolean;
-  index: number;
-  browserGroup: BrowserGroup | null;
-  storable: boolean;
-  reason: CaptureCandidateReason | null;
-}
-
-interface OpenWindowInfo {
-  id: number | undefined;
-  focused: boolean;
-  incognito: boolean;
-  tabCount: number;
-  tabs: OpenTabInfo[];
-}
-
-async function listOpenTabs(): Promise<{ windows: OpenWindowInfo[] }> {
+async function listOpenTabs(): Promise<OpenTabsListResult> {
   const settings = await getSettings();
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ['normal'] });
   const extensionBaseUrl = chrome.runtime.getURL('').toLowerCase();

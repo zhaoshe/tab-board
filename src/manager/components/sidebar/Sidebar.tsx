@@ -5,7 +5,7 @@ import { OPEN_TABS_FILTER_INPUT_ID, OpenTabsPanel } from './OpenTabsPanel';
 import { useOpenTabsRuntime } from '../../hooks/useOpenTabsRuntime';
 import type { CaptureCategorySnapshot } from '../../core/capture';
 import type { CategoryFilter } from '../../core/selectors';
-import type { OpenTabInfo, OpenWindowInfo } from '../../core/open-tabs';
+import type { OpenTabInfo, OpenWindowInfo } from '../../../shared/openTabs';
 
 interface SidebarRailProps {
   sidebarExpanded: boolean;
