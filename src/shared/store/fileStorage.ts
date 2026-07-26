@@ -338,6 +338,7 @@ interface FileStorageAdapterDeps {
     beforeMetaWrite?: () => Promise<void> | void;
     beforeFinalMeta?: () => Promise<void> | void;
   };
+  shouldPublishPing?: () => boolean;
 }
 
 const STATE_CHANGED_EVENT = 'state-changed';
@@ -500,7 +501,7 @@ class FileStorageAdapterImpl implements ReloadableStorageAdapter {
 
     // Cross-context ping.
     try {
-      if (globalThis.chrome?.storage?.local?.set) {
+      if (this.deps.shouldPublishPing?.() !== false && globalThis.chrome?.storage?.local?.set) {
         await globalThis.chrome.storage.local.set({
           [FILE_PING_KEY]: {
             mutationRevision: nextState.mutationRevision,

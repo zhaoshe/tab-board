@@ -35,6 +35,7 @@ import type {
 import {
   subscribeFilePing,
   subscribeStorageFallback,
+  writeFilePing,
   writeStorageFallback,
   type StorageFallbackEvent,
 } from './storageEvents';
@@ -255,7 +256,7 @@ class StorageAuthority implements StorageAdapter {
     const reason = remoteEvent?.reason || fallbackReason(error);
     logError('file-storage: fallback', reason, error);
     const adapter = createChromeStorageAdapter();
-    if (this.lastKnownState) {
+    if (!remoteEvent && this.lastKnownState) {
       try {
         await adapter.setState(this.lastKnownState);
       } catch (chromeError: unknown) {
@@ -371,6 +372,23 @@ function getAuthority(): StorageAuthority {
   return authority;
 }
 
+async function commitFileHandleAndBootstrap(
+  root: FileSystemDirectoryHandle,
+): Promise<void> {
+  const previousRoot = await loadRootHandle(testIdbFactory);
+  await saveRootHandle(root, testIdbFactory);
+  try {
+    await writeBootstrapMode('file');
+  } catch (error: unknown) {
+    if (previousRoot) {
+      await saveRootHandle(previousRoot, testIdbFactory);
+    } else {
+      await clearRootHandle(testIdbFactory);
+    }
+    throw error;
+  }
+}
+
 // ---------- public API ----------
 
 /**
@@ -454,11 +472,15 @@ export async function switchToFileMode(
   initialState: TabBoardState,
 ): Promise<void> {
   logBreadcrumb('file-storage: migration', `switching to file mode, revision=${initialState.mutationRevision}`);
-  const adapter = await createFileStorageAdapter(root);
+  let committed = false;
+  const adapter = await createFileStorageAdapter(root, {
+    shouldPublishPing: () => committed,
+  });
   await adapter.setState(initialState);
-  await saveRootHandle(root, testIdbFactory);
-  await writeBootstrapMode('file');
+  await commitFileHandleAndBootstrap(root);
+  committed = true;
   await getAuthority().install('file', adapter, initialState);
+  await writeFilePing(initialState.mutationRevision, initialState.updatedAt);
 }
 
 /**
@@ -506,7 +528,6 @@ export async function reconnectFolder(root: FileSystemDirectoryHandle): Promise<
   logBreadcrumb('file-storage: reconnect', 'reconnecting to file folder');
   const adapter = await createFileStorageAdapter(root);
   const state = await adapter.getState();
-  await saveRootHandle(root, testIdbFactory);
-  await writeBootstrapMode('file');
+  await commitFileHandleAndBootstrap(root);
   await getAuthority().install('file', adapter, state);
 }

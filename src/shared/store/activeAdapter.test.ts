@@ -576,6 +576,11 @@ describe('activeAdapter', () => {
       reason: 'Cloud folder went offline',
       occurredAt: '2026-07-26T10:03:00.000Z',
     };
+    const remoteState = knownState({
+      mutationRevision: 15,
+      updatedAt: '2026-07-26T10:02:30.000Z',
+    });
+    chromeMock.storage.local.data[STATE_KEY] = remoteState;
 
     chromeMock.storage.onChanged._fire({
       [STORAGE_FALLBACK_KEY]: { newValue: event },
@@ -589,7 +594,8 @@ describe('activeAdapter', () => {
     });
     expect(fallbackCb).toHaveBeenCalledTimes(1);
     expect(await getActiveAdapter()).toBe(authority);
-    expect((await authority.getState()).mutationRevision).toBe(14);
+    expect((await authority.getState()).mutationRevision).toBe(15);
+    expect((chromeMock.storage.local.data[STATE_KEY] as TabBoardState).mutationRevision).toBe(15);
   });
 
   it('switchToFileMode persists handle, writes bootstrap, and seeds initial state', async () => {
@@ -636,6 +642,76 @@ describe('activeAdapter', () => {
     expect((await authority.getState()).mutationRevision).toBe(90);
     const { loadRootHandle } = await import('./fsDirectory');
     expect(await loadRootHandle(idbFactory)).toBeNull();
+  });
+
+  it('file migration restores the previous handle when bootstrap commit fails', async () => {
+    const authority = await getActiveAdapter();
+    const previousRoot = createMemoryDirectory('previous-root');
+    withPermission(previousRoot);
+    const nextRoot = createMemoryDirectory('next-root');
+    withPermission(nextRoot);
+    const { loadRootHandle, saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(previousRoot, idbFactory);
+    chromeMock.storage.local.set.mockImplementation(async (items: Record<string, unknown>) => {
+      if (BOOTSTRAP_KEY in items) throw new Error('bootstrap write failed');
+      const changes: Record<string, StorageChange> = {};
+      for (const [key, value] of Object.entries(items)) {
+        changes[key] = {
+          oldValue: chromeMock.storage.local.data[key],
+          newValue: value,
+        };
+        chromeMock.storage.local.data[key] = value;
+      }
+      queueMicrotask(() => chromeMock.storage.onChanged._fire(changes));
+    });
+
+    await expect(switchToFileMode(
+      nextRoot,
+      knownState({ mutationRevision: 92 }),
+    )).rejects.toThrow('bootstrap write failed');
+
+    expect(await loadRootHandle(idbFactory)).toBe(previousRoot);
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toBeUndefined();
+    expect(await isFileModeActive()).toBe(false);
+    expect(await getActiveAdapter()).toBe(authority);
+  });
+
+  it('failed file migration does not publish a pre-commit file ping', async () => {
+    await writeBootstrap('file', chromeMock);
+    const previousRoot = createMemoryDirectory('previous-root');
+    withPermission(previousRoot);
+    const nextRoot = createMemoryDirectory('next-root');
+    withPermission(nextRoot);
+    const { saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(previousRoot, idbFactory);
+    const authority = await getActiveAdapter();
+    await authority.setState(knownState({ mutationRevision: 92 }));
+    const pingWritesBefore = chromeMock.storage.local.set.mock.calls.filter(
+      ([items]) => FILE_PING_KEY in (items as Record<string, unknown>),
+    ).length;
+    chromeMock.storage.local.set.mockImplementation(async (items: Record<string, unknown>) => {
+      if (BOOTSTRAP_KEY in items) throw new Error('bootstrap write failed');
+      const changes: Record<string, StorageChange> = {};
+      for (const [key, value] of Object.entries(items)) {
+        changes[key] = {
+          oldValue: chromeMock.storage.local.data[key],
+          newValue: value,
+        };
+        chromeMock.storage.local.data[key] = value;
+      }
+      queueMicrotask(() => chromeMock.storage.onChanged._fire(changes));
+    });
+
+    await expect(switchToFileMode(
+      nextRoot,
+      knownState({ mutationRevision: 93 }),
+    )).rejects.toThrow('bootstrap write failed');
+
+    const pingWritesAfter = chromeMock.storage.local.set.mock.calls.filter(
+      ([items]) => FILE_PING_KEY in (items as Record<string, unknown>),
+    ).length;
+    expect(pingWritesAfter).toBe(pingWritesBefore);
+    expect(await isFileModeActive()).toBe(true);
   });
 
   it('switchToBrowserMode(copyFileData:true) copies file data to chrome storage', async () => {
@@ -736,6 +812,24 @@ describe('activeAdapter', () => {
     expect(await getActiveAdapter()).toBe(authority);
     const { loadRootHandle } = await import('./fsDirectory');
     expect(await loadRootHandle(idbFactory)).toBeNull();
+  });
+
+  it('reconnect restores the previous handle when bootstrap commit fails', async () => {
+    const previousRoot = createMemoryDirectory('previous-root');
+    withPermission(previousRoot);
+    const nextRoot = createMemoryDirectory('next-root');
+    withPermission(nextRoot);
+    const { loadRootHandle, saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(previousRoot, idbFactory);
+    chromeMock.storage.local.set.mockImplementationOnce(async () => {
+      throw new Error('bootstrap write failed');
+    });
+
+    await expect(reconnectFolder(nextRoot)).rejects.toThrow('bootstrap write failed');
+
+    expect(await loadRootHandle(idbFactory)).toBe(previousRoot);
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toBeUndefined();
+    expect(await isFileModeActive()).toBe(false);
   });
 
   it('file mode init with permission denied falls back to chrome', async () => {

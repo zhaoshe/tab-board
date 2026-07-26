@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createEmptyState } from '../../shared/model';
 import { STATE_KEY } from '../../shared/model/constants';
+import { resetActiveAdapterForTests } from '../../shared/store/activeAdapter';
 import { getState, setState } from '../../shared/store/chromeStorage';
 import { applyStateMutation, type StateMutation } from '../../shared/store/stateMutations';
 import { createStatePersistence } from '../../background/statePersistence';
@@ -14,12 +15,18 @@ describe('core contracts', () => {
     const state = createEmptyState();
     const get = vi.fn(async (key: string) => ({ [key]: state }));
     const set = vi.fn(async (_value: Record<string, unknown>) => undefined);
-    vi.stubGlobal('chrome', { storage: { local: { get, set } } });
+    vi.stubGlobal('chrome', {
+      storage: {
+        local: { get, set },
+        onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+    });
 
     try {
       expect(await getState()).toEqual(state);
       await setState(state);
     } finally {
+      resetActiveAdapterForTests();
       vi.unstubAllGlobals();
     }
 

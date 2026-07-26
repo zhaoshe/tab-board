@@ -12,6 +12,7 @@ import {
 } from './commands';
 import { applyStateMutation, type StateMutation } from '../../shared/store/stateMutations';
 import { MAX_ENTITY_ID_BYTES, utf8ByteLength } from '../../shared/store/mutationValidation';
+import { resetActiveAdapterForTests } from '../../shared/store/activeAdapter';
 import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
@@ -543,9 +544,22 @@ describe('category commands', () => {
 
 describe('store category mutation lock', () => {
   afterEach(() => {
+    resetActiveAdapterForTests();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
+
+  async function waitForPendingWrites(
+    pendingWrites: Array<() => void>,
+    count: number,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < 100 && pendingWrites.length < count; attempt += 1) {
+      await Promise.resolve();
+    }
+    if (pendingWrites.length < count) {
+      throw new Error(`Expected ${count} pending storage writes, received ${pendingWrites.length}.`);
+    }
+  }
 
   it('validates two queued creates against the latest state', async () => {
     vi.useFakeTimers();
@@ -720,23 +734,17 @@ describe('store category mutation lock', () => {
     useTabBoardStore.setState({ ...createEmptyState(), hydrated: true });
 
     const folderPromise = useTabBoardStore.getState().addFolder('workspace_default', 'Stable folder');
-    for (let attempt = 0; attempt < 10 && pendingWrites.length < 1; attempt += 1) {
-      await Promise.resolve();
-    }
+    await waitForPendingWrites(pendingWrites, 1);
     useTabBoardStore.getState().addGroup(group('group-one', 'workspace_default'));
     vi.advanceTimersByTime(100);
-    pendingWrites[0]?.();
-    for (let attempt = 0; attempt < 10 && pendingWrites.length < 2; attempt += 1) {
-      await Promise.resolve();
-    }
+    pendingWrites[0]();
+    await waitForPendingWrites(pendingWrites, 2);
 
     useTabBoardStore.getState().addGroup(group('group-two', 'workspace_default'));
     vi.advanceTimersByTime(100);
-    pendingWrites[1]?.();
-    for (let attempt = 0; attempt < 10 && pendingWrites.length < 3; attempt += 1) {
-      await Promise.resolve();
-    }
-    pendingWrites[2]?.();
+    pendingWrites[1]();
+    await waitForPendingWrites(pendingWrites, 3);
+    pendingWrites[2]();
     await folderPromise;
     await vi.runAllTimersAsync();
 
