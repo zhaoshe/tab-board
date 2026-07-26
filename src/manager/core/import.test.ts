@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEmptyState, createNoteRecord, exportToText, type Folder, type Group, type TabBoardState, type Workspace } from '../../shared/model';
 import { AppEvents, onEvent } from '../../shared/utils/events';
 import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
-import { importText, parseImportedText } from './commands';
+import {
+  importText,
+  parseImportedText,
+} from '../../shared/model/session-operations';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 

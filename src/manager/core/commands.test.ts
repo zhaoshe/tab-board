@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEmptyState, exportToText } from '../../shared/model';
 import type { BinEntry, Folder, Group, TabBoardState, Workspace } from '../../shared/model';
 import {
+  restoreGroupFromBin,
+} from '../../shared/model/session-operations';
+import {
   moveSessionToCategory,
   reorderCategoryIds,
-  restoreGroupFromBin,
-} from './commands';
+} from '../../shared/model/categories';
 import {
   dropOperationGroupId,
   dropOperationTabId,

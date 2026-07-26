@@ -14,7 +14,7 @@ import {
 } from '@mantine/core';
 import { IconUpload, IconFileImport, IconAlertCircle, IconCheck } from '@tabler/icons-react';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
-import { parseImportedText } from '../../core/commands';
+import { parseImportedText } from '../../../shared/model/session-operations';
 import type { CategoryFilter } from '../../core/selectors';
 
 interface ImportModalProps {

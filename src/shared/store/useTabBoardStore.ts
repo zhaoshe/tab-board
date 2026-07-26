@@ -20,7 +20,7 @@ import {
 import {
   importText,
   restoreGroupFromBin,
-} from '../../manager/core/commands';
+} from '../model/session-operations';
 import type { DropIntent } from '../model/drop-intent';
 import type { OpenTabInfo } from '../openTabs';
 import { emitEvent, AppEvents } from '../utils/events';

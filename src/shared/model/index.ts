@@ -36,3 +36,6 @@ export * from './import-export';
 export * from './capture-policy';
 export * from './categories';
 export * from './drop-intent';
+export * from './drop-operations';
+export * from './drop-validation';
+export * from './session-operations';
