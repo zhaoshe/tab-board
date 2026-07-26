@@ -698,3 +698,265 @@ describe('authoritative publication persistence outcomes', () => {
       .toBe('category-validation-group');
   });
 });
+
+describe('authoritative publication lifecycle', () => {
+  it('shares one in-flight hydration and creates one subscription', async () => {
+    const harness = createHarness();
+    harness.dependencies.patchStatus({ hydrated: false });
+    let resolveEnsure: ((state: TabBoardState) => void) | undefined;
+    harness.dependencies.ensureState = vi.fn(() =>
+      new Promise<TabBoardState>((resolve) => {
+        resolveEnsure = resolve;
+      }),
+    );
+    const subscribe = vi.fn(harness.dependencies.subscribeAuthoritativeState);
+    harness.dependencies.subscribeAuthoritativeState = subscribe;
+    const publication = createAuthoritativePublication(harness.dependencies);
+
+    const first = publication.hydrate();
+    const second = publication.hydrate();
+
+    expect(second).toBe(first);
+    expect(harness.dependencies.ensureState).toHaveBeenCalledTimes(1);
+    resolveEnsure?.(harness.getProjection().state);
+    await Promise.all([first, second]);
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    expect(harness.getProjection().hydrated).toBe(true);
+  });
+
+  it.each([
+    {
+      name: 'newer publication',
+      readUpdatedAt: '2026-01-02T00:00:00.000Z',
+      eventUpdatedAt: '9999-01-01T00:00:00.000Z',
+      expectedGroupId: 'event-group',
+    },
+    {
+      name: 'newer read',
+      readUpdatedAt: '9999-01-01T00:00:00.000Z',
+      eventUpdatedAt: '2026-01-02T00:00:00.000Z',
+      expectedGroupId: 'read-group',
+    },
+  ])('chooses the $name observed across the initial read gap', async ({
+    readUpdatedAt,
+    eventUpdatedAt,
+    expectedGroupId,
+  }) => {
+    const initial = createEmptyState();
+    const harness = createHarness(initial);
+    harness.dependencies.patchStatus({ hydrated: false });
+    let subscriber: ((state: TabBoardState) => void) | undefined;
+    harness.dependencies.subscribeAuthoritativeState = (callback) => {
+      subscriber = callback;
+      return () => undefined;
+    };
+    const readState: TabBoardState = {
+      ...initial,
+      groups: [group('read-group')],
+      updatedAt: readUpdatedAt,
+    };
+    const eventState: TabBoardState = {
+      ...initial,
+      groups: [group('event-group')],
+      updatedAt: eventUpdatedAt,
+    };
+    harness.dependencies.readAuthoritativeState = vi.fn(async () => {
+      subscriber?.(eventState);
+      return readState;
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+
+    await publication.hydrate();
+
+    expect(harness.getProjection().state.groups.map(({ id }) => id))
+      .toEqual([expectedGroupId]);
+  });
+
+  it('does not subscribe when release wins an in-flight hydration', async () => {
+    const harness = createHarness();
+    harness.dependencies.patchStatus({ hydrated: false });
+    let resolveEnsure: ((state: TabBoardState) => void) | undefined;
+    harness.dependencies.ensureState = () =>
+      new Promise<TabBoardState>((resolve) => {
+        resolveEnsure = resolve;
+      });
+    const subscribe = vi.fn(harness.dependencies.subscribeAuthoritativeState);
+    harness.dependencies.subscribeAuthoritativeState = subscribe;
+    const publication = createAuthoritativePublication(harness.dependencies);
+
+    const hydration = publication.hydrate();
+    publication.releaseHydration();
+    resolveEnsure?.(harness.getProjection().state);
+    await hydration;
+
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(harness.getProjection().hydrated).toBe(false);
+  });
+
+  it('ignores a stale subscription callback after release', async () => {
+    const initial = createEmptyState();
+    const harness = createHarness(initial);
+    harness.dependencies.patchStatus({ hydrated: false });
+    let staleCallback: ((state: TabBoardState) => void) | undefined;
+    harness.dependencies.subscribeAuthoritativeState = (callback) => {
+      staleCallback = callback;
+      return () => undefined;
+    };
+    const publication = createAuthoritativePublication(harness.dependencies);
+    await publication.hydrate();
+    publication.releaseHydration();
+
+    staleCallback?.({
+      ...initial,
+      groups: [group('stale-group')],
+      updatedAt: '9999-01-01T00:00:00.000Z',
+    });
+
+    expect(harness.getProjection().state.groups).toEqual([]);
+    expect(harness.getProjection().hydrated).toBe(false);
+  });
+
+  it('reports hydration failure without notification and permits retry', async () => {
+    const harness = createHarness();
+    harness.dependencies.patchStatus({ hydrated: false });
+    let attempts = 0;
+    harness.dependencies.ensureState = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('storage unavailable');
+      return harness.getProjection().state;
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+
+    await expect(publication.hydrate()).rejects.toThrow('storage unavailable');
+    expect(harness.dependencies.onPersistenceError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'storage unavailable' }),
+      false,
+    );
+    expect(harness.getProjection().hydrated).toBe(false);
+
+    await expect(publication.hydrate()).resolves.toBeUndefined();
+    expect(attempts).toBe(2);
+    expect(harness.getProjection().hydrated).toBe(true);
+  });
+
+  it('rejects old waiters and sends only new work after context replacement', async () => {
+    vi.useFakeTimers();
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      groups: [group('context-drop')],
+    };
+    const harness = createHarness(initial);
+    let context = 'context-a';
+    harness.dependencies.currentContext = () => context;
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const oldDrop = publication.commitDrop(
+      dropMutation('context-drop-operation', 'context-drop'),
+    );
+    const oldDropOutcome = oldDrop.then(
+      () => 'resolved' as const,
+      (error: unknown) => error,
+    );
+
+    context = 'context-b';
+    publication.commit({
+      type: 'update-settings',
+      updates: { theme: 'dark' },
+      updatedAt: timestamp,
+    });
+    await vi.advanceTimersByTimeAsync(100);
+
+    await expect(oldDropOutcome).resolves.toMatchObject({
+      message: 'Persistence context changed.',
+    });
+    expect(harness.sentBatches.map((batch) => batch.map(({ type }) => type)))
+      .toEqual([['update-settings']]);
+    expect(harness.getProjection().state.groups[0]?.starred).toBe(false);
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+  });
+
+  it('does not let an old in-flight context overwrite new-context publication', async () => {
+    vi.useFakeTimers();
+    const initial = createEmptyState();
+    const harness = createHarness(initial);
+    let context = 'context-a';
+    let resolveOld: ((state: TabBoardState) => void) | undefined;
+    let newAuthoritative = initial;
+    harness.dependencies.currentContext = () => context;
+    harness.dependencies.sendMutations = vi.fn((
+      mutations: readonly StateMutation[],
+    ) => {
+      const settings = mutations[0]?.type === 'update-settings'
+        ? mutations[0].updates
+        : {};
+      if (settings.theme === 'dark') {
+        return new Promise<TabBoardState>((resolve) => {
+          resolveOld = resolve;
+        });
+      }
+      newAuthoritative = applyStateMutations(newAuthoritative, mutations);
+      harness.setAuthoritative(newAuthoritative);
+      return Promise.resolve(newAuthoritative);
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+    publication.commit({
+      type: 'update-settings',
+      updates: { theme: 'dark' },
+      updatedAt: timestamp,
+    });
+    await vi.advanceTimersByTimeAsync(100);
+
+    context = 'context-b';
+    publication.commit({
+      type: 'update-settings',
+      updates: { closeTabsAfterSave: false },
+      updatedAt: timestamp,
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.waitFor(() => {
+      expect(harness.getProjection().state.settings.closeTabsAfterSave)
+        .toBe(false);
+    });
+
+    resolveOld?.(applyStateMutations(initial, [{
+      type: 'update-settings',
+      updates: { theme: 'dark' },
+      updatedAt: timestamp,
+    }]));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(harness.getProjection().state.settings).toMatchObject({
+      theme: 'system',
+      closeTabsAfterSave: false,
+    });
+  });
+
+  it('dispose cancels a scheduled retry and rejects its waiter', async () => {
+    vi.useFakeTimers();
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      groups: [group('dispose-drop')],
+    };
+    const harness = createHarness(initial);
+    harness.dependencies.sendMutations = vi.fn(async () => {
+      throw new Error('temporary failure');
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const persistence = publication.commitDrop(
+      dropMutation('dispose-drop-operation', 'dispose-drop'),
+    );
+    const outcome = persistence.then(
+      () => 'resolved' as const,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(100);
+
+    publication.dispose();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expect(outcome).resolves.toMatchObject({
+      message: 'Authoritative publication is disposed.',
+    });
+    expect(harness.dependencies.sendMutations).toHaveBeenCalledTimes(1);
+  });
+});

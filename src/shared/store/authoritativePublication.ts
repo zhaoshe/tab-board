@@ -299,9 +299,13 @@ export function createAuthoritativePublication(
   let pendingRemoteState: TabBoardState | null = null;
   let lastAuthoritativeState: TabBoardState | null = null;
   let pendingPersistenceWaiters: PendingPersistenceWaiter[] = [];
+  let inFlightPersistenceWaiters: PendingPersistenceWaiter[] = [];
   let publicationQueue: Promise<unknown> = Promise.resolve();
+  let persistenceContext: unknown;
+  let publicationGeneration = 0;
   let hydrationPromise: Promise<void> | null = null;
   let hydrationUnsubscribe: (() => void) | null = null;
+  let hydrationGeneration = 0;
   let disposed = false;
 
   const publishOptimisticMutation = (mutation: StateMutation): void => {
@@ -382,9 +386,45 @@ export function createAuthoritativePublication(
   };
 
   const rejectPendingPersistenceWaiters = (error: unknown): void => {
-    const waiters = pendingPersistenceWaiters;
+    const waiters = [
+      ...pendingPersistenceWaiters,
+      ...inFlightPersistenceWaiters,
+    ];
     pendingPersistenceWaiters = [];
+    inFlightPersistenceWaiters = [];
     waiters.forEach(({ reject }) => reject(error));
+  };
+
+  const syncPersistenceContext = (): void => {
+    const context = dependencies.currentContext();
+    if (persistenceContext !== undefined && persistenceContext !== context) {
+      publicationGeneration += 1;
+      if (saveTimeout) clearTimeout(saveTimeout);
+      if (retryTimeout) clearTimeout(retryTimeout);
+      saveTimeout = null;
+      retryTimeout = null;
+      const projection = dependencies.readProjection();
+      if (lastAuthoritativeState) {
+        dependencies.publishProjection(
+          structurallyShareState(projection.state, lastAuthoritativeState),
+          {
+            hydrated: projection.hydrated,
+            persistenceError: projection.persistenceError,
+          },
+        );
+      }
+      pendingMutations = [];
+      inFlightMutations = null;
+      pendingRemoteState = null;
+      lastAuthoritativeState = null;
+      persistenceRetryAttempt = 0;
+      suppressRetrySchedule = false;
+      publicationQueue = Promise.resolve();
+      rejectPendingPersistenceWaiters(
+        new Error('Persistence context changed.'),
+      );
+    }
+    persistenceContext = context;
   };
 
   const reconcileAuthoritativeState = (
@@ -497,6 +537,7 @@ export function createAuthoritativePublication(
   const isolateTerminalOrdinaryBatch = async (
     batch: readonly StateMutation[],
     initialError: unknown,
+    generation: number,
   ): Promise<IsolatedBatchResult> => {
     const candidates: StateMutation[] = batch.filter(
       (mutation) => mutation.type !== 'drop-intent',
@@ -524,6 +565,15 @@ export function createAuthoritativePublication(
       inFlightMutations = [mutation];
       try {
         const persisted = await dependencies.sendMutations([mutation]);
+        if (generation !== publicationGeneration || disposed) {
+          return {
+            error: new Error('Persistence context changed.'),
+            canRetry: false,
+            succeeded: [],
+            failures: [],
+            authoritative: null,
+          };
+        }
         authoritative = persisted;
         succeeded.push(mutation);
         inFlightMutations = null;
@@ -553,6 +603,15 @@ export function createAuthoritativePublication(
         remaining = terminalFailure ? remaining : [mutation, ...remaining];
         pendingMutations = [...remaining, ...queuedOutsideBatch];
         const recovery = await recoverAuthoritativeState();
+        if (generation !== publicationGeneration || disposed) {
+          return {
+            error: new Error('Persistence context changed.'),
+            canRetry: false,
+            succeeded: [],
+            failures: [],
+            authoritative: null,
+          };
+        }
         captureQueuedMutations();
         if (recovery) {
           const reconciliationFailures = reconcileAuthoritativeState(recovery);
@@ -615,63 +674,226 @@ export function createAuthoritativePublication(
 
   sendPendingBatch = (
     additional: readonly StateMutation[] = [],
-  ): Promise<TabBoardState | null> => enqueue(async () => {
-    const batch = [...takePendingMutations(), ...additional];
-    if (additional.length > 0) suppressRetrySchedule = false;
-    const waiters = takePersistenceWaiters(batch);
-    if (!batch.length || disposed) return null;
-    inFlightMutations = batch;
-    try {
-      const authoritative = await dependencies.sendMutations(batch);
-      inFlightMutations = null;
-      settlePersistenceWaiters(waiters, batch);
-      const failures = reconcileAuthoritativeState(authoritative, batch);
-      batch.forEach(dependencies.onMutationCommitted);
-      persistenceRetryAttempt = 0;
-      suppressRetrySchedule = false;
-      if (retryTimeout) clearTimeout(retryTimeout);
-      retryTimeout = null;
-      if (failures.length) {
-        const reconciliationError = failures[0].error;
-        dependencies.onPersistenceError(reconciliationError, true);
-        return Promise.reject(reconciliationError);
-      }
-      if (dependencies.readProjection().persistenceError) {
-        dependencies.patchStatus({ persistenceError: null });
-      }
-      return authoritative;
-    } catch (error: unknown) {
-      inFlightMutations = null;
-      const validationFailure = isCategoryValidationError(error);
-      const restoreCollision = isRestoreCollisionError(error);
-      const invalidIndexes = invalidDropIndexes(error, batch);
-      const committedIndexes = committedMutationIndexes(error, batch);
-      const invalidDrop = invalidIndexes.size > 0;
-      const terminalOrdinaryFailure = isTerminalSemanticError(error)
-        && !validationFailure
-        && !restoreCollision
-        && !invalidDrop;
-      const hasOrdinarySibling = batch.some(
-        (mutation) => mutation.type !== 'drop-intent',
-      );
-      if (
-        terminalOrdinaryFailure
-        && batch.length > 1
-        && hasOrdinarySibling
-      ) {
+  ): Promise<TabBoardState | null> => {
+    const generation = publicationGeneration;
+    return enqueue(async () => {
+      if (generation !== publicationGeneration || disposed) return null;
+      const batch = [...takePendingMutations(), ...additional];
+      if (additional.length > 0) suppressRetrySchedule = false;
+      const waiters = takePersistenceWaiters(batch);
+      inFlightPersistenceWaiters = waiters;
+      if (!batch.length || disposed) return null;
+      inFlightMutations = batch;
+      try {
+        const authoritative = await dependencies.sendMutations(batch);
+        if (generation !== publicationGeneration || disposed) return null;
+        inFlightMutations = null;
+        settlePersistenceWaiters(waiters, batch);
+        inFlightPersistenceWaiters = [];
+        const failures = reconcileAuthoritativeState(authoritative, batch);
+        batch.forEach(dependencies.onMutationCommitted);
+        persistenceRetryAttempt = 0;
+        suppressRetrySchedule = false;
+        if (retryTimeout) clearTimeout(retryTimeout);
+        retryTimeout = null;
+        if (failures.length) {
+          const reconciliationError = failures[0].error;
+          dependencies.onPersistenceError(reconciliationError, true);
+          return Promise.reject(reconciliationError);
+        }
+        if (dependencies.readProjection().persistenceError) {
+          dependencies.patchStatus({ persistenceError: null });
+        }
+        return authoritative;
+      } catch (error: unknown) {
+        if (generation !== publicationGeneration || disposed) return null;
+        inFlightMutations = null;
+        const validationFailure = isCategoryValidationError(error);
+        const restoreCollision = isRestoreCollisionError(error);
+        const invalidIndexes = invalidDropIndexes(error, batch);
+        const committedIndexes = committedMutationIndexes(error, batch);
+        const invalidDrop = invalidIndexes.size > 0;
+        const terminalOrdinaryFailure = isTerminalSemanticError(error)
+          && !validationFailure
+          && !restoreCollision
+          && !invalidDrop;
+        const hasOrdinarySibling = batch.some(
+          (mutation) => mutation.type !== 'drop-intent',
+        );
+        if (
+          terminalOrdinaryFailure
+          && batch.length > 1
+          && hasOrdinarySibling
+        ) {
+          const hasRetryBudget =
+            persistenceRetryAttempt < PERSISTENCE_RETRY_DELAYS_MS.length;
+          const retainedDrops = hasRetryBudget
+            ? batch.filter((mutation) => mutation.type === 'drop-intent')
+            : [];
+          pendingMutations = [...retainedDrops, ...pendingMutations];
+          const isolated = await isolateTerminalOrdinaryBatch(
+            batch,
+            error,
+            generation,
+          );
+          if (generation !== publicationGeneration || disposed) return null;
+          const isolatedCommittedIndexes = new Set(
+            batch.map((mutation, index) =>
+              isolated.succeeded.includes(mutation) ? index : -1,
+            ).filter((index) => index >= 0),
+          );
+          const retainedIndexes = isolated.canRetry
+            ? new Set(
+              batch.map((mutation, index) =>
+                pendingMutations.some((candidate) =>
+                  sameMutation(candidate, mutation),
+                ) ? index : -1,
+              ).filter((index) => index >= 0),
+            )
+            : new Set<number>();
+          const errorsByMutation = new Map(
+            isolated.failures.map(({ mutation, error: failure }) =>
+              [mutation, failure],
+            ),
+          );
+          settlePersistenceWaiters(
+            waiters,
+            batch,
+            error,
+            isolatedCommittedIndexes,
+            retainedIndexes,
+            errorsByMutation,
+          );
+          inFlightPersistenceWaiters = [];
+          if (isolated.canRetry) {
+            persistenceRetryAttempt = 0;
+            suppressRetrySchedule = false;
+            schedulePendingRetry();
+          } else {
+            persistenceRetryAttempt = 0;
+            suppressRetrySchedule = true;
+            if (retryTimeout) clearTimeout(retryTimeout);
+            retryTimeout = null;
+          }
+          dependencies.onPersistenceError(isolated.error, true);
+          const additionalSucceeded = additional.length > 0
+            && additional.every((mutation) =>
+              isolated.succeeded.includes(mutation),
+            );
+          if (additionalSucceeded) return isolated.authoritative;
+          return Promise.reject(isolated.error);
+        }
+
+        const retainedBatch = batch.filter(
+          (_, index) =>
+            !invalidIndexes.has(index) && !committedIndexes.has(index),
+        );
+        const retryableBatch = restoreCollision
+          ? retainedBatch.filter((mutation) =>
+            mutation.type !== 'restore-group'
+            && mutation.type !== 'restore-tab',
+          )
+          : retainedBatch;
         const hasRetryBudget =
           persistenceRetryAttempt < PERSISTENCE_RETRY_DELAYS_MS.length;
-        const retainedDrops = hasRetryBudget
-          ? batch.filter((mutation) => mutation.type === 'drop-intent')
-          : [];
-        pendingMutations = [...retainedDrops, ...pendingMutations];
-        const isolated = await isolateTerminalOrdinaryBatch(batch, error);
-        const isolatedCommittedIndexes = new Set(
-          batch.map((mutation, index) =>
-            isolated.succeeded.includes(mutation) ? index : -1,
-          ).filter((index) => index >= 0),
+        const nextPendingBatch = validationFailure
+          ? batch.filter(
+            (mutation, index) =>
+              !isCategoryMutation(mutation) && !committedIndexes.has(index),
+          )
+          : terminalOrdinaryFailure
+            ? hasRetryBudget
+              ? retryableBatch.filter(
+                (mutation) => mutation.type === 'drop-intent',
+              )
+              : []
+            : hasRetryBudget
+              ? retryableBatch
+              : retryableBatch.filter(
+                (mutation) => mutation.type !== 'drop-intent',
+              );
+        const nonDropRetryBatch = nextPendingBatch.filter(
+          (mutation) => mutation.type !== 'drop-intent',
         );
-        const retainedIndexes = isolated.canRetry
+        const persisted = committedState(error);
+        pendingMutations = [...nextPendingBatch, ...pendingMutations];
+        const terminalDropWithRetainedOrdinary = !validationFailure
+          && !hasRetryBudget
+          && batch.some((mutation) => mutation.type === 'drop-intent')
+          && nonDropRetryBatch.length > 0;
+        const shouldResetRetryBudget = terminalOrdinaryFailure
+          || (
+            nonDropRetryBatch.length > 0
+            && (
+              validationFailure
+              || restoreCollision
+              || terminalDropWithRetainedOrdinary
+            )
+          );
+        if (shouldResetRetryBudget) {
+          persistenceRetryAttempt = 0;
+          suppressRetrySchedule = false;
+        }
+        const removedNonDropMutation = restoreCollision && batch.some(
+          (mutation, index) =>
+            mutation.type !== 'drop-intent'
+            && !committedIndexes.has(index)
+            && !retryableBatch.some((candidate) =>
+              sameMutation(candidate, mutation),
+            ),
+        );
+        let reconciliationState = persisted;
+        if (
+          !reconciliationState
+          && (
+            terminalOrdinaryFailure
+            || restoreCollision
+            || (
+              !hasRetryBudget
+              && batch.some((mutation) => mutation.type === 'drop-intent')
+            )
+          )
+        ) {
+          reconciliationState = await recoverAuthoritativeState();
+        }
+        let reconciliationFailures: ReconciliationFailure[] = [];
+        if (reconciliationState) {
+          const committedMutations = batch.filter(
+            (_, index) => committedIndexes.has(index),
+          );
+          reconciliationFailures = reconcileAuthoritativeState(
+            reconciliationState,
+            pendingRemoteState ? committedMutations : [],
+          );
+          const shouldRebasePendingDrops = !invalidDrop && (
+            (
+              terminalOrdinaryFailure
+              && batch.every((mutation) => mutation.type !== 'drop-intent')
+            )
+            || removedNonDropMutation
+          );
+          if (shouldRebasePendingDrops) {
+            rebasePendingDropRevisions(
+              lastAuthoritativeState || reconciliationState,
+            );
+          }
+        }
+        batch.forEach((mutation, index) => {
+          if (committedIndexes.has(index)) {
+            dependencies.onMutationCommitted(mutation);
+          }
+        });
+        const canRetry = pendingMutations.length > 0
+          && persistenceRetryAttempt < PERSISTENCE_RETRY_DELAYS_MS.length;
+        if (canRetry) {
+          schedulePendingRetry();
+        } else {
+          persistenceRetryAttempt = 0;
+          suppressRetrySchedule = true;
+          if (retryTimeout) clearTimeout(retryTimeout);
+          retryTimeout = null;
+        }
+        const retainedIndexes = canRetry
           ? new Set(
             batch.map((mutation, index) =>
               pendingMutations.some((candidate) =>
@@ -680,188 +902,40 @@ export function createAuthoritativePublication(
             ).filter((index) => index >= 0),
           )
           : new Set<number>();
-        const errorsByMutation = new Map(
-          isolated.failures.map(({ mutation, error: failure }) =>
-            [mutation, failure],
-          ),
-        );
         settlePersistenceWaiters(
           waiters,
           batch,
           error,
-          isolatedCommittedIndexes,
+          committedIndexes,
           retainedIndexes,
-          errorsByMutation,
         );
-        if (isolated.canRetry) {
-          persistenceRetryAttempt = 0;
-          suppressRetrySchedule = false;
-          schedulePendingRetry();
-        } else {
-          persistenceRetryAttempt = 0;
-          suppressRetrySchedule = true;
-          if (retryTimeout) clearTimeout(retryTimeout);
-          retryTimeout = null;
-        }
-        dependencies.onPersistenceError(isolated.error, true);
-        const additionalSucceeded = additional.length > 0
-          && additional.every((mutation) =>
-            isolated.succeeded.includes(mutation),
-          );
-        if (additionalSucceeded) return isolated.authoritative;
-        return Promise.reject(isolated.error);
-      }
-
-      const retainedBatch = batch.filter(
-        (_, index) =>
-          !invalidIndexes.has(index) && !committedIndexes.has(index),
-      );
-      const retryableBatch = restoreCollision
-        ? retainedBatch.filter((mutation) =>
-          mutation.type !== 'restore-group'
-          && mutation.type !== 'restore-tab',
-        )
-        : retainedBatch;
-      const hasRetryBudget =
-        persistenceRetryAttempt < PERSISTENCE_RETRY_DELAYS_MS.length;
-      const nextPendingBatch = validationFailure
-        ? batch.filter(
-          (mutation, index) =>
-            !isCategoryMutation(mutation) && !committedIndexes.has(index),
-        )
-        : terminalOrdinaryFailure
-          ? hasRetryBudget
-            ? retryableBatch.filter(
-              (mutation) => mutation.type === 'drop-intent',
-            )
-            : []
-          : hasRetryBudget
-            ? retryableBatch
-            : retryableBatch.filter(
-              (mutation) => mutation.type !== 'drop-intent',
-            );
-      const nonDropRetryBatch = nextPendingBatch.filter(
-        (mutation) => mutation.type !== 'drop-intent',
-      );
-      const persisted = committedState(error);
-      pendingMutations = [...nextPendingBatch, ...pendingMutations];
-      const terminalDropWithRetainedOrdinary = !validationFailure
-        && !hasRetryBudget
-        && batch.some((mutation) => mutation.type === 'drop-intent')
-        && nonDropRetryBatch.length > 0;
-      const shouldResetRetryBudget = terminalOrdinaryFailure
-        || (
-          nonDropRetryBatch.length > 0
-          && (
-            validationFailure
-            || restoreCollision
-            || terminalDropWithRetainedOrdinary
-          )
+        inFlightPersistenceWaiters = [];
+        const waiterMutations = new Set(
+          waiters.map(({ mutation }) => mutation),
         );
-      if (shouldResetRetryBudget) {
-        persistenceRetryAttempt = 0;
-        suppressRetrySchedule = false;
-      }
-      const removedNonDropMutation = restoreCollision && batch.some(
-        (mutation, index) =>
-          mutation.type !== 'drop-intent'
-          && !committedIndexes.has(index)
-          && !retryableBatch.some((candidate) =>
-            sameMutation(candidate, mutation),
-          ),
-      );
-      let reconciliationState = persisted;
-      if (
-        !reconciliationState
-        && (
-          terminalOrdinaryFailure
-          || restoreCollision
+        const hasUnownedFailure = batch.some((mutation, index) =>
+          !committedIndexes.has(index)
+          && !retainedIndexes.has(index)
+          && !waiterMutations.has(mutation),
+        );
+        const deferErrorNotification = canRetry
+          && !validationFailure
+          && !invalidDrop
+          && !restoreCollision
+          && !terminalOrdinaryFailure
+          && reconciliationFailures.length === 0;
+        const shouldNotify = terminalDropWithRetainedOrdinary
           || (
-            !hasRetryBudget
-            && batch.some((mutation) => mutation.type === 'drop-intent')
-          )
-        )
-      ) {
-        reconciliationState = await recoverAuthoritativeState();
-      }
-      let reconciliationFailures: ReconciliationFailure[] = [];
-      if (reconciliationState) {
-        const committedMutations = batch.filter(
-          (_, index) => committedIndexes.has(index),
-        );
-        reconciliationFailures = reconcileAuthoritativeState(
-          reconciliationState,
-          pendingRemoteState ? committedMutations : [],
-        );
-        const shouldRebasePendingDrops = !invalidDrop && (
-          (
-            terminalOrdinaryFailure
-            && batch.every((mutation) => mutation.type !== 'drop-intent')
-          )
-          || removedNonDropMutation
-        );
-        if (shouldRebasePendingDrops) {
-          rebasePendingDropRevisions(
-            lastAuthoritativeState || reconciliationState,
+            waiters.length > 0
+              ? hasUnownedFailure
+              : !deferErrorNotification
           );
-        }
+        const surfacedError = reconciliationFailures[0]?.error || error;
+        dependencies.onPersistenceError(surfacedError, shouldNotify);
+        throw surfacedError;
       }
-      batch.forEach((mutation, index) => {
-        if (committedIndexes.has(index)) {
-          dependencies.onMutationCommitted(mutation);
-        }
-      });
-      const canRetry = pendingMutations.length > 0
-        && persistenceRetryAttempt < PERSISTENCE_RETRY_DELAYS_MS.length;
-      if (canRetry) {
-        schedulePendingRetry();
-      } else {
-        persistenceRetryAttempt = 0;
-        suppressRetrySchedule = true;
-        if (retryTimeout) clearTimeout(retryTimeout);
-        retryTimeout = null;
-      }
-      const retainedIndexes = canRetry
-        ? new Set(
-          batch.map((mutation, index) =>
-            pendingMutations.some((candidate) =>
-              sameMutation(candidate, mutation),
-            ) ? index : -1,
-          ).filter((index) => index >= 0),
-        )
-        : new Set<number>();
-      settlePersistenceWaiters(
-        waiters,
-        batch,
-        error,
-        committedIndexes,
-        retainedIndexes,
-      );
-      const waiterMutations = new Set(
-        waiters.map(({ mutation }) => mutation),
-      );
-      const hasUnownedFailure = batch.some((mutation, index) =>
-        !committedIndexes.has(index)
-        && !retainedIndexes.has(index)
-        && !waiterMutations.has(mutation),
-      );
-      const deferErrorNotification = canRetry
-        && !validationFailure
-        && !invalidDrop
-        && !restoreCollision
-        && !terminalOrdinaryFailure
-        && reconciliationFailures.length === 0;
-      const shouldNotify = terminalDropWithRetainedOrdinary
-        || (
-          waiters.length > 0
-            ? hasUnownedFailure
-            : !deferErrorNotification
-        );
-      const surfacedError = reconciliationFailures[0]?.error || error;
-      dependencies.onPersistenceError(surfacedError, shouldNotify);
-      throw surfacedError;
-    }
-  });
+    });
+  };
 
   const scheduleSave = (): void => {
     if (saveTimeout) clearTimeout(saveTimeout);
@@ -873,12 +947,14 @@ export function createAuthoritativePublication(
 
   const commit = (mutation: StateMutation): void => {
     if (disposed) return;
+    syncPersistenceContext();
     publishOptimisticMutation(mutation);
     scheduleSave();
   };
 
   const commitRestore = (mutation: RestoreStateMutation): void => {
     if (disposed) return;
+    syncPersistenceContext();
     try {
       publishOptimisticMutation(mutation);
     } catch (error: unknown) {
@@ -892,6 +968,7 @@ export function createAuthoritativePublication(
     if (disposed) {
       return Promise.reject(new Error('Authoritative publication is disposed.'));
     }
+    syncPersistenceContext();
     try {
       publishOptimisticMutation(mutation);
     } catch (error: unknown) {
@@ -917,6 +994,7 @@ export function createAuthoritativePublication(
     if (disposed) {
       return Promise.reject(new Error('Authoritative publication is disposed.'));
     }
+    syncPersistenceContext();
     const persistence = new Promise<void>((resolve, reject) => {
       pendingPersistenceWaiters = [
         ...pendingPersistenceWaiters,
@@ -935,30 +1013,59 @@ export function createAuthoritativePublication(
     commitCategory,
     hydrate: () => {
       if (hydrationPromise) return hydrationPromise;
-      hydrationPromise = (async () => {
-        await dependencies.ensureState();
-        if (disposed) return;
-        hydrationUnsubscribe?.();
-        hydrationUnsubscribe = dependencies.subscribeAuthoritativeState(
-          acceptRemoteState,
-        );
-        const authoritative = await dependencies.readAuthoritativeState();
-        if (disposed) return;
-        const projection = dependencies.readProjection();
-        const shared = structurallyShareState(
-          projection.state,
-          newestRemoteState(authoritative, pendingRemoteState),
-        );
-        pendingRemoteState = null;
-        lastAuthoritativeState = shared;
-        dependencies.publishProjection(shared, {
-          hydrated: true,
-          persistenceError: null,
-        });
+      const generation = hydrationGeneration;
+      const hydration = (async () => {
+        let pendingHydrationState: TabBoardState | null = null;
+        try {
+          await dependencies.ensureState();
+          if (disposed || generation !== hydrationGeneration) return;
+
+          hydrationUnsubscribe?.();
+          hydrationUnsubscribe = dependencies.subscribeAuthoritativeState(
+            (state) => {
+              if (disposed || generation !== hydrationGeneration) return;
+              if (!dependencies.readProjection().hydrated) {
+                pendingHydrationState = newestRemoteState(
+                  state,
+                  pendingHydrationState,
+                );
+                return;
+              }
+              acceptRemoteState(state);
+            },
+          );
+          const authoritative = await dependencies.readAuthoritativeState();
+          if (disposed || generation !== hydrationGeneration) return;
+          const projection = dependencies.readProjection();
+          const shared = structurallyShareState(
+            projection.state,
+            newestRemoteState(authoritative, pendingHydrationState),
+          );
+          pendingHydrationState = null;
+          lastAuthoritativeState = shared;
+          dependencies.publishProjection(shared, {
+            hydrated: true,
+            persistenceError: null,
+          });
+        } catch (error: unknown) {
+          if (disposed || generation !== hydrationGeneration) return;
+          hydrationUnsubscribe?.();
+          hydrationUnsubscribe = null;
+          dependencies.onPersistenceError(error, false);
+          dependencies.patchStatus({ hydrated: false });
+          throw error;
+        }
       })();
+      hydrationPromise = hydration.catch((error: unknown) => {
+        if (!disposed && generation === hydrationGeneration) {
+          hydrationPromise = null;
+        }
+        throw error;
+      });
       return hydrationPromise;
     },
     releaseHydration: () => {
+      hydrationGeneration += 1;
       hydrationUnsubscribe?.();
       hydrationUnsubscribe = null;
       hydrationPromise = null;
@@ -966,6 +1073,8 @@ export function createAuthoritativePublication(
     },
     dispose: () => {
       disposed = true;
+      publicationGeneration += 1;
+      hydrationGeneration += 1;
       if (saveTimeout) clearTimeout(saveTimeout);
       if (retryTimeout) clearTimeout(retryTimeout);
       saveTimeout = null;
