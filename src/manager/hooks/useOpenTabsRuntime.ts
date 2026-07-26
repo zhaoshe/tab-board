@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useSearchQuery, useSetSearchQuery } from './useFilteredGroups';
 import {
   canRevealCapture,
@@ -27,6 +27,12 @@ import type {
   OpenWindowInfo,
   RuntimeResponse,
 } from '../../shared/openTabs';
+import {
+  createOpenTabsWorkflowState,
+  projectOpenTabsWorkflow,
+  reduceOpenTabsWorkflow,
+  type OpenTabsWorkflowAction,
+} from '../core/openTabsWorkflow';
 import { groupMatchesQuery, normalizeState, type TabBoardState } from '../../shared/model';
 import { getState as getPersistedState } from '../../shared/store/chromeStorage';
 import { structurallyShareState } from '../../shared/store/stateStructuralSharing';
@@ -138,19 +144,16 @@ const REFRESHABLE_TAB_CHANGES = new Set([
 ]);
 
 export function useOpenTabsRuntime(): OpenTabsRuntime {
-  const [windows, setWindows] = useState<OpenWindowInfo[]>([]);
-  const [selectedWindowId, setSelectedWindowId] = useState<number | null>(null);
-  const [query, setQuery] = useState('');
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedTabIds, setSelectedTabIds] = useState<number[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [capturing, setCapturing] = useState(false);
-  const [updatingSelection, setUpdatingSelection] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [tabFilterUrl, setTabFilterUrl] = useState<string | null>(null);
-  const selectedWindowIdRef = useRef<number | null>(null);
-  const selectedTabIdsRef = useRef<number[]>([]);
-  const selectionModeRef = useRef(false);
+  const [workflowState, reactDispatch] = useReducer(
+    reduceOpenTabsWorkflow,
+    undefined,
+    createOpenTabsWorkflowState,
+  );
+  const workflowStateRef = useRef(workflowState);
+  const dispatch = useCallback((action: OpenTabsWorkflowAction) => {
+    workflowStateRef.current = reduceOpenTabsWorkflow(workflowStateRef.current, action);
+    reactDispatch(action);
+  }, []);
   const capturingRef = useRef(false);
   const currentWorkspaceId = useTabBoardStore((state) => state.activeWorkspaceId);
   const previousWorkspaceIdRef = useRef(currentWorkspaceId);
@@ -158,29 +161,28 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const refreshQueued = useRef<Promise<void> | null>(null);
   const closingTabIdsRef = useRef<Set<number>>(new Set());
-  const [closingTabIds, setClosingTabIds] = useState<number[]>([]);
   const savedSearchQuery = useSearchQuery();
   const setSavedSearchQuery = useSetSearchQuery();
   const savedSearchQueryRef = useRef(savedSearchQuery);
-  const tabFilterUrlRef = useRef(tabFilterUrl);
+  const tabFilterUrlRef = useRef(workflowState.tabFilterUrl);
 
   useEffect(() => {
-    selectedWindowIdRef.current = selectedWindowId;
-  }, [selectedWindowId]);
+    workflowStateRef.current = workflowState;
+  }, [workflowState]);
 
   useEffect(() => {
     savedSearchQueryRef.current = savedSearchQuery;
     if (tabFilterUrlRef.current && savedSearchQuery !== tabFilterUrlRef.current) {
       tabFilterUrlRef.current = null;
-      setTabFilterUrl(null);
+      dispatch({ type: 'tab-filter-changed', url: null });
       setGlobalTabFilterUrl(null);
     }
-  }, [savedSearchQuery]);
+  }, [dispatch, savedSearchQuery]);
 
   useEffect(() => {
-    tabFilterUrlRef.current = tabFilterUrl;
-    setGlobalTabFilterUrl(tabFilterUrl);
-  }, [tabFilterUrl]);
+    tabFilterUrlRef.current = workflowState.tabFilterUrl;
+    setGlobalTabFilterUrl(workflowState.tabFilterUrl);
+  }, [workflowState.tabFilterUrl]);
 
   useEffect(() => {
     const previousWorkspaceId = previousWorkspaceIdRef.current;
@@ -188,7 +190,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
       const previousTabFilterUrl = tabFilterUrlRef.current;
       if (previousTabFilterUrl) {
         tabFilterUrlRef.current = null;
-        setTabFilterUrl(null);
+        dispatch({ type: 'tab-filter-changed', url: null });
         setGlobalTabFilterUrl(null);
         if (savedSearchQueryRef.current === previousTabFilterUrl) {
           savedSearchQueryRef.current = '';
@@ -197,15 +199,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
       }
       previousWorkspaceIdRef.current = currentWorkspaceId;
     }
-  }, [currentWorkspaceId, setSavedSearchQuery]);
-
-  useEffect(() => {
-    selectedTabIdsRef.current = [...selectedTabIds];
-  }, [selectedTabIds]);
-
-  useEffect(() => {
-    selectionModeRef.current = selectionMode;
-  }, [selectionMode]);
+  }, [currentWorkspaceId, dispatch, setSavedSearchQuery]);
 
   const refresh = useCallback((): Promise<void> => {
     if (refreshInFlight.current) {
@@ -222,8 +216,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
     }
 
     const run = (async () => {
-      setLoading(true);
-      setError(null);
+      dispatch({ type: 'refresh-started' });
       refreshFailureRef.current = null;
       try {
         const result = await sendWorkerMessage<OpenTabsListResult>({ type: 'list-open-tabs' });
@@ -232,28 +225,10 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
           const visibleTabs = window.tabs.filter((tab) => !isNewTabUrl(tab.url));
           return { ...window, tabs: visibleTabs, tabCount: visibleTabs.length };
         });
-        const previousWindowId = selectedWindowIdRef.current;
-        const nextSelectedWindow = resolveSelectedWindow(nextWindows, previousWindowId);
-        const nextSelectedWindowId = nextSelectedWindow?.id ?? null;
-        const allowedIds = new Set(getSelectableOpenTabIds(nextSelectedWindow));
-
-        setWindows(nextWindows);
-        selectedWindowIdRef.current = nextSelectedWindowId;
-        setSelectedWindowId(nextSelectedWindowId);
-        setSelectedTabIds((current) => {
-          const next = previousWindowId === nextSelectedWindowId
-            ? current.filter((id) => allowedIds.has(id))
-            : [];
-          selectedTabIdsRef.current = next;
-          selectionModeRef.current = next.length > 0;
-          setSelectionMode(next.length > 0);
-          return next;
-        });
+        dispatch({ type: 'refresh-succeeded', windows: nextWindows });
       } catch (error: unknown) {
         refreshFailureRef.current = error;
-        setError(errorMessage(error));
-      } finally {
-        setLoading(false);
+        dispatch({ type: 'refresh-failed', error: errorMessage(error) });
       }
     })();
 
@@ -264,7 +239,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
       }
     });
     return run;
-  }, []);
+  }, [dispatch]);
 
   useEffect(() => {
     void refresh();
@@ -312,11 +287,8 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
   }, [refresh]);
 
   const exitSelectionMode = useCallback(() => {
-    selectionModeRef.current = false;
-    setSelectionMode(false);
-    selectedTabIdsRef.current = [];
-    setSelectedTabIds([]);
-  }, []);
+    dispatch({ type: 'selection-cleared' });
+  }, [dispatch]);
 
   useEffect(() => {
     const handleOpenTabsDropped = () => {
@@ -326,160 +298,130 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
     return () => window.removeEventListener('tabboard-open-tabs-dropped', handleOpenTabsDropped);
   }, [exitSelectionMode]);
 
-  const selectedWindow = useMemo(
-    () => resolveSelectedWindow(windows, selectedWindowId),
-    [windows, selectedWindowId],
+  const deferredQuery = useDeferredValue(workflowState.query);
+  const projection = useMemo(
+    () => projectOpenTabsWorkflow(workflowState, deferredQuery),
+    [deferredQuery, workflowState],
   );
-  const deferredQuery = useDeferredValue(query);
-  const filteredTabs = useMemo(
-    () => filterOpenTabs(selectedWindow?.tabs ?? [], deferredQuery),
-    [deferredQuery, selectedWindow],
-  );
+  const selectedWindow = projection.selectedWindow;
+  const selectedStorableTabIds = projection.selection.recordIds;
 
   const selectWindow = useCallback((windowId: number) => {
-    if (!windows.some((window) => !window.incognito && window.id === windowId)) return;
-    selectedWindowIdRef.current = windowId;
-    setSelectedWindowId(windowId);
-    selectionModeRef.current = false;
-    setSelectionMode(false);
-    selectedTabIdsRef.current = [];
-    setSelectedTabIds([]);
-  }, [windows]);
+    dispatch({ type: 'window-selected', windowId });
+  }, [dispatch]);
 
   const toggleTabSelection = useCallback((tabId: number | undefined) => {
-    if (typeof tabId !== 'number' || !Number.isSafeInteger(tabId) || !selectedWindow) return;
-    const canSelect = selectedWindow.tabs.some((tab) =>
-      tab.id === tabId && tab.storable === true,
-    );
-    if (!canSelect) return;
-    setSelectedTabIds((current) => {
-      const next = current.includes(tabId)
-        ? current.filter((id) => id !== tabId)
-        : [...current, tabId];
-      selectedTabIdsRef.current = next;
-      selectionModeRef.current = next.length > 0;
-      setSelectionMode(next.length > 0);
-      return next;
-    });
-  }, [selectedWindow]);
+    if (typeof tabId !== 'number' || !Number.isSafeInteger(tabId)) return;
+    dispatch({ type: 'selection-toggled', tabId });
+  }, [dispatch]);
 
   const selectAllTabs = useCallback(() => {
-    if (!selectedWindow) return;
-    const allStorableIds = getSelectableOpenTabIds(selectedWindow);
-    if (!allStorableIds.length) return;
-    selectedTabIdsRef.current = allStorableIds;
-    setSelectedTabIds(allStorableIds);
-    selectionModeRef.current = true;
-    setSelectionMode(true);
-  }, [selectedWindow]);
+    dispatch({ type: 'selection-all' });
+  }, [dispatch]);
 
   const focusTab = useCallback(async (tabId: number | undefined, windowId: number | undefined) => {
     if (!Number.isSafeInteger(tabId) || !Number.isSafeInteger(windowId)) {
-      setError('A valid tab and window are required.');
+      dispatch({ type: 'operation-failed', error: 'A valid tab and window are required.' });
       return;
     }
     try {
       await sendWorkerMessage({ type: 'focus-open-tab', tabId, windowId });
     } catch (error: unknown) {
-      setError(errorMessage(error));
+      dispatch({ type: 'operation-failed', error: errorMessage(error) });
     }
-  }, []);
+  }, [dispatch]);
 
   const closeTab = useCallback(async (tabId: number | undefined) => {
     if (typeof tabId !== 'number' || !Number.isSafeInteger(tabId)) {
-      setError('A valid tab ID is required');
+      dispatch({ type: 'operation-failed', error: 'A valid tab ID is required' });
       return;
     }
     if (closingTabIdsRef.current.has(tabId)) return;
     const nextClosingTabIds = new Set([...closingTabIdsRef.current, tabId]);
     closingTabIdsRef.current = nextClosingTabIds;
-    setClosingTabIds([...nextClosingTabIds]);
+    dispatch({ type: 'closing-changed', tabIds: [...nextClosingTabIds] });
     try {
       await sendWorkerMessage({ type: 'close-open-tab', tabId });
       await refresh();
     } catch (error: unknown) {
-      setError(errorMessage(error));
+      dispatch({ type: 'operation-failed', error: errorMessage(error) });
     } finally {
       const remainingTabIds = new Set([...closingTabIdsRef.current].filter((id) => id !== tabId));
       closingTabIdsRef.current = remainingTabIds;
-      setClosingTabIds([...remainingTabIds]);
+      dispatch({ type: 'closing-changed', tabIds: [...remainingTabIds] });
     }
-  }, [refresh]);
+  }, [dispatch, refresh]);
 
   const pinTab = useCallback(async (tabId: number | undefined) => {
     if (typeof tabId !== 'number' || !Number.isSafeInteger(tabId)) {
-      setError('A valid tab ID is required');
+      dispatch({ type: 'operation-failed', error: 'A valid tab ID is required' });
       return;
     }
     try {
       await sendWorkerMessage({ type: 'pin-open-tab', tabId });
       await refresh();
     } catch (error: unknown) {
-      setError(errorMessage(error));
+      dispatch({ type: 'operation-failed', error: errorMessage(error) });
     }
-  }, [refresh]);
-
-  const selectedStorableTabIds = useMemo(() => (
-    (selectedWindow?.tabs ?? [])
-      .flatMap((tab) => (
-        tab.storable && isSafeTabId(tab.id) && selectedTabIds.includes(tab.id)
-          ? [tab.id]
-          : []
-      ))
-  ), [selectedTabIds, selectedWindow]);
+  }, [dispatch, refresh]);
 
   const closeSelectedTabs = useCallback(async () => {
-    if (!selectedStorableTabIds.length || updatingSelection) return;
+    if (!selectedStorableTabIds.length || workflowStateRef.current.updatingSelection) return;
     const nextClosingTabIds = new Set([...closingTabIdsRef.current, ...selectedStorableTabIds]);
     closingTabIdsRef.current = nextClosingTabIds;
-    setClosingTabIds([...nextClosingTabIds]);
-    setUpdatingSelection(true);
+    dispatch({ type: 'closing-changed', tabIds: [...nextClosingTabIds] });
+    dispatch({ type: 'selection-update-changed', updating: true });
     try {
       await sendWorkerMessage({ type: 'close-open-tabs', tabIds: selectedStorableTabIds });
       await refresh();
       exitSelectionMode();
     } catch (error: unknown) {
-      setError(errorMessage(error));
+      dispatch({ type: 'operation-failed', error: errorMessage(error) });
     } finally {
       const remainingTabIds = new Set(
         [...closingTabIdsRef.current].filter((id) => !selectedStorableTabIds.includes(id)),
       );
       closingTabIdsRef.current = remainingTabIds;
-      setClosingTabIds([...remainingTabIds]);
-      setUpdatingSelection(false);
+      dispatch({ type: 'closing-changed', tabIds: [...remainingTabIds] });
+      dispatch({ type: 'selection-update-changed', updating: false });
     }
-  }, [exitSelectionMode, refresh, selectedStorableTabIds, updatingSelection]);
+  }, [dispatch, exitSelectionMode, refresh, selectedStorableTabIds]);
 
   const pinSelectedTabs = useCallback(async () => {
-    if (!selectedStorableTabIds.length || updatingSelection) return;
-    setUpdatingSelection(true);
+    if (!selectedStorableTabIds.length || workflowStateRef.current.updatingSelection) return;
+    dispatch({ type: 'selection-update-changed', updating: true });
     try {
       await sendWorkerMessage({ type: 'pin-open-tabs', tabIds: selectedStorableTabIds });
       await refresh();
       exitSelectionMode();
     } catch (error: unknown) {
-      setError(errorMessage(error));
+      dispatch({ type: 'operation-failed', error: errorMessage(error) });
     } finally {
-      setUpdatingSelection(false);
+      dispatch({ type: 'selection-update-changed', updating: false });
     }
-  }, [exitSelectionMode, refresh, selectedStorableTabIds, updatingSelection]);
+  }, [dispatch, exitSelectionMode, refresh, selectedStorableTabIds]);
 
   const filterSessionsByTab = useCallback((tab: OpenTabInfo) => {
     if (tab.storable !== true || !tab.url.trim()) return;
     tabFilterUrlRef.current = tab.url;
-    setTabFilterUrl(tab.url);
+    dispatch({ type: 'tab-filter-changed', url: tab.url });
     setGlobalTabFilterUrl(tab.url);
     setSavedSearchQuery(tab.url);
-  }, [setSavedSearchQuery]);
+  }, [dispatch, setSavedSearchQuery]);
 
   const clearTabFilter = useCallback(() => {
     tabFilterUrlRef.current = null;
-    setTabFilterUrl(null);
+    dispatch({ type: 'tab-filter-changed', url: null });
     setGlobalTabFilterUrl(null);
     setSavedSearchQuery('');
-  }, [setSavedSearchQuery]);
+  }, [dispatch, setSavedSearchQuery]);
 
-  const clearFilter = useCallback(() => setQuery(''), []);
+  const setQuery = useCallback((value: string) => {
+    dispatch({ type: 'query-changed', query: value });
+  }, [dispatch]);
+  const clearFilter = useCallback(() => {
+    dispatch({ type: 'query-changed', query: '' });
+  }, [dispatch]);
 
   const captureSelectedTabs = useCallback(async (
     categorySnapshot: CaptureCategorySnapshot,
@@ -492,20 +434,18 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
       tabFilterUrl: tabFilterUrlRef.current,
       searchQuery: savedSearchQueryRef.current,
     };
+    const captureProjection = projectOpenTabsWorkflow(workflowStateRef.current);
     const captureSnapshot = createCaptureSnapshot({
-      selectedTabIds: (selectedWindow?.tabs ?? [])
-        .filter((tab) => tab.storable === true && Number.isSafeInteger(tab.id) && selectedTabIds.includes(tab.id as number))
-        .map((tab) => tab.id as number)
-        .sort((left, right) => left - right),
+      selectedTabIds: captureProjection.selection.recordIds,
       selectedWindowId: selectedWindow?.id ?? null,
       workspaceId: sourceWorkspaceId,
-      isSelectionMode: selectionMode,
+      isSelectionMode: captureProjection.selection.active,
     });
     if (!captureSnapshot.selectedTabIds.length) return null;
 
     capturingRef.current = true;
-    setCapturing(true);
-    setError(null);
+    dispatch({ type: 'capture-changed', capturing: true });
+    dispatch({ type: 'error-cleared' });
     let result: CaptureResult | null = null;
     let normalizedState: TabBoardState | null = null;
     let committed = false;
@@ -551,24 +491,28 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
         if (refreshFailureRef.current) throw refreshFailureRef.current;
         reconciled = true;
       } catch {
-        setError(getCaptureMessage({ committed: true, reconciled: false }));
+        dispatch({
+          type: 'operation-failed',
+          error: getCaptureMessage({ committed: true, reconciled: false }),
+        });
       }
     } catch (error: unknown) {
       captureError = errorMessage(error);
-      setError(captureError);
+      dispatch({ type: 'operation-failed', error: captureError });
       try {
         refreshFailureRef.current = null;
         await refresh();
       } finally {
-        setError(captureError);
+        dispatch({ type: 'operation-failed', error: captureError });
       }
     } finally {
       const activeWorkspaceId = useTabBoardStore.getState().activeWorkspaceId;
+      const currentProjection = projectOpenTabsWorkflow(workflowStateRef.current);
       const currentSelection: OpenTabsCaptureSnapshot = createCaptureSnapshot({
-        selectedTabIds: selectedTabIdsRef.current,
-        selectedWindowId: selectedWindowIdRef.current,
+        selectedTabIds: currentProjection.selection.ids,
+        selectedWindowId: currentProjection.selectedWindowId,
         workspaceId: activeWorkspaceId,
-        isSelectionMode: selectionModeRef.current,
+        isSelectionMode: currentProjection.selection.active,
       });
       const selectionCurrent = sameOpenTabSelection(
         captureSnapshot.selectedTabIds,
@@ -576,10 +520,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
       ) && sameCaptureSnapshot(captureSnapshot, currentSelection);
       const outcome = getCaptureOutcome({ committed, reconciled, selectionCurrent });
       if (outcome.shouldClearSelection) {
-        selectionModeRef.current = false;
-        setSelectionMode(false);
-        selectedTabIdsRef.current = [];
-        setSelectedTabIds([]);
+        dispatch({ type: 'selection-cleared' });
       }
       const currentFilterSnapshot: CaptureFilterSnapshot = {
         tabFilterUrl: tabFilterUrlRef.current,
@@ -605,7 +546,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
         const isCaptureTabFilterCurrent = tabFilterUrlRef.current === captureFilterSnapshot.tabFilterUrl;
         if (isCaptureTabFilterCurrent) {
           tabFilterUrlRef.current = null;
-          setTabFilterUrl(null);
+          dispatch({ type: 'tab-filter-changed', url: null });
           setGlobalTabFilterUrl(null);
           if (captureFilterSnapshot.tabFilterUrl && currentFilterSnapshot.searchQuery === captureFilterSnapshot.tabFilterUrl) {
             savedSearchQueryRef.current = '';
@@ -651,26 +592,27 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
         }));
       }
       capturingRef.current = false;
-      setCapturing(false);
+      dispatch({ type: 'capture-changed', capturing: false });
     }
     return result;
-  }, [refresh, selectedTabIds, selectedWindow, selectionMode, setSavedSearchQuery]);
+  }, [dispatch, refresh, selectedWindow, setSavedSearchQuery]);
 
   return {
-    windows,
+    windows: projection.windows,
     selectedWindow,
-    selectedWindowId,
-    query,
-    filteredTabs,
-    selectionMode,
-    selectedTabIds,
-    selectedCount: selectedTabIds.length,
-    closingTabIds,
-    updatingSelection,
-    loading,
-    capturing,
-    error,
-    isTabFilterActive: Boolean(tabFilterUrl) && savedSearchQuery === tabFilterUrl,
+    selectedWindowId: projection.selectedWindowId,
+    query: projection.query,
+    filteredTabs: projection.filteredTabs,
+    selectionMode: projection.selection.active,
+    selectedTabIds: projection.selection.ids,
+    selectedCount: projection.selection.count,
+    closingTabIds: projection.status.closingTabIds,
+    updatingSelection: projection.status.updatingSelection,
+    loading: projection.status.loading,
+    capturing: projection.status.capturing,
+    error: projection.status.error,
+    isTabFilterActive: Boolean(projection.tabFilterUrl)
+      && savedSearchQuery === projection.tabFilterUrl,
     setQuery,
     selectWindow,
     exitSelectionMode,

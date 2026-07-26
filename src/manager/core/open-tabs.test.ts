@@ -223,14 +223,16 @@ describe('capture policy', () => {
 describe('Task107 source contracts', () => {
   it('defers long-list filtering while preserving CSS-contained rows', () => {
     const runtime = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useOpenTabsRuntime.ts'), 'utf8');
+    const workflow = readFileSync(resolve(process.cwd(), 'src/manager/core/openTabsWorkflow.ts'), 'utf8');
     const css = readFileSync(resolve(process.cwd(), 'src/manager/styles/manager.css'), 'utf8');
     const rowStart = css.indexOf('.manager-open-tab-row {');
     const rowEnd = css.indexOf('}', rowStart);
     const row = css.slice(rowStart, rowEnd + 1);
 
     expect(runtime).toContain('useDeferredValue');
-    expect(runtime).toContain('const deferredQuery = useDeferredValue(query)');
-    expect(runtime).toContain('filterOpenTabs(selectedWindow?.tabs ?? [], deferredQuery)');
+    expect(runtime).toContain('useDeferredValue(workflowState.query)');
+    expect(runtime).toContain('projectOpenTabsWorkflow(workflowState, deferredQuery)');
+    expect(workflow).toContain('filterOpenTabs(currentWindow?.tabs ?? [], deferredQuery)');
     expect(row).toContain('content-visibility: auto');
     expect(row).toContain('contain-intrinsic-size:');
   });
@@ -285,17 +287,21 @@ describe('Task107 source contracts', () => {
 
   it('keeps selected capture scoped to the selected window and storable tabs', () => {
     const hook = read('manager/hooks/useOpenTabsRuntime.ts');
-    expect(hook).toContain('selectedWindow?.tabs');
-    expect(hook).toContain('tab.storable === true');
-    expect(hook).toContain('.sort((left, right) => left - right)');
+    const workflow = read('manager/core/openTabsWorkflow.ts');
+    expect(hook).toContain('captureProjection.selection.recordIds');
+    expect(hook).toContain('selectedWindow?.id ?? null');
+    expect(workflow).toContain('canonicalSelection');
+    expect(workflow).toContain('deriveSelectedStorableRecords');
     expect(hook).toContain('sameOpenTabSelection');
   });
 
   it('keeps selection actions aligned with storable drag constraints', () => {
     const hook = read('manager/hooks/useOpenTabsRuntime.ts');
+    const workflow = read('manager/core/openTabsWorkflow.ts');
 
-    expect(hook).toContain('getSelectableOpenTabIds(selectedWindow)');
-    expect(hook).toContain('getSelectableOpenTabIds(nextSelectedWindow)');
+    expect(hook).toContain("dispatch({ type: 'selection-all' })");
+    expect(workflow).toContain('getSelectableOpenTabIds(selectedWindow(state))');
+    expect(workflow).toContain('getSelectableOpenTabIds(nextSelectedWindow)');
     expect(hook).not.toContain('tab.storable === true && !tab.pinned');
     expect(hook).not.toContain('tab.storable && !tab.pinned');
   });

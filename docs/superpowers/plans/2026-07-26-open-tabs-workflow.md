@@ -55,12 +55,12 @@
 - Produces: `OpenTabsWorkflowState`, `OpenTabsWorkflowAction`, `reduceOpenTabsWorkflow()`, `projectOpenTabsWorkflow()`.
 - Projection owns selected records and selected record IDs.
 
-- [ ] Write failing reducer tests for refresh selection pruning, window switch clearing, complete-drop clearing, invalid toggle no-op, and projection-derived drag records.
-- [ ] Run focused tests and verify RED.
-- [ ] Implement the pure reducer and projection.
-- [ ] Convert the hook from scattered state to reducer state plus one state ref for async ownership checks.
-- [ ] Run workflow, hook DOM, Open Tabs core, and Panel tests.
-- [ ] Commit.
+- [x] Write failing reducer tests for refresh selection pruning, window switch clearing, complete-drop clearing, invalid toggle no-op, and projection-derived drag records.
+- [x] Run focused tests and verify RED.
+- [x] Implement the pure reducer and projection.
+- [x] Convert the hook from scattered state to reducer state plus one state ref for async ownership checks.
+- [x] Run workflow, hook DOM, Open Tabs core, and Panel tests.
+- [x] Commit.
 
 ### Task 3: Group workflow interface and shrink Panel surface
 
