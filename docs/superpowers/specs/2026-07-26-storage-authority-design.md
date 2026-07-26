@@ -1,7 +1,7 @@
 # Storage Authority Deepening Design
 
-**Date:** 2026-07-26  
-**Status:** Approved for implementation  
+**Date:** 2026-07-26
+**Status:** Implemented and verified
 **Scope:** Deepen the storage authority module so backend selection, runtime fallback, migration commit, cross-context notification, and subscription ownership stay behind one interface.
 
 ## Problem

@@ -21,6 +21,21 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-07-26: Storage Authority 深化与运行时自动降级
+
+本地文件存储已经有 Chrome/File 两个真实 adapters，但 backend 选择、订阅、ping、迁移和 fallback 分散在多个 callers；其中运行时文件读写失败只会抛错，未兑现 D037 的自动降级承诺。
+
+变化：
+
+- `activeAdapter` 深化为稳定的 Storage Authority：页面、service worker 和 Options 持有同一 authority interface，内部 backend 可从 File 切到 Chrome，不会让 caller 缓存失效。
+- File runtime 写失败会先把最后一次有效 snapshot 保存到 Chrome，再切换 authority 并通知所有 context；本次未提交 mutation 仍返回失败，由既有 retry 机制在 Chrome backend 上重试。
+- File read、permission、ping reload 或 remote fallback 失败会切到 Chrome，并保持原有 authority subscription 连续；remote context 读取对方已提交 state，不会用旧 File snapshot 覆盖 Chrome。
+- File ping 与 fallback transport 独立到 `storageEvents.ts`，消除 `activeAdapter ↔ chromeStorage` import cycle。
+- Browser/File/reconnect 切换改为 transactional commit order：先验证并写目标 backend，最后才提交 bootstrap mode 与目录 handle；File seed 的 cross-context ping 也延后到 commit 完成。
+- 新增 targeted import-cycle gate，禁止 storage authority 与 legacy `chromeStorage` 再次形成 cycle。
+
+当前状态：Current；D037 的初始化与运行时 fallback 均已覆盖。
+
 ### 2026-07-24: Open Tabs 隐藏所有扩展页并允许 pinned 参与多选
 
 用户希望侧边栏只展示真实浏览内容，不展示 TabBoard 自身页面或其他扩展页面；同时 pinned tabs 不再作为特殊限制项，和普通 tabs 一样可以勾选、批量创建 session、批量拖拽到已有 session。

@@ -876,6 +876,12 @@ Status:
 
 Accepted。
 
+Implementation note（2026-07-26）：
+
+- Storage Authority 以稳定对象持有当前 backend；File runtime read/write/reload 失败时替换内部 backend，不要求 callers 重新获取 adapter。
+- 降级只复制最后一次成功 snapshot；触发失败的 mutation 仍 reject，由 persistence retry 在 Chrome backend 上重试，因此不会把未提交数据误报成功。
+- `storageEvents.ts` 用 `chrome.storage.local` 的小事件协调存活 context，event id 防止同一 fallback 重复通知；remote context 读取已提交 Chrome state，不用本地旧 snapshot 覆盖它。
+
 ## D038: Raw IndexedDB for folder handle persistence (no wrapper library)
 
 Context:
@@ -922,6 +928,12 @@ Trade-offs:
 Status:
 
 Accepted。
+
+Implementation note（2026-07-26）：
+
+- substitute switch 使用 transactional commit order：目标 backend 验证/写入成功后才提交 bootstrap mode 与目录 handle。
+- pre-commit failure 保持原 authority backend、bootstrap 和 handle，不产生半切换状态。
+- File migration seed 在 commit 前抑制 cross-context ping；bootstrap/handle 提交且 authority 安装完成后才广播 committed revision。
 
 ## D040: Three migration modes when connecting a folder
 

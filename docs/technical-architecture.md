@@ -77,12 +77,14 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - 持久化层抽象为 `StorageAdapter` 接口（`src/shared/store/storageAdapter.ts`，约定 `getState()` / `setState(state)` / `clear()` 等方法），当前有两个实现：
   - `ChromeStorageAdapter`（`chromeStorageAdapter.ts`）：封装 `chrome.storage.local["tabboardState"]`，是默认后端。
   - `FileStorageAdapter`（`fileStorage.ts` + `fileSerialization.ts` + `fsAtomic.ts`）：通过 File System Access API 把数据写入用户选择的本地文件夹；详见下文「File Store Layout」。
-- `activeAdapter` 工厂在启动时读 `chrome.storage.local["tabboardStorageConfig"]`（BOOTSTRAP_KEY，一个极小的 bootstrap key：`{ mode: 'browser' | 'file' }`）决定激活哪个 adapter。`mode === 'file'` 时从 IndexedDB 读取持久化的 `FileSystemDirectoryHandle`，若句柄缺失或权限失效则回退到 `ChromeStorageAdapter` 并通过 fallback listener 通知 UI。
+- `activeAdapter` 是稳定的 Storage Authority。启动时读 `chrome.storage.local["tabboardStorageConfig"]`（BOOTSTRAP_KEY，一个极小的 bootstrap key：`{ mode: 'browser' | 'file' }`）决定内部 backend；callers 可长期持有同一个 authority interface，backend 切换不会让 subscription 或缓存引用失效。
+- `storageEvents.ts` 独立承载 file commit ping 与跨 context fallback event；authority 只在 File backend 活跃时绑定这两类 transport，并按 event id 去重。
+- File backend 在初始化、读取、写入或 ping reload 时失败，authority 会切换 backend、重绑 subscription 并通知 UI。本 context 首次发现故障时先把最后一次有效 snapshot 保存到 Chrome；收到其他 context 的 fallback event 时直接读取对方已提交的 Chrome state，禁止用旧 File snapshot 反向覆盖。本次失败写仍 reject，避免把未提交 mutation 误报为成功；既有 persistence retry 会在 Chrome backend 上重试。
 - `stateMutations.ts` 以 immutable commands 应用普通 state mutation，并拒绝无效引用、locked 目标和 link/note URL 形态错误。
 - `mutationValidation.ts` 负责 untrusted/raw mutation boundary。
 - `useTabBoardStore.ts` 提供 React 状态投影和 mutation 入口。
 
-所有写入先 normalize，再交给当前激活的 adapter 原子提交；跨页面更新按 revision/hydration 规则应用，不能让旧快照覆盖较新 state。
+所有写入先 normalize，再交给 authority 当前 backend 原子提交；跨页面更新按 revision/hydration 规则应用，authority 的 last-known snapshot 也按 revision/updatedAt 单调推进，不能让旧快照覆盖较新 state。
 
 ### `src/background/`
 
@@ -325,16 +327,23 @@ Options 中连接本地文件夹时提供三种迁移模式（由 UI 派发迁�
 - `export-browser`：把当前浏览器存储的完整 normalized state 写入文件夹（走两阶段提交），但保持激活后端为 `browser`，相当于手动备份。
 - `merge`：读取文件夹数据 + 浏览器存储数据，按 ID 合并（同 ID 以文件侧为准，浏览器侧独有追加），合并结果写回文件夹后切换激活后端为 file。
 
-迁移完成后更新 bootstrap key 与 settings 中的 `storageMode` / `storageFolderName`。迁移中途失败时保持原后端不变，不修改 bootstrap key。
+Storage Authority 把 bootstrap/handle 当作 mode-switch commit point：
+
+- 切到 File：先创建并验证 File adapter、写入完整目标 state（暂不广播 ping），再保存 handle、写 bootstrap=`file`，最后安装 File backend 并广播 committed ping。
+- 切回 Browser：如需 copy-back，先完成 Chrome state 写入，再写 bootstrap=`browser`、清 handle，最后安装 Chrome backend。
+- Reconnect：先验证目录权限并读取 File state，再保存 handle 与 bootstrap，最后安装 File backend。
+
+任何 pre-commit 步骤失败都会保留原 backend、bootstrap 和 handle；UI 不会把半完成切换显示为成功。
 
 ### Fallback（错误自动降级）
 
-`FileStorageAdapter` 的 `loadState()` 或 `saveState()` 抛出错误（权限丢失、文件夹被删除/移动、IO 错误、配额不足等）时：
+File backend 的初始化、读取、写入或 `reloadFromDisk()` 抛出错误（权限丢失、文件夹被删除/移动、IO 错误、配额不足等）时：
 
-1. 记录 diagnostics breadcrumb。
-2. 切换为 in-memory fallback adapter 并复用最近一次内存中的 normalized state，保证 UI 可继续操作。
-3. 后台把后续写入同步持久化到 `ChromeStorageAdapter`（浏览器存储），避免丢失。
-4. 通过 manager/options UI 显示 toast 或 banner，告知用户已降级、原因、并提供"重新选择文件夹"或"保持使用浏览器存储"入口。
+1. Storage Authority 记录 diagnostics，并保留最后一次成功读取/提交的 normalized snapshot。
+2. 首个故障 context 将该 snapshot 写入 `ChromeStorageAdapter`，再原子替换内部 backend；收到 remote fallback event 的 context 直接读取已提交 Chrome state。authority object 本身不变。
+3. Authority 重绑 backend subscription，向当前 context listeners 发布 Chrome state，并通过 `storageEvents.ts` 通知其他存活 context 同步降级。
+4. 触发失败的 File 写仍 reject；现有 mutation retry 负责在新 Chrome backend 上重试，避免误报 commit。
+5. Manager/Options 显示 toast 或 banner，告知用户已降级、原因，并提供"重新选择文件夹"或"保持使用浏览器存储"入口。
 
 降级状态下，用户可在 Options 里重新选择文件夹触发 merge 迁移，或显式断开文件夹并正式切回浏览器存储。
 

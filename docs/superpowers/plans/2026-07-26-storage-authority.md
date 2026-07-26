@@ -297,15 +297,15 @@ Co-authored-by: TRAE CLI <noreply@bytedance.com>"
 - Produces: `npm run check:cycles:storage`, a targeted source import cycle verifier.
 - Documents: current storage authority and D037 implementation status.
 
-- [ ] **Step 1: Add the import-cycle verifier**
+- [x] **Step 1: Add the import-cycle verifier**
 
 The script resolves relative `.ts`/`.tsx` imports under `src/`, computes strongly connected components, and prints every cycle. With `--deny-together <path-a>,<path-b>` it exits non-zero only when the named modules occur in the same cycle. Running without a filter exits non-zero for any cycle; that stricter mode becomes the gate after the later Session move ownership round removes the remaining Manager/shared cycle.
 
-- [ ] **Step 2: Verify the script catches the pre-refactor cycle**
+- [x] **Step 2: Verify the script catches the pre-refactor cycle**
 
 Run it against a temporary fixture graph containing `a -> b -> a`; expected exit code is non-zero with the cycle listed. Also run the targeted command against the current source before caller migration and verify it lists `activeAdapter.ts` with `chromeStorage.ts`.
 
-- [ ] **Step 3: Add `check:cycles` to package scripts**
+- [x] **Step 3: Add `check:cycles` to package scripts**
 
 Add:
 
@@ -315,11 +315,11 @@ Add:
 
 `npm run check` must include this targeted storage cycle verifier after the build sanity check. Do not yet make all source cycles fatal; the remaining Manager/shared cycle belongs to the later Session move ownership round.
 
-- [ ] **Step 4: Update architecture documentation**
+- [x] **Step 4: Update architecture documentation**
 
 Record stable authority ownership, runtime fallback sequence, storage event transport, transactional migration ordering, and the removal of the storage cycle.
 
-- [ ] **Step 5: Run final verification**
+- [x] **Step 5: Run final verification**
 
 Run sequentially:
 
@@ -332,11 +332,11 @@ git diff --check
 
 Expected: the storage authority pair is not in one cycle, extension check passed, 0 failed tests, clean diff formatting.
 
-- [ ] **Step 6: Request code review and resolve Critical/Important findings**
+- [x] **Step 6: Request code review and resolve Critical/Important findings**
 
 Review the complete diff against this plan and D034–D040.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add scripts/check-import-cycles.mjs package.json docs/feature-evolution.md docs/technical-architecture.md docs/product-decisions.md docs/superpowers/specs/2026-07-26-storage-authority-design.md
@@ -344,3 +344,10 @@ git commit -m "docs(store): record deep storage authority
 
 Co-authored-by: TRAE CLI <noreply@bytedance.com>"
 ```
+
+## Verification Record
+
+- `npm run check`: PASS, including build, extension sanity, cycle verifier tests, and targeted storage cycle gate.
+- `npm test`: PASS, 41 test files and 799 tests.
+- `git diff --check`: PASS.
+- Local review found and fixed remote fallback overwrite, bootstrap handle rollback, pre-commit File ping, incomplete Chrome test doubles, and fixed-microtask test polling.
