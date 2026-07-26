@@ -1071,6 +1071,49 @@ Implementation note（2026-07-26）：
 - Shared/background production imports Manager = 0；`manager/core/commands.ts` 已删除。
 - `npm run check:cycles` 对任何source SCC失败，并额外禁止shared/background → Manager edges。
 
+## D044: Saved search uses a standalone external store and canonical board projection
+
+Context:
+
+Saved-session query曾同时存在module global、每个hook instance的React state、`sessionStorage`和`tabboard-search-change` window event。SearchBar另行监听同一event；Open Tabs capture用effect更新的ref判断filter ownership。与此同时，`WorkspaceContent`在filtered groups之外重新扫描全部groups并手写category membership，导致orphan folder在render与DnD index之间语义不一致。
+
+可选方案包括：
+
+1. React Context provider统一query；
+2. 把query放入现有Zustand store或建立第二个UI slice；
+3. framework-neutral external store，通过React adapter订阅。
+
+Decision:
+
+采用独立 `SearchQueryStore`，只暴露同步 `getSnapshot()` / `subscribe()` / `set()`。Browser adapter拥有URL/sessionStorage初始化和唯一storage key，React通过 `useSyncExternalStore`订阅；Open Tabs imperative command/capture直接读取同一snapshot。
+
+同时建立canonical board projection：`getBoardProjection()`先用shared category semantics产生未过滤 `categoryGroups`，再产生query-filtered `visibleGroups`。`WorkspaceContent`只消费该projection，card insertion index和end target必须使用未过滤category groups。
+
+Rationale:
+
+- Query是Manager page临时状态，不属于TabBoard schema、Storage Authority或Authoritative Publication；放入Zustand会重新混淆persistent domain projection与UI session state。
+- Context能统一React consumers，却不能自然满足“setter返回后同一call stack立即读取新值”的Open Tabs capture需求；仍需额外imperative bridge/ref。
+- 三方法external store足够小，可用内存ports直接测试，并让React和imperative consumers共享一个snapshot。
+- Category membership已有shared owner，board不应再用`starred` / `archived` / `folderId`复制规则。
+- DnD index基于未过滤category groups，搜索只改变可见卡片，不改变canonical insertion位置。
+
+Trade-offs:
+
+- Manager page仍有一个module singleton，但它只有一个string snapshot和listener set，且不跨extension pages同步。
+- SearchBar保留local input用于150ms debounce，因此刻意存在“正在输入”与“已提交query”两层值；external update必须取消旧timer并同步local value。
+- `useFilteredGroups()`作为只返回`visibleGroups`的薄wrapper继续服务只需要可见列表的consumer；它不拥有projection规则。
+- `sessionStorage`失败时只保留当前page的in-memory query，刷新后无法恢复，但Manager仍可搜索。
+
+Status:
+
+Accepted。
+
+Implementation note（2026-07-26）：
+
+- `tabboard-search-change`、query module global和effect-updated saved-query ref已删除。
+- Orphan/cross-workspace folder references在Inbox render、search、card index和end target中使用同一shared语义。
+- `npm run check:architecture`禁止event bus、SearchBar window listener、WorkspaceContent全量group/category scan和core owner的framework/browser dependencies。
+
 ## Decision template
 
 ```md

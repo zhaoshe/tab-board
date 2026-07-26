@@ -774,7 +774,7 @@
 - Docs must name the production owners and current behavior, not the migration plan.
 - No product behavior change is claimed beyond eliminating hidden synchronization and category drift.
 
-- [ ] **Step 1: 更新 current architecture**
+- [x] **Step 1: 更新 current architecture**
 
   在 Search section记录：
 
@@ -785,7 +785,7 @@
   - board projection的 categoryGroups/visibleGroups 分工；
   - storage failure的 in-memory degradation。
 
-- [ ] **Step 2: 更新 evolution/decision**
+- [x] **Step 2: 更新 evolution/decision**
 
   `feature-evolution.md` 记录：
 
@@ -799,7 +799,7 @@
   - 不使用 Zustand slice，因为 query 不属于 authoritative/persistent state；
   - 选择 framework-neutral external store + board projection。
 
-- [ ] **Step 3: 运行 focused suite**
+- [x] **Step 3: 运行 focused suite**
 
   Run:
 
@@ -818,7 +818,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 4: 运行 fresh full verification**
+- [x] **Step 4: 运行 fresh full verification**
 
   依次运行，避免 build/test/E2E artifact race：
 
@@ -840,7 +840,7 @@
   - removed search globals/events无 source 命中；
   - shared/background production imports Manager = 0。
 
-- [ ] **Step 5: 更新 persistent plan evidence**
+- [x] **Step 5: 更新 persistent plan evidence**
 
   在 ignored planning files记录：
 
@@ -849,7 +849,7 @@
   - next step切换为 fresh architecture analysis；
   - 所有错误与修正。
 
-- [ ] **Step 6: Commit docs**
+- [x] **Step 6: Commit docs**
 
   ```bash
   git add docs/technical-architecture.md \

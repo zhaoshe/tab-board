@@ -26,14 +26,15 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `manager.html`: 生产 Manager HTML shell，加载 `/src/manager/main.tsx`。
 - `src/manager/main.tsx` / `src/manager/ManagerApp.tsx`: React Manager 启动和应用 composition。
 - `src/manager/components/`: Mantine shell、workspace header、sidebar/Open Tabs、session board、Bin、import/export、search 和 overlays。
-- `src/manager/core/`: selectors、capture、Open Tabs workflow、typed DnD interaction resolution、overlay/focus 等纯 contracts，以及 core tests。
-- `src/manager/hooks/`: hydration、runtime message、Open Tabs、overlay 和 derived group 生命周期。
+- `src/manager/core/`: selectors、SearchQueryStore、capture、Open Tabs workflow、typed DnD interaction resolution、overlay/focus 等纯 contracts，以及 core tests。
+- `src/manager/hooks/`: hydration、saved-search/board projection、runtime message、Open Tabs 和 overlay 生命周期。
 - `src/background/service-worker.ts`: Chrome API boundary、capture/restore、runtime messages、sender verification。
 - `src/background/statePersistence.ts`: serialized mutation queue、optional Web Locks、normalized atomic writes。
 - `src/shared/model/`: schema/types、normalize、category/session semantics、DropIntent contract/validation/execution/replay、capture policy、import/export 和 search。
 - `src/shared/store/`: Storage Authority、Authoritative Publication、immutable state mutations、mutation validation 和 Zustand facade。
 - `src/shared/styles/`: shared theme tokens。
 - `scripts/check-extension.mjs`: extension 文件存在性、构建产物引用和 sanity checks。
+- `scripts/check-import-cycles.mjs` / `scripts/check-search-architecture.mjs`: source dependency 与 saved-search/board ownership 静态门禁。
 
 ## Manifest 能力
 
@@ -115,6 +116,10 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - components 渲染 workspace/category topbar、可折叠 sidebar、selected-window Open Tabs、horizontal active-category board、session cards、modals 和 feedback。
 - `src/shared/openTabs.ts` 是 Open Tabs 跨 runtime protocol owner；background、preview、Manager 与 persistence 使用同一 tab/window/list/capture result contract。
 - core modules 提供 selectors、capture snapshot ownership、Open Tabs workflow reducer/projection、typed DnD interaction resolution、overlay/focus contracts；这些模块可在无 Chrome DOM 的测试中执行。
+- `core/searchQueryStore.ts` 是 framework-neutral saved-session query owner，只暴露 `getSnapshot()` / `subscribe()` / `set()`，通过注入 ports 初始化 URL/session storage；它不依赖 React、Zustand、DOM global 或 TabBoard store。
+- `hooks/useSearchQuery.ts` 是 browser/React adapter，唯一持有 `tabboardSearch` storage key，并用 `useSyncExternalStore` 把同一 snapshot 提供给 React consumers。Open Tabs capture/filter 的 imperative path直接读该 owner，不依赖 effect-updated ref。
+- `core/selectors.ts` 的 `getBoardProjection()` 先复用 shared `groupsForCategory()` 得到 canonical `categoryGroups`，再得到 query-filtered `visibleGroups`；`hooks/useBoardProjection.ts` 保持 query变化时未过滤 category projection引用稳定。
+- `WorkspaceContent` 只消费 board projection；Zustand selector仅用于当前自定义 category标题，不再读取全部 groups或手写 `starred` / `archived` / `folderId` membership。render、card insertion index和end target因此共享 orphan-folder → Inbox语义。
 - DnD 不复用未类型化 payload；resolver 先校验 workspace/ownership/URL/locked/index 边界，session body 不产生 merge intent。
 - Manager production 不拥有 session/drop execution module；`src/manager/core/commands.ts` 已删除。Shared/background production modules不得导入 Manager。
 - `ManagerLayout` 持有一个 Open Tabs workflow；`Sidebar` / `OpenTabsPanel` 只消费 grouped `model/commands`。capture 使用 selection snapshot 与 pending guard并直接返回 completion evidence；persisted Open Tabs drop 直接调用 `completeDrop()`，不使用全局 DOM event。
@@ -589,11 +594,14 @@ Open Tabs 同样保留全部 rows 与每行的 DnD/focus/preview hooks。`useOpe
 
 Manager search：
 
-- `searchQuery` 来自 URL `?q=` 或顶部 input，过滤当前 workspace 的 saved sessions。
+- `searchQuery` 由 `SearchQueryStore` 单一拥有。初始化时非空 URL `?q=` 优先；URL缺失或为空时回退 `sessionStorage["tabboardSearch"]`。非空 initial snapshot会best-effort写回session storage，空初始化不创建key。
+- 顶部 SearchBar 保留本地 input value和150ms debounce；external store更新会同步local value，clear/close立即更新两者。match count使用local input即时过滤canonical category groups，不等待debounce。
 - `openTabsQuery` 来自 sidebar footer，只过滤 selected browser window 的 pinned/regular rows。
-- `openTabFilter` 来自可保存 open tab 的右键菜单，按 URL 过滤 saved sessions；window 切换和 Open Tabs refresh 不自动清除它。
-- `visibleGroups()` 先按 workspace 过滤，再按 `groupMatchesQuery()` 和 `openTabFilter` 过滤。
+- `openTabFilter` 来自可保存 open tab 的右键菜单：workflow记录 `tabFilterUrl`，同一 command同步把URL写入 `SearchQueryStore`。window切换和 Open Tabs refresh不自动清除它；capture snapshot直接读取owner，避免setter与React effect之间的竞态。
+- `getBoardProjection()` 先按fallback-safe active workspace和shared category semantics产生未过滤 `categoryGroups`，再用 `filterGroupsByQuery()`产生 `visibleGroups`。空normalized query直接复用category array引用。
+- orphan或跨workspace folder reference在render、search、card insertion index和end target中都按shared `categoryForGroup()`归Inbox。
 - `getVisibleGroupTabs()` 决定 session 内 matching tabs；不做预览数量截断。
+- `sessionStorage`读取/写入失败时，query owner保留当前page的in-memory snapshot并继续通知React；只丢失刷新后的恢复能力。
 
 Omnibox search：
 

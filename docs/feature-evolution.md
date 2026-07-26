@@ -21,6 +21,29 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-07-26: Saved Search Query 与 Board Projection Ownership 深化
+
+Saved-session query原本同时由 `useFilteredGroups.ts` 中的module global、每个hook instance的React state、`sessionStorage`和`tabboard-search-change` window event同步；`SearchBar`又单独监听同一event。`WorkspaceContent`在拿到filtered groups后，还会重新扫描全部groups并手写category membership，导致orphan folder虽然能被selector渲染到Inbox，却在DnD insertion index中被排除。
+
+变化：
+
+- 新增framework-neutral `SearchQueryStore`，以 `getSnapshot()` / `subscribe()` / `set()` 单一拥有saved-session query；URL/session storage由ports注入，可直接用内存测试。
+- `useSearchQuery.ts`成为唯一browser/React adapter，持有 `tabboardSearch` storage key并通过 `useSyncExternalStore`订阅；删除module global、per-hook state和`tabboard-search-change` event。
+- SearchBar保留150ms local input debounce和immediate match count；external query变化同步local input，旧timer不能覆盖较新的external value。
+- Open Tabs URL filter/capture不再依赖effect-updated ref，imperative path直接读取同一个query snapshot；同一call stack中“设置filter → capture”不会误判filter ownership。
+- `getBoardProjection()` 同时返回canonical unfiltered `categoryGroups`、query-filtered `visibleGroups`和`searchQuery`；空query保留category groups引用。
+- `WorkspaceContent`只消费board projection；render、card index和end target共享shared category语义，orphan/cross-workspace folder references在Inbox中保持一致。
+- 删除旧 `useFilteredGroups.ts` owner；`useFilteredGroups()`仅作为 `useBoardProjection()` 的薄wrapper保留在新hook中。
+- `npm run check`新增search architecture gate，禁止window event bus、SearchBar query listener、WorkspaceContent全量group/category scan，以及core owner对React/Zustand/browser globals/TabBoard store的依赖。
+
+判断：
+
+- saved-session query是Manager page临时状态，不属于TabBoard持久化schema或Authoritative Publication；塞入Zustand会混淆domain projection和UI session state。
+- Context能统一React consumer，但不能自然提供Open Tabs async command需要的同步snapshot；三方法external store同时服务React与imperative consumers。
+- DnD index必须基于未过滤canonical category groups，而不是visible results；否则搜索会改变drop insertion语义。
+
+当前状态：Current。Direct owner/hook/component tests、Open Tabs race regression、strict graph gate和search architecture CLI共同守护。
+
 ### 2026-07-26: Session Domain Ownership 深化
 
 Persistent session/category/drop语义原本位于 Manager `commands.ts` / `dnd.ts`，shared mutation validation、background persistence 和 Zustand store反向导入 Manager。即使只把 barrel import改为direct import可以让当时的六模块SCC消失，layering inversion仍会保留。
