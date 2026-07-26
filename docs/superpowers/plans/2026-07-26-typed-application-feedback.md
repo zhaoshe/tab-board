@@ -36,7 +36,7 @@
   `createApplicationFeedbackChannel()`, `applicationFeedbackChannel`.
 - Owner不得import React、Zustand、shared store或读取DOM/Chrome globals。
 
-- [ ] **Step 1: 写direct RED**
+- [x] **Step 1: 写direct RED**
 
   用literal feedback fixtures验证：
 
@@ -59,7 +59,7 @@
   - two instances隔离；
   - late subscriber不replay。
 
-- [ ] **Step 2: 运行RED**
+- [x] **Step 2: 运行RED**
 
   Run:
 
@@ -69,12 +69,12 @@
 
   Expected: FAIL because module does not exist.
 
-- [ ] **Step 3: 实现最小channel**
+- [x] **Step 3: 实现最小channel**
 
   Closure-backed `Set`，`publish()`遍历`[...listeners]`并对每个listener单独
   `try/catch`。不保存history/last value。
 
-- [ ] **Step 4: 运行GREEN**
+- [x] **Step 4: 运行GREEN**
 
   Run:
 
@@ -85,7 +85,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
   ```bash
   git add src/shared/applicationFeedback.ts src/shared/applicationFeedback.test.ts
