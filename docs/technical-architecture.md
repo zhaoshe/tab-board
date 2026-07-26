@@ -354,7 +354,7 @@ Options 中连接本地文件夹时提供三种迁移模式（由 UI 派发迁�
 
 1. 入口调用 `captureTabs(mode, anchorTab, options)`。
 2. `getTabsForMode()` 根据 mode 取 tabs。
-3. `getCaptureCandidateReason()` 只拒绝 TabBoard 自身 extension 页、没有 usable URL 的 rows 和命中 `customUrlFilter` 的 URL；pinned、Chrome 和 file URLs 与普通 tab 一样处理。
+3. `getCaptureCandidateReason()` 拒绝 extension pages、没有 usable URL 的 rows 和命中 `customUrlFilter` 的 URL；pinned、Chrome 和 file URLs 与普通 tab 一样处理。
 4. 如开启 `dedupeOnSave`，按符合保存资格的源 tab URL 去重，重复源 tabs 关闭。
 5. `createTabRecord()` 转成 TabBoard tab records。
 6. 按 windowId 分组。

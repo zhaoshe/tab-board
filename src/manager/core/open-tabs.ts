@@ -34,7 +34,7 @@ function isValidOpenTabId(id: number | undefined): id is number {
 
 export function getSelectableOpenTabIds(selectedWindow: OpenWindowInfo | null): number[] {
   return selectedWindow?.tabs.flatMap((tab) => (
-    tab.storable === true && !tab.pinned && isValidOpenTabId(tab.id) ? [tab.id] : []
+    tab.storable === true && isValidOpenTabId(tab.id) ? [tab.id] : []
   )) ?? [];
 }
 
@@ -43,7 +43,7 @@ export function deriveSelectedStorableRecords(
   selectedTabIdSet: ReadonlySet<number>,
 ): OpenTabInfo[] {
   return selectedWindow?.tabs.filter((record) =>
-    record.storable === true && !record.pinned && isValidOpenTabId(record.id) && selectedTabIdSet.has(record.id),
+    record.storable === true && isValidOpenTabId(record.id) && selectedTabIdSet.has(record.id),
   ) ?? [];
 }
 

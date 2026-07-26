@@ -13,13 +13,31 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 - 从单一 Open Tabs 列表勾选多个有 URL 的 tabs 创建 session。
 - 通过有 URL open tab 的右键菜单筛选包含该 URL 的 saved sessions。
 - 用 sidebar footer Filter tabs 只过滤当前 selected browser window 的单一 Open Tabs 列表。
-- Open Tabs 保留 selected normal window 的非 TabBoard tab rows；pinned、Chrome 和 file URLs 可正常多选和保存，自定义 URL 过滤规则与 TabBoard 自身页面直接隐藏。
+- Open Tabs 保留 selected normal window 的非 extension tab rows；pinned、Chrome 和 file URLs 可正常多选和保存，自定义 URL 过滤规则与 extension pages 直接隐藏。
 - 勾选 open tabs 只用于批量创建 session 或批量拖入已有 session，拖拽完成后自动退出多选。
 - 拖动 open tab 到已有 session 中追加链接。
 - saved sessions 支持三档内置分类（Inbox/Saved/Archive）+ 自定义分类、搜索、恢复、拖拽排序、inline rename、笔记、导入导出、回收站。
 - Session card 展示 note，预览弹窗可添加/修改 note，点击打开链接后自动隐藏预览窗。
 
 ## 变迁时间线
+
+### 2026-07-24: Open Tabs 隐藏所有扩展页并允许 pinned 参与多选
+
+用户希望侧边栏只展示真实浏览内容，不展示 TabBoard 自身页面或其他扩展页面；同时 pinned tabs 不再作为特殊限制项，和普通 tabs 一样可以勾选、批量创建 session、批量拖拽到已有 session。
+
+变化：
+
+- `capture-policy` 新增统一的 extension page URL 判断，覆盖 `chrome-extension:`、`moz-extension:` 和当前扩展 base URL。
+- `list-open-tabs` 在 background 数据入口隐藏所有 extension pages；preview harness 保持同一规则，避免开发预览和真实扩展行为漂移。
+- Open Tabs selection、drag payload、批量 pin/delete、selected capture 全部按 `storable` + valid tab ID 判断，不再排除 pinned tabs。
+- 文档同步当前边界：pinned、Chrome URL、file URL rows 可像普通 rows 一样选择和保存；extension pages 直接隐藏，不进入列表或 capture。
+
+判断：
+
+- 扩展页面通常不可恢复，也不代表用户正在整理的网页上下文，显示出来会制造不可操作噪音。
+- pinned 是浏览器现场的一部分，用户明确选择时应能一起保存或拖入 session；是否 pinned 不应影响 checkbox 语义。
+
+当前状态：Current。
 
 ### 2026-07-23: 本地文件夹存储（可选替代 chrome.storage.local）
 
@@ -187,13 +205,13 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 当前状态：Current，全部 603 个测试通过。
 
-### 2026-07-20: Open Tabs 自身页面过滤与无闪烁刷新
+### 2026-07-20: Open Tabs extension 页面过滤与无闪烁刷新
 
-Open Tabs 的用途是呈现用户正在处理的浏览现场，TabBoard 自身 manager/settings 等页面不应占据列表；后台刷新也不应让旧列表短暂消失。
+Open Tabs 的用途是呈现用户正在处理的浏览现场，TabBoard 自身 manager/settings 等页面和其他扩展页面不应占据列表；后台刷新也不应让旧列表短暂消失。
 
 变化：
 
-- `list-open-tabs` 在 background 数据入口按当前 extension base URL 排除 TabBoard 自身页面，preview harness 保持同一规则。
+- `list-open-tabs` 在 background 数据入口排除所有 extension pages，preview harness 保持同一规则。
 - 刷新期间保留已显示的 windows/tabs，不展示 loading row；顶部 Refresh icon 旋转并标记 `aria-busy`，成功后一次替换数据，失败时旧列表仍可见。
 
 当前状态：Current。

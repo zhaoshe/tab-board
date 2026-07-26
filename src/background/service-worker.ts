@@ -15,6 +15,7 @@ import {
   normalizeBinEntry,
   normalizeBrowserGroup,
   getCaptureCandidateReason,
+  isExtensionPageUrl,
   matchesCustomUrlFilter,
   type CaptureCandidateReason,
   type TabItem,
@@ -1423,7 +1424,7 @@ async function listOpenTabs(): Promise<{ windows: OpenWindowInfo[] }> {
   const openWindows = await Promise.all(windows.map(async (window): Promise<OpenWindowInfo> => {
     const tabs = (await Promise.all((window.tabs || []).map(async (tab): Promise<OpenTabInfo | null> => {
       const url = resolveTabUrl(tab);
-      if (url.toLowerCase().startsWith(extensionBaseUrl)) return null;
+      if (isExtensionPageUrl(url, extensionBaseUrl)) return null;
       if (matchesCustomUrlFilter(url, settings)) return null;
       const reason = getCaptureCandidateReason(
         { id: tab?.id, url, pinned: tab?.pinned },

@@ -135,9 +135,9 @@ Options 分为 Basic 和 Advanced：
 
 ### Capture 规则
 
-- Open Tabs 展示 selected normal window 的 tab rows，并按 Chrome `tab.index` 排序；TabBoard 自身 manager、popup、options 等 extension pages，以及命中自定义 URL 过滤规则的 rows 不展示。
+- Open Tabs 展示 selected normal window 的 tab rows，并按 Chrome `tab.index` 排序；TabBoard 自身页面和其他扩展页面，以及命中自定义 URL 过滤规则的 rows 不展示。
 - pinned、`chrome://` 和 `file://` tabs 与普通 tabs 一样可以多选、拖拽和保存；同一 custom filter policy 同时用于列表、checkbox、DnD 和 capture。
-- TabBoard 自身 extension 页面不会进入 Open Tabs 列表或 capture；没有 usable URL 的 rows 不具备保存资格。
+- Extension pages 不会进入 Open Tabs 列表或 capture；没有 usable URL 的 rows 不具备保存资格。
 - 即使 policy 允许特殊 URL，Chrome 对受限 URL 的实际保存/恢复能力仍是平台边界。
 
 ### 去重

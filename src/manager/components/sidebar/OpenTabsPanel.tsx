@@ -169,7 +169,7 @@ function OpenTabContentTrigger({
   );
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: `open-tab-${tab.windowId ?? 'window'}-${tab.id ?? tab.index}`,
-    disabled: tab.storable !== true || tab.pinned || !isValidTabId(tab.id),
+    disabled: tab.storable !== true || !isValidTabId(tab.id),
     data: {
       type: 'open-tab',
       dnd: {
@@ -328,8 +328,8 @@ export function OpenTabsPanel({
   }, [selectedWindow?.id]);
 
   return (
-    <Stack gap={0} h="100%" style={{ position: 'relative' }} onMouseEnter={() => scrollSelectedWindowIntoView('auto')}>
-      <MantineGroup gap={2} px="xs" pt="xs" wrap="nowrap">
+    <Stack gap={0} h="100%" className="manager-open-tabs-layout" onMouseEnter={() => scrollSelectedWindowIntoView('auto')}>
+      <MantineGroup gap={2} wrap="nowrap" className="manager-open-tabs-window-bar">
         <MantineGroup className="manager-window-switcher" gap={2} wrap="nowrap">
           {visibleWindows.map((window) => {
             const index = visibleWindows.indexOf(window);
@@ -388,35 +388,35 @@ export function OpenTabsPanel({
         </MantineGroup>
       </MantineGroup>
 
-      <div className="manager-open-tabs-toolbar" data-selection-mode={selectionMode || undefined}>
+      <div className="manager-open-tabs-selection-bar" data-selection-mode={selectionMode || undefined}>
         {selectionMode ? (
           <MantineGroup className="manager-open-tabs-selection-actions" gap={8} wrap="nowrap">
             <Text className="manager-open-tabs-selection-actions__count" size="sm" fw={600} aria-live="polite">{selectedCount} Selected</Text>
             <div className="manager-open-tabs-selection-actions__tools">
-              <Tooltip label="Select all" openDelay={1000}><ActionIcon size={28} variant="subtle" aria-label="Select all tabs" disabled={updatingSelection} onClick={onSelectAll}><IconSelectAll size={18} /></ActionIcon></Tooltip>
-              <Tooltip label="Create session" openDelay={1000}><ActionIcon size={28} variant="subtle" color="blue" aria-label={`Create session from ${selectedCount} selected tabs`} disabled={selectedCount === 0 || capturing || updatingSelection} loading={capturing} onClick={() => void onCaptureSelectedTabs()}><IconFolderPlus size={18} /></ActionIcon></Tooltip>
-              <Tooltip label="Delete selected tabs" openDelay={1000}><ActionIcon size={28} variant="subtle" color="red" aria-label={`Delete ${selectedCount} selected tabs`} disabled={selectedCount === 0 || capturing || updatingSelection} loading={updatingSelection} onClick={() => void onCloseSelectedTabs()}><IconTrash size={18} /></ActionIcon></Tooltip>
-              <Tooltip label="Pin selected tabs" openDelay={1000}><ActionIcon size={28} variant="subtle" aria-label={`Pin ${selectedCount} selected tabs`} disabled={selectedCount === 0 || capturing || updatingSelection} onClick={() => void onPinSelectedTabs()}><IconPin size={18} /></ActionIcon></Tooltip>
-              <Tooltip label="Exit selection mode" openDelay={1000}><ActionIcon size={28} variant="subtle" aria-label="Exit tab selection mode" disabled={updatingSelection} onClick={onExitSelectionMode}><IconX size={18} /></ActionIcon></Tooltip>
+              <Tooltip label="Select all" openDelay={1000}><ActionIcon size={24} variant="subtle" aria-label="Select all tabs" disabled={updatingSelection} onClick={onSelectAll}><IconSelectAll size={16} /></ActionIcon></Tooltip>
+              <Tooltip label="Create session" openDelay={1000}><ActionIcon size={24} variant="subtle" color="blue" aria-label={`Create session from ${selectedCount} selected tabs`} disabled={selectedCount === 0 || capturing || updatingSelection} loading={capturing} onClick={() => void onCaptureSelectedTabs()}><IconFolderPlus size={16} /></ActionIcon></Tooltip>
+              <Tooltip label="Delete selected tabs" openDelay={1000}><ActionIcon size={24} variant="subtle" color="red" aria-label={`Delete ${selectedCount} selected tabs`} disabled={selectedCount === 0 || capturing || updatingSelection} loading={updatingSelection} onClick={() => void onCloseSelectedTabs()}><IconTrash size={16} /></ActionIcon></Tooltip>
+              <Tooltip label="Pin selected tabs" openDelay={1000}><ActionIcon size={24} variant="subtle" aria-label={`Pin ${selectedCount} selected tabs`} disabled={selectedCount === 0 || capturing || updatingSelection} onClick={() => void onPinSelectedTabs()}><IconPin size={16} /></ActionIcon></Tooltip>
+              <Tooltip label="Exit selection mode" openDelay={1000}><ActionIcon size={24} variant="subtle" aria-label="Exit tab selection mode" disabled={updatingSelection} onClick={onExitSelectionMode}><IconX size={16} /></ActionIcon></Tooltip>
             </div>
           </MantineGroup>
         ) : null}
       </div>
 
       {error && (
-        <Alert color="red" title="Open Tabs unavailable" mx="xs" mt={4} p="xs">
+        <Alert color="red" title="Open Tabs unavailable" mx="xs" mt={4} p="xs" style={{ flexShrink: 0 }}>
           {error}
         </Alert>
       )}
       {windows.length > 0 && !selectedWindow && (
-        <Text size="xs" c="dimmed" px="xs" mt={4}>No selected browser window</Text>
+        <Text size="xs" c="dimmed" px="xs" mt={4} style={{ flexShrink: 0 }}>No selected browser window</Text>
       )}
 
       <ScrollArea style={{ flex: 1, minHeight: 0 }} type="auto" scrollbarSize={4}>
         <Stack
           gap={2}
-          px="xs"
-          pt="xs"
+          px={0}
+          pt={0}
           pb="xs"
           data-open-tabs-panel
           className={selectionMode ? 'manager-open-tabs--selection-mode' : undefined}
@@ -434,7 +434,7 @@ export function OpenTabsPanel({
             </MantineGroup>
           )}
           {selectedWindow && filteredTabs.map((tab) => {
-            const canSelect = tab.storable === true && !tab.pinned && isValidTabId(tab.id);
+            const canSelect = tab.storable === true && isValidTabId(tab.id);
             const isSelected = isValidTabId(tab.id) && selectedTabIdSet.has(tab.id);
             const isClosing = isValidTabId(tab.id) && closingTabIdSet.has(tab.id);
             const hasValidTabId = isValidTabId(tab.id);
@@ -517,6 +517,7 @@ export function OpenTabsPanel({
         onChange={(event) => onQueryChange(event.currentTarget.value)}
         placeholder="Filter tabs"
         aria-label="Filter tabs by title or URL"
+        style={{ flexShrink: 0 }}
         rightSection={query ? (
           <Tooltip label="Clear tab filter" openDelay={1000}>
             <ActionIcon size="sm" variant="subtle" aria-label="Clear tab filter" onClick={onClearFilter}>

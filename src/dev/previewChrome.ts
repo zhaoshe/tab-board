@@ -10,7 +10,7 @@ import {
   clone,
 } from '../shared/model';
 import type { BrowserGroup, Group, TabBoardState, TabItem } from '../shared/model';
-import { getCaptureCandidateReason, matchesCustomUrlFilter } from '../shared/model/capture-policy';
+import { getCaptureCandidateReason, isExtensionPageUrl, matchesCustomUrlFilter } from '../shared/model/capture-policy';
 import { applyStateMutations } from '../shared/store/stateMutations';
 
 export type PreviewTab = chrome.tabs.Tab & {
@@ -436,7 +436,7 @@ function resolveTabUrl(tab: PreviewTab): string {
 
 function isPreviewExtensionPage(url: string, extensionBaseUrl: string): boolean {
   return PREVIEW_EXTENSION_PAGE_URL_PATTERN.test(url)
-    || url.toLowerCase().startsWith(extensionBaseUrl.toLowerCase());
+    || isExtensionPageUrl(url, extensionBaseUrl);
 }
 
 function getPreviewCaptureCandidateReason(

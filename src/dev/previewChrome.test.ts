@@ -397,7 +397,7 @@ describe('preview Chrome fixture', () => {
     expect(removedWindows).toEqual([created.id]);
   });
 
-  it('hides preview extension pages from listings while keeping them uncapturable', async () => {
+  it('hides extension pages from listings while keeping them uncapturable', async () => {
     const harness = install();
     const preview = await harness.chrome.tabs.create({
       windowId: 1,
@@ -408,6 +408,11 @@ describe('preview Chrome fixture', () => {
       windowId: 1,
       active: false,
       url: 'chrome-extension://preview/options.html',
+    });
+    const otherExtension = await harness.chrome.tabs.create({
+      windowId: 1,
+      active: false,
+      url: 'chrome-extension://other-extension/options.html',
     });
     const external = await harness.chrome.tabs.create({
       windowId: 1,
@@ -421,6 +426,7 @@ describe('preview Chrome fixture', () => {
 
     expect(listedTabs.some((tab) => tab.id === preview.id)).toBe(false);
     expect(listedTabs.some((tab) => tab.id === options.id)).toBe(false);
+    expect(listedTabs.some((tab) => tab.id === otherExtension.id)).toBe(false);
     expect(listedTabs.find((tab) => tab.id === external.id)).toMatchObject({
       url: 'https://external.example/dev/manager-preview.html?source=test#preview',
       storable: true,

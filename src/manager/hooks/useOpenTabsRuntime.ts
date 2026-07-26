@@ -355,7 +355,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
   const toggleTabSelection = useCallback((tabId: number | undefined) => {
     if (typeof tabId !== 'number' || !Number.isSafeInteger(tabId) || !selectedWindow) return;
     const canSelect = selectedWindow.tabs.some((tab) =>
-      tab.id === tabId && tab.storable === true && !tab.pinned,
+      tab.id === tabId && tab.storable === true,
     );
     if (!canSelect) return;
     setSelectedTabIds((current) => {
@@ -428,7 +428,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
   const selectedStorableTabIds = useMemo(() => (
     (selectedWindow?.tabs ?? [])
       .flatMap((tab) => (
-        tab.storable && !tab.pinned && isSafeTabId(tab.id) && selectedTabIds.includes(tab.id)
+        tab.storable && isSafeTabId(tab.id) && selectedTabIds.includes(tab.id)
           ? [tab.id]
           : []
       ))
@@ -500,7 +500,7 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
     };
     const captureSnapshot = createCaptureSnapshot({
       selectedTabIds: (selectedWindow?.tabs ?? [])
-        .filter((tab) => tab.storable === true && !tab.pinned && Number.isSafeInteger(tab.id) && selectedTabIds.includes(tab.id as number))
+        .filter((tab) => tab.storable === true && Number.isSafeInteger(tab.id) && selectedTabIds.includes(tab.id as number))
         .map((tab) => tab.id as number)
         .sort((left, right) => left - right),
       selectedWindowId: selectedWindow?.id ?? null,

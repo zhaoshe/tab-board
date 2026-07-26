@@ -166,7 +166,7 @@ describe('Open Tabs selection and drag data', () => {
     expect(Number.isSafeInteger(invalid.id)).toBe(false);
   });
 
-  it('excludes pinned storable tabs from selected drag records', () => {
+  it('includes pinned storable tabs in selected drag records', () => {
     const regular = tab(41, 'Regular', 'https://regular.test');
     const pinned = { ...tab(42, 'Pinned', 'https://pinned.test'), pinned: true };
     const selectedTabIdSet = new Set<number>([regular.id as number, pinned.id as number]);
@@ -176,20 +176,20 @@ describe('Open Tabs selection and drag data', () => {
     );
     const selectedStorableTabIds = deriveSelectedStorableTabIds(selectedStorableRecords);
 
-    expect(selectedStorableRecords).toEqual([regular]);
-    expect(selectedStorableTabIds).toEqual([41]);
+    expect(selectedStorableRecords).toEqual([regular, pinned]);
+    expect(selectedStorableTabIds).toEqual([41, 42]);
     expect(getOpenTabDragData(regular, true, selectedStorableRecords, selectedStorableTabIds)).toEqual({
-      records: [regular],
-      tabIds: [41],
+      records: [regular, pinned],
+      tabIds: [41, 42],
     });
   });
 
-  it('returns only unpinned storable IDs for selection actions', () => {
+  it('returns storable IDs including pinned tabs for selection actions', () => {
     const regular = tab(51, 'Regular', 'https://regular.test');
     const pinned = { ...tab(52, 'Pinned', 'https://pinned.test'), pinned: true };
     const blocked = tab(53, 'Blocked', 'https://blocked.test', false);
 
-    expect(getSelectableOpenTabIds(windowInfo(1, false, [regular, pinned, blocked]))).toEqual([51]);
+    expect(getSelectableOpenTabIds(windowInfo(1, false, [regular, pinned, blocked]))).toEqual([51, 52]);
   });
 });
 
@@ -207,6 +207,7 @@ describe('capture policy', () => {
   it('returns stable reasons for extension-owned URLs and custom filtering', () => {
     expect(getCaptureCandidateReason({ id: 1, url: `${extensionBaseUrl}manager.html` }, settings, extensionBaseUrl)).toBe('Cannot save this extension tab');
     expect(getCaptureCandidateReason({ id: 1, url: 'CHROME-EXTENSION://TEST/manager.html' }, settings, extensionBaseUrl)).toBe('Cannot save this extension tab');
+    expect(getCaptureCandidateReason({ id: 1, url: 'chrome-extension://other-extension/options.html' }, settings, extensionBaseUrl)).toBe('Cannot save this extension tab');
     expect(getCaptureCandidateReason({ ...candidate, pinned: true }, settings, extensionBaseUrl)).toBeNull();
     expect(getCaptureCandidateReason(candidate, { ...settings, customUrlFilter: 'example.test' }, extensionBaseUrl)).toBe('Matches custom filter rule');
   });
@@ -290,13 +291,13 @@ describe('Task107 source contracts', () => {
     expect(hook).toContain('sameOpenTabSelection');
   });
 
-  it('keeps selection actions aligned with pinned drag constraints', () => {
+  it('keeps selection actions aligned with storable drag constraints', () => {
     const hook = read('manager/hooks/useOpenTabsRuntime.ts');
 
     expect(hook).toContain('getSelectableOpenTabIds(selectedWindow)');
     expect(hook).toContain('getSelectableOpenTabIds(nextSelectedWindow)');
-    expect(hook).toContain('tab.storable === true && !tab.pinned');
-    expect(hook).toContain('tab.storable && !tab.pinned');
+    expect(hook).not.toContain('tab.storable === true && !tab.pinned');
+    expect(hook).not.toContain('tab.storable && !tab.pinned');
   });
 
   it('uses pure capture policy at the service-worker boundary and preserves response contracts', () => {

@@ -224,18 +224,20 @@ afterEach(async () => {
 });
 
 describe('OpenTabsPanel drag constraints', () => {
-  it('keeps pinned storable tabs out of selection and drag records', async () => {
+  it('allows pinned storable tabs in selection and drag records', async () => {
     await mountPanel();
 
-    expect(document.querySelector('[aria-label="Select Pinned"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Select Pinned"]')).not.toBeNull();
 
     const pinnedDrag = testHarness.draggables.find((entry) => entry.id === 'open-tab-1-42');
-    expect(pinnedDrag?.disabled).toBe(true);
+    expect(pinnedDrag?.disabled).toBe(false);
+    expect(pinnedDrag?.data?.dnd?.payload?.tabIds).toEqual([41, 42]);
+    expect(pinnedDrag?.data?.dnd?.records).toEqual([tabs[0], tabs[1]]);
 
     const regularDrag = testHarness.draggables.find((entry) => entry.id === 'open-tab-1-41');
     expect(regularDrag?.disabled).toBe(false);
-    expect(regularDrag?.data?.dnd?.payload?.tabIds).toEqual([41]);
-    expect(regularDrag?.data?.dnd?.records).toEqual([tabs[0]]);
+    expect(regularDrag?.data?.dnd?.payload?.tabIds).toEqual([41, 42]);
+    expect(regularDrag?.data?.dnd?.records).toEqual([tabs[0], tabs[1]]);
   });
 
   it('disables the close control while that tab is closing', async () => {

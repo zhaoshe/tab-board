@@ -951,6 +951,31 @@ Status:
 
 Accepted。
 
+## D041: Hide extension pages and treat pinned open tabs as selectable
+
+Context:
+
+Open Tabs 是用户整理当前浏览现场的入口。TabBoard 自身页面和其他扩展页面出现在列表里会混入不可恢复、不可迁移的工具页面；同时 pinned tabs 作为真实浏览现场的一部分，如果不能勾选或拖拽，会让批量整理结果和用户所见列表不一致。
+
+Decision:
+
+Open Tabs 隐藏所有 extension pages（`chrome-extension:`、`moz-extension:` 和当前扩展 base URL）。Pinned tabs 与普通 tabs 共用 selection、drag、batch action 和 selected capture 规则，只要 row 是 `storable` 且有有效 tab ID，就可以勾选和拖拽。
+
+Rationale:
+
+- Extension pages 不是用户要整理的网页内容，隐藏比展示为不可操作 row 更安静。
+- Checkbox 的语义应是“我要整理这些当前 tabs”，不应因为 pinned 状态额外分叉。
+- 统一到 `storable` + valid tab ID 能让 UI、drag payload 和 background capture 保持同一边界。
+
+Trade-offs:
+
+- 如果用户确实想保存某个扩展页面 URL，需要通过其他方式手动添加；这是为了避免 sidebar 被工具页噪音污染。
+- Pinned tabs 被保存后恢复时仍受 Chrome 对 pinned/特殊 URL 的平台能力限制。
+
+Status:
+
+Accepted。
+
 ## Decision template
 
 ```md

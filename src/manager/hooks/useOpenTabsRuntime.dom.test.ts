@@ -132,7 +132,12 @@ describe('Open Tabs runtime refresh', () => {
 
     testHarness.sendMessage.mockResolvedValueOnce({
       ok: true,
-      result: { windows: createWindow([createTab({ pinned: true })]) },
+      result: {
+        windows: createWindow([createTab({
+          storable: false,
+          reason: 'Matches custom filter rule',
+        })]),
+      },
     });
     await act(async () => {
       await runtime?.refresh();

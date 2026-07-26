@@ -16,7 +16,7 @@
 - **P0 #1 已完成：** `ManagerLayout` 碰撞检测改为单次扫描，保留 category 与 lock 优先级，不再创建候选排序数组；拖拽 replacement snapshot 仅在数据或筛选条件变化时重算。
 - **P0 #2 已完成：** `listOpenTabs()` 在单次请求内按 `groupId` 复用 browser group Promise，并行转换窗口与 tab records；无分组与查询失败继续返回 `null`。
 - **P0 #3 已完成（局部稳定性）：** `useFilteredGroups()` 对相同 store slice、category、query 的派生结果保持引用稳定，并缩窄为当前 workspace folders；真实 hook 回归覆盖本地无关 rerender。
-- **P0 #4 已完成：** Open Tabs 面板在面板层共享 selection `Set`、selected records 与 IDs；pinned tab 不参与选择或拖拽；刷新后无有效选中项会退出 selection mode；拖拽源刷新/替换后释放不会提交旧 payload。
+- **P0 #4 已完成：** Open Tabs 面板在面板层共享 selection `Set`、selected records 与 IDs；pinned tab 与普通 tab 一样参与选择和拖拽；刷新后无有效选中项会退出 selection mode；拖拽源刷新/替换后释放不会提交旧 payload。
 - **P1 #5 已完成：** `WorkspaceContent` 与 `SessionCard` 使用 `useShallow` 并缩窄 folder 订阅；authoritative state 在发布到 Zustand 前通过语义 structural sharing 复用未变化的 workspace、folder、group、tab、settings、category order、bin 与 ledger 引用。真实 storage 订阅回归覆盖跨 workspace 写入保持当前实体引用。
 - **P1 #6 已完成：** overlay 全局 document/window listener effect 使用 refs 读取最新 menu/preview，只在 provider 生命周期绑定一次；DOM 回归覆盖绑定次数、Esc、outside click、blur/focus、preview timer 与 focus restore。
 - **P1 #7 已完成：** storage change 直接比较旧/新 `settings.actionClick`；普通 state 更新不再读取 settings 或调用 action API，模式变化才更新 popup/title。

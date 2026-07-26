@@ -40,7 +40,7 @@ TabBoard also replaces Chrome's new tab page, so every new tab opens the TabBoar
 - Organize saved groups in a tabExtend-style manager with workspace/category controls in the top bar, a collapsible full-height Open Tabs sidebar, and horizontal session columns.
 - Switch Chrome windows from sidebar chips and window actions, or create a new browser window without leaving the manager.
 - Review one selected window in a single vertical Open Tabs list; pinned tabs stay inline with a badge.
-- Attempt to save every tab with a URL except TabBoard's own extension pages, including pinned tabs.
+- Attempt to save every tab with a URL except extension pages, including pinned tabs.
 - Filter the selected window's rows from the sidebar footer without changing saved-session results.
 - Drag saved tabs between groups or into a new group.
 - Drag an open tab into an existing saved session.

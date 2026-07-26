@@ -372,13 +372,14 @@ describe('Task194 runtime sender allowlist', () => {
     }
   });
 
-  it('omits this extension own pages from open tabs listings', async () => {
+  it('omits extension pages from open tabs listings', async () => {
     const extensionBaseUrl = `chrome-extension://${TRUSTED_EXTENSION_ID}/`;
     const ownManagerTab = createTab(1, 'TabBoard manager', { url: `${extensionBaseUrl}manager.html` });
     const ownOptionsTab = createTab(2, 'TabBoard options', { url: `${extensionBaseUrl}options.html` });
     const externalTab = createTab(3, 'External page', { url: 'https://external.example/' });
+    const otherExtensionTab = createTab(4, 'Other extension', { url: 'chrome-extension://other-extension/options.html' });
     const harness = createChromeHarness(createState(), {
-      tabs: [ownManagerTab, ownOptionsTab, externalTab],
+      tabs: [ownManagerTab, ownOptionsTab, externalTab, otherExtensionTab],
     });
     vi.stubGlobal('chrome', harness.chromeMock);
     await import('./service-worker');

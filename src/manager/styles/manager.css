@@ -1,6 +1,8 @@
 :root {
   --manager-sidebar-expanded-width: clamp(250px, 22vw, 300px);
   --manager-sidebar-rail-width: 54px;
+  --manager-sidebar-padding: 8px;
+  --manager-open-tab-leading-offset: calc((var(--manager-sidebar-rail-width) - 1px - 20px) / 2);
 }
 
 .manager-shell {
@@ -242,7 +244,7 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  padding: 8px;
+  padding: var(--manager-sidebar-padding);
   border-right: 1px solid var(--mantine-color-default-border);
   background: var(--mantine-color-body);
   transition: width 180ms cubic-bezier(0.2, 0, 0, 1), opacity 140ms ease, transform 160ms ease;
@@ -270,37 +272,64 @@
 .manager-open-tab-select,
 .manager-open-tab-close {
   opacity: 0;
+  pointer-events: none;
 }
 
 .manager-open-tab-row {
   position: relative;
   min-height: 36px;
-  margin-inline: calc(-1 * var(--mantine-spacing-xs));
+  margin-inline: 0;
   content-visibility: auto;
   contain-intrinsic-size: auto 36px;
 }
 
-.manager-open-tabs-toolbar {
-  min-height: 36px;
-  margin: var(--mantine-spacing-xs) calc(-1 * var(--mantine-spacing-xs)) 0;
-  padding: 0 4px;
-  border-bottom: 1px solid var(--mantine-color-default-border);
+.manager-open-tabs .mantine-ScrollArea-root {
+  margin-inline: calc(-1 * var(--manager-sidebar-padding));
+  padding-top: 2px;
 }
 
-.manager-open-tabs-toolbar[data-selection-mode] {
+.manager-open-tabs-divider {
+  display: none;
+}
+
+.manager-open-tabs-selection-bar {
+  position: relative;
+  z-index: 0;
+  box-sizing: border-box;
+  flex: 0 0 28px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  margin-inline: calc(-1 * var(--manager-sidebar-padding));
+  padding: 0 calc(var(--manager-sidebar-padding) + 4px);
+}
+
+.manager-open-tabs-selection-bar[data-selection-mode] {
   background: color-mix(in srgb, var(--mantine-color-blue-9) 12%, var(--mantine-color-body));
 }
 
+.manager-open-tabs-selection-actions {
+  width: 100%;
+  min-height: 28px;
+  padding: 0 4px;
+  align-items: center;
+}
+
 .manager-open-tab-content {
+  position: relative;
+  z-index: 0;
   min-height: 36px;
-  padding-inline: 9px;
+  padding-inline: var(--manager-open-tab-leading-offset);
 }
 
 .manager-open-tab-select {
   position: absolute;
-  inset-inline-start: 9px;
+  inset-inline-start: var(--manager-open-tab-leading-offset);
   top: 50%;
-  z-index: 1;
+  z-index: 3;
   --checkbox-size: 20px;
   transform: translateY(-50%);
 }
@@ -326,6 +355,7 @@
   flex: 0 0 auto;
   place-items: center;
   color: var(--mantine-color-dimmed);
+  pointer-events: none;
 }
 
 .manager-open-tab-favicon img,
@@ -339,6 +369,7 @@
 .manager-open-tab-favicon img {
   object-fit: cover;
   z-index: 1;
+  pointer-events: none;
 }
 
 .manager-open-tab-favicon:has(img[data-loaded="true"]) .manager-open-tab-favicon__fallback {
@@ -364,6 +395,7 @@
 .manager-open-tab-row:focus-within .manager-open-tab-select,
 .manager-open-tab-row:focus-within .manager-open-tab-close {
   opacity: 1;
+  pointer-events: auto;
 }
 
 html[data-tabboard-hover-suppressed] .manager-open-tabs:not(.manager-open-tabs--selection-mode) .manager-open-tab-select,
@@ -375,6 +407,7 @@ html[data-tabboard-hover-suppressed] .manager-open-tab-close {
 
 .manager-open-tabs--selection-mode .manager-open-tab-select {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .manager-open-tabs--selection-mode .manager-open-tab-close {
@@ -387,8 +420,8 @@ html[data-tabboard-hover-suppressed] .manager-open-tab-close {
 }
 
 .manager-open-tabs-selection-actions {
-  min-height: 36px;
-  padding: 2px 4px;
+  min-height: 28px;
+  padding: 0 4px;
   align-items: center;
 }
 
@@ -406,22 +439,48 @@ html[data-tabboard-hover-suppressed] .manager-open-tab-close {
 }
 
 .manager-open-tabs-selection-actions__tools > * {
-  flex: 0 0 28px;
+  flex: 0 0 24px;
 }
 
 .manager-sidebar-content {
   height: 100%;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-.manager-open-tabs > .mantine-Stack-root > .mantine-Group-root:first-child {
+.manager-open-tabs-layout {
   position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.manager-open-tabs-window-bar {
+  position: relative;
+  z-index: 1;
   box-sizing: border-box;
-  height: 32px;
-  min-height: 32px;
-  padding-block: 0 !important;
-  padding-inline: 0 !important;
+  height: 48px;
+  min-height: 48px;
+  flex: 0 0 48px;
+  margin:
+    calc(-1 * var(--manager-sidebar-padding))
+    calc(-1 * var(--manager-sidebar-padding))
+    0;
+  padding-inline: var(--manager-sidebar-padding);
+  padding-block: 0;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: color-mix(in srgb, var(--mantine-color-body) 92%, var(--mantine-color-blue-9));
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.manager-open-tabs-window-bar .manager-window-switcher {
+  margin-block-start: -5px;
+  padding-block-start: 5px;
   transform: none;
+  gap: 4px;
 }
 
 .manager-sidebar-rail {
@@ -431,6 +490,9 @@ html[data-tabboard-hover-suppressed] .manager-open-tab-close {
 .manager-open-tabs {
   flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .manager-sidebar-scroll {
@@ -616,15 +678,25 @@ html[data-tabboard-hover-suppressed] .manager-open-tab-close {
   justify-content: flex-start;
 }
 
+.manager-shell--sidebar-collapsed:is(:not(:has(.manager-sidebar:hover)), .manager-shell--sidebar-hover-suppressed):not(.manager-shell--sidebar-overlay-open) .manager-open-tabs .mantine-ScrollArea-root {
+  margin-inline: calc(-1 * var(--manager-sidebar-padding));
+}
+
 .manager-shell--sidebar-collapsed:is(:not(:has(.manager-sidebar:hover)), .manager-shell--sidebar-hover-suppressed):not(.manager-shell--sidebar-overlay-open) .manager-open-tab-content {
   flex: 1 1 auto !important;
   justify-content: flex-start;
   gap: 0 !important;
-  padding-inline: 9px !important;
+  padding-inline: var(--manager-open-tab-leading-offset) !important;
+}
+
+.manager-shell--sidebar-collapsed:is(:not(:has(.manager-sidebar:hover)), .manager-shell--sidebar-hover-suppressed):not(.manager-shell--sidebar-overlay-open) .manager-open-tabs-window-bar {
+  padding-inline: 0;
 }
 
 .manager-shell--sidebar-collapsed:is(:not(:has(.manager-sidebar:hover)), .manager-shell--sidebar-hover-suppressed):not(.manager-shell--sidebar-overlay-open) .manager-window-switcher {
-  flex: 0 0 48px;
+  width: 100%;
+  flex: 0 0 100%;
+  justify-content: center;
   overflow: hidden;
 }
 
