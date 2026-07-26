@@ -690,7 +690,7 @@
 - `npm run check:architecture` runs Node tests, then the real repository scan.
 - `npm run check` invokes `check:architecture` after build/extension/cycle checks.
 
-- [ ] **Step 1: 写 checker CLI RED**
+- [x] **Step 1: 写 checker CLI RED**
 
   Node test fixture分别构造：
 
@@ -700,7 +700,7 @@
   4. core owner引用 `window` / `sessionStorage` 或 import React/Zustand/store → fail；
   5. clean fixture，且同样 strings 只在 test file → pass。
 
-- [ ] **Step 2: 运行 checker RED**
+- [x] **Step 2: 运行 checker RED**
 
   Run:
 
@@ -710,7 +710,7 @@
 
   Expected: FAIL because checker does not exist.
 
-- [ ] **Step 3: 实现 checker**
+- [x] **Step 3: 实现 checker**
 
   用 Node built-ins recursively读取：
 
@@ -720,7 +720,7 @@
 
   不用 brittle AST dependency；import direction仍由已有 graph checker负责。
 
-- [ ] **Step 4: 接入 package scripts**
+- [x] **Step 4: 接入 package scripts**
 
   新增：
 
@@ -740,7 +740,7 @@
   --deny-imports src/manager/core/searchQueryStore.ts,react,zustand,src/shared/store
   ```
 
-- [ ] **Step 5: 运行 GREEN**
+- [x] **Step 5: 运行 GREEN**
 
   Run:
 
@@ -752,7 +752,7 @@
 
   Expected: PASS，source graph仍为零 cycle / 零 forbidden edge。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   ```bash
   git add scripts/check-search-architecture.mjs \
