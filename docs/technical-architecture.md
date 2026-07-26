@@ -100,9 +100,10 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 
 - `main.tsx` 挂载 React app；`ManagerApp.tsx` 组合 Mantine shell、store hydration、runtime hooks 和 overlays。
 - components 渲染 workspace/category topbar、可折叠 sidebar、selected-window Open Tabs、horizontal active-category board、session cards、modals 和 feedback。
-- core modules 提供 selectors、capture snapshot ownership、open-tabs policy、commands、typed DnD、overlay/focus contracts；这些模块可在无 Chrome DOM 的测试中执行。
+- `src/shared/openTabs.ts` 是 Open Tabs 跨 runtime protocol owner；background、preview、Manager 与 persistence 使用同一 tab/window/list/capture result contract。
+- core modules 提供 selectors、capture snapshot ownership、Open Tabs workflow reducer/projection、commands、typed DnD、overlay/focus contracts；这些模块可在无 Chrome DOM 的测试中执行。
 - DnD 不复用未类型化 payload；resolver 先校验 workspace/ownership/URL/locked/index 边界，session body 不产生 merge intent。
-- capture 使用 selection snapshot 与 pending guard；反馈由 committed/reconciled outcome 决定，避免 stale response 清空新 selection 或错误 reveal。
+- `ManagerLayout` 持有一个 Open Tabs workflow；`Sidebar` / `OpenTabsPanel` 只消费 grouped `model/commands`。capture 使用 selection snapshot 与 pending guard并直接返回 completion evidence；persisted Open Tabs drop 直接调用 `completeDrop()`，不使用全局 DOM event。
 
 ### 图标
 
@@ -384,16 +385,16 @@ File backend 的初始化、读取、写入或 `reloadFromDisk()` 抛出错误�
 
 流程：
 
-1. Manager 调用 runtime message `list-open-tabs`。
+1. `ManagerLayout` 创建一个 `useOpenTabsRuntime()` workflow，并把它传给 Sidebar；workflow 的 React adapter 调用 runtime message `list-open-tabs`。
 2. Background 使用 `chrome.windows.getAll({ populate: true })`，先按当前 extension base URL 排除 TabBoard 自身 manager、popup、options 等页面，再为 window 返回过滤后可见 rows 的 `tabCount`。
 3. `getCaptureCandidateReason()` 使用 shared capture policy 判定其余 tab 是否 storable；命中 `customUrlFilter` 的 rows 不返回，没有 usable URL 的 rows 被拒绝。
-4. Manager 用 Mantine `Select` 展示 window ordinal 和 tab count；Chrome raw window ID 只作为 option value 使用，不显示给用户。一次只渲染 selected window 的 Open Tabs body。
-5. Selected window 先用 sidebar `TextInput` query 过滤，再用 `sortOpenTabs()` 按 Chrome `tab.index` 排成单一纵向列表；pinned row 与普通 row 同处列表，并显示 inline badge/reason。
+4. `openTabsWorkflow.ts` reducer 原子应用 windows、selected window 与 selection pruning；projection 一次派生 filtered rows、selected records 和 selected record IDs。
+5. Manager 用 compact window selector 展示 window ordinal 和 tab count；Chrome raw window ID 只作为 option value 使用，不显示给用户。一次只渲染 selected window 的 Open Tabs body。Selected window 先用 sidebar `TextInput` query 过滤，再按 Chrome `tab.index` 排成单一纵向列表；pinned row 与普通 row 同处列表，并显示 inline badge/reason。
 6. Selected window 可保存、从 More 清理重复 tabs、进入 select mode；已显示的普通 URL、pinned、Chrome 和 file rows 均可选择、拖拽和保存。
 7. Select mode controls 位于 64px header rail 内，不改变 header 高度或移动 tab 列表；selected count 以 numeric badge 呈现并保留 aria-live 文本。
-8. Selected capture 在请求前快照 selected tab ids、window、workspace 和 select mode，并以 pending guard 防止重复提交；返回后仅在 snapshot 与当前选择一致时清空，避免覆盖用户在请求期间的新选择。
+8. Selected capture 在请求前快照 selected tab ids、window、workspace 和 select mode，并以 pending guard 防止重复提交；返回 `CaptureCompletion` 后仅在 snapshot 与当前选择一致时清空。ManagerLayout 直接消费 completion 做 toast/reveal，不经过 window event。
 9. `chrome.storage.onChanged` 直接恢复正常 manager render。
-10. Open Tabs refresh 不清空当前 `windows` state，也不渲染 loading row；`loading` 只驱动顶部 Refresh icon 的旋转/`aria-busy` 状态，请求成功后一次替换 rows，请求失败则保留旧列表并显示错误。
+10. Open Tabs refresh 不清空当前 `windows` state，也不渲染 loading row；`loading` 只驱动顶部 Refresh icon 的旋转/`aria-busy` 状态。并发 refresh 保持一个 active run + 一个 queued rerun，请求成功后 reducer 一次替换 rows，请求失败则保留旧列表并显示错误。
 11. Shared preview portal 的 layout measurement 只在 `position === null` 时提交一次定位 state；后续 commits 仍检查 trigger 是否已脱离 DOM，但不得重复派发同一 preview 的 position。Saved-link activation 会停止冒泡并先关闭 preview，避免 document-level preview click handler 在同一事件末尾将其重新打开。Window blur / document hidden 会关闭 overlay 并暂时抑制 CSS hover/focus disclosure；只有后续真实 pointer/keyboard interaction 才解除，避免 Chrome 返回前台时复用失焦前的 stale hover target。
 
 ### Manager 启动与降级
@@ -566,7 +567,7 @@ manager.html
 
 `WorkspaceContent` 一次渲染当前 active category 的全部 session card（横向 track），不做 JS 虚拟化，以保持 `@dnd-kit` 的 collision/measurement、浏览器 find-in-page 与 `scrollIntoView` 正常工作。为控制成本，`.session-board__group-slot` 使用 CSS `content-visibility: auto` + `contain-intrinsic-size`：滚出视口的 session slot 跳过 layout/paint，但仍留在 DOM 中，可被拖拽 measurement、搜索定位和滚动命中。该行为由 `src/manager/core/layout.test.ts` 的 CSS 契约和 `tests/e2e/large-board.e2e.ts`（60 sessions 全部在 DOM、远端 card 可滚动可见）守护。若单 category 达到数百 session 仍出现压力，再评估引入真正的虚拟列表及其与 `@dnd-kit` 的兼容性。
 
-Open Tabs 同样保留全部 rows 与每行的 DnD/focus/preview hooks。`useOpenTabsRuntime()` 用 `useDeferredValue` 延后 query 对长列表的派生，`.manager-open-tab-row` 使用 `content-visibility: auto` 与 intrinsic size 跳过 off-screen layout/paint。Overlay provider 的 document/window listeners 在生命周期内只绑定一次；commands 与 menu/preview observable state 分离，普通 row/card 只订阅自身 key 的 open boolean。
+Open Tabs 同样保留全部 rows 与每行的 DnD/focus/preview hooks。`useOpenTabsRuntime()` 用 `useDeferredValue` 延后 query，`openTabsWorkflow.ts` projection 统一派生 filtered rows 与 selection drag records；`.manager-open-tab-row` 使用 `content-visibility: auto` 与 intrinsic size 跳过 off-screen layout/paint。Overlay provider 的 document/window listeners 在生命周期内只绑定一次；commands 与 menu/preview observable state 分离，普通 row/card 只订阅自身 key 的 open boolean。
 
 ## Search
 

@@ -1,7 +1,7 @@
 # Open Tabs Workflow Deepening Design
 
 **Date:** 2026-07-26
-**Status:** Approved for implementation
+**Status:** Implemented and verified
 **Scope:** Give Open Tabs listing, selection, refresh, capture completion, filtering, and drag completion one workflow owner with a compact interface.
 
 ## Problem

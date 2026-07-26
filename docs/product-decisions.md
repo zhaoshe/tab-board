@@ -988,6 +988,12 @@ Status:
 
 Accepted。
 
+Implementation note（2026-07-26）：
+
+- Open Tabs protocol 由 `src/shared/openTabs.ts` 统一拥有；selection/refresh/filter status 由 pure workflow reducer 统一拥有。
+- Panel 消费 grouped model/commands 与单一 selection projection，不再重复派生 records/IDs。
+- Capture、drop 和 tab-filter ownership 使用直接返回值/command/model，删除三条全局 DOM event。
+
 ## Decision template
 
 ```md

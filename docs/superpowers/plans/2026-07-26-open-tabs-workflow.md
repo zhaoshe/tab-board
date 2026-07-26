@@ -114,8 +114,16 @@
 - Modify: `docs/superpowers/specs/2026-07-26-open-tabs-workflow-design.md`
 - Modify: `docs/superpowers/plans/2026-07-26-open-tabs-workflow.md`
 
-- [ ] Add current architecture documentation and a decision implementation note.
-- [ ] Add source contract tests that forbid `tabboard-open-tabs-dropped`, `tabboard-capture-completed`, and `tabboard-tab-filter-change`.
-- [ ] Run `npm run check`, `npm test`, and `git diff --check`.
-- [ ] Review the full diff and resolve all Critical/Important findings.
-- [ ] Record fresh verification evidence and commit.
+- [x] Add current architecture documentation and a decision implementation note.
+- [x] Add source contract tests that forbid `tabboard-open-tabs-dropped`, `tabboard-capture-completed`, and `tabboard-tab-filter-change`.
+- [x] Run `npm run check`, `npm test`, and `git diff --check`.
+- [x] Review the full diff and resolve all Critical/Important findings.
+- [x] Record fresh verification evidence and commit.
+
+## Verification Record
+
+- `npm run check`: PASS, including production build, extension sanity, and storage cycle gate.
+- `npm test`: PASS, 43 test files and 808 tests.
+- `git diff --check`: PASS.
+- Local review found and fixed mixed capture snapshot ownership; capture now reads selected IDs and selected window ID from one canonical workflow projection.
+- Static import graph: Open Tabs ownership left the cycle; remaining cycle is limited to Session move domain ownership and is scheduled for the later round.

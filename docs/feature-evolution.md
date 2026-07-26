@@ -21,6 +21,21 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-07-26: Open Tabs Workflow 深化
+
+Open Tabs 的 runtime contract、selection、refresh、capture feedback、tab filter 和 drag completion 原本分散在 worker、hook、Panel、ManagerLayout 与多个全局 DOM events 中；小规则改动往往需要同步修改 4–5 个模块。
+
+变化：
+
+- `src/shared/openTabs.ts` 成为 Open Tabs runtime protocol owner，统一 `OpenTabInfo`、window/list/capture/result contracts；background、preview、Manager 和 persistence 不再各自定义类型。
+- `openTabsWorkflow.ts` 用纯 reducer 统一 windows、selected window、selection、query、tab-filter 和 operation status，并一次投影 selected records/IDs。
+- `useOpenTabsRuntime()` 只负责 Chrome listeners、runtime messages 与 persisted-state reconciliation，对外暴露 grouped `model/commands`。
+- `OpenTabsPanel` 直接消费 workflow projection，不再重新扫描 selected window 派生 drag records。
+- `ManagerLayout` 持有 workflow；capture completion 通过返回值处理，drop completion 直接调用 command，tab filter 直接读 model。
+- 删除 `tabboard-open-tabs-dropped`、`tabboard-capture-completed`、`tabboard-tab-filter-change` 三条全局 DOM event seam。
+
+当前状态：Current。
+
 ### 2026-07-26: Storage Authority 深化与运行时自动降级
 
 本地文件存储已经有 Chrome/File 两个真实 adapters，但 backend 选择、订阅、ping、迁移和 fallback 分散在多个 callers；其中运行时文件读写失败只会抛错，未兑现 D037 的自动降级承诺。
