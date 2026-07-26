@@ -1,8 +1,20 @@
-import { isStorableCaptureCandidate, type Group, type TabBoardState } from '../../shared/model';
+import { isStorableCaptureCandidate } from '../../shared/model/capture-policy';
+import {
+  categoryForGroup,
+  categoryOrder,
+  groupsForCategory,
+  isOwnedCategory,
+  isOwnedCategoryId,
+  reorderCategoryIds,
+  type CategoryFilter,
+} from '../../shared/model/categories';
+import type {
+  DropIntent,
+  SavedTabRef,
+} from '../../shared/model/drop-intent';
+import type { Group, TabBoardState } from '../../shared/model/types';
 import type { OpenTabInfo } from '../../shared/openTabs';
-import type { CategoryFilter } from './selectors';
-
-export type SavedTabRef = { groupId: string; tabId: string };
+export type { DropIntent, SavedTabRef } from '../../shared/model/drop-intent';
 
 export type DragPayload =
   | { kind: 'group'; groupId: string; workspaceId: string }
@@ -108,46 +120,6 @@ export interface DndData {
   records?: OpenTabInfo[];
 }
 
-export type DropIntent =
-  | {
-      kind: 'move-session';
-      groupId: string;
-      category: CategoryFilter;
-      index: number;
-      workspaceId: string;
-    }
-  | {
-      kind: 'reorder-category';
-      categoryId: string;
-      targetCategoryId: string;
-      placement: 'before' | 'after';
-      workspaceId: string;
-    }
-  | {
-      kind: 'move-tabs';
-      refs: SavedTabRef[];
-      targetGroupId: string;
-      targetIndex: number;
-      workspaceId: string;
-    }
-  | {
-      kind: 'copy-open-tabs';
-      tabIds: number[];
-      windowId: number;
-      targetGroupId: string;
-      targetIndex: number;
-      workspaceId: string;
-    }
-  | {
-      kind: 'create-session';
-      source:
-        | { kind: 'saved-tabs'; refs: SavedTabRef[] }
-        | { kind: 'open-tabs'; tabIds: number[]; windowId: number };
-      category: CategoryFilter;
-      index: number;
-      workspaceId: string;
-    };
-
 export interface ResolveDropInput {
   payload: DragPayload;
   target: DropTarget;
@@ -171,8 +143,6 @@ export function isDragSourceStillRendered(
   return payload.refs.length > 0 && payload.refs.every((ref) => groups.some((group) => group.id === ref.groupId
     && group.tabs.some((tab) => tab.id === ref.tabId)));
 }
-
-const BUILT_IN_CATEGORIES: readonly CategoryFilter[] = ['inbox', 'saved', 'archive'];
 
 export function resolveDrop({
   payload,
@@ -265,7 +235,12 @@ function resolveCategoryDrop(
   if (!order.includes(payload.categoryId) || !order.includes(target.categoryId)) {
     return null;
   }
-  const nextOrder = reorderCategoryOrder(order, payload.categoryId, target.categoryId, target.placement);
+  const nextOrder = reorderCategoryIds(
+    order,
+    payload.categoryId,
+    target.categoryId,
+    target.placement,
+  );
   if (nextOrder.length === order.length && nextOrder.every((id, index) => id === order[index])) {
     return null;
   }
@@ -444,79 +419,6 @@ function getOwnedTab(
 ): { group: Group; tabId: string } | null {
   const group = getOwnedGroup(state, ref.groupId, workspaceId);
   return group?.tabs.some((tab) => tab.id === ref.tabId) ? { group, tabId: ref.tabId } : null;
-}
-
-function categoryForGroup(state: TabBoardState, group: Group): CategoryFilter {
-  if (group.starred) {
-    return 'saved';
-  }
-  if (group.archived) {
-    return 'archive';
-  }
-  if (group.folderId && state.folders.some((folder) => folder.id === group.folderId && folder.workspaceId === group.workspaceId)) {
-    return `folder:${group.folderId}`;
-  }
-  return 'inbox';
-}
-
-function groupsForCategory(state: TabBoardState, category: CategoryFilter, workspaceId: string): Group[] {
-  return state.groups.filter((group) => group.workspaceId === workspaceId && categoryForGroup(state, group) === category);
-}
-
-function isOwnedCategory(state: TabBoardState, category: CategoryFilter, workspaceId: string): boolean {
-  if (typeof category !== 'string') {
-    return false;
-  }
-  if (category === 'inbox' || category === 'saved' || category === 'archive') {
-    return true;
-  }
-  if (!category.startsWith('folder:')) {
-    return false;
-  }
-  const folderId = category.slice('folder:'.length);
-  return folderId.length > 0 && state.folders.some((folder) => folder.id === folderId && folder.workspaceId === workspaceId);
-}
-
-function isOwnedCategoryId(state: TabBoardState, categoryId: string, workspaceId: string): boolean {
-  return typeof categoryId === 'string'
-    && ((BUILT_IN_CATEGORIES as readonly string[]).includes(categoryId)
-      || (categoryId.startsWith('folder:') && isOwnedCategory(state, categoryId as CategoryFilter, workspaceId)));
-}
-
-function categoryOrder(state: TabBoardState, workspaceId: string): string[] {
-  const known = [
-    ...BUILT_IN_CATEGORIES,
-    ...state.folders.filter((folder) => folder.workspaceId === workspaceId).map((folder) => `folder:${folder.id}` as const),
-  ];
-  const knownSet = new Set<string>(known);
-  const folderIds = new Set(state.folders
-    .filter((folder) => folder.workspaceId === workspaceId)
-    .map((folder) => folder.id));
-  const saved = state.categoryOrderByWorkspace[workspaceId] ?? [];
-  const ordered = saved
-    .filter((id): id is string => typeof id === 'string')
-    .map((id) => id.startsWith('folder:') ? id : folderIds.has(id) ? `folder:${id}` : id)
-    .filter((id) => knownSet.has(id));
-  return [...new Set([...ordered, ...known])];
-}
-
-function reorderCategoryOrder(
-  order: string[],
-  sourceId: string,
-  targetId: string,
-  placement: 'before' | 'after',
-): string[] {
-  const withoutSource = order.filter((id) => id !== sourceId);
-  const targetIndex = withoutSource.indexOf(targetId);
-  if (targetIndex < 0) {
-    return order;
-  }
-  const insertionIndex = placement === 'after' ? targetIndex + 1 : targetIndex;
-  return [
-    ...withoutSource.slice(0, insertionIndex),
-    sourceId,
-    ...withoutSource.slice(insertionIndex),
-  ];
 }
 
 function normalizeSavedRefs(refs: Array<SavedTabRef>): SavedTabRef[] {

@@ -1,4 +1,4 @@
-import type { DropIntent, SavedTabRef } from '../../manager/core/dnd';
+import type { DropIntent, SavedTabRef } from '../model/drop-intent';
 import type { OpenTabInfo } from '../openTabs';
 import {
   canonicalJson,

@@ -1,5 +1,5 @@
-import type { TabBoardState } from '../../shared/model';
-import type { CategoryFilter } from './selectors';
+import type { CategoryFilter } from '../../shared/model/categories';
+import type { TabBoardState } from '../../shared/model/types';
 
 export type OpenTabsCaptureSnapshot = {
   selectedTabIds: number[];

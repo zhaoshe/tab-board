@@ -12,8 +12,24 @@ import {
   parseOneTabText,
 } from '../../shared/model';
 import type { OpenTabInfo } from '../../shared/openTabs';
-import type { DropIntent, SavedTabRef } from './dnd';
-import type { CategoryFilter } from './selectors';
+import {
+  categoryMatches,
+  categoryOrder,
+  insertGroupAtCategoryIndex,
+  isOwnedCategory,
+  isOwnedCategoryId,
+  moveSessionToCategory,
+  reorderCategoryIds,
+  type CategoryFilter,
+} from '../../shared/model/categories';
+import type {
+  DropIntent,
+  SavedTabRef,
+} from '../../shared/model/drop-intent';
+export {
+  moveSessionToCategory,
+  reorderCategoryIds,
+} from '../../shared/model/categories';
 import {
   canonicalJson,
   isDropIntentShape,
@@ -140,7 +156,7 @@ function matchesOpenTabGroup(
   operationId: string,
 ): boolean {
   if (group.workspaceId !== intent.workspaceId
-    || !categoryMatches(group, intent.category)
+    || !categoryMatches(state, group, intent.category)
     || group.note !== ''
     || group.collapsed) return false;
   if (intent.source.kind === 'saved-tabs') {
@@ -267,8 +283,8 @@ export function isDropIntentAlreadyApplied(
       const source = getOwnedGroup(state, intent.groupId, intent.workspaceId);
       if (!source || !isOwnedCategory(state, intent.category, intent.workspaceId)) return false;
       const categoryGroups = state.groups.filter((group) => group.workspaceId === intent.workspaceId
-        && categoryMatches(group, intent.category));
-      return categoryMatches(source, intent.category)
+        && categoryMatches(state, group, intent.category));
+      return categoryMatches(state, source, intent.category)
         && categoryGroups.findIndex((group) => group.id === source.id) === intent.index;
     }
     case 'reorder-category': {
@@ -320,128 +336,6 @@ function isMoveTabsAlreadyApplied(
     && expected.every((id, index) => id === target.tabs[index]?.id);
 }
 
-function categoryMatches(group: Group, category: CategoryFilter): boolean {
-  if (category === 'saved') {
-    return group.starred;
-  }
-  if (category === 'archive') {
-    return group.archived;
-  }
-  if (category === 'inbox') {
-    return !group.starred && !group.archived && group.folderId === null;
-  }
-  return !group.starred && !group.archived && group.folderId === category.slice('folder:'.length);
-}
-
-function categoryForMove(
-  state: TabBoardState,
-  group: Group,
-  category: CategoryFilter,
-): Pick<Group, 'folderId' | 'starred' | 'archived'> {
-  if (category === 'saved') {
-    return { folderId: null, starred: true, archived: false };
-  }
-  if (category === 'archive') {
-    return { folderId: null, starred: false, archived: true };
-  }
-  if (category === 'inbox') {
-    return { folderId: null, starred: false, archived: false };
-  }
-
-  const folderId = category.slice('folder:'.length);
-  const folder = state.folders.find((item) => item.id === folderId);
-  if (!folder) {
-    throw new Error('Target category does not exist.');
-  }
-  if (folder.workspaceId !== group.workspaceId) {
-    throw new Error('Target category is outside the group workspace.');
-  }
-  return { folderId, starred: false, archived: false };
-}
-
-export function moveSessionToCategory(
-  state: TabBoardState,
-  input: { groupId: string; category: CategoryFilter; index: number },
-  updatedAt = nowIso(),
-): TabBoardState {
-  const group = state.groups.find((item) => item.id === input.groupId);
-  if (!group) {
-    throw new Error(`Group not found: ${input.groupId}.`);
-  }
-  if (!Number.isFinite(input.index)) {
-    throw new Error('Session index must be finite.');
-  }
-
-  const categoryState = categoryForMove(state, group, input.category);
-  const sourceIndex = state.groups.findIndex((item) => item.id === group.id);
-  const remainingGroups = state.groups.filter((item) => item.id !== group.id);
-  const categoryGroups = remainingGroups.filter(
-    (item) => item.workspaceId === group.workspaceId && categoryMatches(item, input.category),
-  );
-  const targetIndex = Math.max(0, Math.min(Math.trunc(input.index), categoryGroups.length));
-  const movedGroup: Group = {
-    ...group,
-    ...categoryState,
-    updatedAt,
-  };
-
-  let insertionIndex = remainingGroups.length;
-  if (categoryGroups.length > 0) {
-    const anchorId = categoryGroups[Math.min(targetIndex, categoryGroups.length - 1)].id;
-    insertionIndex = remainingGroups.findIndex((item) => item.id === anchorId);
-    if (targetIndex === categoryGroups.length) {
-      insertionIndex += 1;
-    }
-  } else {
-    const sourceWorkspaceIndexes = remainingGroups
-      .map((item, itemIndex) => item.workspaceId === group.workspaceId ? itemIndex : -1)
-      .filter((itemIndex) => itemIndex >= 0);
-    insertionIndex = sourceWorkspaceIndexes.length > 0
-      ? sourceWorkspaceIndexes.at(-1)! + 1
-      : Math.min(sourceIndex, remainingGroups.length);
-  }
-
-  return {
-    ...state,
-    groups: [
-      ...remainingGroups.slice(0, insertionIndex),
-      movedGroup,
-      ...remainingGroups.slice(insertionIndex),
-    ],
-    updatedAt: movedGroup.updatedAt,
-  };
-}
-
-export function reorderCategoryIds(
-  categoryOrder: string[],
-  sourceId: string,
-  targetId: string,
-  placement: 'before' | 'after',
-): string[] {
-  const current = [...categoryOrder];
-  if (
-    sourceId === targetId ||
-    !sourceId ||
-    !targetId ||
-    !current.includes(sourceId) ||
-    !current.includes(targetId)
-  ) {
-    return current;
-  }
-
-  const withoutSource = current.filter((id) => id !== sourceId);
-  const targetIndex = withoutSource.indexOf(targetId);
-  if (targetIndex < 0) {
-    return current;
-  }
-  const insertionIndex = placement === 'after' ? targetIndex + 1 : targetIndex;
-  return [
-    ...withoutSource.slice(0, insertionIndex),
-    sourceId,
-    ...withoutSource.slice(insertionIndex),
-  ];
-}
-
 function isValidDropIntent(
   state: TabBoardState,
   intent: DropIntent,
@@ -459,7 +353,7 @@ function isValidDropIntent(
       }
       const categoryGroups = state.groups.filter((group) => group.id !== source.id
         && group.workspaceId === intent.workspaceId
-        && categoryMatches(group, intent.category));
+        && categoryMatches(state, group, intent.category));
       return isValidInsertionIndex(intent.index, categoryGroups.length);
     }
     case 'reorder-category': {
@@ -493,7 +387,7 @@ function isValidDropIntent(
         || !isValidInsertionIndex(
           intent.index,
           state.groups.filter((group) => group.workspaceId === intent.workspaceId
-            && categoryMatches(group, intent.category)).length,
+            && categoryMatches(state, group, intent.category)).length,
         )) {
         return false;
       }
@@ -514,22 +408,6 @@ function isActiveWorkspace(state: TabBoardState, workspaceId: string): boolean {
 function getOwnedGroup(state: TabBoardState, groupId: string, workspaceId: string): Group | null {
   const group = state.groups.find((item) => item.id === groupId);
   return group?.workspaceId === workspaceId ? group : null;
-}
-
-function isOwnedCategory(state: TabBoardState, category: CategoryFilter, workspaceId: string): boolean {
-  if (category === 'inbox' || category === 'saved' || category === 'archive') {
-    return true;
-  }
-  if (typeof category !== 'string' || !category.startsWith('folder:')) {
-    return false;
-  }
-  const folderId = category.slice('folder:'.length);
-  return folderId.length > 0 && state.folders.some((folder) => folder.id === folderId && folder.workspaceId === workspaceId);
-}
-
-function isOwnedCategoryId(state: TabBoardState, categoryId: string, workspaceId: string): boolean {
-  return typeof categoryId === 'string'
-    && (categoryId === 'inbox' || categoryId === 'saved' || categoryId === 'archive' || isOwnedCategory(state, categoryId as CategoryFilter, workspaceId));
 }
 
 function isDenseArray(value: readonly unknown[]): boolean {
@@ -733,11 +611,9 @@ function createSessionFromSavedTabs(
     || Boolean(group.note));
   if (!tabs.length || tabs.length !== intent.source.refs.length) return state;
 
-  const categoryState = categoryForNewGroup(state, intent.workspaceId, intent.category);
   const created = {
     ...createGroupFromTabRecords(tabs, {
       workspaceId: intent.workspaceId,
-      ...categoryState,
     }),
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -749,7 +625,8 @@ function createSessionFromSavedTabs(
       .map((group) => group.id),
   );
   const originalCategoryGroups = state.groups.filter(
-    (group) => group.workspaceId === intent.workspaceId && categoryMatches(group, intent.category),
+    (group) => group.workspaceId === intent.workspaceId
+      && categoryMatches(state, group, intent.category),
   );
   const insertionIndex = Math.max(0, Math.trunc(intent.index) - originalCategoryGroups
     .slice(0, Math.max(0, Math.trunc(intent.index)))
@@ -821,7 +698,6 @@ function createSessionFromOpenTabs(
   const created = {
     ...createGroupFromTabRecords(tabs, {
       workspaceId: intent.workspaceId,
-      ...categoryForNewGroup(state, intent.workspaceId, intent.category),
     }),
     createdAt: updatedAt,
     updatedAt,
@@ -849,78 +725,6 @@ function getOpenTabRecords(
     seen.add(record.id);
   }
   return tabIds.map((tabId) => matching.find((record) => record.id === tabId)!).filter(Boolean);
-}
-
-function categoryForNewGroup(
-  state: TabBoardState,
-  workspaceId: string,
-  category: CategoryFilter,
-): Pick<Group, 'folderId' | 'starred' | 'archived'> {
-  const template = {
-    ...state.groups.find((group) => group.workspaceId === workspaceId) ?? {
-      id: '', title: '', note: '', workspaceId, folderId: null, locked: false, starred: false, archived: false,
-      collapsed: false, tabs: [], createdAt: '', updatedAt: '',
-    },
-    workspaceId,
-  };
-  return categoryForMove(state, template, category);
-}
-
-function insertGroupAtCategoryIndex(
-  state: TabBoardState,
-  group: Group,
-  category: CategoryFilter,
-  index: number,
-  fallbackIndex?: number,
-  updatedAt = nowIso(),
-): TabBoardState {
-  const categoryGroups = state.groups.filter(
-    (item) => item.workspaceId === group.workspaceId && categoryMatches(item, category),
-  );
-  const targetIndex = Math.max(0, Math.min(Math.trunc(index), categoryGroups.length));
-  let insertionIndex = state.groups.length;
-  if (categoryGroups.length) {
-    insertionIndex = targetIndex === categoryGroups.length
-      ? state.groups.findIndex((item) => item.id === categoryGroups.at(-1)?.id) + 1
-      : state.groups.findIndex((item) => item.id === categoryGroups[targetIndex].id);
-  } else {
-    const workspaceIndexes = state.groups
-      .map((item, itemIndex) => item.workspaceId === group.workspaceId ? itemIndex : -1)
-      .filter((itemIndex) => itemIndex >= 0);
-    insertionIndex = workspaceIndexes.length
-      ? workspaceIndexes.at(-1)! + 1
-      : Math.max(0, Math.min(fallbackIndex ?? state.groups.length, state.groups.length));
-  }
-  const timestamp = updatedAt;
-  const created = { ...group, updatedAt: timestamp };
-  return {
-    ...state,
-    groups: [
-      ...state.groups.slice(0, insertionIndex),
-      created,
-      ...state.groups.slice(insertionIndex),
-    ],
-    updatedAt: timestamp,
-  };
-}
-
-function categoryOrder(state: TabBoardState, workspaceId: string): string[] {
-  const known = [
-    'inbox',
-    'saved',
-    'archive',
-    ...state.folders.filter((folder) => folder.workspaceId === workspaceId).map((folder) => `folder:${folder.id}`),
-  ];
-  const knownSet = new Set(known);
-  const folderIds = new Set(state.folders
-    .filter((folder) => folder.workspaceId === workspaceId)
-    .map((folder) => folder.id));
-  const saved = state.categoryOrderByWorkspace[workspaceId] ?? [];
-  const normalized = saved
-    .filter((id): id is string => typeof id === 'string')
-    .map((id) => id.startsWith('folder:') ? id : folderIds.has(id) ? `folder:${id}` : id)
-    .filter((id) => knownSet.has(id));
-  return [...new Set([...normalized, ...known])];
 }
 
 export function restoreGroupFromBin(

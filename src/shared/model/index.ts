@@ -34,3 +34,5 @@ export type { FindTabRefResult } from './schema';
 export * from './search';
 export * from './import-export';
 export * from './capture-policy';
+export * from './categories';
+export * from './drop-intent';

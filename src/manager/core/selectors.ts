@@ -1,7 +1,10 @@
 import { groupMatchesQuery, normalizeSearch } from '../../shared/model/search';
-import type { Folder, Group, TabBoardState } from '../../shared/model';
-
-export type CategoryFilter = 'inbox' | 'saved' | 'archive' | `folder:${string}`;
+import {
+  categoryForGroup,
+  type CategoryFilter,
+} from '../../shared/model/categories';
+import type { Folder, Group, TabBoardState } from '../../shared/model/types';
+export type { CategoryFilter } from '../../shared/model/categories';
 
 export type CategoryStripItem = {
   id: CategoryFilter;
@@ -40,10 +43,14 @@ export function getCategoryStrip(state: CategoryStripState): CategoryStripItem[]
   }
 
   const inboxCount = workspaceGroups.filter(
-    (group) => !group.starred && !group.archived && !isValidFolder(group.folderId, folderById),
+    (group) => categoryForGroup(state, group) === 'inbox',
   ).length;
-  const savedCount = workspaceGroups.filter((group) => group.starred).length;
-  const archiveCount = workspaceGroups.filter((group) => group.archived).length;
+  const savedCount = workspaceGroups.filter(
+    (group) => categoryForGroup(state, group) === 'saved',
+  ).length;
+  const archiveCount = workspaceGroups.filter(
+    (group) => categoryForGroup(state, group) === 'archive',
+  ).length;
 
   return [
     { id: 'inbox', label: 'Inbox', count: inboxCount, kind: 'inbox' },
@@ -53,7 +60,7 @@ export function getCategoryStrip(state: CategoryStripState): CategoryStripItem[]
       id: `folder:${folder.id}` as const,
       label: folder.name,
       count: workspaceGroups.filter(
-        (group) => !group.starred && !group.archived && group.folderId === folder.id,
+        (group) => categoryForGroup(state, group) === `folder:${folder.id}`,
       ).length,
       kind: 'folder' as const,
       folderId: folder.id,
@@ -79,29 +86,13 @@ export function getVisibleGroups(
   query: string,
 ): Group[] {
   const { workspaceId, folders } = getActiveWorkspaceState(state);
-  const folderById = new Map(folders.map((folder) => [folder.id, folder]));
   const projected = state.groups.filter((group) => {
-    if (group.workspaceId !== workspaceId) {
-      return false;
-    }
-    if (filter === 'saved') {
-      return group.starred;
-    }
-    if (filter === 'archive') {
-      return group.archived;
-    }
-    if (filter === 'inbox') {
-      return !group.starred && !group.archived && !isValidFolder(group.folderId, folderById);
-    }
-    return !group.starred && !group.archived && group.folderId === filter.slice('folder:'.length) && isValidFolder(group.folderId, folderById);
+    return group.workspaceId === workspaceId
+      && categoryForGroup(state, group) === filter;
   });
 
   const normalizedQuery = normalizeSearch(query);
   return normalizedQuery
     ? projected.filter((group) => groupMatchesQuery(group, normalizedQuery))
     : projected;
-}
-
-function isValidFolder(folderId: string | null, folderById: Map<string, Folder>): boolean {
-  return Boolean(folderId && folderById.has(folderId));
 }

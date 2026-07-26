@@ -22,10 +22,12 @@ import {
   getDropOperationDigest,
   getDropIntentReplayStatus,
   isDropIntentAlreadyApplied,
-  moveSessionToCategory,
 } from '../../manager/core/commands';
-import type { CategoryFilter } from '../../manager/core/selectors';
-import type { DropIntent } from '../../manager/core/dnd';
+import {
+  moveSessionToCategory,
+  type CategoryFilter,
+} from '../model/categories';
+import type { DropIntent } from '../model/drop-intent';
 import type { OpenTabInfo } from '../openTabs';
 import {
   isBoundedString,
