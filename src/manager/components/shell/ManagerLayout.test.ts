@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, createElement, useState, type ReactNode } from 'react';
+import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -92,9 +92,11 @@ vi.mock('../sessions/SessionCard', () => ({ SessionCard: () => null }));
 vi.mock('../sessions/TabItemRow', () => ({ TabItemRow: () => null }));
 vi.mock('../workspace/WorkspaceHeader', () => ({ WorkspaceHeader: () => null }));
 
-vi.mock('../../hooks/useFilteredGroups', () => ({
-  useCurrentWorkspace: () => ({ id: 'workspace_default', name: 'Workspace' }),
+vi.mock('../../hooks/useBoardProjection', () => ({
   useFilteredGroups: () => [],
+}));
+vi.mock('../../hooks/useWorkspaceState', () => ({
+  useCurrentWorkspace: () => ({ id: 'workspace_default', name: 'Workspace' }),
 }));
 vi.mock('../../hooks/useSearchQuery', () => ({
   savedSearchQueryStore: {
@@ -246,35 +248,6 @@ describe('tooltip dismissal', () => {
     expect(source).toContain("document.querySelectorAll<HTMLElement>('[aria-describedby]')");
     expect(source).toContain("new MouseEvent('mouseout'");
     expect(source).toContain("document.addEventListener('pointerdown', dismiss, true)");
-  });
-});
-
-describe('visible group memoization', () => {
-  it('returns the same groups reference when stable inputs survive a rerender', async () => {
-    const { useFilteredGroups } = await vi.importActual<typeof import('../../hooks/useFilteredGroups')>(
-      '../../hooks/useFilteredGroups',
-    );
-    const observed = { current: null as ReturnType<typeof useFilteredGroups> | null };
-    const forceRender = { current: null as (() => void) | null };
-
-    function HookProbe() {
-      const [, setRenderCount] = useState(0);
-      forceRender.current = () => setRenderCount((count) => count + 1);
-      observed.current = useFilteredGroups('inbox');
-      return null;
-    }
-
-    root = createRoot(container!);
-    await act(async () => {
-      root?.render(createElement(HookProbe));
-    });
-    const firstGroups = observed.current;
-
-    await act(async () => {
-      forceRender.current?.();
-    });
-
-    expect(observed.current).toBe(firstGroups);
   });
 });
 

@@ -12,7 +12,7 @@ import {
 
 const source = readFileSync(resolve(process.cwd(), 'src/manager/components/workspace/WorkspaceHeader.tsx'), 'utf8');
 const searchSource = readFileSync(resolve(process.cwd(), 'src/manager/components/search/SearchBar.tsx'), 'utf8');
-const filteredGroupsSource = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useFilteredGroups.ts'), 'utf8');
+const boardProjectionSource = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useBoardProjection.ts'), 'utf8');
 const selectorsSource = readFileSync(resolve(process.cwd(), 'src/manager/core/selectors.ts'), 'utf8');
 
 describe('WorkspaceHeader source contracts', () => {
@@ -97,13 +97,14 @@ describe('WorkspaceHeader source contracts', () => {
 
   it('uses concrete shallow store selectors and an exact category projection', () => {
     const selectorPattern = /useTabBoardStore\(\s*useShallow\(\(currentState\) => \(\{/;
-    const memoizedSelectorPattern = /useTabBoardStore\(\s*useShallow\(\s*selectVisibleGroupsState\s*\)\s*\)/;
+    const memoizedSelectorPattern = /useTabBoardStore\(\s*useShallow\(\s*selectBoardState\s*\)\s*\)/;
     expect(source).toMatch(selectorPattern);
-    expect(searchSource).toMatch(selectorPattern);
-    expect(filteredGroupsSource).toMatch(memoizedSelectorPattern);
-    expect(filteredGroupsSource).toContain('const selectVisibleGroupsState = useMemo(createVisibleGroupsSelector, []);');
+    expect(searchSource).not.toContain('useTabBoardStore');
+    expect(searchSource).toContain('useBoardProjection(category)');
+    expect(boardProjectionSource).toMatch(memoizedSelectorPattern);
+    expect(boardProjectionSource).toContain('const selectBoardState = useMemo(createBoardStateSelector, []);');
     expect(source).not.toMatch(/useTabBoardStore\(\s*\)/);
-    expect(filteredGroupsSource).not.toMatch(/useTabBoardStore\(\s*\)/);
+    expect(boardProjectionSource).not.toMatch(/useTabBoardStore\(\s*\)/);
 
     expect(selectorsSource).toMatch(/export type CategoryStripState = Pick<\s*TabBoardState,\s*'activeWorkspaceId'\s*\|\s*'workspaces'\s*\|\s*'folders'\s*\|\s*'groups'\s*\|\s*'categoryOrderByWorkspace'\s*>;/);
     expect(selectorsSource).toContain('getCategoryStrip(state: CategoryStripState)');

@@ -473,7 +473,7 @@
 - `useFilteredGroups()` is a no-rule compatibility wrapper.
 - Unused `useWorkspaceFolders()` and `useWorkspaceStats()` are removed rather than moved.
 
-- [ ] **Step 1: 写 board hook RED**
+- [x] **Step 1: 写 board hook RED**
 
   创建 happy-dom test，挂载 hook probe。覆盖：
 
@@ -482,7 +482,7 @@
   - query store change 更新 `visibleGroups`，但 canonical `categoryGroups` 保持来自
     same Zustand state/category。
 
-- [ ] **Step 2: 运行 hook RED**
+- [x] **Step 2: 运行 hook RED**
 
   Run:
 
@@ -492,7 +492,7 @@
 
   Expected: FAIL because hook module does not exist.
 
-- [ ] **Step 3: 实现 board/workspace hooks**
+- [x] **Step 3: 实现 board/workspace hooks**
 
   从旧 `useFilteredGroups.ts` 迁移并重命名 memoized active-workspace selector。
   `useBoardProjection()`：
@@ -509,7 +509,7 @@
 
   将仅有 consumer 的 `useCurrentWorkspace()` 移到 `useWorkspaceState.ts`。
 
-- [ ] **Step 4: 写 SearchBar canonical count RED**
+- [x] **Step 4: 写 SearchBar canonical count RED**
 
   扩展 Task 2 的 happy-dom test，mock `useBoardProjection()` 返回 canonical
   groups。输入 local query后，在 debounce前断言 badge已经使用
@@ -522,14 +522,14 @@
   expect(savedSearchQueryStore.getSnapshot()).toBe('');
   ```
 
-- [ ] **Step 5: 迁移 SearchBar**
+- [x] **Step 5: 迁移 SearchBar**
 
   - `categoryGroups` 从 `useBoardProjection(category)` 取得；
   - match count 使用 `filterGroupsByQuery(categoryGroups, localValue)`；
   - 删除 `useTabBoardStore` / `useShallow`；
   - 保留 Task 2 已验证的 external query sync、150 ms timer和 immediate clear/close。
 
-- [ ] **Step 6: 迁移 ManagerLayout**
+- [x] **Step 6: 迁移 ManagerLayout**
 
   - `useFilteredGroups` 从 `useBoardProjection.ts` import；
   - `useCurrentWorkspace` 从 `useWorkspaceState.ts` import；
@@ -538,13 +538,13 @@
   - 将既有 visible-group stable-reference test迁到 board hook direct test，避免 shell
     test拥有 hook内部实现契约。
 
-- [ ] **Step 7: 更新 header source contract**
+- [x] **Step 7: 更新 header source contract**
 
   `WorkspaceHeader.test.ts` 不再读取旧 `useFilteredGroups.ts`；改为读取
   `useBoardProjection.ts` 并断言 memoized concrete selector，以及 SearchBar 不再
   direct subscribe完整 Zustand state。
 
-- [ ] **Step 8: 运行 GREEN**
+- [x] **Step 8: 运行 GREEN**
 
   Run:
 
@@ -558,7 +558,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
   ```bash
   git add src/manager/hooks/useBoardProjection.ts \

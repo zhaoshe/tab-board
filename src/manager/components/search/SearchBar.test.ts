@@ -10,6 +10,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { savedSearchQueryStore } from '../../hooks/useSearchQuery';
 import { SearchBar } from './SearchBar';
 
+const testHarness = vi.hoisted(() => ({
+  categoryGroups: [] as Array<{
+    id: string;
+    title: string;
+    note: string;
+    workspaceId: string;
+    folderId: string | null;
+    locked: boolean;
+    starred: boolean;
+    archived: boolean;
+    collapsed: boolean;
+    tabs: never[];
+    createdAt: string;
+    updatedAt: string;
+  }>,
+}));
+
 type NativeProps = {
   children?: ReactNode;
   leftSection?: ReactNode;
@@ -50,18 +67,19 @@ vi.mock('@tabler/icons-react', () => {
   };
 });
 
-vi.mock('../../../shared/store/useTabBoardStore', () => ({
-  useTabBoardStore: (selector: (state: {
-    activeWorkspaceId: string;
-    workspaces: { id: string }[];
-    folders: never[];
-    groups: never[];
-  }) => unknown) => selector({
-    activeWorkspaceId: 'workspace',
-    workspaces: [{ id: 'workspace' }],
-    folders: [],
-    groups: [],
+vi.mock('../../hooks/useBoardProjection', () => ({
+  useBoardProjection: () => ({
+    workspaceId: 'workspace',
+    categoryGroups: testHarness.categoryGroups,
+    visibleGroups: testHarness.categoryGroups,
+    searchQuery: savedSearchQueryStore.getSnapshot(),
   }),
+}));
+
+vi.mock('../../../shared/store/useTabBoardStore', () => ({
+  useTabBoardStore: () => {
+    throw new Error('SearchBar must consume useBoardProjection.');
+  },
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -91,6 +109,33 @@ beforeEach(async () => {
   vi.useFakeTimers();
   sessionStorage.clear();
   savedSearchQueryStore.set('');
+  testHarness.categoryGroups = [{
+    id: 'matching',
+    title: 'Needle session',
+    note: '',
+    workspaceId: 'workspace',
+    folderId: null,
+    locked: false,
+    starred: false,
+    archived: false,
+    collapsed: false,
+    tabs: [],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  }, {
+    id: 'hidden',
+    title: 'Hidden session',
+    note: '',
+    workspaceId: 'workspace',
+    folderId: null,
+    locked: false,
+    starred: false,
+    archived: false,
+    collapsed: false,
+    tabs: [],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  }];
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -111,6 +156,13 @@ afterEach(async () => {
 });
 
 describe('SearchBar query lifecycle', () => {
+  it('counts canonical category matches immediately before query debounce', async () => {
+    await changeInput('needle');
+
+    expect(container?.textContent).toContain('1 result');
+    expect(savedSearchQueryStore.getSnapshot()).toBe('');
+  });
+
   it('publishes user input only after the 150 ms debounce', async () => {
     await changeInput('local');
 

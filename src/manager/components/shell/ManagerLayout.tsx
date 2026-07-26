@@ -23,14 +23,12 @@ import { ImportModal } from '../import-export/ImportModal';
 import { ExportModal } from '../import-export/ExportModal';
 import { WorkspaceContent } from '../workspace/WorkspaceContent';
 import { BinView } from '../bin/BinView';
-import {
-  useCurrentWorkspace,
-  useFilteredGroups,
-} from '../../hooks/useFilteredGroups';
+import { useFilteredGroups } from '../../hooks/useBoardProjection';
 import {
   useSearchQuery,
   useSetSearchQuery,
 } from '../../hooks/useSearchQuery';
+import { useCurrentWorkspace } from '../../hooks/useWorkspaceState';
 import {
   useOpenTabsRuntime,
   type CaptureCompletion,

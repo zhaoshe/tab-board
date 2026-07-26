@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { useShallow } from 'zustand/react/shallow';
 import { TextInput, ActionIcon, Tooltip, Badge } from '@mantine/core';
 import { IconSearch, IconX, IconKeyboard } from '@tabler/icons-react';
+import { useBoardProjection } from '../../hooks/useBoardProjection';
 import { useSearchQuery, useSetSearchQuery } from '../../hooks/useSearchQuery';
-import { getVisibleGroups, type CategoryFilter } from '../../core/selectors';
-import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
+import { filterGroupsByQuery, type CategoryFilter } from '../../core/selectors';
 import { normalizeSearch } from '../../../shared/model';
 
 interface SearchBarProps {
@@ -20,18 +19,11 @@ export function SearchBar({ autoFocus = false, inputId, category = 'inbox', full
   const setQuery = useSetSearchQuery();
   const [localValue, setLocalValue] = useState(query);
   const inputRef = useRef<HTMLInputElement>(null);
-  const state = useTabBoardStore(
-    useShallow((currentState) => ({
-      activeWorkspaceId: currentState.activeWorkspaceId,
-      workspaces: currentState.workspaces,
-      folders: currentState.folders,
-      groups: currentState.groups,
-    })),
-  );
+  const { categoryGroups } = useBoardProjection(category);
 
   const normalized = normalizeSearch(localValue);
   const matchCount = normalized
-    ? getVisibleGroups(state, category, localValue).length
+    ? filterGroupsByQuery(categoryGroups, localValue).length
     : 0;
 
   useEffect(() => {
