@@ -4,7 +4,7 @@ import { IconArchive, IconFolder, IconSearch, IconStar } from '@tabler/icons-rea
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
 import { useShallow } from 'zustand/react/shallow';
-import { useFilteredGroups, useSearchQuery } from '../../hooks/useFilteredGroups';
+import { useBoardProjection } from '../../hooks/useBoardProjection';
 import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import type { CategoryFilter } from '../../core/selectors';
@@ -77,25 +77,20 @@ export function WorkspaceContent({
   dragMarker = null,
   sourceRect = null,
 }: WorkspaceContentProps) {
-  const groups = useFilteredGroups(category);
-  const searchQuery = useSearchQuery();
+  const {
+    workspaceId,
+    categoryGroups,
+    visibleGroups,
+    searchQuery,
+  } = useBoardProjection(category);
   const folderId = category.startsWith('folder:') ? category.slice('folder:'.length) : null;
-  const { activeWorkspaceId, groups: allGroups, currentFolder } = useTabBoardStore(
+  const { currentFolder } = useTabBoardStore(
     useShallow((state) => ({
-      activeWorkspaceId: state.activeWorkspaceId,
-      groups: state.groups,
       currentFolder: folderId
         ? state.folders.find((folder) => folder.id === folderId) ?? null
         : null,
     })),
   );
-  const categoryGroups = allGroups.filter((group) => {
-    if (group.workspaceId !== activeWorkspaceId) return false;
-    if (category === 'saved') return group.starred && !group.archived;
-    if (category === 'archive') return group.archived;
-    if (category === 'inbox') return !group.starred && !group.archived && group.folderId === null;
-    return !group.starred && !group.archived && group.folderId === folderId;
-  });
   const hasSearch = searchQuery.trim().length > 0;
 
   const getTitle = () => {
@@ -168,24 +163,24 @@ export function WorkspaceContent({
 
   return (
     <section className="manager-board" aria-label={`${workspaceName} ${getTitle()} sessions`} tabIndex={-1}>
-      {groups.length === 0 ? (
+      {visibleGroups.length === 0 ? (
         <div className="manager-board__empty-content">
           {getEmptyState()}
           <div className="session-board" tabIndex={-1}>
             <GroupInsertionTarget
-              id={`new-group-${activeWorkspaceId}-${category}`}
+              id={`new-group-${workspaceId}-${category}`}
               category={category}
               index={categoryGroups.length}
-              workspaceId={activeWorkspaceId}
+              workspaceId={workspaceId}
               isMarker={dragMarker?.kind === 'group' && dragMarker.index === categoryGroups.length}
               isEndTarget
             />
           </div>
         </div>
       ) : (
-        <SortableContext items={groups.map((group) => `group-${group.id}`)} strategy={rectSortingStrategy}>
+        <SortableContext items={visibleGroups.map((group) => `group-${group.id}`)} strategy={rectSortingStrategy}>
           <div className="session-board" tabIndex={-1}>
-            {groups.map((group) => {
+            {visibleGroups.map((group) => {
               const groupIndex = Math.max(0, categoryGroups.findIndex((item) => item.id === group.id));
               return (
                 <div key={group.id} className="session-board__group-slot">
@@ -193,7 +188,7 @@ export function WorkspaceContent({
                     id={`group-insert-${group.id}`}
                     category={category}
                     index={groupIndex}
-                    workspaceId={activeWorkspaceId}
+                    workspaceId={workspaceId}
                     isMarker={dragMarker?.kind === 'group' && dragMarker.index === groupIndex}
                   />
                   <SessionCard
@@ -210,10 +205,10 @@ export function WorkspaceContent({
               );
             })}
             <GroupInsertionTarget
-              id={`new-group-${activeWorkspaceId}-${category}`}
+              id={`new-group-${workspaceId}-${category}`}
               category={category}
               index={categoryGroups.length}
-              workspaceId={activeWorkspaceId}
+              workspaceId={workspaceId}
               isMarker={dragMarker?.kind === 'group' && dragMarker.index === categoryGroups.length}
               isEndTarget
             />

@@ -238,7 +238,7 @@ describe('Task108 session rendering contracts', () => {
   });
 
   it('keeps hidden search sessions in canonical end-target indexing', () => {
-    const emptyBranchStart = workspace.indexOf('{groups.length === 0 ?');
+    const emptyBranchStart = workspace.indexOf('{visibleGroups.length === 0 ?');
     const emptyBranchEnd = workspace.indexOf(') : (', emptyBranchStart);
     const emptyBranch = workspace.slice(emptyBranchStart, emptyBranchEnd);
 

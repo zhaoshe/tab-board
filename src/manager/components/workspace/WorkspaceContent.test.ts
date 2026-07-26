@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { create } from 'zustand';
 import type { DragMarker } from '../../core/dnd';
+import { savedSearchQueryStore } from '../../hooks/useSearchQuery';
 import { getSessionCardDragMarker } from './WorkspaceContent';
 
 type TestFolder = {
@@ -14,10 +15,17 @@ type TestFolder = {
 
 type TestGroup = {
   id: string;
+  title: string;
+  note: string;
   workspaceId: string;
   folderId: string | null;
+  locked: boolean;
   starred: boolean;
   archived: boolean;
+  collapsed: boolean;
+  tabs: never[];
+  createdAt: string;
+  updatedAt: string;
 };
 
 type TestState = {
@@ -33,9 +41,20 @@ interface TestStore {
 }
 
 const testHarness = vi.hoisted(() => ({
+  droppableTargets: [] as Array<{
+    id: string;
+    index: number;
+    workspaceId: string;
+  }>,
+  sessionCards: [] as Array<{
+    groupId: string;
+    groupIndex: number;
+  }>,
   store: null as TestStore | null,
   sessionCardRenderCount: 0,
 }));
+
+const timestamp = '2026-01-01T00:00:00.000Z';
 
 const currentFolder: TestFolder = {
   id: 'folder-current',
@@ -49,10 +68,17 @@ const otherFolder: TestFolder = {
 };
 const group: TestGroup = {
   id: 'group-current',
+  title: 'Current group',
+  note: '',
   workspaceId: 'workspace-current',
   folderId: currentFolder.id,
+  locked: false,
   starred: false,
   archived: false,
+  collapsed: false,
+  tabs: [],
+  createdAt: timestamp,
+  updatedAt: timestamp,
 };
 
 vi.mock('@mantine/core', async () => {
@@ -74,7 +100,25 @@ vi.mock('@tabler/icons-react', () => {
 });
 
 vi.mock('@dnd-kit/core', () => ({
-  useDroppable: () => ({ setNodeRef: () => undefined }),
+  useDroppable: (options: {
+    id: string;
+    data: {
+      dnd: {
+        targets: Array<{
+          index: number;
+          workspaceId: string;
+        }>;
+      };
+    };
+  }) => {
+    const target = options.data.dnd.targets[0];
+    testHarness.droppableTargets.push({
+      id: options.id,
+      index: target.index,
+      workspaceId: target.workspaceId,
+    });
+    return { setNodeRef: () => undefined };
+  },
 }));
 
 vi.mock('@dnd-kit/sortable', () => ({
@@ -83,8 +127,15 @@ vi.mock('@dnd-kit/sortable', () => ({
 }));
 
 vi.mock('../sessions/SessionCard', () => ({
-  SessionCard: () => {
+  SessionCard: (props: {
+    group: TestGroup;
+    groupIndex: number;
+  }) => {
     testHarness.sessionCardRenderCount += 1;
+    testHarness.sessionCards.push({
+      groupId: props.group.id,
+      groupIndex: props.groupIndex,
+    });
     return null;
   },
 }));
@@ -101,23 +152,26 @@ vi.mock('../../../shared/store/useTabBoardStore', () => ({
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
-function createTestStore(): TestStore {
+function createTestStore(groups: readonly TestGroup[] = [group]): TestStore {
   return create<TestState>(() => ({
     activeWorkspaceId: currentFolder.workspaceId,
     workspaces: [{ id: currentFolder.workspaceId }, { id: otherFolder.workspaceId }],
-    groups: [group],
+    groups,
     folders: [currentFolder, otherFolder],
   }));
 }
 
-async function mountWorkspaceContent(): Promise<TestStore> {
-  const store = createTestStore();
+async function mountWorkspaceContent(input: {
+  category?: 'inbox' | `folder:${string}`;
+  groups?: readonly TestGroup[];
+} = {}): Promise<TestStore> {
+  const store = createTestStore(input.groups);
   testHarness.store = store;
   const { WorkspaceContent } = await import('./WorkspaceContent');
   root = createRoot(container!);
   await act(async () => {
     root?.render(createElement(WorkspaceContent, {
-      category: `folder:${currentFolder.id}`,
+      category: input.category ?? `folder:${currentFolder.id}`,
       workspaceName: 'Workspace',
       runtime: {} as never,
     }));
@@ -131,8 +185,11 @@ function boardLabel(): string {
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  savedSearchQueryStore.set('');
   container = document.createElement('div');
   document.body.append(container);
+  testHarness.droppableTargets = [];
+  testHarness.sessionCards = [];
   testHarness.store = null;
   testHarness.sessionCardRenderCount = 0;
 });
@@ -144,6 +201,7 @@ afterEach(async () => {
   root = null;
   container?.remove();
   container = null;
+  savedSearchQueryStore.set('');
   vi.restoreAllMocks();
 });
 
@@ -195,5 +253,44 @@ describe('WorkspaceContent drag marker scoping', () => {
     expect(getSessionCardDragMarker(marker, 'group-current')).toBe(marker);
     expect(getSessionCardDragMarker(marker, 'group-other')).toBeNull();
     expect(getSessionCardDragMarker({ kind: 'group', index: 0 }, 'group-current')).toBeNull();
+  });
+});
+
+describe('WorkspaceContent canonical board projection', () => {
+  it('uses unfiltered Inbox membership for orphan indexes and the end target', async () => {
+    const normal: TestGroup = {
+      ...group,
+      id: 'normal',
+      title: 'Normal session',
+      folderId: null,
+    };
+    const orphan: TestGroup = {
+      ...group,
+      id: 'orphan',
+      title: 'Needle orphan session',
+      folderId: 'missing-folder',
+    };
+    const hidden: TestGroup = {
+      ...group,
+      id: 'hidden',
+      title: 'Hidden session',
+      folderId: null,
+    };
+    savedSearchQueryStore.set('needle');
+
+    await mountWorkspaceContent({
+      category: 'inbox',
+      groups: [normal, orphan, hidden],
+    });
+
+    expect(testHarness.sessionCards).toEqual([{
+      groupId: 'orphan',
+      groupIndex: 1,
+    }]);
+    expect(testHarness.droppableTargets).toContainEqual({
+      id: `new-group-${currentFolder.workspaceId}-inbox`,
+      index: 3,
+      workspaceId: currentFolder.workspaceId,
+    });
   });
 });

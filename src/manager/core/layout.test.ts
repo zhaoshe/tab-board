@@ -165,7 +165,7 @@ describe('Task105 manager layout contracts', () => {
     expect(sessions).toContain('height: 100%');
     expect(workspace).not.toContain('manager-board__header');
     expect(workspace).not.toContain('<SimpleGrid');
-    expect(workspace).toContain('groups.map((group) =>');
+    expect(workspace).toContain('visibleGroups.map((group) =>');
     expect(workspace).toContain('highlighted={highlightedGroupId === group.id}');
   });
 

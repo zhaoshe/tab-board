@@ -590,7 +590,7 @@
 - `WorkspaceContent` may use a narrow folder-name selector, but not `state.groups`.
 - DnD `GroupInsertionTarget` receives canonical unfiltered indexes.
 
-- [ ] **Step 1: 写 orphan/index RED**
+- [x] **Step 1: 写 orphan/index RED**
 
   扩展 WorkspaceContent harness：
 
@@ -614,7 +614,7 @@
   query 只显示 orphan 时，其 `groupIndex` 仍为 canonical index 1，而不是 visible
   index 0。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
   Run:
 
@@ -624,7 +624,7 @@
 
   Expected: FAIL because current inline Inbox membership drops orphan groups and uses its own scan.
 
-- [ ] **Step 3: 迁移 WorkspaceContent**
+- [x] **Step 3: 迁移 WorkspaceContent**
 
   使用：
 
@@ -640,7 +640,7 @@
   将所有 render `groups` 替换为 `visibleGroups`，所有 insertion lookup/end target
   使用 `categoryGroups`。Zustand selector仅保留 current custom folder name。
 
-- [ ] **Step 4: 删除旧 owner**
+- [x] **Step 4: 删除旧 owner**
 
   删除 `useFilteredGroups.ts`。确保：
 
@@ -650,7 +650,7 @@
 
   无 production 命中；`tabboardSearch` 只在 `useSearchQuery.ts`。
 
-- [ ] **Step 5: 运行 focused GREEN**
+- [x] **Step 5: 运行 focused GREEN**
 
   Run:
 
@@ -665,7 +665,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   ```bash
   git add src/manager/components/workspace/WorkspaceContent.tsx \
