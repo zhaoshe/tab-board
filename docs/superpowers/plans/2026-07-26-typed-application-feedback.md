@@ -113,7 +113,7 @@
 
 - Store imports singleton and mapper; publication仍拥有commit/error timing。
 
-- [ ] **Step 1: 写mapper RED**
+- [x] **Step 1: 写mapper RED**
 
   Direct tests用完整StateMutation literals覆盖：
 
@@ -123,7 +123,7 @@
   - restore-tab → tab restore；
   - update-settings → null。
 
-- [ ] **Step 2: 运行mapper RED**
+- [x] **Step 2: 运行mapper RED**
 
   Run:
 
@@ -133,11 +133,11 @@
 
   Expected: FAIL because mapper does not exist.
 
-- [ ] **Step 3: 实现pure mapper**
+- [x] **Step 3: 实现pure mapper**
 
   使用exhaustive switch的相关branches；default返回null。不得调用channel。
 
-- [ ] **Step 4: 迁移store timing tests为typed RED**
+- [x] **Step 4: 迁移store timing tests为typed RED**
 
   先修改以下既有tests，让它们从同一module graph的
   `applicationFeedbackChannel`收集typed payload，而不是spy
@@ -161,7 +161,7 @@
 
   Tests预期FAIL，直到store改用channel。
 
-- [ ] **Step 5: 迁移store producer**
+- [x] **Step 5: 迁移store producer**
 
   `useTabBoardStore.ts`：
 
@@ -172,7 +172,7 @@
 
   不改publication代码。
 
-- [ ] **Step 6: 迁移import observable error test**
+- [x] **Step 6: 迁移import observable error test**
 
   `manager/core/import.test.ts`从typed channel订阅，断言：
 
@@ -184,7 +184,7 @@
   }
   ```
 
-- [ ] **Step 7: 运行GREEN**
+- [x] **Step 7: 运行GREEN**
 
   Run:
 
@@ -197,7 +197,7 @@
 
   Expected: PASS，74 store tests仍守护timing。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
   ```bash
   git add src/shared/store/stateMutationFeedback.ts \

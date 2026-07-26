@@ -23,8 +23,9 @@ import {
 } from '../model/session-operations';
 import type { DropIntent } from '../model/drop-intent';
 import type { OpenTabInfo } from '../openTabs';
-import { emitEvent, AppEvents } from '../utils/events';
+import { applicationFeedbackChannel } from '../applicationFeedback';
 import { createAuthoritativePublication } from './authoritativePublication';
+import { feedbackForCommittedMutation } from './stateMutationFeedback';
 
 // Subscribe to file-storage fallback events so that a degraded backend (file
 // mode failed, dropped back to browser storage) surfaces as a persistenceError
@@ -91,7 +92,13 @@ function reportError(
 ): void {
   const message = persistenceErrorMessage(error);
   useTabBoardStore.setState({ persistenceError: message });
-  if (notify) emitEvent(AppEvents.ERROR, { source, message });
+  if (notify) {
+    applicationFeedbackChannel.publish({
+      kind: 'operation-failed',
+      source,
+      message,
+    });
+  }
 }
 
 function reportPersistenceError(error: unknown, notify = true): void {
@@ -135,48 +142,6 @@ function findRestoreTabTargetGroup(state: TabBoardState, entry: BinEntry): Group
     && group.folderId === null && !group.starred);
 }
 
-function emitRestoreSuccesses(
-  batch: readonly StateMutation[],
-  committedIndexes?: ReadonlySet<number>,
-): void {
-  batch.forEach((mutation, index) => {
-    if (committedIndexes && !committedIndexes.has(index)) return;
-    if (mutation.type === 'restore-group') {
-      emitEvent(AppEvents.RESTORE_SUCCESS, {
-        type: 'group',
-        count: mutation.group.tabs.length,
-        label: mutation.group.title,
-      });
-    } else if (mutation.type === 'restore-tab') {
-      emitEvent(AppEvents.RESTORE_SUCCESS, {
-        type: 'tab',
-        count: 1,
-        label: mutation.tab.title,
-      });
-    }
-  });
-}
-
-function emitMutationSuccesses(
-  batch: readonly StateMutation[],
-  committedIndexes?: ReadonlySet<number>,
-): void {
-  batch.forEach((mutation, index) => {
-    if (committedIndexes && !committedIndexes.has(index)) return;
-    if (mutation.type === 'add-group') {
-      emitEvent(AppEvents.SAVE_SUCCESS, {
-        title: mutation.group.title,
-        tabCount: mutation.group.tabs.length,
-      });
-    } else if (mutation.type === 'import-groups') {
-      emitEvent(AppEvents.IMPORT_SUCCESS, {
-        groupCount: mutation.groups.length,
-        tabCount: mutation.groups.reduce((sum, group) => sum + group.tabs.length, 0),
-      });
-    }
-  });
-}
-
 const publication = createAuthoritativePublication({
   readProjection: () => {
     const state = useTabBoardStore.getState();
@@ -206,8 +171,8 @@ const publication = createAuthoritativePublication({
   currentContext: () => globalThis.chrome,
   onPersistenceError: reportPersistenceError,
   onMutationCommitted: (mutation) => {
-    emitRestoreSuccesses([mutation]);
-    emitMutationSuccesses([mutation]);
+    const feedback = feedbackForCommittedMutation(mutation);
+    if (feedback) applicationFeedbackChannel.publish(feedback);
   },
 });
 

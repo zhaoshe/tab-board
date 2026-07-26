@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { applicationFeedbackChannel } from '../../shared/applicationFeedback';
 import { createEmptyState, createNoteRecord, exportToText, type Folder, type Group, type TabBoardState, type Workspace } from '../../shared/model';
-import { AppEvents, onEvent } from '../../shared/utils/events';
 import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
 import {
   importText,
@@ -196,9 +196,10 @@ describe('import commands', () => {
   });
 
   it('emits an observable store error for invalid import targets', () => {
-    vi.stubGlobal('window', new EventTarget());
     const errorEvents: unknown[] = [];
-    const unsubscribe = onEvent(AppEvents.ERROR, (data) => errorEvents.push(data));
+    const unsubscribe = applicationFeedbackChannel.subscribe(
+      (feedback) => errorEvents.push(feedback),
+    );
     useTabBoardStore.setState({ ...state(), hydrated: true });
 
     expect(() => useTabBoardStore.getState().importGroups('https://example.com', {
@@ -207,10 +208,11 @@ describe('import commands', () => {
     })).toThrow('Workspace not found.');
 
     unsubscribe();
-    expect(errorEvents).toContainEqual(expect.objectContaining({
+    expect(errorEvents).toContainEqual({
+      kind: 'operation-failed',
       source: 'import',
       message: 'Workspace not found.',
-    }));
+    });
   });
 
   it('keeps workspace and category command paths reachable from the current shell', () => {

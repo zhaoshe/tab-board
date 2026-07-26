@@ -1,10 +1,40 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  applicationFeedbackChannel,
+  type ApplicationFeedback,
+  type ApplicationFeedbackChannel,
+} from '../applicationFeedback';
 import { applyStateMutations, type StateMutation } from './stateMutations';
 import { getDropOperationDigest } from '../model/drop-operations';
 import { createEmptyState, type Group, type TabBoardState, type BinEntry, type TabItem } from '../model';
 import { persistedSnapshot, useTabBoardStore } from './useTabBoardStore';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
+const feedbackUnsubscribers: Array<() => void> = [];
+
+function collectFeedback(
+  channel: ApplicationFeedbackChannel = applicationFeedbackChannel,
+): ApplicationFeedback[] {
+  const feedback: ApplicationFeedback[] = [];
+  feedbackUnsubscribers.push(
+    channel.subscribe((item) => feedback.push(item)),
+  );
+  return feedback;
+}
+
+async function importStoreWithFeedback(): Promise<{
+  store: typeof import('./useTabBoardStore').useTabBoardStore;
+  feedback: ApplicationFeedback[];
+}> {
+  const [
+    { useTabBoardStore: store },
+    { applicationFeedbackChannel: channel },
+  ] = await Promise.all([
+    import('./useTabBoardStore'),
+    import('../applicationFeedback'),
+  ]);
+  return { store, feedback: collectFeedback(channel) };
+}
 
 function group(id: string, workspaceId = 'workspace_default', overrides: Partial<Group> = {}): Group {
   return {
@@ -45,6 +75,7 @@ function tab(id: string): TabItem {
 }
 
 afterEach(() => {
+  feedbackUnsubscribers.splice(0).forEach((unsubscribe) => unsubscribe());
   useTabBoardStore.getState().releaseHydration();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -728,10 +759,8 @@ describe('TabBoard store remote persistence reconciliation', () => {
         result: applyStateMutations(persisted, message.mutations || []),
       });
     });
-    const dispatchEvent = vi.fn();
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
-    const { useTabBoardStore } = await import('./useTabBoardStore');
+    const { store: useTabBoardStore, feedback } = await importStoreWithFeedback();
     useTabBoardStore.setState({ ...persisted, hydrated: true, persistenceError: null });
 
     const persistencePromise = useTabBoardStore.getState().applyDropIntent({
@@ -744,7 +773,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     vi.advanceTimersByTime(100);
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
     await Promise.resolve();
-    expect(dispatchEvent).not.toHaveBeenCalled();
+    expect(feedback).toEqual([]);
 
     let settled = false;
     void persistencePromise.then(() => { settled = true; }, () => { settled = true; });
@@ -754,7 +783,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     await vi.advanceTimersByTimeAsync(250);
     await expect(persistencePromise).resolves.toBeUndefined();
     expect(sendMessage).toHaveBeenCalledTimes(2);
-    expect(dispatchEvent).not.toHaveBeenCalled();
+    expect(feedback).toEqual([]);
   });
 
   it('does not emit a generic error for a drop after retries are exhausted', async () => {
@@ -763,16 +792,14 @@ describe('TabBoard store remote persistence reconciliation', () => {
       ...createEmptyState(),
       groups: [group('failed-drop-source')],
     };
-    const dispatchEvent = vi.fn();
     const sendMessage = vi.fn((message: { type: string }) => {
       if (message.type === 'tabboard-ensure-state') {
         return Promise.resolve({ ok: true, result: structuredClone(persisted) });
       }
       return Promise.reject(new Error('permanent drop failure'));
     });
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
-    const { useTabBoardStore } = await import('./useTabBoardStore');
+    const { store: useTabBoardStore, feedback } = await importStoreWithFeedback();
     useTabBoardStore.setState({ ...persisted, hydrated: true, persistenceError: null });
 
     const persistencePromise = useTabBoardStore.getState().applyDropIntent({
@@ -786,7 +813,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
 
     await expect(persistencePromise).rejects.toThrow('permanent drop failure');
     expect(sendMessage).toHaveBeenCalledTimes(4);
-    expect(dispatchEvent).not.toHaveBeenCalled();
+    expect(feedback).toEqual([]);
     expect(useTabBoardStore.getState().persistenceError).toBe('permanent drop failure');
   });
 
@@ -803,7 +830,6 @@ describe('TabBoard store remote persistence reconciliation', () => {
       }
       return Promise.reject(new Error('unrecoverable drop failure'));
     });
-    vi.stubGlobal('window', { dispatchEvent: vi.fn() });
     vi.stubGlobal('chrome', {
       runtime: { sendMessage },
       storage: {
@@ -811,7 +837,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
         onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
       },
     });
-    const { useTabBoardStore } = await import('./useTabBoardStore');
+    const { store: useTabBoardStore } = await importStoreWithFeedback();
     await useTabBoardStore.getState().hydrate();
     storageGet.mockRejectedValue(new Error('storage recovery unavailable'));
 
@@ -839,11 +865,9 @@ describe('TabBoard store remote persistence reconciliation', () => {
       ...createEmptyState(),
       groups: [group('locked-drop-source', 'workspace_default', { locked: true })],
     };
-    const dispatchEvent = vi.fn();
     const sendMessage = vi.fn();
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
-    const { useTabBoardStore } = await import('./useTabBoardStore');
+    const { store: useTabBoardStore, feedback } = await importStoreWithFeedback();
     useTabBoardStore.setState({ ...persisted, hydrated: true, persistenceError: null });
 
     const persistencePromise = useTabBoardStore.getState().applyDropIntent({
@@ -856,7 +880,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
 
     await expect(persistencePromise).rejects.toThrow();
     expect(useTabBoardStore.getState().persistenceError).toBeTruthy();
-    expect(dispatchEvent).not.toHaveBeenCalled();
+    expect(feedback).toEqual([]);
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
@@ -866,16 +890,14 @@ describe('TabBoard store remote persistence reconciliation', () => {
       ...createEmptyState(),
       groups: [group('mixed-drop-source')],
     };
-    const dispatchEvent = vi.fn();
     const sendMessage = vi.fn((message: { type: string }) => {
       if (message.type === 'tabboard-ensure-state') {
         return Promise.resolve({ ok: true, result: structuredClone(persisted) });
       }
       return Promise.reject(new Error('mixed batch failure'));
     });
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
-    const { useTabBoardStore } = await import('./useTabBoardStore');
+    const { store: useTabBoardStore, feedback } = await importStoreWithFeedback();
     useTabBoardStore.setState({ ...persisted, hydrated: true, persistenceError: null });
 
     const persistencePromise = useTabBoardStore.getState().applyDropIntent({
@@ -889,7 +911,11 @@ describe('TabBoard store remote persistence reconciliation', () => {
     await vi.advanceTimersByTimeAsync(100 + 250 + 1_000 + 4_000 + 1);
 
     await expect(persistencePromise).rejects.toThrow('mixed batch failure');
-    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    expect(feedback).toEqual([{
+      kind: 'operation-failed',
+      source: 'persistence',
+      message: 'mixed batch failure',
+    }]);
   });
 
   it('does not emit a generic error for a final invalid drop', async () => {
@@ -898,7 +924,6 @@ describe('TabBoard store remote persistence reconciliation', () => {
       ...createEmptyState(),
       groups: [group('invalid-drop-source')],
     };
-    const dispatchEvent = vi.fn();
     const sendMessage = vi.fn((message: { type: string }) => {
       if (message.type === 'tabboard-ensure-state') {
         return Promise.resolve({ ok: true, result: structuredClone(persisted) });
@@ -910,9 +935,8 @@ describe('TabBoard store remote persistence reconciliation', () => {
         invalidMutationIndexes: [0],
       });
     });
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
-    const { useTabBoardStore } = await import('./useTabBoardStore');
+    const { store: useTabBoardStore, feedback } = await importStoreWithFeedback();
     useTabBoardStore.setState({ ...persisted, hydrated: true, persistenceError: null });
 
     const persistencePromise = useTabBoardStore.getState().applyDropIntent({
@@ -925,7 +949,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     await vi.advanceTimersByTimeAsync(100);
 
     await expect(persistencePromise).rejects.toThrow('Invalid drop intent.');
-    expect(dispatchEvent).not.toHaveBeenCalled();
+    expect(feedback).toEqual([]);
     expect(useTabBoardStore.getState().persistenceError).toBe('Invalid drop intent.');
   });
 
@@ -971,16 +995,18 @@ describe('TabBoard store remote persistence reconciliation', () => {
       }
       return Promise.reject(new Error('persistent RPC failure'));
     });
-    const dispatchEvent = vi.fn();
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
-    const { useTabBoardStore } = await import('./useTabBoardStore');
+    const { store: useTabBoardStore, feedback } = await importStoreWithFeedback();
 
     useTabBoardStore.getState().updateSettings({ theme: 'dark' });
     await vi.advanceTimersByTimeAsync(100 + 250 + 1000 + 4000 + 1);
 
     expect(sendMessage).toHaveBeenCalledTimes(4);
-    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    expect(feedback).toEqual([{
+      kind: 'operation-failed',
+      source: 'persistence',
+      message: 'persistent RPC failure',
+    }]);
     expect(useTabBoardStore.getState().persistenceError).toBe('persistent RPC failure');
   });
 
@@ -1682,7 +1708,6 @@ describe('Task191 persistence feedback and terminal failures', () => {
     };
     let resolveAdd: ((response: unknown) => void) | undefined;
     const listeners: Array<(changes: Record<string, { newValue: TabBoardState }>, area: string) => void> = [];
-    const dispatchEvent = vi.fn();
     const sentBatches: StateMutation[][] = [];
     const sendMessage = vi.fn((message: { type: string; mutations?: StateMutation[] }) => {
       if (message.type === 'tabboard-ensure-state') return Promise.resolve({ ok: true, result: structuredClone(persisted) });
@@ -1693,7 +1718,6 @@ describe('Task191 persistence feedback and terminal failures', () => {
       }
       return Promise.resolve({ ok: false, code: 'GROUP_NOT_FOUND', error: 'Group not found.' });
     });
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', {
       runtime: { sendMessage },
       storage: {
@@ -1704,7 +1728,7 @@ describe('Task191 persistence feedback and terminal failures', () => {
         },
       },
     });
-    const { useTabBoardStore } = await import('./useTabBoardStore');
+    const { store: useTabBoardStore, feedback } = await importStoreWithFeedback();
     await useTabBoardStore.getState().hydrate();
 
     useTabBoardStore.getState().addGroup(group('committed-save'));
@@ -1724,11 +1748,19 @@ describe('Task191 persistence feedback and terminal failures', () => {
       result: applyStateMutations(persisted, sentBatches[0] || []),
     });
     await vi.advanceTimersByTimeAsync(100);
-    await vi.waitFor(() => expect(dispatchEvent.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await vi.waitFor(() => expect(feedback).toHaveLength(2));
 
-    expect(dispatchEvent.mock.calls.slice(0, 2).map(([event]) => event.type)).toEqual([
-      'tabboard:save-success',
-      'tabboard:error',
+    expect(feedback).toEqual([
+      {
+        kind: 'save-succeeded',
+        title: 'committed-save',
+        tabCount: 0,
+      },
+      {
+        kind: 'operation-failed',
+        source: 'persistence',
+        message: 'Group not found.',
+      },
     ]);
     expect(sentBatches).toHaveLength(1);
     expect(useTabBoardStore.getState().groups.map(({ title }) => title)).toEqual(['committed-save']);
@@ -1761,8 +1793,6 @@ describe('Task191 persistence feedback and terminal failures', () => {
       remoteState = applyStateMutations(remoteState, mutations);
       return Promise.resolve({ ok: true, result: structuredClone(remoteState) });
     });
-    const dispatchEvent = vi.fn();
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', {
       runtime: { sendMessage },
       storage: {
@@ -1773,7 +1803,7 @@ describe('Task191 persistence feedback and terminal failures', () => {
         },
       },
     });
-    const { useTabBoardStore } = await import('./useTabBoardStore');
+    const { store: useTabBoardStore } = await importStoreWithFeedback();
     await useTabBoardStore.getState().hydrate();
 
     useTabBoardStore.getState().updateGroup('isolation-trigger', { title: 'Rejected trigger' });
@@ -1803,28 +1833,36 @@ describe('Task191 persistence feedback and terminal failures', () => {
     vi.useFakeTimers();
     const persisted = createEmptyState();
     let resolveMutation: ((response: unknown) => void) | undefined;
-    const dispatchEvent = vi.fn();
     const sendMessage = vi.fn((message: { type: string }) => {
       if (message.type === 'tabboard-ensure-state') return Promise.resolve({ ok: true, result: structuredClone(persisted) });
       return new Promise((resolve) => { resolveMutation = resolve; });
     });
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
-    const { useTabBoardStore } = await import('./useTabBoardStore');
+    const [
+      { useTabBoardStore },
+      { applicationFeedbackChannel },
+    ] = await Promise.all([
+      import('./useTabBoardStore'),
+      import('../applicationFeedback'),
+    ]);
+    const feedback = collectFeedback(applicationFeedbackChannel);
     useTabBoardStore.setState({ ...persisted, hydrated: true, persistenceError: null });
 
     useTabBoardStore.getState().addGroup(group('save-success-group'));
-    expect(dispatchEvent).not.toHaveBeenCalled();
+    expect(feedback).toEqual([]);
     await vi.advanceTimersByTimeAsync(100);
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(dispatchEvent).not.toHaveBeenCalled();
+    expect(feedback).toEqual([]);
 
     const request = sendMessage.mock.calls[0]?.[0] as { mutations?: StateMutation[] };
     resolveMutation?.({ ok: true, result: applyStateMutations(persisted, request.mutations || []) });
-    await vi.waitFor(() => expect(dispatchEvent).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(feedback).toHaveLength(1));
 
-    expect(dispatchEvent).toHaveBeenCalledTimes(1);
-    expect(dispatchEvent.mock.calls[0]?.[0]?.type).toBe('tabboard:save-success');
+    expect(feedback).toEqual([{
+      kind: 'save-succeeded',
+      title: 'save-success-group',
+      tabCount: 0,
+    }]);
   });
 
   it('emits save success for mutations committed in a partial drop response', async () => {
@@ -1833,7 +1871,6 @@ describe('Task191 persistence feedback and terminal failures', () => {
       ...createEmptyState(),
       groups: [group('partial-drop-source')],
     };
-    const dispatchEvent = vi.fn();
     const sendMessage = vi.fn(async (message: { type: string; mutations?: StateMutation[] }) => {
       if (message.type === 'tabboard-ensure-state') return { ok: true, result: structuredClone(persisted) };
       const mutations = message.mutations || [];
@@ -1846,9 +1883,8 @@ describe('Task191 persistence feedback and terminal failures', () => {
         state: applyStateMutations(persisted, mutations.slice(0, 1)),
       };
     });
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
-    const { useTabBoardStore } = await import('./useTabBoardStore');
+    const { store: useTabBoardStore, feedback } = await importStoreWithFeedback();
     useTabBoardStore.setState({ ...persisted, hydrated: true, persistenceError: null });
 
     useTabBoardStore.getState().addGroup(group('partial-save-group'));
@@ -1862,7 +1898,11 @@ describe('Task191 persistence feedback and terminal failures', () => {
     await vi.advanceTimersByTimeAsync(100);
 
     await expect(dropPromise).rejects.toMatchObject({ code: 'INVALID_DROP_INTENT' });
-    expect(dispatchEvent.mock.calls.map(([event]) => event.type)).toEqual(['tabboard:save-success']);
+    expect(feedback).toEqual([{
+      kind: 'save-succeeded',
+      title: 'partial-save-group',
+      tabCount: 0,
+    }]);
   });
 
   it('rebases a queued drop after terminal in-flight ordinary rejection', async () => {
@@ -2134,50 +2174,54 @@ describe('Task191 persistence feedback and terminal failures', () => {
   it('does not emit import success when worker persistence rejects', async () => {
     vi.useFakeTimers();
     const persisted = createEmptyState();
-    const dispatchEvent = vi.fn();
     const sendMessage = vi.fn(async (message: { type: string }) => {
       if (message.type === 'tabboard-ensure-state') return { ok: true, result: structuredClone(persisted) };
       return { ok: false, code: 'DUPLICATE_ENTITY_ID', error: 'Entity ID already exists.' };
     });
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
-    const { useTabBoardStore } = await import('./useTabBoardStore');
+    const { store: useTabBoardStore, feedback } = await importStoreWithFeedback();
     useTabBoardStore.setState({ ...persisted, hydrated: true, persistenceError: null });
 
     useTabBoardStore.getState().importGroups('# Imported\nhttps://example.com');
-    expect(dispatchEvent).not.toHaveBeenCalled();
+    expect(feedback).toEqual([]);
     await vi.advanceTimersByTimeAsync(100);
 
-    expect(dispatchEvent.mock.calls.map(([event]) => event.type)).toEqual(['tabboard:error']);
+    expect(feedback).toEqual([{
+      kind: 'operation-failed',
+      source: 'persistence',
+      message: 'Entity ID already exists.',
+    }]);
     expect(useTabBoardStore.getState().groups).toEqual([]);
   });
 
   it('emits import success only after deferred worker persistence resolves', async () => {
     vi.useFakeTimers();
     const persisted = createEmptyState();
-    const dispatchEvent = vi.fn();
     let resolveMutation: ((response: unknown) => void) | undefined;
     const sendMessage = vi.fn((message: { type: string; mutations?: StateMutation[] }) => {
       if (message.type === 'tabboard-ensure-state') return Promise.resolve({ ok: true, result: structuredClone(persisted) });
       return new Promise((resolve) => { resolveMutation = resolve; });
     });
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
-    const { useTabBoardStore } = await import('./useTabBoardStore');
+    const { store: useTabBoardStore, feedback } = await importStoreWithFeedback();
     useTabBoardStore.setState({ ...persisted, hydrated: true, persistenceError: null });
 
     useTabBoardStore.getState().importGroups('# Imported\nhttps://example.com');
     await vi.advanceTimersByTimeAsync(100);
 
-    expect(dispatchEvent).not.toHaveBeenCalled();
+    expect(feedback).toEqual([]);
     const request = sendMessage.mock.calls[0]?.[0];
     resolveMutation?.({
       ok: true,
       result: applyStateMutations(persisted, request?.mutations || []),
     });
-    await vi.waitFor(() => expect(dispatchEvent).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(feedback).toHaveLength(1));
 
-    expect(dispatchEvent.mock.calls[0]?.[0]?.type).toBe('tabboard:import-success');
+    expect(feedback).toEqual([{
+      kind: 'import-succeeded',
+      groupCount: 1,
+      tabCount: 1,
+    }]);
   });
 });
 
@@ -2449,13 +2493,12 @@ describe('restore-group category placement', () => {
       ok: true,
       result: applyStateMutations(before, message.mutations || []),
     }));
-    const dispatchEvent = vi.fn();
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const feedback = collectFeedback();
     useTabBoardStore.setState({ ...before, hydrated: true, persistenceError: null });
 
     useTabBoardStore.getState().restoreFromBin(entry.id);
-    expect(dispatchEvent).not.toHaveBeenCalled();
+    expect(feedback).toEqual([]);
     await vi.advanceTimersByTimeAsync(100);
 
     const mutation = sendMessage.mock.calls[0]?.[0]?.mutations?.[0] as StateMutation | undefined;
@@ -2466,8 +2509,12 @@ describe('restore-group category placement', () => {
         tabs: [{ createdAt: originalTab.createdAt }],
       },
     });
-    expect(dispatchEvent).toHaveBeenCalledTimes(1);
-    expect(dispatchEvent.mock.calls[0]?.[0]?.type).toBe('tabboard:restore-success');
+    expect(feedback).toEqual([{
+      kind: 'restore-succeeded',
+      item: 'group',
+      count: 1,
+      label: 'metadata-group',
+    }]);
   });
 
   it('reports a restore collision once without throwing or emitting success', async () => {
@@ -2486,14 +2533,16 @@ describe('restore-group category placement', () => {
       originalFolderId: null,
     };
     const before = { ...createEmptyState(), groups: [source], bin: [entry] };
-    const dispatchEvent = vi.fn();
-    vi.stubGlobal('window', { dispatchEvent });
+    const feedback = collectFeedback();
     useTabBoardStore.setState({ ...before, hydrated: true, persistenceError: null });
 
     expect(() => useTabBoardStore.getState().restoreFromBin(entry.id)).not.toThrow();
 
-    expect(dispatchEvent).toHaveBeenCalledTimes(1);
-    expect(dispatchEvent.mock.calls[0]?.[0]?.type).toBe('tabboard:error');
+    expect(feedback).toEqual([{
+      kind: 'operation-failed',
+      source: 'persistence',
+      message: expect.stringContaining('collides'),
+    }]);
     expect(useTabBoardStore.getState().persistenceError).toContain('collides');
     expect(useTabBoardStore.getState().bin).toEqual([entry]);
   });
@@ -2514,8 +2563,7 @@ describe('restore-group category placement', () => {
       originalFolderId: null,
       originalIndex: 0,
     };
-    const dispatchEvent = vi.fn();
-    vi.stubGlobal('window', { dispatchEvent });
+    const feedback = collectFeedback();
     vi.stubGlobal('chrome', {
       runtime: {
         sendMessage: vi.fn(async () => ({
@@ -2530,8 +2578,11 @@ describe('restore-group category placement', () => {
     useTabBoardStore.getState().restoreFromBin(entry.id);
     await vi.advanceTimersByTimeAsync(100);
 
-    expect(dispatchEvent).toHaveBeenCalledTimes(1);
-    expect(dispatchEvent.mock.calls[0]?.[0]?.type).toBe('tabboard:error');
+    expect(feedback).toEqual([{
+      kind: 'operation-failed',
+      source: 'persistence',
+      message: 'Restored entity ID collides with an unrelated live entity.',
+    }]);
     expect(useTabBoardStore.getState().persistenceError).toContain('collides');
   });
 
@@ -2625,16 +2676,19 @@ describe('restore-group category placement', () => {
       groups: [group('inbox-target')],
       bin: [entry],
     };
-    const dispatchEvent = vi.fn();
     const sendMessage = vi.fn();
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const feedback = collectFeedback();
     useTabBoardStore.setState({ ...before, hydrated: true, persistenceError: null });
 
     useTabBoardStore.getState().restoreFromBin(entry.id);
 
     expect(sendMessage).not.toHaveBeenCalled();
-    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    expect(feedback).toEqual([{
+      kind: 'operation-failed',
+      source: 'persistence',
+      message: 'Unable to restore tab: no legal target group exists in the original workspace/category.',
+    }]);
     expect(useTabBoardStore.getState().persistenceError).toContain('target group');
     expect(useTabBoardStore.getState().bin).toEqual([entry]);
   });
@@ -2817,17 +2871,19 @@ describe('restore-group category placement', () => {
       originalIndex: 0,
     };
     const before = { ...createEmptyState(), groups: [group('only-starred', 'workspace_default', { starred: true })], bin: [entry] };
-    const dispatchEvent = vi.fn();
     const sendMessage = vi.fn();
-    vi.stubGlobal('window', { dispatchEvent });
     vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const feedback = collectFeedback();
     useTabBoardStore.setState({ ...before, hydrated: true, persistenceError: null });
 
     useTabBoardStore.getState().restoreFromBin(entry.id);
 
     expect(sendMessage).not.toHaveBeenCalled();
-    expect(dispatchEvent).toHaveBeenCalledTimes(1);
-    expect(dispatchEvent.mock.calls[0]?.[0]?.type).toBe('tabboard:error');
+    expect(feedback).toEqual([{
+      kind: 'operation-failed',
+      source: 'persistence',
+      message: 'Unable to restore tab: no legal target group exists in the original workspace/category.',
+    }]);
     expect(useTabBoardStore.getState().persistenceError).toContain('target group');
     expect(useTabBoardStore.getState().bin).toEqual([entry]);
   });
