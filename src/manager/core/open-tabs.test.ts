@@ -289,7 +289,7 @@ describe('Task107 source contracts', () => {
     const hook = read('manager/hooks/useOpenTabsRuntime.ts');
     const workflow = read('manager/core/openTabsWorkflow.ts');
     expect(hook).toContain('captureProjection.selection.recordIds');
-    expect(hook).toContain('selectedWindow?.id ?? null');
+    expect(hook).toContain('selectedWindowId: captureProjection.selectedWindowId');
     expect(workflow).toContain('canonicalSelection');
     expect(workflow).toContain('deriveSelectedStorableRecords');
     expect(hook).toContain('sameOpenTabSelection');
@@ -337,6 +337,20 @@ describe('Task107 source contracts', () => {
     expect(testSource).not.toMatch(/from ['"]\.\.\/components\/sidebar\/OpenTabsPanel/);
     expect(testSource).not.toMatch(/from ['"]@mantine\/core/);
     expect(testSource).not.toMatch(/from ['"]@dnd-kit\/core/);
+  });
+
+  it('keeps Open Tabs completion and filter ownership off global DOM events', () => {
+    const runtime = read('manager/hooks/useOpenTabsRuntime.ts');
+    const layout = read('manager/components/shell/ManagerLayout.tsx');
+    const sidebar = read('manager/components/sidebar/Sidebar.tsx');
+    const production = `${runtime}\n${layout}\n${sidebar}`;
+
+    expect(production).not.toContain('tabboard-open-tabs-dropped');
+    expect(production).not.toContain('tabboard-capture-completed');
+    expect(production).not.toContain('tabboard-tab-filter-change');
+    expect(layout).toContain('openTabsWorkflow.commands.completeDrop()');
+    expect(layout).toContain('workflow={openTabsWorkflow}');
+    expect(sidebar).toContain('onCaptureCompleted(completion)');
   });
 
   it('consumes workflow selection projection instead of deriving selection inside the panel', () => {

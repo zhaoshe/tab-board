@@ -417,7 +417,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     const captureProjection = projectOpenTabsWorkflow(workflowStateRef.current);
     const captureSnapshot = createCaptureSnapshot({
       selectedTabIds: captureProjection.selection.recordIds,
-      selectedWindowId: selectedWindow?.id ?? null,
+      selectedWindowId: captureProjection.selectedWindowId,
       workspaceId: sourceWorkspaceId,
       isSelectionMode: captureProjection.selection.active,
     });
@@ -571,7 +571,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
       dispatch({ type: 'capture-changed', capturing: false });
     }
     return completion;
-  }, [dispatch, refresh, selectedWindow, setSavedSearchQuery]);
+  }, [dispatch, refresh, setSavedSearchQuery]);
 
   return {
     model: {
