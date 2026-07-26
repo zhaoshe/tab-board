@@ -81,39 +81,55 @@ export interface CaptureCompletedEventDetail {
 
 export type CaptureResult = OpenTabsCaptureResult;
 
-export interface OpenTabsRuntime {
+export interface OpenTabsWorkflowModel {
   windows: OpenWindowInfo[];
   selectedWindow: OpenWindowInfo | null;
   selectedWindowId: number | null;
-  query: string;
   filteredTabs: OpenTabInfo[];
-  selectionMode: boolean;
-  selectedTabIds: number[];
-  selectedCount: number;
-  closingTabIds: number[];
-  updatingSelection: boolean;
-  loading: boolean;
-  capturing: boolean;
-  error: string | null;
+  query: string;
+  tabFilterUrl: string | null;
   isTabFilterActive: boolean;
+  selection: {
+    active: boolean;
+    ids: number[];
+    count: number;
+    records: OpenTabInfo[];
+    recordIds: number[];
+  };
+  status: {
+    closingTabIds: number[];
+    updatingSelection: boolean;
+    loading: boolean;
+    capturing: boolean;
+    error: string | null;
+  };
+}
+
+export interface OpenTabsWorkflowCommands {
   setQuery: (value: string) => void;
   selectWindow: (windowId: number) => void;
-  exitSelectionMode: () => void;
-  toggleTabSelection: (tabId: number | undefined) => void;
-  selectAllTabs: () => void;
+  clearSelection: () => void;
+  toggleSelection: (tabId: number | undefined) => void;
+  selectAll: () => void;
+  completeDrop: () => void;
   focusTab: (tabId: number | undefined, windowId: number | undefined) => Promise<void>;
   closeTab: (tabId: number | undefined) => Promise<void>;
   pinTab: (tabId: number | undefined) => Promise<void>;
-  closeSelectedTabs: () => Promise<void>;
-  pinSelectedTabs: () => Promise<void>;
+  closeSelection: () => Promise<void>;
+  pinSelection: () => Promise<void>;
   filterSessionsByTab: (tab: OpenTabInfo) => void;
-  clearTabFilter: () => void;
-  clearFilter: () => void;
-  captureSelectedTabs: (
+  clearSessionFilter: () => void;
+  clearQuery: () => void;
+  captureSelection: (
     categorySnapshot: CaptureCategorySnapshot,
     getCurrentCategorySnapshot: () => CaptureCategorySnapshot,
   ) => Promise<CaptureResult | null>;
   refresh: () => Promise<void>;
+}
+
+export interface OpenTabsWorkflow {
+  model: OpenTabsWorkflowModel;
+  commands: OpenTabsWorkflowCommands;
 }
 
 function errorMessage(error: unknown): string {
@@ -143,7 +159,7 @@ const REFRESHABLE_TAB_CHANGES = new Set([
   'pinned',
 ]);
 
-export function useOpenTabsRuntime(): OpenTabsRuntime {
+export function useOpenTabsRuntime(): OpenTabsWorkflow {
   const [workflowState, reactDispatch] = useReducer(
     reduceOpenTabsWorkflow,
     undefined,
@@ -289,14 +305,17 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
   const exitSelectionMode = useCallback(() => {
     dispatch({ type: 'selection-cleared' });
   }, [dispatch]);
+  const completeDrop = useCallback(() => {
+    dispatch({ type: 'drop-completed' });
+  }, [dispatch]);
 
   useEffect(() => {
     const handleOpenTabsDropped = () => {
-      exitSelectionMode();
+      completeDrop();
     };
     window.addEventListener('tabboard-open-tabs-dropped', handleOpenTabsDropped);
     return () => window.removeEventListener('tabboard-open-tabs-dropped', handleOpenTabsDropped);
-  }, [exitSelectionMode]);
+  }, [completeDrop]);
 
   const deferredQuery = useDeferredValue(workflowState.query);
   const projection = useMemo(
@@ -598,35 +617,28 @@ export function useOpenTabsRuntime(): OpenTabsRuntime {
   }, [dispatch, refresh, selectedWindow, setSavedSearchQuery]);
 
   return {
-    windows: projection.windows,
-    selectedWindow,
-    selectedWindowId: projection.selectedWindowId,
-    query: projection.query,
-    filteredTabs: projection.filteredTabs,
-    selectionMode: projection.selection.active,
-    selectedTabIds: projection.selection.ids,
-    selectedCount: projection.selection.count,
-    closingTabIds: projection.status.closingTabIds,
-    updatingSelection: projection.status.updatingSelection,
-    loading: projection.status.loading,
-    capturing: projection.status.capturing,
-    error: projection.status.error,
-    isTabFilterActive: Boolean(projection.tabFilterUrl)
-      && savedSearchQuery === projection.tabFilterUrl,
-    setQuery,
-    selectWindow,
-    exitSelectionMode,
-    toggleTabSelection,
-    selectAllTabs,
-    focusTab,
-    closeTab,
-    pinTab,
-    closeSelectedTabs,
-    pinSelectedTabs,
-    filterSessionsByTab,
-    clearTabFilter,
-    clearFilter,
-    captureSelectedTabs,
-    refresh,
+    model: {
+      ...projection,
+      isTabFilterActive: Boolean(projection.tabFilterUrl)
+        && savedSearchQuery === projection.tabFilterUrl,
+    },
+    commands: {
+      setQuery,
+      selectWindow,
+      clearSelection: exitSelectionMode,
+      toggleSelection: toggleTabSelection,
+      selectAll: selectAllTabs,
+      completeDrop,
+      focusTab,
+      closeTab,
+      pinTab,
+      closeSelection: closeSelectedTabs,
+      pinSelection: pinSelectedTabs,
+      filterSessionsByTab,
+      clearSessionFilter: clearTabFilter,
+      clearQuery: clearFilter,
+      captureSelection: captureSelectedTabs,
+      refresh,
+    },
   };
 }

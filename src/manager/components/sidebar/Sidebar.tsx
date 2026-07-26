@@ -2,7 +2,10 @@ import { useEffect, useRef, type RefObject } from 'react';
 import { ActionIcon, Box, Stack, Tooltip } from '@mantine/core';
 import { IconBrowser, IconSearch } from '@tabler/icons-react';
 import { OPEN_TABS_FILTER_INPUT_ID, OpenTabsPanel } from './OpenTabsPanel';
-import { useOpenTabsRuntime } from '../../hooks/useOpenTabsRuntime';
+import {
+  useOpenTabsRuntime,
+  type OpenTabsWorkflow,
+} from '../../hooks/useOpenTabsRuntime';
 import type { CaptureCategorySnapshot } from '../../core/capture';
 import type { CategoryFilter } from '../../core/selectors';
 import type { OpenTabInfo, OpenWindowInfo } from '../../../shared/openTabs';
@@ -109,6 +112,7 @@ interface SidebarProps {
   onToggleSidebar: (expanded: boolean) => void;
   onSelectionModeChange?: (selectionMode: boolean) => void;
   onOpenTabsSourceKeyChange?: (key: string) => void;
+  workflow?: OpenTabsWorkflow;
 }
 
 export function Sidebar({
@@ -122,12 +126,14 @@ export function Sidebar({
   onToggleSidebar,
   onSelectionModeChange,
   onOpenTabsSourceKeyChange,
+  workflow: providedWorkflow,
 }: SidebarProps) {
-  const openTabs = useOpenTabsRuntime();
+  const localWorkflow = useOpenTabsRuntime();
+  const openTabs = providedWorkflow ?? localWorkflow;
   useEffect(() => {
-    onSelectionModeChange?.(openTabs.selectionMode);
+    onSelectionModeChange?.(openTabs.model.selection.active);
     return () => onSelectionModeChange?.(false);
-  }, [onSelectionModeChange, openTabs.selectionMode]);
+  }, [onSelectionModeChange, openTabs.model.selection.active]);
   const currentCategorySnapshot: CaptureCategorySnapshot = {
     showBin,
     category,
@@ -136,7 +142,7 @@ export function Sidebar({
   categorySnapshotRef.current = currentCategorySnapshot;
   const captureSelectedTabs = () => {
     const categorySnapshot = { ...categorySnapshotRef.current };
-    return openTabs.captureSelectedTabs(
+    return openTabs.commands.captureSelection(
       categorySnapshot,
       () => ({ ...categorySnapshotRef.current }),
     );
@@ -155,33 +161,9 @@ export function Sidebar({
           <Box className="manager-open-tabs">
             <OpenTabsPanel
               workspaceId={workspaceId}
-              windows={openTabs.windows}
-              selectedWindow={openTabs.selectedWindow}
-              selectedWindowId={openTabs.selectedWindowId}
-              query={openTabs.query}
-              filteredTabs={openTabs.filteredTabs}
-              selectionMode={openTabs.selectionMode}
-              selectedTabIds={openTabs.selectedTabIds}
-              selectedCount={openTabs.selectedCount}
+              workflow={openTabs}
               sidebarPinned={sidebarExpanded}
-              closingTabIds={openTabs.closingTabIds}
-              updatingSelection={openTabs.updatingSelection}
-              loading={openTabs.loading}
-              capturing={openTabs.capturing}
-              error={openTabs.error}
-              onQueryChange={openTabs.setQuery}
-              onSelectWindow={openTabs.selectWindow}
-              onExitSelectionMode={openTabs.exitSelectionMode}
-              onToggleTabSelection={openTabs.toggleTabSelection}
-              onSelectAll={openTabs.selectAllTabs}
-              onFocusTab={openTabs.focusTab}
-              onCloseTab={openTabs.closeTab}
-              onPinTab={openTabs.pinTab}
-              onCloseSelectedTabs={openTabs.closeSelectedTabs}
-              onPinSelectedTabs={openTabs.pinSelectedTabs}
-              onClearFilter={openTabs.clearFilter}
               onCaptureSelectedTabs={captureSelectedTabs}
-              onRefresh={openTabs.refresh}
               sidebarToggleRef={sidebarToggleRef}
               onToggleSidebar={onToggleSidebar}
               onSourceKeyChange={onOpenTabsSourceKeyChange}

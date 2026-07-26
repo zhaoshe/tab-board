@@ -339,15 +339,17 @@ describe('Task107 source contracts', () => {
     expect(testSource).not.toMatch(/from ['"]@dnd-kit\/core/);
   });
 
-  it('derives selection data once at panel scope instead of scanning each row', () => {
+  it('consumes workflow selection projection instead of deriving selection inside the panel', () => {
     const panel = read('manager/components/sidebar/OpenTabsPanel.tsx');
     const triggerStart = panel.indexOf('function OpenTabContentTrigger');
     const triggerEnd = panel.indexOf('export function OpenTabsPanel', triggerStart);
     const triggerSource = panel.slice(triggerStart, triggerEnd);
 
-    expect(panel).toContain('useMemo(() => new Set(selectedTabIds)');
-    expect(panel).toContain('selectedStorableRecords');
-    expect(panel).toContain('selectedStorableTabIds');
+    expect(panel).toContain('workflow: OpenTabsWorkflow');
+    expect(panel).toContain('const selectedStorableRecords = selection.records');
+    expect(panel).toContain('const selectedStorableTabIds = selection.recordIds');
+    expect(panel).not.toContain('deriveSelectedStorableRecords');
+    expect(panel).not.toContain('deriveSelectedStorableTabIds');
     expect(panel).toContain('closingTabIdSet');
     expect(panel).toContain('const isClosing = isValidTabId(tab.id) && closingTabIdSet.has(tab.id);');
     expect(panel).toContain('disabled={!isValidTabId(tab.id) || isClosing}');

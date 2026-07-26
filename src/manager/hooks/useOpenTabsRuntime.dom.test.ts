@@ -2,9 +2,9 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OpenTabsRuntime } from './useOpenTabsRuntime';
+import type { OpenTabsWorkflow } from './useOpenTabsRuntime';
 import { useOpenTabsRuntime } from './useOpenTabsRuntime';
-import type { OpenWindowInfo } from '../core/open-tabs';
+import type { OpenWindowInfo } from '../../shared/openTabs';
 
 const testHarness = vi.hoisted(() => {
   const state = { activeWorkspaceId: 'workspace_default' };
@@ -63,7 +63,7 @@ function createTab(overrides: Partial<OpenWindowInfo['tabs'][number]> = {}): Ope
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
-let runtime: OpenTabsRuntime | null = null;
+let runtime: OpenTabsWorkflow | null = null;
 
 function RuntimeProbe(): null {
   runtime = useOpenTabsRuntime();
@@ -116,7 +116,7 @@ async function mountRuntime(windows: OpenWindowInfo[]): Promise<void> {
     root?.render(createElement(RuntimeProbe));
   });
   await vi.waitFor(() => {
-    expect(runtime?.selectedWindowId).toBe(1);
+    expect(runtime?.model.selectedWindowId).toBe(1);
   });
 }
 
@@ -125,10 +125,10 @@ describe('Open Tabs runtime refresh', () => {
     await mountRuntime(createWindow([createTab()]));
 
     await act(async () => {
-      runtime?.toggleTabSelection(1);
+      runtime?.commands.toggleSelection(1);
     });
-    expect(runtime?.selectionMode).toBe(true);
-    expect(runtime?.selectedTabIds).toEqual([1]);
+    expect(runtime?.model.selection.active).toBe(true);
+    expect(runtime?.model.selection.ids).toEqual([1]);
 
     testHarness.sendMessage.mockResolvedValueOnce({
       ok: true,
@@ -140,10 +140,10 @@ describe('Open Tabs runtime refresh', () => {
       },
     });
     await act(async () => {
-      await runtime?.refresh();
+      await runtime?.commands.refresh();
     });
 
-    expect(runtime?.selectedTabIds).toEqual([]);
-    expect(runtime?.selectionMode).toBe(false);
+    expect(runtime?.model.selection.ids).toEqual([]);
+    expect(runtime?.model.selection.active).toBe(false);
   });
 });

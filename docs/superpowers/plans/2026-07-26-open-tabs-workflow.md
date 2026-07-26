@@ -74,13 +74,13 @@
 - Produces: `OpenTabsWorkflow`, `OpenTabsWorkflowModel`, `OpenTabsWorkflowCommands`.
 - `OpenTabsPanelProps` contains workflow plus six shell-specific values.
 
-- [ ] Add failing render tests that mount Panel with grouped workflow and verify selection/drag/action behavior.
-- [ ] Run Panel tests and verify RED.
-- [ ] Return grouped model/commands from the hook.
-- [ ] Pass grouped workflow through Sidebar and consume projection in Panel.
-- [ ] Remove Panel-side selected record derivation.
-- [ ] Run Panel, Sidebar, hook DOM, Open Tabs core, and Manager DOM tests.
-- [ ] Commit.
+- [x] Add failing render tests that mount Panel with grouped workflow and verify selection/drag/action behavior.
+- [x] Run Panel tests and verify RED.
+- [x] Return grouped model/commands from the hook.
+- [x] Pass grouped workflow through Sidebar and consume projection in Panel.
+- [x] Remove Panel-side selected record derivation.
+- [x] Run Panel, Sidebar, hook DOM, Open Tabs core, and Manager DOM tests.
+- [x] Commit.
 
 ### Task 4: Replace global events with direct workflow ownership
 

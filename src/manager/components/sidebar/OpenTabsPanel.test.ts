@@ -3,7 +3,7 @@ import { act, createElement, forwardRef, type ComponentProps, type ReactNode } f
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OpenTabsPanel } from './OpenTabsPanel';
-import type { OpenTabInfo, OpenWindowInfo } from '../../core/open-tabs';
+import type { OpenTabInfo, OpenWindowInfo } from '../../../shared/openTabs';
 
 interface NativeProps {
   children?: ReactNode;
@@ -165,35 +165,54 @@ let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
 function createProps(overrides: Partial<ComponentProps<typeof OpenTabsPanel>> = {}) {
+  const workflow = {
+    model: {
+      windows: [selectedWindow],
+      selectedWindow,
+      selectedWindowId: selectedWindow.id ?? null,
+      filteredTabs: tabs,
+      query: '',
+      tabFilterUrl: null,
+      isTabFilterActive: false,
+      selection: {
+        active: true,
+        ids: [41, 42],
+        count: 2,
+        records: [tabs[0], tabs[1]],
+        recordIds: [41, 42],
+      },
+      status: {
+        closingTabIds: [43],
+        updatingSelection: false,
+        loading: false,
+        capturing: false,
+        error: null,
+      },
+    },
+    commands: {
+      setQuery: vi.fn(),
+      selectWindow: vi.fn(),
+      clearSelection: vi.fn(),
+      toggleSelection: vi.fn(),
+      selectAll: vi.fn(),
+      focusTab: vi.fn(async () => undefined),
+      closeTab: vi.fn(async () => undefined),
+      pinTab: vi.fn(async () => undefined),
+      closeSelection: vi.fn(async () => undefined),
+      pinSelection: vi.fn(async () => undefined),
+      clearQuery: vi.fn(),
+      captureSelection: vi.fn(async () => null),
+      refresh: vi.fn(async () => undefined),
+      filterSessionsByTab: vi.fn(),
+      clearSessionFilter: vi.fn(),
+      completeDrop: vi.fn(),
+    },
+  };
   return {
     workspaceId: 'workspace_default',
-    windows: [selectedWindow],
-    selectedWindow,
-    selectedWindowId: selectedWindow.id ?? null,
-    query: '',
-    filteredTabs: tabs,
-    selectionMode: true,
-    selectedTabIds: [41, 42],
-    selectedCount: 2,
+    workflow,
     sidebarPinned: true,
-    closingTabIds: [43],
-    updatingSelection: false,
-    loading: false,
-    capturing: false,
-    error: null,
-    onQueryChange: vi.fn(),
-    onSelectWindow: vi.fn(),
-    onExitSelectionMode: vi.fn(),
-    onToggleTabSelection: vi.fn(),
-    onSelectAll: vi.fn(),
-    onFocusTab: vi.fn(async () => undefined),
-    onCloseTab: vi.fn(async () => undefined),
-    onPinTab: vi.fn(async () => undefined),
-    onCloseSelectedTabs: vi.fn(async () => undefined),
-    onPinSelectedTabs: vi.fn(async () => undefined),
-    onClearFilter: vi.fn(),
     onCaptureSelectedTabs: vi.fn(async () => undefined),
-    onRefresh: vi.fn(async () => undefined),
     sidebarToggleRef: { current: null },
     onToggleSidebar: vi.fn(),
     ...overrides,
