@@ -21,6 +21,28 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-07-26: Typed Application Feedback Ownership 深化
+
+Authoritative Publication已经拥有commit/error时序，但Zustand adapter仍把save/import/restore/error outcome包装成未类型化 `window.CustomEvent`，Manager再按event name订阅并断言payload shape。旧 `events.ts` 同时维护一个从未被subscriber注册的dead listener map。
+
+变化：
+
+- 新增 `ApplicationFeedback` discriminated union与page-local typed channel；channel同步、non-replay，listener异常不会反向影响persistence。
+- 新增pure `feedbackForCommittedMutation()`，统一add-group/import/restore mutation到feedback的payload mapping。
+- `useTabBoardStore` 只在publication确认commit或决定surface error后publish；partial commit、retry、waiter-owned error与`notify: false`时序保持原规则。
+- `useToastNotifications()` 从四个window listeners收敛为一个typed subscription，并把toast copy提取为pure presenter。
+- 删除 `shared/utils/events.ts`、`AppEvents`、四个legacy event names和dead listener map。
+- Store timing tests不再stub `window.dispatchEvent`，直接断言typed payload与顺序。
+- architecture gate禁止feedback owner依赖React/Zustand/store/Manager/browser globals，也禁止toast consumer回退到window listener或raw payload assertion。
+
+判断：
+
+- Feedback是一次性outcome stream，不应进入Zustand snapshot并引入ack/clear队列。
+- UI action callback无法判断retry、partial commit与reconciliation，authoritative timing必须继续由publication ports拥有。
+- 当前window event只在同页生效；typed module channel保持同样page-local语义，不需要BroadcastChannel或storage transport。
+
+当前状态：Current。Direct channel/mapper/presentation tests与74个store timing regressions共同守护。
+
 ### 2026-07-26: Saved Search Query 与 Board Projection Ownership 深化
 
 Saved-session query原本同时由 `useFilteredGroups.ts` 中的module global、每个hook instance的React state、`sessionStorage`和`tabboard-search-change` window event同步；`SearchBar`又单独监听同一event。`WorkspaceContent`在拿到filtered groups后，还会重新扫描全部groups并手写category membership，导致orphan folder虽然能被selector渲染到Inbox，却在DnD insertion index中被排除。

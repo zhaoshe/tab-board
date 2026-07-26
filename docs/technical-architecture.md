@@ -90,7 +90,8 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `authoritativePublication.ts` 是 Manager-side publication owner。它不依赖 Zustand、React、DOM event 或具体 Chrome adapter，独占 optimistic queue、in-flight batch、remote buffer、drop/category waiter、bounded retry、terminal isolation、authoritative reconciliation、structural sharing 和 hydration generation。
 - `stateMutations.ts` 以 immutable commands 应用普通 state mutation，并拒绝无效引用、locked 目标和 link/note URL 形态错误。
 - `mutationValidation.ts` 负责 mutation-batch candidate boundary；DropIntent/OpenTab raw shape由 shared model `drop-validation.ts` 负责。
-- `useTabBoardStore.ts` 只提供 Zustand UI projection、领域 action facade、restore/import/export 准备和 AppEvents 映射；它通过窄 ports 创建一个 publication instance，不拥有 persistence queue、retry timer、waiter 或 hydration subscription。
+- `stateMutationFeedback.ts` 把 committed `StateMutation` 纯映射为 typed `ApplicationFeedback`；不决定commit时机。
+- `useTabBoardStore.ts` 只提供 Zustand UI projection、领域 action facade、restore/import/export 准备和publication ports；它在publication确认commit/surface error后publish typed feedback，不拥有 persistence queue、retry timer、waiter 或 hydration subscription。
 
 三类 ownership 不应混淆：
 
@@ -120,6 +121,8 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `hooks/useSearchQuery.ts` 是 browser/React adapter，唯一持有 `tabboardSearch` storage key，并用 `useSyncExternalStore` 把同一 snapshot 提供给 React consumers。Open Tabs capture/filter 的 imperative path直接读该 owner，不依赖 effect-updated ref。
 - `core/selectors.ts` 的 `getBoardProjection()` 先复用 shared `groupsForCategory()` 得到 canonical `categoryGroups`，再得到 query-filtered `visibleGroups`；`hooks/useBoardProjection.ts` 保持 query变化时未过滤 category projection引用稳定。
 - `WorkspaceContent` 只消费 board projection；Zustand selector仅用于当前自定义 category标题，不再读取全部 groups或手写 `starred` / `archived` / `folderId` membership。render、card insertion index和end target因此共享 orphan-folder → Inbox语义。
+- `src/shared/applicationFeedback.ts` 是 page-local application feedback owner，提供typed `publish()` / `subscribe()`；channel无DOM/React/Zustand/Chrome依赖、同步且不replay，listener异常被隔离。
+- `useToastNotifications.ts` 只把 `ApplicationFeedback` discriminated union映射为现有toast copy；Store与Manager不再通过window event names通信。
 - DnD 不复用未类型化 payload；resolver 先校验 workspace/ownership/URL/locked/index 边界，session body 不产生 merge intent。
 - Manager production 不拥有 session/drop execution module；`src/manager/core/commands.ts` 已删除。Shared/background production modules不得导入 Manager。
 - `ManagerLayout` 持有一个 Open Tabs workflow；`Sidebar` / `OpenTabsPanel` 只消费 grouped `model/commands`。capture 使用 selection snapshot 与 pending guard并直接返回 completion evidence；persisted Open Tabs drop 直接调用 `completeDrop()`，不使用全局 DOM event。
@@ -582,7 +585,9 @@ manager.html
 4. worker `statePersistence` 串行验证并提交 mutation batch，返回 authoritative state、partial commit indexes 或 semantic error evidence。
 5. Storage Authority publication 回流到 publication subscription；有 pending/in-flight work 时先缓冲，batch settle 后按 revision/timestamp 选最新 remote base并安全重放 committed mutation。
 6. Publication 在发布 reconciled state 前执行 semantic structural sharing，复用未变化的 workspace/folder/group/tab 等实体引用；drop/category waiter 只在 authoritative outcome 后 settle。
-7. React 根据共享后的 projection 重绘，并由 capture outcome/overlay lifecycle 恢复 feedback 与 focus。
+7. Publication确认mutation committed或决定surface error后，Zustand adapter通过pure mapper发布typed `ApplicationFeedback`。Partial commit只映射committed indexes，transient retry与`notify: false`不publish。
+8. Manager page的toast hook订阅同页feedback channel；Options/Popup无subscriber，publish为no-op。Channel不跨page、不replay，listener失败不影响persistence结果。
+9. React 根据共享后的 projection 重绘，并由capture outcome/overlay lifecycle恢复focus；capture/drop等caller-owned feedback继续直接返回结果，不重复经过channel。
 
 ### 大 board 性能
 

@@ -101,8 +101,70 @@ test('rejects framework, browser-global, and TabBoard store dependencies in the 
   }
 });
 
+test('rejects legacy application feedback event names and the retired event module', () => {
+  const fixture = createFixture({
+    'src/shared/utils/events.ts': `
+      export const name = 'tabboard:save-success';
+    `,
+  });
+  try {
+    const result = runCheck(fixture.root);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /events\.ts: retired application event module must not exist/);
+    assert.match(result.stderr, /events\.ts: application feedback must not use legacy event names/);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test('rejects framework, store, Manager, and browser dependencies in the feedback owner', () => {
+  const fixture = createFixture({
+    'src/shared/applicationFeedback.ts': `
+      import { useEffect } from 'react';
+      import { create } from 'zustand';
+      import { useTabBoardStore } from './store/useTabBoardStore';
+      import { ManagerLayout } from '../manager/components/shell/ManagerLayout';
+      export const feedback = window.location.href + document.title + chrome.runtime.id;
+    `,
+  });
+  try {
+    const result = runCheck(fixture.root);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /applicationFeedback\.ts: feedback owner must not import React/);
+    assert.match(result.stderr, /applicationFeedback\.ts: feedback owner must not import Zustand/);
+    assert.match(result.stderr, /applicationFeedback\.ts: feedback owner must not import shared store/);
+    assert.match(result.stderr, /applicationFeedback\.ts: feedback owner must not import Manager/);
+    assert.match(result.stderr, /applicationFeedback\.ts: feedback owner must not read browser globals/);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test('rejects toast window listeners and untyped payload assertions', () => {
+  const fixture = createFixture({
+    'src/manager/components/shell/useToastNotifications.ts': `
+      window.addEventListener('tabboard:error', handler);
+      const info = data as { message?: string };
+    `,
+  });
+  try {
+    const result = runCheck(fixture.root);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /useToastNotifications\.ts: toast feedback must subscribe through the typed channel/);
+    assert.match(result.stderr, /useToastNotifications\.ts: toast feedback must not assert raw payload shapes/);
+  } finally {
+    fixture.dispose();
+  }
+});
+
 test('passes clean owners and ignores architecture strings in test files', () => {
   const fixture = createFixture({
+    'src/shared/applicationFeedback.ts': `
+      export const createChannel = () => ({ publish() {}, subscribe() {} });
+    `,
     'src/manager/core/searchQueryStore.ts': `
       export const createStore = (ports) => ports;
     `,
@@ -112,8 +174,14 @@ test('passes clean owners and ignores architecture strings in test files', () =>
     'src/manager/components/workspace/WorkspaceContent.tsx': `
       export const WorkspaceContent = () => useBoardProjection('inbox');
     `,
+    'src/manager/components/shell/useToastNotifications.ts': `
+      export const useToastNotifications = () =>
+        applicationFeedbackChannel.subscribe(presentApplicationFeedback);
+    `,
     'src/manager/hooks/query.test.ts': `
       window.dispatchEvent(new CustomEvent('tabboard-search-change'));
+      window.addEventListener('tabboard:error', handler);
+      const info = data as { message?: string };
       const allGroups = state.groups.filter((group) => group.starred);
     `,
   });

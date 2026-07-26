@@ -39,6 +39,12 @@ function addViolation(violations, root, file, rule) {
 }
 
 function scanAllSource(root, files, violations) {
+  const legacyFeedbackNames = [
+    'tabboard:save-success',
+    'tabboard:import-success',
+    'tabboard:restore-success',
+    'tabboard:error',
+  ];
   for (const file of files) {
     const source = readFileSync(file, 'utf8');
     if (source.includes('tabboard-search-change')) {
@@ -47,6 +53,14 @@ function scanAllSource(root, files, violations) {
         root,
         file,
         'saved search must not use a window event bus',
+      );
+    }
+    if (legacyFeedbackNames.some((name) => source.includes(name))) {
+      addViolation(
+        violations,
+        root,
+        file,
+        'application feedback must not use legacy event names',
       );
     }
   }
@@ -103,6 +117,56 @@ function scanCoreOwner(root, violations) {
   }
 }
 
+function scanFeedbackOwner(root, violations) {
+  const file = join(root, 'src/shared/applicationFeedback.ts');
+  if (!existsSync(file)) return;
+  const source = readFileSync(file, 'utf8');
+  const rules = [
+    [/(?:from\s+|import\s*)['"]react['"]/, 'feedback owner must not import React'],
+    [/(?:from\s+|import\s*)['"]zustand(?:\/[^'"]*)?['"]/, 'feedback owner must not import Zustand'],
+    [/(?:from\s+|import\s*)['"][^'"]*(?:shared\/)?store(?:\/[^'"]*)?['"]/, 'feedback owner must not import shared store'],
+    [/(?:from\s+|import\s*)['"][^'"]*manager(?:\/[^'"]*)?['"]/, 'feedback owner must not import Manager'],
+    [/\b(?:window|document|chrome)\b/, 'feedback owner must not read browser globals'],
+  ];
+  for (const [pattern, rule] of rules) {
+    if (pattern.test(source)) addViolation(violations, root, file, rule);
+  }
+}
+
+function scanToastFeedback(root, violations) {
+  const file = join(root, 'src/manager/components/shell/useToastNotifications.ts');
+  if (!existsSync(file)) return;
+  const source = readFileSync(file, 'utf8');
+  if (/\bwindow\.(?:addEventListener|dispatchEvent)\s*\(/.test(source)) {
+    addViolation(
+      violations,
+      root,
+      file,
+      'toast feedback must subscribe through the typed channel',
+    );
+  }
+  if (/\bas\s+\{[^}]+\}/.test(source)) {
+    addViolation(
+      violations,
+      root,
+      file,
+      'toast feedback must not assert raw payload shapes',
+    );
+  }
+}
+
+function scanRetiredEventModule(root, violations) {
+  const file = join(root, 'src/shared/utils/events.ts');
+  if (existsSync(file)) {
+    addViolation(
+      violations,
+      root,
+      file,
+      'retired application event module must not exist',
+    );
+  }
+}
+
 function main() {
   const { root } = parseArgs(process.argv.slice(2));
   const files = listProductionSource(join(root, 'src'));
@@ -112,6 +176,9 @@ function main() {
   scanSearchBar(root, violations);
   scanWorkspaceContent(root, violations);
   scanCoreOwner(root, violations);
+  scanFeedbackOwner(root, violations);
+  scanToastFeedback(root, violations);
+  scanRetiredEventModule(root, violations);
 
   for (const violation of violations) {
     console.error(`Search architecture violation: ${violation}`);

@@ -309,7 +309,7 @@
 - Architecture checker继续支持`--root` fixtures。
 - Graph checker显式禁止feedback owner依赖React/Zustand/shared store/Manager。
 
-- [ ] **Step 1: 写static gate RED**
+- [x] **Step 1: 写static gate RED**
 
   扩展Node fixtures：
 
@@ -319,7 +319,7 @@
   - fixture含`src/shared/utils/events.ts` → fail；
   - test files中的legacy strings不触发。
 
-- [ ] **Step 2: 运行RED**
+- [x] **Step 2: 运行RED**
 
   Run:
 
@@ -329,7 +329,7 @@
 
   Expected: new fixtures FAIL.
 
-- [ ] **Step 3: 实现checker并接入graph gate**
+- [x] **Step 3: 实现checker并接入graph gate**
 
   更新checker rules；在`check:cycles`增加：
 
@@ -337,13 +337,13 @@
   --deny-imports src/shared/applicationFeedback.ts,react,zustand,src/shared/store,src/manager
   ```
 
-- [ ] **Step 4: 更新docs**
+- [x] **Step 4: 更新docs**
 
   - architecture：typed owner、authoritative timing、subscriber isolation、page-local/non-replay；
   - evolution：删除最后一条Store → Manager window event seam；
   - decision D045：为什么不用callbacks或Zustand queue。
 
-- [ ] **Step 5: 运行focused suite**
+- [x] **Step 5: 运行focused suite**
 
   Run:
 
@@ -358,7 +358,7 @@
     src/manager/ManagerApp.dom.test.ts
   ```
 
-- [ ] **Step 6: 运行fresh full verification**
+- [x] **Step 6: 运行fresh full verification**
 
   依次运行：
 
@@ -373,7 +373,7 @@
 
   Expected全部PASS/零命中。
 
-- [ ] **Step 7: 更新planning evidence与commit docs/gates**
+- [x] **Step 7: 更新planning evidence与commit docs/gates**
 
   记录实际module/test counts和命令输出。提交：
 
@@ -389,7 +389,7 @@
     -m "Co-authored-by: TRAE CLI <noreply@bytedance.com>"
   ```
 
-- [ ] **Step 8: 检查commit stack**
+- [x] **Step 8: 检查commit stack**
 
   Run:
 

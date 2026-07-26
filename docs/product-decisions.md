@@ -1017,7 +1017,7 @@ Trade-offs:
 
 - publication owner 本身集中了承担 retry、isolation 和 reconciliation 的复杂状态机，文件仍较大；后续是否拆 pure policy 需根据独立 seam、测试局部性与 import graph 再评估，不能为了行数机械拆分。
 - context replacement 必须同时处理 pending 与 in-flight continuation；因此 owner维护独立 publication generation 和 hydration generation。
-- AppEvents 仍由 Zustand adapter 映射，publication 只决定 success/error outcome 与 `notify` policy。
+- Typed Application Feedback 由 Zustand adapter 映射，publication 只决定 success/error outcome 与 `notify` policy；具体channel与toast presentation见D045。
 
 Status:
 
@@ -1113,6 +1113,48 @@ Implementation note（2026-07-26）：
 - `tabboard-search-change`、query module global和effect-updated saved-query ref已删除。
 - Orphan/cross-workspace folder references在Inbox render、search、card index和end target中使用同一shared语义。
 - `npm run check:architecture`禁止event bus、SearchBar window listener、WorkspaceContent全量group/category scan和core owner的framework/browser dependencies。
+
+## D045: Application feedback is a typed outcome stream, not window events or Zustand state
+
+Context:
+
+Authoritative Publication负责mutation commit、partial commit、retry、reconciliation和error notification policy，但outcome仍由Zustand adapter通过四个未类型化window event names传给Manager toast。Producer/consumer分别手写payload shape，Store tests依赖`window.dispatchEvent`，旧event module还保留一套从未注册subscriber的dead listener map。
+
+可选方案包括：
+
+1. UI action传入success/error callbacks；
+2. 把feedback queue/last feedback放进Zustand；
+3. 建立typed page-local external channel。
+
+Decision:
+
+采用 `ApplicationFeedback` discriminated union和同步 `ApplicationFeedbackChannel`。Channel只拥有fanout；`stateMutationFeedback.ts`纯映射committed mutation；`useTabBoardStore`只在publication outcome ports调用channel；Manager `useToastNotifications()`把typed feedback映射为toast copy。
+
+Rationale:
+
+- UI callbacks在optimistic action返回时无法判断authoritative commit、retry、partial commit或reconciliation，不能拥有feedback时机。
+- Feedback是一次性event stream；放入Zustand snapshot需要ack/clear协议，并可能被hydration/reconciliation重放或覆盖。
+- Typed channel让producer/consumer contract进入import graph，direct tests不依赖DOM global。
+- 当前window events本就只在同一page生效；page-local module singleton保持行为，不需要跨context transport。
+- Subscriber异常必须隔离，避免toast failure把已经成功的persistence调用变成失败。
+
+Trade-offs:
+
+- Late subscriber不会收到历史feedback；这是notification的预期语义。
+- Options/Popup bundle会创建自己的channel instance但没有subscriber，publish为no-op。
+- Component-local copy/validation toast继续直接使用`useToast()`；channel只承载authoritative store outcomes。
+- Channel不记录history；需要诊断时依赖现有diagnostics breadcrumbs和persistence evidence。
+
+Status:
+
+Accepted。
+
+Implementation note（2026-07-26）：
+
+- Save/import/restore只在committed mutation后publish；partial response只publishcommitted indexes。
+- Transient retry、waiter-owned drop error和`notify: false` hydration failure不产生generic feedback。
+- `shared/utils/events.ts`、`AppEvents`与legacy feedback event names已删除。
+- `npm run check:architecture`与import graph gate共同禁止feedback owner/consumer退回global DOM bus或framework/store dependency。
 
 ## Decision template
 
