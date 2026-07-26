@@ -1,49 +1,58 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
+import {
+  applicationFeedbackChannel,
+  type ApplicationFeedback,
+} from '../../../shared/applicationFeedback';
 import { useToast } from '../../hooks/useToast';
-import { onEvent, AppEvents } from '../../../shared/utils/events';
+
+export interface FeedbackPresenter {
+  showSuccess(message: string, title?: string): void;
+  showError(message: string, title?: string): void;
+}
+
+export function presentApplicationFeedback(
+  feedback: ApplicationFeedback,
+  presenter: FeedbackPresenter,
+): void {
+  switch (feedback.kind) {
+    case 'save-succeeded':
+      presenter.showSuccess(
+        `${feedback.tabCount} tab${feedback.tabCount === 1 ? '' : 's'} saved`,
+        feedback.title,
+      );
+      return;
+    case 'import-succeeded':
+      presenter.showSuccess(
+        `Imported ${feedback.groupCount} session${feedback.groupCount === 1 ? '' : 's'} (${feedback.tabCount} tabs)`,
+        'Import successful',
+      );
+      return;
+    case 'restore-succeeded':
+      if (feedback.item === 'group') {
+        presenter.showSuccess(
+          `Restored ${feedback.count} tab${feedback.count === 1 ? '' : 's'}`,
+          feedback.label,
+        );
+      } else {
+        presenter.showSuccess('Tab restored', feedback.label);
+      }
+      return;
+    case 'operation-failed':
+      presenter.showError(feedback.message || 'Unable to save changes');
+  }
+}
 
 export function useToastNotifications() {
   const { showSuccess, showError } = useToast();
+  const presenter = useMemo<FeedbackPresenter>(
+    () => ({ showSuccess, showError }),
+    [showError, showSuccess],
+  );
 
-  useEffect(() => {
-    const unsubSave = onEvent(AppEvents.SAVE_SUCCESS, (data: unknown) => {
-      const info = data as { title: string; tabCount: number };
-      showSuccess(
-        `${info.tabCount} tab${info.tabCount === 1 ? '' : 's'} saved`,
-        info.title
-      );
-    });
-
-    const unsubImport = onEvent(AppEvents.IMPORT_SUCCESS, (data: unknown) => {
-      const info = data as { groupCount: number; tabCount: number };
-      showSuccess(
-        `Imported ${info.groupCount} session${info.groupCount === 1 ? '' : 's'} (${info.tabCount} tabs)`,
-        'Import successful'
-      );
-    });
-
-    const unsubError = onEvent(AppEvents.ERROR, (data: unknown) => {
-      const info = data as { message?: string };
-      showError(info.message || 'Unable to save changes');
-    });
-
-    const unsubRestore = onEvent(AppEvents.RESTORE_SUCCESS, (data: unknown) => {
-      const info = data as { type: string; count: number; label: string };
-      if (info.type === 'group') {
-        showSuccess(
-          `Restored ${info.count} tab${info.count === 1 ? '' : 's'}`,
-          info.label
-        );
-      } else {
-        showSuccess('Tab restored', info.label);
-      }
-    });
-
-    return () => {
-      unsubSave();
-      unsubImport();
-      unsubError();
-      unsubRestore();
-    };
-  }, [showSuccess, showError]);
+  useEffect(
+    () => applicationFeedbackChannel.subscribe(
+      (feedback) => presentApplicationFeedback(feedback, presenter),
+    ),
+    [presenter],
+  );
 }

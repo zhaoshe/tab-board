@@ -226,7 +226,7 @@
   `useToastNotifications()`.
 - Hook subscribes once per stable presenter and unsubscribes on unmount.
 
-- [ ] **Step 1: 写presentation RED**
+- [x] **Step 1: 写presentation RED**
 
   Direct tests对五类presentation断言exact existing copy：
 
@@ -240,12 +240,12 @@
 
   覆盖import、group restore、tab restore、error。
 
-- [ ] **Step 2: 写hook lifecycle RED**
+- [x] **Step 2: 写hook lifecycle RED**
 
   happy-dom挂载probe调用hook；publish后toast presenter收到，unmount后publish不再收到。
   使用真实channel，mock `useToast()`仅作为UI port。
 
-- [ ] **Step 3: 运行RED**
+- [x] **Step 3: 运行RED**
 
   Run:
 
@@ -255,12 +255,12 @@
 
   Expected: FAIL because typed presentation is not implemented.
 
-- [ ] **Step 4: 实现typed consumer**
+- [x] **Step 4: 实现typed consumer**
 
   单一`subscribe`，switch exhaustive presentation。通过`useMemo`创建稳定presenter。
   删除`onEvent`/`AppEvents`。
 
-- [ ] **Step 5: 删除events.ts与残余契约**
+- [x] **Step 5: 删除events.ts与残余契约**
 
   删除`src/shared/utils/events.ts`，更新任何source contract tests。确认：
 
@@ -270,7 +270,7 @@
 
   无命中。
 
-- [ ] **Step 6: 运行GREEN**
+- [x] **Step 6: 运行GREEN**
 
   Run:
 
@@ -283,7 +283,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
   ```bash
   git add src/manager/components/shell/useToastNotifications.ts \
