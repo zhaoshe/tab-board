@@ -30,12 +30,14 @@ import {
 import type { DropIntent } from '../model/drop-intent';
 import type { OpenTabInfo } from '../openTabs';
 import {
-  isBoundedString,
-  isDenseArray,
   isDropIntentShape,
   isDropPayloadWithinLimits,
-  isEntityId,
   isOpenTabInfoShape,
+} from '../model/drop-validation';
+import {
+  isBoundedString,
+  isDenseArray,
+  isEntityId,
   isOperationId,
   isTimestamp,
   MAX_FAVICON_URL_BYTES,

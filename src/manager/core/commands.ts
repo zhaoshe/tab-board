@@ -32,13 +32,15 @@ export {
 } from '../../shared/model/categories';
 import {
   canonicalJson,
-  isDropIntentShape,
-  isDropPayloadWithinLimits,
-  isOpenTabInfoShape,
   MAX_CANONICAL_DIGEST_BYTES,
   MAX_ENTITY_ID_BYTES,
   utf8ByteLength,
-} from '../../shared/store/mutationValidation';
+} from '../../shared/validation';
+import {
+  isDropIntentShape,
+  isDropPayloadWithinLimits,
+  isOpenTabInfoShape,
+} from '../../shared/model/drop-validation';
 
 type CreateSessionIntent = Extract<DropIntent, { kind: 'create-session' }>;
 type SavedSessionIntent = Omit<CreateSessionIntent, 'source'> & {
