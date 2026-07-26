@@ -57,7 +57,7 @@
 - `getSnapshot`, `subscribe`, and `set` are closure-backed functions and never depend on `this`.
 - Port read/write errors are contained by the owner; listeners still observe in-memory updates.
 
-- [ ] **Step 1: 写初始化优先级 RED**
+- [x] **Step 1: 写初始化优先级 RED**
 
   新建 direct test，以内存 ports 覆盖：
 
@@ -82,7 +82,7 @@
   expect(emptyWrites).toEqual([]);
   ```
 
-- [ ] **Step 2: 运行初始化 RED**
+- [x] **Step 2: 运行初始化 RED**
 
   Run:
 
@@ -92,7 +92,7 @@
 
   Expected: FAIL because `./searchQueryStore` does not exist.
 
-- [ ] **Step 3: 写 mutation/subscription RED**
+- [x] **Step 3: 写 mutation/subscription RED**
 
   增加：
 
@@ -113,7 +113,7 @@
   覆盖两个 store instance 隔离，以及 `writeStoredQuery()` 抛错时 snapshot/notification
   仍更新。
 
-- [ ] **Step 4: 实现最小 owner**
+- [x] **Step 4: 实现最小 owner**
 
   实现：
 
@@ -139,7 +139,7 @@
   `set()` 对同值 no-op，对新值先更新 snapshot，再 best-effort write，最后同步遍历
   listener snapshot。
 
-- [ ] **Step 5: 运行 GREEN**
+- [x] **Step 5: 运行 GREEN**
 
   Run:
 
@@ -150,7 +150,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   ```bash
   git add src/manager/core/searchQueryStore.ts \
@@ -166,6 +166,9 @@
 - Create: `src/manager/hooks/useSearchQuery.test.ts`
 - Modify: `src/manager/hooks/useOpenTabsRuntime.ts`
 - Modify: `src/manager/hooks/useOpenTabsRuntime.dom.test.ts`
+- Modify: `src/manager/hooks/useFilteredGroups.ts`
+- Modify: `src/manager/components/search/SearchBar.tsx`
+- Create: `src/manager/components/search/SearchBar.test.ts`
 - Modify: query imports in `src/manager/components/workspace/WorkspaceHeader.tsx`
 - Modify: query imports/mocks in `src/manager/components/shell/ManagerLayout.tsx`
 - Modify: `src/manager/components/shell/ManagerLayout.test.ts`
@@ -183,8 +186,10 @@
 - Browser adapter owns the constant `tabboardSearch`; no other production module reads/writes this key.
 - Open Tabs imperative paths use `savedSearchQueryStore.getSnapshot()` rather than an
   effect-updated query ref.
+- Until Task 4 moves board hooks, `useFilteredGroups.ts` re-exports the query hooks from
+  `useSearchQuery.ts`; it no longer owns query state.
 
-- [ ] **Step 1: 写 React shared-snapshot RED**
+- [x] **Step 1: 写 React shared-snapshot RED**
 
   在 happy-dom test 中挂载两个 probe：
 
@@ -203,7 +208,7 @@
 
   断言两个 output 同时变为 `shared`，并在 unmount 后无 React update。
 
-- [ ] **Step 2: 运行 adapter RED**
+- [x] **Step 2: 运行 adapter RED**
 
   Run:
 
@@ -213,7 +218,7 @@
 
   Expected: FAIL because `./useSearchQuery` does not exist.
 
-- [ ] **Step 3: 实现 browser ports 与 hooks**
+- [x] **Step 3: 实现 browser ports 与 hooks**
 
   browser ports 必须只在 adapter 中引用 global，并允许非浏览器 import：
 
@@ -236,7 +241,7 @@
   `useSearchQuery()` 使用 `useSyncExternalStore`；server snapshot 与 client snapshot
   都来自同一 owner。`useSetSearchQuery()` 直接返回稳定的 `set`。
 
-- [ ] **Step 4: 迁移 Open Tabs RED**
+- [x] **Step 4: 迁移 Open Tabs RED**
 
   更新 DOM test 的 query mock，使它提供：
 
@@ -255,7 +260,7 @@
   3. 立即调用 capture；
   4. 断言 capture filter snapshot 使用 tab URL，而不是旧 query。
 
-- [ ] **Step 5: 迁移 Open Tabs implementation**
+- [x] **Step 5: 迁移 Open Tabs implementation**
 
   `useOpenTabsRuntime.ts`：
 
@@ -266,18 +271,33 @@
   - query render subscription继续用于 model；
   -所有写入仍通过 `useSetSearchQuery()` 返回的同一 owner setter。
 
-- [ ] **Step 6: 更新非-board query imports**
+- [x] **Step 6: 更新非-board query imports**
 
   `WorkspaceHeader.tsx` 与 `ManagerLayout.tsx` 从 `useSearchQuery.ts` import query
-  hooks；相应 tests 的 mock 路径改为新 module。此任务不迁移 board projection。
+  hooks；相应 tests 的 mock 路径改为新 module。`useFilteredGroups.ts` 删除
+  module global/sessionStorage/window event代码，临时从 `useSearchQuery.ts`
+  re-export query hooks，确保尚未迁移的 board consumer也使用唯一 owner。
 
-- [ ] **Step 7: 运行 GREEN**
+- [x] **Step 7: 写并通过 SearchBar同步/debounce TDD**
+
+  新建 happy-dom component test，使用真实 `savedSearchQueryStore`，覆盖：
+
+  - imperative external set同步 input local value；
+  - 149 ms前 store不变，第150 ms写入；
+  - external set发生在旧 debounce到期前时，cleanup旧 timer，不能被旧 local value覆盖。
+
+  `SearchBar.tsx` 从 `useSearchQuery.ts` import hooks，删除 window event listener，
+  新增 `[query]` effect同步 local input；其它 full-state match count在 Task 4再迁到
+  board projection。
+
+- [x] **Step 8: 运行 GREEN**
 
   Run:
 
   ```bash
   npx vitest run src/manager/hooks/useSearchQuery.test.ts
   npx vitest run src/manager/hooks/useOpenTabsRuntime.dom.test.ts
+  npx vitest run src/manager/components/search/SearchBar.test.ts
   npx vitest run src/manager/components/shell/ManagerLayout.test.ts
   npx vitest run src/manager/components/workspace/WorkspaceHeader.test.ts
   npx tsc --noEmit
@@ -285,13 +305,16 @@
 
   Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 9: Commit**
 
   ```bash
   git add src/manager/hooks/useSearchQuery.ts \
     src/manager/hooks/useSearchQuery.test.ts \
     src/manager/hooks/useOpenTabsRuntime.ts \
     src/manager/hooks/useOpenTabsRuntime.dom.test.ts \
+    src/manager/hooks/useFilteredGroups.ts \
+    src/manager/components/search/SearchBar.tsx \
+    src/manager/components/search/SearchBar.test.ts \
     src/manager/components/workspace/WorkspaceHeader.tsx \
     src/manager/components/shell/ManagerLayout.tsx \
     src/manager/components/shell/ManagerLayout.test.ts
@@ -425,7 +448,7 @@
 - Create: `src/manager/hooks/useBoardProjection.test.ts`
 - Create: `src/manager/hooks/useWorkspaceState.ts`
 - Modify: `src/manager/components/search/SearchBar.tsx`
-- Create: `src/manager/components/search/SearchBar.test.ts`
+- Modify: `src/manager/components/search/SearchBar.test.ts`
 - Modify: `src/manager/components/workspace/WorkspaceHeader.test.ts`
 - Modify: `src/manager/components/shell/ManagerLayout.tsx`
 - Modify: `src/manager/components/shell/ManagerLayout.test.ts`
@@ -486,32 +509,25 @@
 
   将仅有 consumer 的 `useCurrentWorkspace()` 移到 `useWorkspaceState.ts`。
 
-- [ ] **Step 4: 写 SearchBar debounce RED**
+- [ ] **Step 4: 写 SearchBar canonical count RED**
 
-  happy-dom test mock `useBoardProjection()` 返回 canonical groups，使用真实
-  `useSearchQuery` store，mock Mantine input 为 native input。覆盖：
+  扩展 Task 2 的 happy-dom test，mock `useBoardProjection()` 返回 canonical
+  groups。输入 local query后，在 debounce前断言 badge已经使用
+  `filterGroupsByQuery(categoryGroups, localValue)` 得到即时 count。
 
   ```ts
+  changeInput('needle');
+  expect(document.querySelector('[data-testid="match-count"]')?.textContent)
+    .toContain('1 result');
   expect(savedSearchQueryStore.getSnapshot()).toBe('');
-  changeInput('local');
-  await act(async () => vi.advanceTimersByTime(149));
-  expect(savedSearchQueryStore.getSnapshot()).toBe('');
-  await act(async () => vi.advanceTimersByTime(1));
-  expect(savedSearchQueryStore.getSnapshot()).toBe('local');
   ```
-
-  另加 external `savedSearchQueryStore.set('external')` 同步 local input；若 external
-  update 在旧 debounce 到期前发生，旧 local value 不得覆盖 external value。
 
 - [ ] **Step 5: 迁移 SearchBar**
 
-  - query hooks 从 `useSearchQuery.ts` import；
   - `categoryGroups` 从 `useBoardProjection(category)` 取得；
   - match count 使用 `filterGroupsByQuery(categoryGroups, localValue)`；
   - 删除 `useTabBoardStore` / `useShallow`；
-  - 删除 `tabboard-search-change` listener；
-  - 新增 `[query]` effect同步 local input；
-  - 保留 150 ms timer和 immediate clear/close。
+  - 保留 Task 2 已验证的 external query sync、150 ms timer和 immediate clear/close。
 
 - [ ] **Step 6: 迁移 ManagerLayout**
 

@@ -14,6 +14,7 @@ const testHarness = vi.hoisted(() => {
 
   return {
     getPersistedState: vi.fn(),
+    savedSearchQuery: '',
     sendMessage: vi.fn(),
     setSavedSearchQuery: vi.fn(),
     state,
@@ -21,8 +22,13 @@ const testHarness = vi.hoisted(() => {
   };
 });
 
-vi.mock('./useFilteredGroups', () => ({
-  useSearchQuery: () => '',
+vi.mock('./useSearchQuery', () => ({
+  savedSearchQueryStore: {
+    getSnapshot: () => testHarness.savedSearchQuery,
+    subscribe: () => () => undefined,
+    set: (value: string) => testHarness.setSavedSearchQuery(value),
+  },
+  useSearchQuery: () => testHarness.savedSearchQuery,
   useSetSearchQuery: () => testHarness.setSavedSearchQuery,
 }));
 
@@ -88,8 +94,12 @@ beforeEach(() => {
   runtime = null;
   Object.assign(testHarness.state, createEmptyState());
   testHarness.getPersistedState.mockReset();
+  testHarness.savedSearchQuery = '';
   testHarness.sendMessage.mockReset();
   testHarness.setSavedSearchQuery.mockReset();
+  testHarness.setSavedSearchQuery.mockImplementation((value: string) => {
+    testHarness.savedSearchQuery = value;
+  });
   testHarness.useStore.mockClear();
 
   vi.stubGlobal('chrome', {
@@ -215,5 +225,48 @@ describe('Open Tabs runtime refresh', () => {
     expect(runtime?.model.selection.ids).toEqual([]);
     expect(dispatchEvent.mock.calls.some(([event]) =>
       event.type === 'tabboard-capture-completed')).toBe(false);
+  });
+
+  it('captures a URL filter set in the same call stack before React effects run', async () => {
+    const tab = createTab({ url: 'https://filter.test/path' });
+    await mountRuntime(createWindow([tab]));
+    await act(async () => {
+      runtime?.commands.toggleSelection(tab.id);
+    });
+
+    let rejectCapture!: (reason?: unknown) => void;
+    const pendingCapture = new Promise((_, reject) => {
+      rejectCapture = reject;
+    });
+    testHarness.sendMessage
+      .mockReturnValueOnce(pendingCapture)
+      .mockResolvedValueOnce({
+        ok: true,
+        result: { windows: createWindow([tab]) },
+      });
+
+    let completionPromise: ReturnType<OpenTabsWorkflow['commands']['captureSelection']> | null = null;
+    await act(async () => {
+      runtime?.commands.filterSessionsByTab(tab);
+      completionPromise = runtime?.commands.captureSelection(
+        { showBin: false, category: 'inbox' },
+        () => ({ showBin: false, category: 'inbox' }),
+      ) ?? null;
+    });
+
+    let completion: Awaited<ReturnType<OpenTabsWorkflow['commands']['captureSelection']>> = null;
+    await act(async () => {
+      rejectCapture(new Error('capture failed'));
+      completion = await completionPromise;
+    });
+
+    expect(completion).toMatchObject({
+      committed: false,
+      filterCurrent: true,
+      targetFilterSnapshot: {
+        tabFilterUrl: tab.url,
+        searchQuery: tab.url,
+      },
+    });
   });
 });

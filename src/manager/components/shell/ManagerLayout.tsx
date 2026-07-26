@@ -26,9 +26,11 @@ import { BinView } from '../bin/BinView';
 import {
   useCurrentWorkspace,
   useFilteredGroups,
+} from '../../hooks/useFilteredGroups';
+import {
   useSearchQuery,
   useSetSearchQuery,
-} from '../../hooks/useFilteredGroups';
+} from '../../hooks/useSearchQuery';
 import {
   useOpenTabsRuntime,
   type CaptureCompletion,

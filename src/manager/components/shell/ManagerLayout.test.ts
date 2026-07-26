@@ -95,6 +95,13 @@ vi.mock('../workspace/WorkspaceHeader', () => ({ WorkspaceHeader: () => null }))
 vi.mock('../../hooks/useFilteredGroups', () => ({
   useCurrentWorkspace: () => ({ id: 'workspace_default', name: 'Workspace' }),
   useFilteredGroups: () => [],
+}));
+vi.mock('../../hooks/useSearchQuery', () => ({
+  savedSearchQueryStore: {
+    getSnapshot: () => '',
+    subscribe: () => () => undefined,
+    set: testHarness.setSearchQuery,
+  },
   useSearchQuery: () => '',
   useSetSearchQuery: () => testHarness.setSearchQuery,
 }));
@@ -663,22 +670,24 @@ describe('Task110 capture category race contracts', () => {
     expect(runtimeSource).toContain("dispatch({ type: 'tab-filter-changed', url: null });");
   });
 
-  it('resets the saved search ref before publishing the target filter snapshot for a non-matching group', () => {
+  it('resets the saved search owner before publishing the target filter snapshot for a non-matching group', () => {
     const nonMatchingBranchStart = runtimeSource.indexOf(`if (
           currentFilterSnapshot.searchQuery === captureFilterSnapshot.searchQuery
           && captureFilterSnapshot.searchQuery
           && createdGroup
           && !groupMatchesQuery(createdGroup, captureFilterSnapshot.searchQuery)
         ) {`);
-    const savedSearchRefResetIndex = runtimeSource.indexOf("savedSearchQueryRef.current = '';", nonMatchingBranchStart);
-    const savedSearchResetIndex = runtimeSource.indexOf("setSavedSearchQuery('');", savedSearchRefResetIndex);
+    const savedSearchResetIndex = runtimeSource.indexOf("setSavedSearchQuery('');", nonMatchingBranchStart);
     const targetFilterSnapshotIndex = runtimeSource.indexOf('const targetFilterSnapshot', nonMatchingBranchStart);
+    const ownerSnapshotIndex = runtimeSource.indexOf(
+      'searchQuery: savedSearchQueryStore.getSnapshot(),',
+      targetFilterSnapshotIndex,
+    );
 
     expect(nonMatchingBranchStart).toBeGreaterThanOrEqual(0);
-    expect(savedSearchRefResetIndex).toBeGreaterThan(nonMatchingBranchStart);
-    expect(savedSearchResetIndex).toBeGreaterThan(savedSearchRefResetIndex);
-    expect(savedSearchRefResetIndex).toBeLessThan(targetFilterSnapshotIndex);
+    expect(savedSearchResetIndex).toBeGreaterThan(nonMatchingBranchStart);
     expect(savedSearchResetIndex).toBeLessThan(targetFilterSnapshotIndex);
+    expect(ownerSnapshotIndex).toBeGreaterThan(targetFilterSnapshotIndex);
   });
 
   it('rechecks pending target ownership and clears stale targets when view changes', () => {

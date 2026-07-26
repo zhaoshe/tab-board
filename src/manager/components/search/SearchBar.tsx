@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { TextInput, ActionIcon, Tooltip, Badge } from '@mantine/core';
 import { IconSearch, IconX, IconKeyboard } from '@tabler/icons-react';
-import { useSearchQuery, useSetSearchQuery } from '../../hooks/useFilteredGroups';
+import { useSearchQuery, useSetSearchQuery } from '../../hooks/useSearchQuery';
 import { getVisibleGroups, type CategoryFilter } from '../../core/selectors';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import { normalizeSearch } from '../../../shared/model';
@@ -35,14 +35,8 @@ export function SearchBar({ autoFocus = false, inputId, category = 'inbox', full
     : 0;
 
   useEffect(() => {
-    const handler = (e: Event) => {
-      const customEvent = e as CustomEvent<string>;
-      setLocalValue(customEvent.detail);
-    };
-    window.addEventListener('tabboard-search-change', handler);
-    return () =>
-      window.removeEventListener('tabboard-search-change', handler);
-  }, []);
+    setLocalValue(query);
+  }, [query]);
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus();

@@ -1,5 +1,9 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef } from 'react';
-import { useSearchQuery, useSetSearchQuery } from './useFilteredGroups';
+import {
+  savedSearchQueryStore,
+  useSearchQuery,
+  useSetSearchQuery,
+} from './useSearchQuery';
 import {
   canRevealCapture,
   createCaptureSnapshot,
@@ -153,7 +157,6 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
   const closingTabIdsRef = useRef<Set<number>>(new Set());
   const savedSearchQuery = useSearchQuery();
   const setSavedSearchQuery = useSetSearchQuery();
-  const savedSearchQueryRef = useRef(savedSearchQuery);
   const tabFilterUrlRef = useRef(workflowState.tabFilterUrl);
 
   useEffect(() => {
@@ -161,7 +164,6 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
   }, [workflowState]);
 
   useEffect(() => {
-    savedSearchQueryRef.current = savedSearchQuery;
     if (tabFilterUrlRef.current && savedSearchQuery !== tabFilterUrlRef.current) {
       tabFilterUrlRef.current = null;
       dispatch({ type: 'tab-filter-changed', url: null });
@@ -179,8 +181,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
       if (previousTabFilterUrl) {
         tabFilterUrlRef.current = null;
         dispatch({ type: 'tab-filter-changed', url: null });
-        if (savedSearchQueryRef.current === previousTabFilterUrl) {
-          savedSearchQueryRef.current = '';
+        if (savedSearchQueryStore.getSnapshot() === previousTabFilterUrl) {
           setSavedSearchQuery('');
         }
       }
@@ -412,7 +413,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     const sourceWorkspaceId = useTabBoardStore.getState().activeWorkspaceId;
     const captureFilterSnapshot: CaptureFilterSnapshot = {
       tabFilterUrl: tabFilterUrlRef.current,
-      searchQuery: savedSearchQueryRef.current,
+      searchQuery: savedSearchQueryStore.getSnapshot(),
     };
     const captureProjection = projectOpenTabsWorkflow(workflowStateRef.current);
     const captureSnapshot = createCaptureSnapshot({
@@ -505,7 +506,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
       }
       const currentFilterSnapshot: CaptureFilterSnapshot = {
         tabFilterUrl: tabFilterUrlRef.current,
-        searchQuery: savedSearchQueryRef.current,
+        searchQuery: savedSearchQueryStore.getSnapshot(),
       };
       const filterCurrent = sameCaptureFilterSnapshot(captureFilterSnapshot, currentFilterSnapshot);
       const categoryCurrent = sameCaptureCategorySnapshot(
@@ -529,7 +530,6 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
           tabFilterUrlRef.current = null;
           dispatch({ type: 'tab-filter-changed', url: null });
           if (captureFilterSnapshot.tabFilterUrl && currentFilterSnapshot.searchQuery === captureFilterSnapshot.tabFilterUrl) {
-            savedSearchQueryRef.current = '';
             setSavedSearchQuery('');
           }
         }
@@ -540,7 +540,6 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
           && createdGroup
           && !groupMatchesQuery(createdGroup, captureFilterSnapshot.searchQuery)
         ) {
-          savedSearchQueryRef.current = '';
           setSavedSearchQuery('');
         }
       }
@@ -550,7 +549,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
       };
       const targetFilterSnapshot: CaptureFilterSnapshot = {
         tabFilterUrl: tabFilterUrlRef.current,
-        searchQuery: savedSearchQueryRef.current,
+        searchQuery: savedSearchQueryStore.getSnapshot(),
       };
       const message = captureError || getCaptureMessage({ committed, reconciled });
       completion = {

@@ -1,31 +1,11 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
 import { getActiveWorkspaceState, getVisibleGroups, type CategoryFilter } from '../core/selectors';
 import type { Group, TabBoardState } from '../../shared/model';
+import { useSearchQuery } from './useSearchQuery';
 
-const SEARCH_KEY = 'tabboardSearch';
-const SEARCH_CHANGE_EVENT = 'tabboard-search-change';
-
-function getInitialQuery(): string {
-  if (typeof window === 'undefined') return '';
-  const params = new URLSearchParams(window.location.search);
-  const urlQuery = params.get('q');
-  if (urlQuery) return urlQuery;
-  const stored = sessionStorage.getItem(SEARCH_KEY);
-  return stored || '';
-}
-
-let globalQuery = '';
-const listeners = new Set<(value: string) => void>();
-
-function setGlobalQuery(value: string) {
-  globalQuery = value;
-  sessionStorage.setItem(SEARCH_KEY, value);
-  const event = new CustomEvent(SEARCH_CHANGE_EVENT, { detail: value });
-  window.dispatchEvent(event);
-  listeners.forEach((listener) => listener(value));
-}
+export { useSearchQuery, useSetSearchQuery } from './useSearchQuery';
 
 type VisibleGroupsSelectorState = Pick<TabBoardState, 'activeWorkspaceId' | 'workspaces' | 'folders' | 'groups'>;
 
@@ -65,39 +45,6 @@ export function useFilteredGroups(category: CategoryFilter): Group[] {
     () => getVisibleGroups(state, category, searchQuery),
     [state, category, searchQuery],
   );
-}
-
-export function useSearchQuery(): string {
-  const [query, setQuery] = useState<string>(() => {
-    if (globalQuery) return globalQuery;
-    return getInitialQuery();
-  });
-
-  useEffect(() => {
-    const initial = getInitialQuery();
-    if (initial) {
-      setGlobalQuery(initial);
-      setQuery(initial);
-    }
-  }, []);
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const customEvent = e as CustomEvent<string>;
-      setQuery(customEvent.detail);
-      globalQuery = customEvent.detail;
-    };
-    window.addEventListener(SEARCH_CHANGE_EVENT, handler);
-    return () => window.removeEventListener(SEARCH_CHANGE_EVENT, handler);
-  }, []);
-
-  return query;
-}
-
-export function useSetSearchQuery() {
-  return useCallback((value: string) => {
-    setGlobalQuery(value);
-  }, []);
 }
 
 export function useWorkspaceFolders() {

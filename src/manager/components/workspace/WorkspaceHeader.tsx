@@ -32,7 +32,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { getCategoryStrip, type CategoryFilter, type CategoryStripItem } from '../../core/selectors';
 import type { DndData, DragMarker } from '../../core/dnd';
-import { useSearchQuery } from '../../hooks/useFilteredGroups';
+import { useSearchQuery } from '../../hooks/useSearchQuery';
 import { SearchBar } from '../search/SearchBar';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import { validateFolderName, type FolderNameValidation } from '../../../shared/model';
