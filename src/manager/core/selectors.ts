@@ -1,6 +1,7 @@
 import { groupMatchesQuery, normalizeSearch } from '../../shared/model/search';
 import {
   categoryForGroup,
+  groupsForCategory,
   type CategoryFilter,
 } from '../../shared/model/categories';
 import type { Folder, Group, TabBoardState } from '../../shared/model/types';
@@ -80,19 +81,47 @@ export function getActiveWorkspaceState(
   };
 }
 
+export type BoardProjectionState = Pick<
+  TabBoardState,
+  'activeWorkspaceId' | 'workspaces' | 'folders' | 'groups'
+>;
+
+export interface BoardProjection {
+  workspaceId: string;
+  categoryGroups: Group[];
+  visibleGroups: Group[];
+  searchQuery: string;
+}
+
+export function filterGroupsByQuery(
+  groups: Group[],
+  searchQuery: string,
+): Group[] {
+  const normalizedQuery = normalizeSearch(searchQuery);
+  return normalizedQuery
+    ? groups.filter((group) => groupMatchesQuery(group, normalizedQuery))
+    : groups;
+}
+
+export function getBoardProjection(
+  state: BoardProjectionState,
+  category: CategoryFilter,
+  searchQuery: string,
+): BoardProjection {
+  const { workspaceId } = getActiveWorkspaceState(state);
+  const categoryGroups = groupsForCategory(state, category, workspaceId);
+  return {
+    workspaceId,
+    categoryGroups,
+    visibleGroups: filterGroupsByQuery(categoryGroups, searchQuery),
+    searchQuery,
+  };
+}
+
 export function getVisibleGroups(
-  state: Pick<TabBoardState, 'activeWorkspaceId' | 'workspaces' | 'folders' | 'groups'>,
+  state: BoardProjectionState,
   filter: CategoryFilter,
   query: string,
 ): Group[] {
-  const { workspaceId, folders } = getActiveWorkspaceState(state);
-  const projected = state.groups.filter((group) => {
-    return group.workspaceId === workspaceId
-      && categoryForGroup(state, group) === filter;
-  });
-
-  const normalizedQuery = normalizeSearch(query);
-  return normalizedQuery
-    ? projected.filter((group) => groupMatchesQuery(group, normalizedQuery))
-    : projected;
+  return getBoardProjection(state, filter, query).visibleGroups;
 }

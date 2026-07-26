@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  filterGroupsByQuery,
   getActiveWorkspaceState,
+  getBoardProjection,
   getCategoryStrip,
   getVisibleGroups,
 } from './selectors';
@@ -269,6 +271,119 @@ describe('getVisibleGroups', () => {
       groups[1],
       groups[2],
     ]);
+  });
+});
+
+describe('getBoardProjection', () => {
+  it('returns canonical unfiltered Inbox groups including orphan folder references', () => {
+    const groups = [
+      makeGroup('inbox', 'workspace-1'),
+      makeGroup('missing-folder', 'workspace-1', { folderId: 'missing-folder' }),
+      makeGroup('cross-workspace-folder', 'workspace-1', { folderId: 'folder-2' }),
+      makeGroup('valid-folder', 'workspace-1', { folderId: 'folder-1' }),
+      makeGroup('saved', 'workspace-1', { starred: true }),
+      makeGroup('archived', 'workspace-1', { archived: true }),
+      makeGroup('other-workspace', 'workspace-2'),
+    ];
+    const state = makeState({
+      groups,
+      folders: [
+        makeFolder('folder-1', 'workspace-1'),
+        makeFolder('folder-2', 'workspace-2'),
+      ],
+    });
+
+    const projection = getBoardProjection(state, 'inbox', '');
+
+    expect(projection.workspaceId).toBe('workspace-1');
+    expect(projection.categoryGroups).toEqual([
+      groups[0],
+      groups[1],
+      groups[2],
+    ]);
+    expect(projection.visibleGroups).toBe(projection.categoryGroups);
+    expect(projection.searchQuery).toBe('');
+  });
+
+  it('filters only after canonical category projection', () => {
+    const inboxMatch = makeGroup('inbox-match', 'workspace-1', {
+      title: 'Needle',
+    });
+    const inboxHidden = makeGroup('inbox-hidden', 'workspace-1');
+    const savedMatch = makeGroup('saved-match', 'workspace-1', {
+      starred: true,
+      title: 'Needle',
+    });
+    const state = makeState({
+      groups: [inboxMatch, inboxHidden, savedMatch],
+    });
+
+    const projection = getBoardProjection(state, 'inbox', 'needle');
+
+    expect(projection.categoryGroups).toEqual([inboxMatch, inboxHidden]);
+    expect(projection.visibleGroups).toEqual([inboxMatch]);
+    expect(projection.searchQuery).toBe('needle');
+  });
+
+  it('preserves category precedence for Saved, Archive, and custom folders', () => {
+    const starredArchived = makeGroup('starred-archived', 'workspace-1', {
+      starred: true,
+      archived: true,
+      folderId: 'folder-1',
+    });
+    const archived = makeGroup('archived', 'workspace-1', {
+      archived: true,
+      folderId: 'folder-1',
+    });
+    const foldered = makeGroup('foldered', 'workspace-1', {
+      folderId: 'folder-1',
+    });
+    const state = makeState({
+      groups: [starredArchived, archived, foldered],
+      folders: [makeFolder('folder-1', 'workspace-1')],
+    });
+
+    expect(getBoardProjection(state, 'saved', '').categoryGroups)
+      .toEqual([starredArchived]);
+    expect(getBoardProjection(state, 'archive', '').categoryGroups)
+      .toEqual([archived]);
+    expect(getBoardProjection(state, 'folder:folder-1', '').categoryGroups)
+      .toEqual([foldered]);
+  });
+
+  it('uses the first workspace fallback for both category and visible groups', () => {
+    const fallback = makeGroup('fallback', 'workspace-1', { title: 'Needle' });
+    const other = makeGroup('other', 'workspace-2', { title: 'Needle' });
+    const state = makeState({
+      activeWorkspaceId: 'missing-workspace',
+      workspaces: [makeWorkspace('workspace-1'), makeWorkspace('workspace-2')],
+      groups: [fallback, other],
+    });
+
+    const projection = getBoardProjection(state, 'inbox', 'needle');
+
+    expect(projection.workspaceId).toBe('workspace-1');
+    expect(projection.categoryGroups).toEqual([fallback]);
+    expect(projection.visibleGroups).toEqual([fallback]);
+  });
+});
+
+describe('filterGroupsByQuery', () => {
+  it('returns the input reference for an empty normalized query', () => {
+    const groups = [makeGroup('first', 'workspace-1')];
+
+    expect(filterGroupsByQuery(groups, '')).toBe(groups);
+    expect(filterGroupsByQuery(groups, '   ')).toBe(groups);
+  });
+
+  it('returns only groups matching the normalized query', () => {
+    const matching = makeGroup('matching', 'workspace-1', {
+      note: 'Contains Needle',
+    });
+    const hidden = makeGroup('hidden', 'workspace-1');
+    const groups = [matching, hidden];
+
+    expect(filterGroupsByQuery(groups, '  NEEDLE  ')).toEqual([matching]);
   });
 });
 

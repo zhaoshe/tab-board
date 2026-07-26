@@ -360,7 +360,7 @@
 - Existing `getVisibleGroups()` remains a thin compatibility wrapper around
   `getBoardProjection(...).visibleGroups`.
 
-- [ ] **Step 1: 写 canonical membership RED**
+- [x] **Step 1: 写 canonical membership RED**
 
   扩展 selector tests：
 
@@ -379,7 +379,7 @@
   同时覆盖 Saved precedence、Archive precedence、自定义 folder 和 invalid active
   workspace fallback。
 
-- [ ] **Step 2: 写 query projection RED**
+- [x] **Step 2: 写 query projection RED**
 
   增加：
 
@@ -393,7 +393,7 @@
 
   明确 query filtering 只作用于 canonical category groups。
 
-- [ ] **Step 3: 运行 RED**
+- [x] **Step 3: 运行 RED**
 
   Run:
 
@@ -403,7 +403,7 @@
 
   Expected: FAIL because projection/helper exports do not exist.
 
-- [ ] **Step 4: 实现 selector**
+- [x] **Step 4: 实现 selector**
 
   `getBoardProjection()`：
 
@@ -421,7 +421,7 @@
   `filterGroupsByQuery()` 为空 normalized query 时原样返回 input；非空时使用
   `groupMatchesQuery()`。删除 `getVisibleGroups()` 内自己的 category scan。
 
-- [ ] **Step 5: 运行 GREEN**
+- [x] **Step 5: 运行 GREEN**
 
   Run:
 
@@ -433,7 +433,7 @@
 
   Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   ```bash
   git add src/manager/core/selectors.ts src/manager/core/selectors.test.ts
