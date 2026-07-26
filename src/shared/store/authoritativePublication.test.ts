@@ -1,10 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createEmptyState,
+  type BinEntry,
+  type Folder,
   type Group,
   type TabBoardState,
 } from '../model';
-import { applyStateMutations, type StateMutation } from './stateMutations';
+import {
+  applyStateMutations,
+  CategoryValidationError,
+  InvalidDropMutationError,
+  RestoreCollisionError,
+  type StateMutation,
+} from './stateMutations';
 import {
   createAuthoritativePublication,
   type AuthoritativePublicationDependencies,
@@ -28,6 +36,39 @@ function group(id: string, overrides: Partial<Group> = {}): Group {
     createdAt: timestamp,
     updatedAt: timestamp,
     ...overrides,
+  };
+}
+
+function folder(id: string, name = id): Folder {
+  return {
+    id,
+    name,
+    color: 'slate',
+    workspaceId: 'workspace_default',
+    collapsed: false,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function dropMutation(
+  operationId: string,
+  groupId: string,
+  expectedRevision = 0,
+): Extract<StateMutation, { type: 'drop-intent' }> {
+  return {
+    type: 'drop-intent',
+    operationId,
+    intent: {
+      kind: 'move-session',
+      groupId,
+      category: 'saved',
+      index: 0,
+      workspaceId: 'workspace_default',
+    },
+    openTabs: [],
+    expectedRevision,
+    updatedAt: timestamp,
   };
 }
 
@@ -290,5 +331,370 @@ describe('authoritative publication reconciliation', () => {
 
     await vi.advanceTimersByTimeAsync(100);
     expect(harness.dependencies.sendMutations).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('authoritative publication persistence outcomes', () => {
+  it('keeps a drop waiter pending through a transient retry and resolves after commit', async () => {
+    vi.useFakeTimers();
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      groups: [group('retry-drop')],
+    };
+    const harness = createHarness(initial);
+    let attempts = 0;
+    harness.dependencies.sendMutations = vi.fn(async (
+      mutations: readonly StateMutation[],
+    ) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('temporary drop failure');
+      const committed = applyStateMutations(initial, mutations);
+      harness.setAuthoritative(committed);
+      return committed;
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+
+    let settled = false;
+    const persistence = publication.commitDrop(
+      dropMutation('retry-drop-operation', 'retry-drop'),
+    );
+    persistence.then(
+      () => { settled = true; },
+      () => { settled = true; },
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(249);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(persistence).resolves.toBeUndefined();
+    expect(harness.getProjection().state.groups[0]?.starred).toBe(true);
+    expect(attempts).toBe(2);
+  });
+
+  it('rejects a drop after bounded retries and restores the authoritative state', async () => {
+    vi.useFakeTimers();
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      groups: [group('failed-drop')],
+    };
+    const harness = createHarness(initial);
+    harness.dependencies.sendMutations = vi.fn(async () => {
+      throw new Error('permanent drop failure');
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const persistence = publication.commitDrop(
+      dropMutation('failed-drop-operation', 'failed-drop'),
+    );
+    const outcome = persistence.then(
+      () => 'resolved' as const,
+      (error: unknown) => error,
+    );
+
+    await vi.advanceTimersByTimeAsync(100 + 250 + 1_000 + 4_000 + 1);
+
+    await expect(outcome).resolves.toMatchObject({
+      message: 'permanent drop failure',
+    });
+    expect(harness.dependencies.sendMutations).toHaveBeenCalledTimes(4);
+    expect(harness.getProjection().state.groups[0]?.starred).toBe(false);
+    expect(harness.dependencies.onPersistenceError).toHaveBeenLastCalledWith(
+      expect.objectContaining({ message: 'permanent drop failure' }),
+      false,
+    );
+  });
+
+  it('rejects category validation without retrying or publishing optimistic state', async () => {
+    vi.useFakeTimers();
+    const initial = createEmptyState();
+    const harness = createHarness(initial);
+    harness.dependencies.sendMutations = vi.fn(async () => {
+      throw new CategoryValidationError('Category name is required.');
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+
+    const persistence = publication.commitCategory({
+      type: 'add-folder',
+      folder: folder('invalid-folder', 'Work'),
+    });
+
+    await expect(persistence).rejects.toMatchObject({
+      code: 'CATEGORY_VALIDATION',
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(harness.dependencies.sendMutations).toHaveBeenCalledTimes(1);
+    expect(harness.getProjection().state.folders).toEqual([]);
+  });
+
+  it('settles drop waiters by partial-commit indexes and publishes committed siblings', async () => {
+    vi.useFakeTimers();
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      groups: [group('valid-drop'), group('invalid-drop')],
+    };
+    const harness = createHarness(initial);
+    harness.dependencies.sendMutations = vi.fn(async (
+      mutations: readonly StateMutation[],
+    ) => {
+      const committedState = applyStateMutations(
+        initial,
+        mutations.filter((_, index) => index !== 1),
+      );
+      throw new InvalidDropMutationError(
+        'Invalid drop intent.',
+        [1],
+        [0, 2],
+        committedState,
+      );
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const valid = publication.commitDrop(
+      dropMutation('valid-drop-operation', 'valid-drop'),
+    );
+    const invalid = publication.commitDrop(
+      dropMutation('invalid-drop-operation', 'invalid-drop', 1),
+    );
+    const invalidOutcome = invalid.then(
+      () => 'resolved' as const,
+      (error: unknown) => error,
+    );
+    publication.commit({
+      type: 'update-settings',
+      updates: { theme: 'dark' },
+      updatedAt: timestamp,
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    await expect(valid).resolves.toBeUndefined();
+    await expect(invalidOutcome).resolves.toMatchObject({
+      code: 'INVALID_DROP_INTENT',
+    });
+    expect(
+      harness.getProjection().state.groups.find(({ id }) => id === 'valid-drop')
+        ?.starred,
+    ).toBe(true);
+    expect(
+      harness.getProjection().state.groups.find(({ id }) => id === 'invalid-drop')
+        ?.starred,
+    ).toBe(false);
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+  });
+
+  it('removes a colliding restore while retaining its ordinary sibling for retry', async () => {
+    vi.useFakeTimers();
+    const restoredGroup = group('restored-group');
+    const entry: BinEntry = {
+      id: 'restore-entry',
+      kind: 'group',
+      label: restoredGroup.title,
+      groupId: restoredGroup.id,
+      groupTitle: restoredGroup.title,
+      source: 'group',
+      item: restoredGroup,
+      deletedAt: timestamp,
+      originalWorkspaceId: 'workspace_default',
+      originalFolderId: null,
+      originalIndex: 0,
+    };
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      bin: [entry],
+    };
+    const harness = createHarness(initial);
+    let attempts = 0;
+    harness.dependencies.sendMutations = vi.fn(async (
+      mutations: readonly StateMutation[],
+    ) => {
+      attempts += 1;
+      if (attempts === 1) throw new RestoreCollisionError();
+      const committed = applyStateMutations(initial, mutations);
+      harness.setAuthoritative(committed);
+      return committed;
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+
+    publication.commitRestore({
+      type: 'restore-group',
+      entryId: entry.id,
+      group: restoredGroup,
+      index: 0,
+      updatedAt: timestamp,
+    });
+    publication.commit({
+      type: 'update-settings',
+      updates: { theme: 'dark' },
+      updatedAt: timestamp,
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(harness.dependencies.sendMutations).toHaveBeenCalledTimes(2);
+    expect(harness.dependencies.sendMutations).toHaveBeenLastCalledWith([
+      expect.objectContaining({ type: 'update-settings' }),
+    ]);
+    expect(harness.getProjection().state.groups).toEqual([]);
+    expect(harness.getProjection().state.bin).toEqual([entry]);
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+  });
+
+  it('isolates a terminal ordinary mutation and commits valid siblings', async () => {
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      groups: [group('locked-group')],
+    };
+    const harness = createHarness(initial);
+    let authoritative = initial;
+    const sentTypes: string[][] = [];
+    harness.dependencies.sendMutations = vi.fn(async (
+      mutations: readonly StateMutation[],
+    ) => {
+      sentTypes.push(mutations.map(({ type }) => type));
+      if (mutations.some(({ type }) => type === 'update-group')) {
+        throw Object.assign(
+          new Error('Cannot modify a locked group.'),
+          { code: 'GROUP_LOCKED' },
+        );
+      }
+      authoritative = applyStateMutations(authoritative, mutations);
+      harness.setAuthoritative(authoritative);
+      return authoritative;
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+    publication.commit({
+      type: 'update-group',
+      id: 'locked-group',
+      updates: { title: 'Rejected title' },
+      updatedAt: timestamp,
+    });
+    publication.commit({
+      type: 'update-settings',
+      updates: { theme: 'dark' },
+      updatedAt: timestamp,
+    });
+    const category = publication.commitCategory({
+      type: 'add-folder',
+      folder: folder('work-folder', 'Work'),
+    });
+
+    await expect(category).resolves.toBeUndefined();
+
+    expect(sentTypes).toEqual([
+      ['update-group', 'update-settings', 'add-folder'],
+      ['update-group'],
+      ['update-settings'],
+      ['add-folder'],
+    ]);
+    expect(harness.getProjection().state.groups[0]?.title).toBe('locked-group');
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+    expect(harness.getProjection().state.folders.map(({ name }) => name))
+      .toEqual(['Work']);
+  });
+
+  it('retains a mutation committed while terminal isolation is in flight', async () => {
+    vi.useFakeTimers();
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      groups: [group('isolation-queue-group')],
+    };
+    const harness = createHarness(initial);
+    let authoritative = initial;
+    let rejectIsolated: ((error: unknown) => void) | undefined;
+    const sentTypes: string[][] = [];
+    harness.dependencies.sendMutations = vi.fn((
+      mutations: readonly StateMutation[],
+    ) => {
+      sentTypes.push(mutations.map(({ type }) => type));
+      if (mutations.length > 1
+        && mutations.some(({ type }) => type === 'update-group')) {
+        return Promise.reject(Object.assign(
+          new Error('Cannot modify a locked group.'),
+          { code: 'GROUP_LOCKED' },
+        ));
+      }
+      if (mutations[0]?.type === 'update-group') {
+        return new Promise<TabBoardState>((_resolve, reject) => {
+          rejectIsolated = reject;
+        });
+      }
+      authoritative = applyStateMutations(authoritative, mutations);
+      harness.setAuthoritative(authoritative);
+      return Promise.resolve(authoritative);
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+    publication.commit({
+      type: 'update-group',
+      id: 'isolation-queue-group',
+      updates: { title: 'Rejected title' },
+      updatedAt: timestamp,
+    });
+    publication.commit({
+      type: 'update-settings',
+      updates: { theme: 'dark' },
+      updatedAt: timestamp,
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.waitFor(() => expect(sentTypes).toHaveLength(2));
+
+    publication.commit({
+      type: 'update-settings',
+      updates: { closeTabsAfterSave: false },
+      updatedAt: timestamp,
+    });
+    rejectIsolated?.(Object.assign(
+      new Error('Cannot modify a locked group.'),
+      { code: 'GROUP_LOCKED' },
+    ));
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.waitFor(() => {
+      expect(harness.getProjection().state.settings).toMatchObject({
+        theme: 'dark',
+        closeTabsAfterSave: false,
+      });
+    });
+
+    expect(harness.getProjection().state.groups[0]?.title)
+      .toBe('isolation-queue-group');
+  });
+
+  it('rejects a category sibling with its own validation error during isolation', async () => {
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      groups: [group('category-validation-group')],
+    };
+    const harness = createHarness(initial);
+    harness.dependencies.sendMutations = vi.fn(async (
+      mutations: readonly StateMutation[],
+    ) => {
+      if (mutations.some(({ type }) => type === 'update-group')) {
+        throw Object.assign(
+          new Error('Cannot modify a locked group.'),
+          { code: 'GROUP_LOCKED' },
+        );
+      }
+      throw new CategoryValidationError('Category name is required.');
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+    publication.commit({
+      type: 'update-group',
+      id: 'category-validation-group',
+      updates: { title: 'Rejected title' },
+      updatedAt: timestamp,
+    });
+
+    const category = publication.commitCategory({
+      type: 'add-folder',
+      folder: folder('invalid-isolated-folder', 'Invalid'),
+    });
+
+    await expect(category).rejects.toMatchObject({
+      code: 'CATEGORY_VALIDATION',
+    });
+    expect(harness.getProjection().state.folders).toEqual([]);
+    expect(harness.getProjection().state.groups[0]?.title)
+      .toBe('category-validation-group');
   });
 });
