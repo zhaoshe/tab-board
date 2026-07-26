@@ -22,7 +22,7 @@ import {
   getDropOperationDigest,
   getDropIntentReplayStatus,
   isDropIntentAlreadyApplied,
-} from '../../manager/core/commands';
+} from '../model/drop-operations';
 import {
   moveSessionToCategory,
   type CategoryFilter,

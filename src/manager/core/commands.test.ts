@@ -2,14 +2,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEmptyState, exportToText } from '../../shared/model';
 import type { BinEntry, Folder, Group, TabBoardState, Workspace } from '../../shared/model';
 import {
-  dropOperationGroupId,
-  dropOperationTabId,
-  executeDropIntent,
-  getDropIntentReplayStatus,
   moveSessionToCategory,
   reorderCategoryIds,
   restoreGroupFromBin,
 } from './commands';
+import {
+  dropOperationGroupId,
+  dropOperationTabId,
+  executeDropIntent,
+  getDropIntentReplayStatus,
+} from '../../shared/model/drop-operations';
 import { applyStateMutation, type StateMutation } from '../../shared/store/stateMutations';
 import { MAX_ENTITY_ID_BYTES, utf8ByteLength } from '../../shared/store/mutationValidation';
 import { resetActiveAdapterForTests } from '../../shared/store/activeAdapter';

@@ -3,7 +3,7 @@ import { createEmptyState, createNoteRecord } from '../shared/model';
 import type { BinEntry, Folder, Group, TabBoardState, TabItem } from '../shared/model';
 import { createStatePersistence } from './statePersistence';
 import type { StateMutation } from '../shared/store/stateMutations';
-import { getDropOperationDigest } from '../manager/core/commands';
+import { getDropOperationDigest } from '../shared/model/drop-operations';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 

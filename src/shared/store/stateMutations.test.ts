@@ -14,7 +14,10 @@ import {
   isStateMutation,
   type StateMutation,
 } from './stateMutations';
-import { getDropOperationDigest, getDropIntentReplayStatus } from '../../manager/core/commands';
+import {
+  getDropIntentReplayStatus,
+  getDropOperationDigest,
+} from '../model/drop-operations';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 

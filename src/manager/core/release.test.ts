@@ -7,7 +7,7 @@ import { applyStateMutation, type StateMutation } from '../../shared/store/state
 import { createStatePersistence } from '../../background/statePersistence';
 import { getCaptureMessage, getCaptureOutcome, shouldRevealCapture } from './capture';
 import { clearDragState, resolveDrop } from './dnd';
-import { getDropIntentReplayStatus } from './commands';
+import { getDropIntentReplayStatus } from '../../shared/model/drop-operations';
 import { resolveSelectedWindow, sameOpenTabSelection } from './open-tabs';
 
 describe('core contracts', () => {

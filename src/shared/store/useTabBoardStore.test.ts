@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyStateMutations, type StateMutation } from './stateMutations';
-import { getDropOperationDigest } from '../../manager/core/commands';
+import { getDropOperationDigest } from '../model/drop-operations';
 import { createEmptyState, type Group, type TabBoardState, type BinEntry, type TabItem } from '../model';
 import { persistedSnapshot, useTabBoardStore } from './useTabBoardStore';
 

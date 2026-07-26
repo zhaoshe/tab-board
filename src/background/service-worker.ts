@@ -50,7 +50,7 @@ import {
 import {
   getDropOperationDigest,
   isDropIntentAlreadyApplied,
-} from '../manager/core/commands';
+} from '../shared/model/drop-operations';
 
 const MANAGER_PAGE = 'manager.html';
 const POPUP_PAGE = 'popup.html';

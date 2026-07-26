@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyState, type Folder, type Group, type TabBoardState, type TabItem, type Workspace } from '../../shared/model';
 import type { OpenTabInfo } from './open-tabs';
-import { executeDropIntent } from './commands';
+import { executeDropIntent } from '../../shared/model/drop-operations';
 import {
   clearDragState,
   getDragPlaceholderStyle,

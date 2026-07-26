@@ -8,7 +8,7 @@ import {
   validateMutationBatch,
   type StateMutation,
 } from '../shared/store/stateMutations';
-import { isDropIntentAlreadyApplied } from '../manager/core/commands';
+import { isDropIntentAlreadyApplied } from '../shared/model/drop-operations';
 
 interface LockManagerLike {
   request<T>(name: string, options: { mode: 'exclusive' }, callback: () => Promise<T>): Promise<T>;
