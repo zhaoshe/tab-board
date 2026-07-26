@@ -3,7 +3,7 @@ import { ActionIcon, Box, Stack, Tooltip } from '@mantine/core';
 import { IconBrowser, IconSearch } from '@tabler/icons-react';
 import { OPEN_TABS_FILTER_INPUT_ID, OpenTabsPanel } from './OpenTabsPanel';
 import {
-  useOpenTabsRuntime,
+  type CaptureCompletion,
   type OpenTabsWorkflow,
 } from '../../hooks/useOpenTabsRuntime';
 import type { CaptureCategorySnapshot } from '../../core/capture';
@@ -112,7 +112,8 @@ interface SidebarProps {
   onToggleSidebar: (expanded: boolean) => void;
   onSelectionModeChange?: (selectionMode: boolean) => void;
   onOpenTabsSourceKeyChange?: (key: string) => void;
-  workflow?: OpenTabsWorkflow;
+  workflow: OpenTabsWorkflow;
+  onCaptureCompleted: (completion: CaptureCompletion | null) => void;
 }
 
 export function Sidebar({
@@ -126,10 +127,9 @@ export function Sidebar({
   onToggleSidebar,
   onSelectionModeChange,
   onOpenTabsSourceKeyChange,
-  workflow: providedWorkflow,
+  workflow: openTabs,
+  onCaptureCompleted,
 }: SidebarProps) {
-  const localWorkflow = useOpenTabsRuntime();
-  const openTabs = providedWorkflow ?? localWorkflow;
   useEffect(() => {
     onSelectionModeChange?.(openTabs.model.selection.active);
     return () => onSelectionModeChange?.(false);
@@ -145,7 +145,10 @@ export function Sidebar({
     return openTabs.commands.captureSelection(
       categorySnapshot,
       () => ({ ...categorySnapshotRef.current }),
-    );
+    ).then((completion) => {
+      onCaptureCompleted(completion);
+      return completion;
+    });
   };
   const focusFilter = () => document.getElementById(OPEN_TABS_FILTER_INPUT_ID)?.focus();
   const focusTab = (tabId: number | undefined) => {

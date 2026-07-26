@@ -2,18 +2,21 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createEmptyState } from '../../shared/model';
 import type { OpenTabsWorkflow } from './useOpenTabsRuntime';
 import { useOpenTabsRuntime } from './useOpenTabsRuntime';
 import type { OpenWindowInfo } from '../../shared/openTabs';
 
 const testHarness = vi.hoisted(() => {
-  const state = { activeWorkspaceId: 'workspace_default' };
+  const state = {} as ReturnType<typeof import('../../shared/model').createEmptyState>;
   const useStore = vi.fn((selector: (value: typeof state) => unknown) => selector(state));
   Object.assign(useStore, { getState: () => state, setState: vi.fn() });
 
   return {
+    getPersistedState: vi.fn(),
     sendMessage: vi.fn(),
     setSavedSearchQuery: vi.fn(),
+    state,
     useStore,
   };
 });
@@ -25,6 +28,14 @@ vi.mock('./useFilteredGroups', () => ({
 
 vi.mock('../../shared/store/useTabBoardStore', () => ({
   useTabBoardStore: testHarness.useStore,
+}));
+
+vi.mock('../../shared/store/chromeStorage', () => ({
+  getState: testHarness.getPersistedState,
+}));
+
+vi.mock('../../shared/store/stateStructuralSharing', () => ({
+  structurallyShareState: (_current: unknown, next: unknown) => next,
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -75,6 +86,8 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.append(container);
   runtime = null;
+  Object.assign(testHarness.state, createEmptyState());
+  testHarness.getPersistedState.mockReset();
   testHarness.sendMessage.mockReset();
   testHarness.setSavedSearchQuery.mockReset();
   testHarness.useStore.mockClear();
@@ -145,5 +158,62 @@ describe('Open Tabs runtime refresh', () => {
 
     expect(runtime?.model.selection.ids).toEqual([]);
     expect(runtime?.model.selection.active).toBe(false);
+  });
+
+  it('returns selected capture completion directly without dispatching a global event', async () => {
+    await mountRuntime(createWindow([createTab()]));
+    await act(async () => {
+      runtime?.commands.toggleSelection(1);
+    });
+    const persisted = createEmptyState();
+    persisted.groups = [{
+      id: 'captured-group',
+      title: 'Captured',
+      note: '',
+      workspaceId: persisted.activeWorkspaceId,
+      folderId: null,
+      locked: false,
+      starred: false,
+      archived: false,
+      collapsed: false,
+      tabs: [],
+      createdAt: persisted.createdAt,
+      updatedAt: persisted.updatedAt,
+    }];
+    testHarness.getPersistedState.mockResolvedValueOnce(persisted);
+    testHarness.sendMessage
+      .mockResolvedValueOnce({
+        ok: true,
+        result: {
+          storedTabs: 1,
+          storedGroups: 1,
+          cleanedDuplicates: 0,
+          createdGroupIds: ['captured-group'],
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        result: { windows: createWindow([createTab()]) },
+      });
+    const dispatchEvent = vi.spyOn(window, 'dispatchEvent');
+
+    let completion: Awaited<ReturnType<OpenTabsWorkflow['commands']['captureSelection']>> = null;
+    await act(async () => {
+      completion = await runtime?.commands.captureSelection(
+        { showBin: false, category: 'inbox' },
+        () => ({ showBin: false, category: 'inbox' }),
+      ) ?? null;
+    });
+
+    expect(completion).toMatchObject({
+      committed: true,
+      reconciled: true,
+      selectionCurrent: true,
+      createdGroupIds: ['captured-group'],
+      result: { storedTabs: 1 },
+    });
+    expect(runtime?.model.selection.ids).toEqual([]);
+    expect(dispatchEvent.mock.calls.some(([event]) =>
+      event.type === 'tabboard-capture-completed')).toBe(false);
   });
 });

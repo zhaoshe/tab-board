@@ -97,13 +97,13 @@
 - `captureSelection()` returns `CaptureCompletion`.
 - `completeDrop()` is invoked directly after successful persistence.
 
-- [ ] Add failing tests showing successful direct drop completion clears selection, failed persistence does not, and capture returns completion evidence without dispatching a window event.
-- [ ] Run focused tests and verify RED.
-- [ ] Lift `useOpenTabsRuntime()` from Sidebar to ManagerLayout.
-- [ ] Replace capture/drop/tab-filter window events with direct model/commands/results.
-- [ ] Keep source-key invalidation callback for drag-source replacement.
-- [ ] Run ManagerLayout, hook DOM, capture, Sidebar, DnD, and Manager DOM tests.
-- [ ] Commit.
+- [x] Add failing tests showing successful direct drop completion clears selection, failed persistence does not, and capture returns completion evidence without dispatching a window event.
+- [x] Run focused tests and verify RED.
+- [x] Lift `useOpenTabsRuntime()` from Sidebar to ManagerLayout.
+- [x] Replace capture/drop/tab-filter window events with direct model/commands/results.
+- [x] Keep source-key invalidation callback for drag-source replacement.
+- [x] Run ManagerLayout, hook DOM, capture, Sidebar, DnD, and Manager DOM tests.
+- [x] Commit.
 
 ### Task 5: Document, gate, and verify
 

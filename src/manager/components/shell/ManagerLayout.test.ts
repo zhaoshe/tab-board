@@ -33,6 +33,7 @@ const testHarness = vi.hoisted(() => {
     dndOnDragEnd: null as ((event: unknown) => Promise<void>) | null,
     dndOnDragStart: null as ((event: unknown) => void) | null,
     onOpenTabsSourceKeyChange: null as ((key: string) => void) | null,
+    completeDrop: vi.fn(),
     resolveDrop: vi.fn(() => ({
       kind: 'create-session' as const,
       source: { kind: 'open-tabs' as const, tabIds: [1], windowId: 1 },
@@ -98,8 +99,34 @@ vi.mock('../../hooks/useFilteredGroups', () => ({
   useSetSearchQuery: () => testHarness.setSearchQuery,
 }));
 vi.mock('../../hooks/useOpenTabsRuntime', () => ({
-  CAPTURE_COMPLETED_EVENT: 'tabboard-capture-completed',
-  useTabFilterUrl: () => null,
+  useOpenTabsRuntime: () => ({
+    model: {
+      windows: [],
+      selectedWindow: null,
+      selectedWindowId: null,
+      filteredTabs: [],
+      query: '',
+      tabFilterUrl: null,
+      isTabFilterActive: false,
+      selection: {
+        active: false,
+        ids: [],
+        count: 0,
+        records: [],
+        recordIds: [],
+      },
+      status: {
+        closingTabIds: [],
+        updatingSelection: false,
+        loading: false,
+        capturing: false,
+        error: null,
+      },
+    },
+    commands: {
+      completeDrop: testHarness.completeDrop,
+    },
+  }),
 }));
 vi.mock('../../hooks/useManagerRuntime', () => ({ useManagerRuntime: () => ({}) }));
 vi.mock('../../hooks/useToast', () => ({
@@ -142,6 +169,7 @@ beforeEach(() => {
   testHarness.showInfo.mockClear();
   testHarness.showError.mockClear();
   testHarness.setSearchQuery.mockClear();
+  testHarness.completeDrop.mockClear();
   testHarness.state.applyDropIntent.mockReset();
   testHarness.state.applyDropIntent.mockResolvedValue(undefined);
 });
@@ -501,42 +529,30 @@ describe('drag persistence feedback', () => {
     expect(showError).toHaveBeenCalledWith('worker failure', 'Drop failed');
   });
 
-  it('does not dispatch open-tabs dropped when persistence fails', async () => {
+  it('does not complete the Open Tabs workflow when persistence fails', async () => {
     await mountManagerLayout();
     testHarness.state.applyDropIntent.mockRejectedValueOnce(new Error('persistence failed'));
-    const dropped = vi.fn();
-    window.addEventListener('tabboard-open-tabs-dropped', dropped);
 
-    try {
-      await act(async () => {
-        testHarness.dndOnDragStart?.({ active: createOpenTabsDragActive() });
-        await testHarness.dndOnDragEnd?.(createOpenTabsDragEndEvent());
-      });
+    await act(async () => {
+      testHarness.dndOnDragStart?.({ active: createOpenTabsDragActive() });
+      await testHarness.dndOnDragEnd?.(createOpenTabsDragEndEvent());
+    });
 
-      expect(dropped).not.toHaveBeenCalled();
-      expect(testHarness.showError).toHaveBeenCalledWith('persistence failed', 'Drop failed');
-    } finally {
-      window.removeEventListener('tabboard-open-tabs-dropped', dropped);
-    }
+    expect(testHarness.completeDrop).not.toHaveBeenCalled();
+    expect(testHarness.showError).toHaveBeenCalledWith('persistence failed', 'Drop failed');
   });
 
-  it('dispatches open-tabs dropped when persistence succeeds', async () => {
+  it('completes the Open Tabs workflow when persistence succeeds', async () => {
     await mountManagerLayout();
-    const dropped = vi.fn();
-    window.addEventListener('tabboard-open-tabs-dropped', dropped);
 
-    try {
-      await act(async () => {
-        testHarness.dndOnDragStart?.({ active: createOpenTabsDragActive() });
-        await testHarness.dndOnDragEnd?.(createOpenTabsDragEndEvent());
-      });
+    await act(async () => {
+      testHarness.dndOnDragStart?.({ active: createOpenTabsDragActive() });
+      await testHarness.dndOnDragEnd?.(createOpenTabsDragEndEvent());
+    });
 
-      expect(dropped).toHaveBeenCalledTimes(1);
-      expect(testHarness.state.applyDropIntent).toHaveBeenCalledTimes(1);
-      expect(testHarness.showSuccess).toHaveBeenCalledWith('Drop saved', 'Drop complete');
-    } finally {
-      window.removeEventListener('tabboard-open-tabs-dropped', dropped);
-    }
+    expect(testHarness.completeDrop).toHaveBeenCalledTimes(1);
+    expect(testHarness.state.applyDropIntent).toHaveBeenCalledTimes(1);
+    expect(testHarness.showSuccess).toHaveBeenCalledWith('Drop saved', 'Drop complete');
   });
 
   it('cancels a drag whose Open Tabs source changed before release', async () => {
@@ -644,7 +660,7 @@ describe('Task110 capture category race contracts', () => {
     expect(runtimeSource).toContain('categoryCurrent');
     expect(runtimeSource).toContain('filterCurrent');
     expect(runtimeSource).toContain('if (canReveal && result) {');
-    expect(runtimeSource).toContain('setGlobalTabFilterUrl(null);');
+    expect(runtimeSource).toContain("dispatch({ type: 'tab-filter-changed', url: null });");
   });
 
   it('resets the saved search ref before publishing the target filter snapshot for a non-matching group', () => {

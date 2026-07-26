@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef } from 'react';
 import { useSearchQuery, useSetSearchQuery } from './useFilteredGroups';
 import {
   canRevealCapture,
@@ -38,33 +38,7 @@ import { getState as getPersistedState } from '../../shared/store/chromeStorage'
 import { structurallyShareState } from '../../shared/store/stateStructuralSharing';
 import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
 
-export const CAPTURE_COMPLETED_EVENT = 'tabboard-capture-completed';
-const TAB_FILTER_CHANGE_EVENT = 'tabboard-tab-filter-change';
-let globalTabFilterUrl: string | null = null;
-
-function setGlobalTabFilterUrl(value: string | null): void {
-  if (globalTabFilterUrl === value) return;
-  globalTabFilterUrl = value;
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent<string | null>(TAB_FILTER_CHANGE_EVENT, { detail: value }));
-  }
-}
-
-export function useTabFilterUrl(): string | null {
-  const [value, setValue] = useState<string | null>(globalTabFilterUrl);
-
-  useEffect(() => {
-    const handleChange = (event: Event) => {
-      setValue((event as CustomEvent<string | null>).detail);
-    };
-    window.addEventListener(TAB_FILTER_CHANGE_EVENT, handleChange);
-    return () => window.removeEventListener(TAB_FILTER_CHANGE_EVENT, handleChange);
-  }, []);
-
-  return value;
-}
-
-export interface CaptureCompletedEventDetail {
+export interface CaptureCompletion {
   sourceWorkspaceId: string;
   activeWorkspaceId: string;
   categorySnapshot: CaptureCategorySnapshot;
@@ -123,7 +97,7 @@ export interface OpenTabsWorkflowCommands {
   captureSelection: (
     categorySnapshot: CaptureCategorySnapshot,
     getCurrentCategorySnapshot: () => CaptureCategorySnapshot,
-  ) => Promise<CaptureResult | null>;
+  ) => Promise<CaptureCompletion | null>;
   refresh: () => Promise<void>;
 }
 
@@ -191,13 +165,11 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     if (tabFilterUrlRef.current && savedSearchQuery !== tabFilterUrlRef.current) {
       tabFilterUrlRef.current = null;
       dispatch({ type: 'tab-filter-changed', url: null });
-      setGlobalTabFilterUrl(null);
     }
   }, [dispatch, savedSearchQuery]);
 
   useEffect(() => {
     tabFilterUrlRef.current = workflowState.tabFilterUrl;
-    setGlobalTabFilterUrl(workflowState.tabFilterUrl);
   }, [workflowState.tabFilterUrl]);
 
   useEffect(() => {
@@ -207,7 +179,6 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
       if (previousTabFilterUrl) {
         tabFilterUrlRef.current = null;
         dispatch({ type: 'tab-filter-changed', url: null });
-        setGlobalTabFilterUrl(null);
         if (savedSearchQueryRef.current === previousTabFilterUrl) {
           savedSearchQueryRef.current = '';
           setSavedSearchQuery('');
@@ -308,14 +279,6 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
   const completeDrop = useCallback(() => {
     dispatch({ type: 'drop-completed' });
   }, [dispatch]);
-
-  useEffect(() => {
-    const handleOpenTabsDropped = () => {
-      completeDrop();
-    };
-    window.addEventListener('tabboard-open-tabs-dropped', handleOpenTabsDropped);
-    return () => window.removeEventListener('tabboard-open-tabs-dropped', handleOpenTabsDropped);
-  }, [completeDrop]);
 
   const deferredQuery = useDeferredValue(workflowState.query);
   const projection = useMemo(
@@ -424,14 +387,12 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     if (tab.storable !== true || !tab.url.trim()) return;
     tabFilterUrlRef.current = tab.url;
     dispatch({ type: 'tab-filter-changed', url: tab.url });
-    setGlobalTabFilterUrl(tab.url);
     setSavedSearchQuery(tab.url);
   }, [dispatch, setSavedSearchQuery]);
 
   const clearTabFilter = useCallback(() => {
     tabFilterUrlRef.current = null;
     dispatch({ type: 'tab-filter-changed', url: null });
-    setGlobalTabFilterUrl(null);
     setSavedSearchQuery('');
   }, [dispatch, setSavedSearchQuery]);
 
@@ -445,7 +406,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
   const captureSelectedTabs = useCallback(async (
     categorySnapshot: CaptureCategorySnapshot,
     getCurrentCategorySnapshot: () => CaptureCategorySnapshot,
-  ): Promise<CaptureResult | null> => {
+  ): Promise<CaptureCompletion | null> => {
     if (capturingRef.current) return null;
 
     const sourceWorkspaceId = useTabBoardStore.getState().activeWorkspaceId;
@@ -470,6 +431,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     let committed = false;
     let reconciled = false;
     let captureError: string | null = null;
+    let completion: CaptureCompletion | null = null;
 
     try {
       result = await sendWorkerMessage<CaptureResult>({
@@ -566,7 +528,6 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
         if (isCaptureTabFilterCurrent) {
           tabFilterUrlRef.current = null;
           dispatch({ type: 'tab-filter-changed', url: null });
-          setGlobalTabFilterUrl(null);
           if (captureFilterSnapshot.tabFilterUrl && currentFilterSnapshot.searchQuery === captureFilterSnapshot.tabFilterUrl) {
             savedSearchQueryRef.current = '';
             setSavedSearchQuery('');
@@ -592,28 +553,24 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
         searchQuery: savedSearchQueryRef.current,
       };
       const message = captureError || getCaptureMessage({ committed, reconciled });
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent<CaptureCompletedEventDetail>(CAPTURE_COMPLETED_EVENT, {
-          detail: {
-            sourceWorkspaceId: captureSnapshot.workspaceId,
-            activeWorkspaceId,
-            categorySnapshot: { ...categorySnapshot },
-            filterCurrent,
-            targetCategorySnapshot: { ...targetCategorySnapshot },
-            targetFilterSnapshot: { ...targetFilterSnapshot },
-            createdGroupIds: result?.createdGroupIds ?? [],
-            committed,
-            reconciled,
-            selectionCurrent,
-            result,
-            message,
-          },
-        }));
-      }
+      completion = {
+        sourceWorkspaceId: captureSnapshot.workspaceId,
+        activeWorkspaceId,
+        categorySnapshot: { ...categorySnapshot },
+        filterCurrent,
+        targetCategorySnapshot: { ...targetCategorySnapshot },
+        targetFilterSnapshot: { ...targetFilterSnapshot },
+        createdGroupIds: result?.createdGroupIds ?? [],
+        committed,
+        reconciled,
+        selectionCurrent,
+        result,
+        message,
+      };
       capturingRef.current = false;
       dispatch({ type: 'capture-changed', capturing: false });
     }
-    return result;
+    return completion;
   }, [dispatch, refresh, selectedWindow, setSavedSearchQuery]);
 
   return {

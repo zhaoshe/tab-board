@@ -30,9 +30,8 @@ import {
   useSetSearchQuery,
 } from '../../hooks/useFilteredGroups';
 import {
-  CAPTURE_COMPLETED_EVENT,
-  useTabFilterUrl,
-  type CaptureCompletedEventDetail,
+  useOpenTabsRuntime,
+  type CaptureCompletion,
 } from '../../hooks/useOpenTabsRuntime';
 import type { Group, TabItem } from '../../../shared/model';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
@@ -371,10 +370,11 @@ export function ManagerLayout() {
   const activeWorkspaceId = useTabBoardStore((state) => state.activeWorkspaceId);
   const workspace = useCurrentWorkspace();
   const runtime = useManagerRuntime();
+  const openTabsWorkflow = useOpenTabsRuntime();
   const { showSuccess, showInfo, showError } = useToast();
   const previousWorkspaceIdRef = useRef(activeWorkspaceId);
   const searchQuery = useSearchQuery();
-  const tabFilterUrl = useTabFilterUrl();
+  const tabFilterUrl = openTabsWorkflow.model.tabFilterUrl;
   const setSearchQuery = useSetSearchQuery();
   const currentCategorySnapshot: CaptureCategorySnapshot = {
     showBin,
@@ -520,7 +520,7 @@ export function ManagerLayout() {
         showError,
       );
       if (persisted && payload.kind === 'open-tabs') {
-        window.dispatchEvent(new CustomEvent('tabboard-open-tabs-dropped'));
+        openTabsWorkflow.commands.completeDrop();
       }
     } finally {
       finishDrag();
@@ -598,9 +598,7 @@ export function ManagerLayout() {
     setShowBin(nextFilters.showBin);
   }, [activeWorkspaceId]);
 
-  useEffect(() => {
-    const handleCaptureCompleted = (event: Event) => {
-      const detail = (event as CustomEvent<CaptureCompletedEventDetail>).detail;
+  const handleCaptureCompleted = useCallback((detail: CaptureCompletion | null) => {
       if (!detail) return;
       if (!detail.committed || !detail.reconciled) {
         showError(detail.message, detail.committed ? 'Capture saved' : 'Capture failed');
@@ -636,11 +634,7 @@ export function ManagerLayout() {
       setPendingTargetGroupId(createdGroupId);
       setPendingTargetCategorySnapshot(detail.targetCategorySnapshot);
       setPendingTargetFilterSnapshot(detail.targetFilterSnapshot);
-    };
-
-    window.addEventListener(CAPTURE_COMPLETED_EVENT, handleCaptureCompleted);
-    return () => window.removeEventListener(CAPTURE_COMPLETED_EVENT, handleCaptureCompleted);
-  }, [selectedCategory, showBin, showError, showSuccess]);
+  }, [showError, showSuccess]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -936,6 +930,8 @@ export function ManagerLayout() {
             onToggleSidebar={handleSidebarToggle}
             onSelectionModeChange={setSidebarSelectionOpen}
             onOpenTabsSourceKeyChange={handleOpenTabsSourceKeyChange}
+            workflow={openTabsWorkflow}
+            onCaptureCompleted={handleCaptureCompleted}
           />
         </aside>
 
