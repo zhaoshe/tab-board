@@ -1,0 +1,175 @@
+.session-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: var(--mantine-spacing-sm);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-body);
+  box-shadow: var(--mantine-shadow-sm);
+}
+
+.session-card__header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px;
+  cursor: grab;
+}
+
+.session-card__drag-handle {
+  width: 18px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--mantine-color-dimmed);
+  opacity: 0;
+}
+
+.session-card__header:hover .session-card__drag-handle,
+.session-card__header:focus-within .session-card__drag-handle,
+.session-card__drag-handle:focus-visible {
+  opacity: 1;
+}
+
+.session-card__heading {
+  min-width: 0;
+}
+
+.tab-item-row__details {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 1px;
+}
+
+.session-card__title,
+.tab-item-row__title {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-card__note {
+  width: 100%;
+  margin-top: var(--mantine-spacing-xs);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.session-card__tabs {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.session-card__meta {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--mantine-color-dimmed);
+  font-size: 11px;
+}
+
+.tab-item-row__content {
+  position: relative;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.tab-item-row__select,
+.tab-item-row__more,
+.session-card__actions {
+  opacity: 0;
+}
+
+.tab-item-row__content:hover .tab-item-row__select,
+.tab-item-row__content:focus-within .tab-item-row__select,
+.tab-item-row__content:hover .tab-item-row__more,
+.tab-item-row__content:focus-within .tab-item-row__more,
+.session-card__header:hover .session-card__actions,
+.session-card__header:focus-within .session-card__actions {
+  opacity: 1;
+}
+
+.session-card__created {
+  margin-left: auto;
+  opacity: 0;
+}
+
+.session-card__header:hover .session-card__created,
+.session-card__header:focus-within .session-card__created {
+  opacity: 1;
+}
+
+.session-card__actions:focus-within,
+.session-card__actions[data-overlay-open="true"] {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+html[data-tabboard-hover-suppressed] .tab-item-row__content {
+  background: transparent !important;
+}
+
+html[data-tabboard-hover-suppressed] .tab-item-row__content:not([data-selection-mode='true']) .tab-item-row__select,
+html[data-tabboard-hover-suppressed] .tab-item-row__more,
+html[data-tabboard-hover-suppressed] .session-card__drag-handle,
+html[data-tabboard-hover-suppressed] .session-card__created,
+html[data-tabboard-hover-suppressed] .session-card__actions {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: none !important;
+}
+
+.tab-item-row__url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-board__drop-marker,
+.session-card__drop-marker,
+.tab-item-row__drop-marker {
+  display: block;
+  pointer-events: none;
+  border-radius: 999px;
+  background: var(--mantine-color-blue-5);
+}
+
+.session-board__drop-marker {
+  position: absolute;
+  inset-block: 0;
+  inset-inline: 4px;
+}
+
+.session-card__drop-marker {
+  flex: 0 0 4px;
+  min-height: 4px;
+  margin: 2px 0;
+}
+
+.tab-item-row__drop-marker {
+  height: 4px;
+  margin: 0 6px;
+}

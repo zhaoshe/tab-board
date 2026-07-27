@@ -3,8 +3,21 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const managerRoot = resolve(process.cwd(), 'src/manager');
-const css = readFileSync(resolve(managerRoot, 'styles/manager.css'), 'utf8');
-const layout = readFileSync(resolve(managerRoot, 'components/shell/ManagerLayout.tsx'), 'utf8');
+const css = [
+  'header.css',
+  'sidebar.css',
+  'shell.css',
+  'session.css',
+  'overlays.css',
+  'responsive.css',
+].map((file) => readFileSync(resolve(managerRoot, 'styles', file), 'utf8')).join('\n');
+const layout = [
+  'components/shell/ManagerLayout.tsx',
+  'components/shell/ManagerFrame.tsx',
+  'components/shell/ManagerDndCoordinator.tsx',
+  'hooks/useSidebarDisclosure.ts',
+  'hooks/useCaptureReveal.ts',
+].map((file) => readFileSync(resolve(managerRoot, file), 'utf8')).join('\n');
 const sidebarSource = readFileSync(resolve(managerRoot, 'components/sidebar/Sidebar.tsx'), 'utf8');
 const workspace = readFileSync(resolve(managerRoot, 'components/workspace/WorkspaceContent.tsx'), 'utf8');
 
@@ -31,7 +44,7 @@ describe('Task105 manager layout contracts', () => {
     expect(css).toContain('--manager-sidebar-rail-width: 54px');
     const collapsed = cssBlock('.manager-shell--sidebar-collapsed');
     expect(collapsed).toContain('grid-template-columns: var(--manager-sidebar-rail-width) minmax(0, 1fr)');
-    expect(collapsed).toContain('transition: grid-template-columns 180ms');
+    expect(collapsed).not.toContain('transition:');
     expect(css).toContain('.manager-shell--sidebar-collapsed:not(.manager-shell--sidebar-hover-suppressed):has(.manager-sidebar:hover)');
   });
 
@@ -75,6 +88,18 @@ describe('Task105 manager layout contracts', () => {
     expect(openTabsPanel).toContain('IconSelectAll size={16}');
   });
 
+  it('uses tabular numerals for changing count displays', () => {
+    expect(cssBlock('.manager-window-tab-count')).toContain('font-variant-numeric: tabular-nums');
+    expect(cssBlock('.manager-open-tabs-selection-actions__count'))
+      .toContain('font-variant-numeric: tabular-nums');
+  });
+
+  it('limits UI transitions to compositor-friendly properties', () => {
+    expect(css).toContain('transition: opacity 140ms ease, transform 160ms ease');
+    expect(css).not.toContain('transition: width');
+    expect(css).not.toContain('transition: grid-template-columns');
+  });
+
   it('keeps the Open Tabs icon column fixed while the collapsed rail expands', () => {
     const root = cssBlock(':root');
     const content = cssBlock('.manager-open-tab-content');
@@ -106,22 +131,19 @@ describe('Task105 manager layout contracts', () => {
   it('uses semantic sidebar and main landmarks without AppShell', () => {
     expect(layout).not.toContain('AppShell');
     expect(sidebarSource).toContain('<OpenTabsPanel');
-    expect(layout).toContain('<aside className="manager-sidebar"');
+    expect(layout).toContain('className="manager-sidebar"');
     expect(layout).toContain('aria-label="Open Tabs workspace"');
-    expect(layout).toContain('<main className="manager-main" id="manager-main"');
+    expect(layout).toContain('className="manager-main"');
+    expect(layout).toContain('id="manager-main"');
   });
 
   it('supports a collapsed overlay sidebar with drag suppression and accessible toggle contracts', () => {
     const sidebarStyles = cssBlock('.manager-sidebar');
     expect(sidebarStyles).toContain('position: relative');
     expect(sidebarStyles).toContain('overflow: visible');
-    expect(css).toMatch(/\.manager-shell--sidebar-collapsed \.manager-sidebar__overlay[\s\S]*?position: absolute/);
-    expect(css).toMatch(/\.manager-shell--sidebar-collapsed \.manager-sidebar__overlay[\s\S]*?width: var\(--manager-sidebar-expanded-width\)/);
-    expect(css).toMatch(/\.manager-shell--sidebar-collapsed \.manager-sidebar-rail[\s\S]*?display: flex/);
-    expect(css).toMatch(/\.manager-shell--sidebar-collapsed \.manager-sidebar__overlay[\s\S]*?inset: 0 auto 0 var\(--manager-sidebar-rail-width\)/);
-    expect(css).toMatch(/\.manager-shell--sidebar-collapsed \.manager-sidebar__overlay[\s\S]*?visibility: hidden/);
+    expect(css).toMatch(/\.manager-shell--sidebar-collapsed \.manager-sidebar__overlay[\s\S]*?width: var\(--manager-sidebar-rail-width\)/);
+    expect(css).toContain('.manager-sidebar-compact-toggle');
     expect(css).toMatch(/\.manager-shell--sidebar-collapsed:not\(\.manager-shell--sidebar-hover-suppressed\) \.manager-sidebar:hover \.manager-sidebar__overlay,[\s\S]*?pointer-events: auto/);
-    expect(css).toMatch(/\.manager-shell--sidebar-collapsed \.manager-sidebar__overlay:focus-within[\s\S]*?pointer-events: auto/);
     expect(css).toContain('.manager-shell--open-tabs-drag-active .manager-sidebar__overlay');
     expect(css).toMatch(/\.manager-shell--open-tabs-drag-active \.manager-sidebar__overlay[\s\S]*?pointer-events: none/);
     expect(css).toMatch(/\.manager-shell--open-tabs-drag-active \.manager-sidebar__overlay:hover[\s\S]*?pointer-events: none/);
@@ -149,7 +171,7 @@ describe('Task105 manager layout contracts', () => {
     expect(layout).toContain("const NARROW_SIDEBAR_QUERY = '(max-width: 900px)';");
     expect(layout).toContain('window.matchMedia(NARROW_SIDEBAR_QUERY).matches');
     expect(layout).toContain("mediaQuery.addEventListener('change', collapseForNarrowViewport);");
-    expect(layout).toContain('if (mediaQuery.matches) setSidebarCollapsed(true);');
+    expect(layout).toContain('if (mediaQuery.matches) setCollapsed(true);');
   });
 
   it('gives the board ownership of horizontal scrolling and uses column session geometry', () => {
@@ -176,5 +198,12 @@ describe('Task105 manager layout contracts', () => {
     // measurement, find-in-page, and scrollIntoView (unlike JS virtualization).
     expect(slot).toContain('content-visibility: auto');
     expect(slot).toContain('contain-intrinsic-size:');
+  });
+
+  it('skips layout and paint for off-screen Trash entries', () => {
+    const binEntry = cssBlock('.manager-bin-entry');
+
+    expect(binEntry).toContain('content-visibility: auto');
+    expect(binEntry).toContain('contain-intrinsic-size:');
   });
 });

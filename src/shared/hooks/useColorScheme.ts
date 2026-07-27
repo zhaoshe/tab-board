@@ -3,9 +3,14 @@ import { useTabBoardStore } from '../store/useTabBoardStore';
 
 type ColorScheme = 'light' | 'dark';
 
+function getSystemColorScheme(): ColorScheme {
+  if (typeof window === 'undefined' || !window.matchMedia) return 'light';
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
 export function useColorScheme(): ColorScheme {
   const settings = useTabBoardStore((state) => state.settings);
-  const [systemScheme, setSystemScheme] = useState<ColorScheme>('light');
+  const [systemScheme, setSystemScheme] = useState<ColorScheme>(getSystemColorScheme);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;

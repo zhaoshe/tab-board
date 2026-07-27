@@ -1105,6 +1105,29 @@ Manager 启动阶段出现依赖或异步顺序问题时，页面不应停在空
 
 ## 待观察问题
 
+### 2026-07-27: UI accessibility, responsive command model, and URL navigation
+
+变化：
+
+- Manager 增加 skip link、页面 heading、键盘 session rename、语义化 note edit、可进入动作的 detail popover 和稳定 sidebar focus。
+- Category reorder hit areas 改为绝对定位，不再撑高 48px topbar。
+- 390px compact header 使用 More actions 保留 Import、Export、Trash、Options；展开 Search 时独占 header 内容区。
+- Workspace/category/Bin/search 写入 URL 并支持 Back/Forward；无效 ownership 自动回退。
+- Workspace create/rename 改为 validated modal，移除 native prompt。
+- Popup 增加 hydration 状态、landmark 和 Dedupe confirmation。
+- Options 跟随主题，移除 usage dashboard cards，Basic/Advanced 分层，`?advanced=1` 恢复展开状态，Reset 增加确认。
+- shared UI 增加首帧 system theme、匹配页面背景的 theme-color、Intl 日期/数字格式、focus/touch/modal/reduced-motion foundation。
+- Manager floating Tooltip/Menu/Modal 统一留在 main landmark 并取消关闭 fade；Open Tabs favicon lazy-load，session/Open Tabs/Trash 使用 `content-visibility` 跳过 off-screen paint。
+- 动作、标题与 accessible names 统一 Title Case；异步按钮使用明确且以 `…` 结尾的进行中 copy，generic errors 提供下一步。
+
+判断：
+
+- 高密度工作台继续保留，但 hover 不再是键盘和触控路径的前提。
+- Compact 模式不应通过隐藏功能解决空间不足。
+- Page-local navigation state 属于 URL，不属于持久化业务 schema。
+
+当前状态：已完成。Manager、Popup、Options 的 light/dark、窄屏、reduced-motion、菜单与对话框开放态均完成浏览器复审；最后一轮 Web Interface Guidelines 静态扫描无 unresolved finding，axe open/default states 为 0 violations / 0 incomplete；全量 build/check/Vitest/E2E 与 DnD 回归通过。
+
 - 右键菜单触发筛选是否足够容易被发现。
 - 批量拖动已勾选 open tabs 到已有 session 是否需要更明显的拖拽提示。
 - 拖动 open tab 到 session 是否需要视觉提示说明是 copy 而不是 move。

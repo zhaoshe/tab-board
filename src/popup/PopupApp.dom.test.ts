@@ -27,9 +27,10 @@ const queryTabs = vi.fn();
 const sendMessage = vi.fn();
 const getExtensionUrl = vi.fn(() => 'chrome-extension://test/');
 let activeMount: MountedPopup | null = null;
+const hydrationState = vi.hoisted(() => ({ hydrated: true }));
 
 vi.mock('../shared/hooks/useStoreHydration', () => ({
-  useStoreHydration: () => ({ hydrated: true }),
+  useStoreHydration: () => ({ hydrated: hydrationState.hydrated }),
 }));
 
 vi.mock('../shared/store/useTabBoardStore', () => ({
@@ -49,7 +50,9 @@ vi.mock('../shared/store/useTabBoardStore', () => ({
 }));
 
 function getSaveButton(): HTMLButtonElement {
-  const button = document.querySelector<HTMLButtonElement>('[aria-label="Save selected tabs as a session"]');
+  const button = document.querySelector<HTMLButtonElement>(
+    '[aria-label="Save Selected Tabs as a Session"], [aria-label="Saving Selected Tabs…"]',
+  );
   if (!button) throw new Error('Missing save button.');
   return button;
 }
@@ -71,6 +74,18 @@ async function mountPopup(expectedButtonText: string): Promise<MountedPopup> {
   return mounted;
 }
 
+async function mountPopupWithoutWaiting(): Promise<MountedPopup> {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(createElement(PopupApp));
+  });
+  const mounted = { container, root };
+  activeMount = mounted;
+  return mounted;
+}
+
 async function clickSave(): Promise<void> {
   await act(async () => {
     getSaveButton().click();
@@ -78,6 +93,7 @@ async function clickSave(): Promise<void> {
 }
 
 beforeEach(() => {
+  hydrationState.hydrated = true;
   queryTabs.mockReset().mockResolvedValue(tabs);
   sendMessage.mockReset();
   getExtensionUrl.mockClear();
@@ -101,11 +117,44 @@ afterEach(async () => {
 });
 
 describe('PopupApp save response protocol', () => {
+  it('renders a main landmark, page heading, and visible hydration status', async () => {
+    hydrationState.hydrated = false;
+    await mountPopupWithoutWaiting();
+
+    expect(document.querySelector('main')).not.toBeNull();
+    expect(document.querySelector('h1')?.textContent).toBe('TabBoard');
+    expect(document.querySelector('[role="status"]')?.textContent).toContain('Loading current window…');
+  });
+
   it('summarizes the current window instead of rendering tab rows', async () => {
     await mountPopup('Save');
 
     expect(document.body.textContent).toContain('1 Tab');
     expect(document.body.textContent).not.toContain('Example');
+    expect(document.querySelector('[translate="no"]')?.textContent).toBe('TabBoard');
+  });
+
+  it('gives capture-option checkboxes stable form names', async () => {
+    queryTabs.mockResolvedValue([
+      { ...tabs[0], pinned: true, groupId: 7 },
+      { ...tabs[0], id: 8, active: false, groupId: 7 },
+    ]);
+    await mountPopup('Save');
+
+    expect(document.querySelector<HTMLInputElement>('input[name="include-pinned-tabs"]'))
+      .not.toBeNull();
+    expect(document.querySelector<HTMLInputElement>('input[name="include-tab-groups"]'))
+      .not.toBeNull();
+  });
+
+  it('uses contrast-safe duplicate text and action variants', async () => {
+    queryTabs.mockResolvedValue([...tabs, { ...tabs[0], id: 8, active: false }]);
+    await mountPopup('Save');
+
+    expect(document.querySelector('.popup-app__duplicate')?.classList)
+      .toContain('popup-app__duplicate--contrast');
+    expect(document.querySelector('.popup-app__dedupe')?.getAttribute('data-variant'))
+      .toBe('default');
   });
 
   it('shows a duplicate-removal action only when duplicate tabs exist', async () => {
@@ -119,6 +168,28 @@ describe('PopupApp save response protocol', () => {
 
     await mountPopup('Save');
     expect(document.body.textContent).toContain('Dedupe');
+  });
+
+  it('confirms before closing duplicate browser tabs', async () => {
+    queryTabs.mockResolvedValue([...tabs, { ...tabs[0], id: 8, active: false }]);
+    sendMessage.mockResolvedValue({ ok: true });
+    const close = vi.spyOn(window, 'close').mockImplementation(() => undefined);
+
+    await mountPopup('Save');
+    const dedupe = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Remove Duplicate Tabs from This Window"]',
+    );
+    await act(async () => dedupe?.click());
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')?.textContent)
+      .toContain('Close 1 duplicate tab in this window?');
+
+    const confirm = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === 'Remove Duplicate Tab');
+    await act(async () => confirm?.click());
+    await waitForDom(() => expect(sendMessage).toHaveBeenCalledWith({ action: 'dedupe-window' }));
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
   it('treats a successful worker envelope as saved and closes after the existing delay', async () => {
@@ -138,6 +209,8 @@ describe('PopupApp save response protocol', () => {
     await clickSave();
     await waitForDom(() => expect(getSaveButton().textContent).toContain('Saved'));
 
+    expect(document.querySelector('[role="status"]')?.textContent)
+      .toContain('Tabs saved. Closing popup…');
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 800);
     expect(close).not.toHaveBeenCalled();
 
@@ -145,6 +218,27 @@ describe('PopupApp save response protocol', () => {
       closeCallback?.();
     });
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('announces a loading action while saving', async () => {
+    let resolveSave!: (value: { ok: true }) => void;
+    sendMessage.mockImplementation(() => new Promise((resolve) => {
+      resolveSave = resolve;
+    }));
+
+    await mountPopup('Save');
+    await act(async () => {
+      getSaveButton().click();
+      await Promise.resolve();
+    });
+
+    expect(getSaveButton().textContent).toContain('Saving…');
+    expect(getSaveButton().getAttribute('aria-label')).toBe('Saving Selected Tabs…');
+
+    await act(async () => {
+      resolveSave({ ok: true });
+      await Promise.resolve();
+    });
   });
 
   it('shows the worker error from an unsuccessful envelope without closing', async () => {
@@ -224,7 +318,7 @@ describe('PopupApp save response protocol', () => {
     queryTabs.mockRejectedValue(new Error('Tabs unavailable.'));
     window.addEventListener('unhandledrejection', unhandledRejection);
 
-    await mountPopup('No tabs');
+    await mountPopup('No Tabs');
     await waitForDom(() => expect(document.querySelector('[role="alert"]')?.textContent)
       .toContain('Tabs unavailable.'));
 

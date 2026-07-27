@@ -12,7 +12,6 @@ import {
   Tooltip,
   Box,
   Paper,
-  Modal,
 } from '@mantine/core';
 import {
   IconTrash,
@@ -24,20 +23,11 @@ import {
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import type { BinEntry } from '../../../shared/model';
 import { BIN_LIMIT } from '../../../shared/model';
+import { formatNumber, formatRelativeTime } from '../../../shared/utils/formatters';
+import { ManagerModal } from '../shell/ManagerModal';
 
 function formatDeletedAt(deletedAt: string): string {
-  const date = new Date(deletedAt);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
+  return formatRelativeTime(deletedAt);
 }
 
 interface BinEntryItemProps {
@@ -72,20 +62,29 @@ function BinEntryItem({ entry, onRestore, onDelete }: BinEntryItemProps) {
 
   return (
     <>
-      <Paper withBorder p="sm" radius="md">
+      <Paper className="manager-bin-entry" withBorder p="sm" radius="md">
         <MantineGroup justify="space-between" wrap="nowrap">
           <MantineGroup gap="sm" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
-            <ActionIcon
-              size="lg"
-              variant="light"
-              color={entry.kind === 'group' ? 'blue' : 'gray'}
+            <Box
+              data-testid="bin-item-icon"
+              aria-hidden="true"
+              w={34}
+              h={34}
+              style={{
+                display: 'grid',
+                placeItems: 'center',
+                borderRadius: 'var(--mantine-radius-sm)',
+                color: entry.kind === 'group'
+                  ? 'var(--mantine-color-blue-6)'
+                  : 'var(--mantine-color-dimmed)',
+              }}
             >
               {entry.kind === 'group' ? (
-                <IconFolder size={20} />
+                <IconFolder size={20} aria-hidden="true" />
               ) : (
-                <IconFile size={20} />
+                <IconFile size={20} aria-hidden="true" />
               )}
-            </ActionIcon>
+            </Box>
             <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
               <MantineGroup gap="xs" wrap="nowrap">
                 <Text size="sm" fw={500} lineClamp={1} style={{ flex: 1, minWidth: 0 }}>
@@ -113,28 +112,30 @@ function BinEntryItem({ entry, onRestore, onDelete }: BinEntryItemProps) {
                 size="sm"
                 variant="subtle"
                 color="blue"
+                aria-label={`Restore ${entry.label}`}
                 onClick={() => onRestore(entry.id)}
               >
-                <IconRestore size={16} />
+                <IconRestore size={16} aria-hidden="true" />
               </ActionIcon>
             </Tooltip>
-            <Tooltip label="Delete permanently">
+            <Tooltip label="Delete Permanently">
               <ActionIcon
                 size="sm"
                 variant="subtle"
                 color="red"
+                aria-label={`Delete ${entry.label} Permanently`}
                 onClick={handleDelete}
               >
-                <IconTrashX size={16} />
+                <IconTrashX size={16} aria-hidden="true" />
               </ActionIcon>
             </Tooltip>
           </MantineGroup>
         </MantineGroup>
       </Paper>
-      <Modal
+      <ManagerModal
         opened={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        title="Delete permanently"
+        title="Delete Permanently"
         size="sm"
         centered
       >
@@ -152,7 +153,7 @@ function BinEntryItem({ entry, onRestore, onDelete }: BinEntryItemProps) {
             </Button>
           </MantineGroup>
         </Stack>
-      </Modal>
+      </ManagerModal>
     </>
   );
 }
@@ -178,13 +179,13 @@ export function BinView() {
       <MantineGroup justify="space-between">
         <Box>
           <MantineGroup gap="xs">
-            <IconTrash size={24} />
+            <IconTrash size={24} aria-hidden="true" />
             <Title order={2} size="h4">
               Trash
             </Title>
           </MantineGroup>
-          <Text size="sm" c="dimmed">
-            {bin.length} / {BIN_LIMIT} {bin.length === 1 ? 'item' : 'items'}
+          <Text size="sm" c="dimmed" className="tabular-nums">
+            {formatNumber(bin.length)} / {formatNumber(BIN_LIMIT)} {bin.length === 1 ? 'item' : 'items'}
           </Text>
         </Box>
         {bin.length > 0 && (
@@ -192,7 +193,7 @@ export function BinView() {
             variant="light"
             color="red"
             size="sm"
-            leftSection={<IconTrash size={16} />}
+            leftSection={<IconTrash size={16} aria-hidden="true" />}
             onClick={handleClearBin}
           >
             Empty Trash
@@ -215,7 +216,7 @@ export function BinView() {
             flex: 1,
           }}
         >
-          <IconTrash size={48} style={{ opacity: 0.3 }} />
+          <IconTrash size={48} aria-hidden="true" style={{ opacity: 0.3 }} />
           <Text mt="md" c="dimmed" fw={500}>
             Trash is empty
           </Text>
@@ -237,7 +238,7 @@ export function BinView() {
           </Stack>
         </ScrollArea>
       )}
-      <Modal
+      <ManagerModal
         opened={clearConfirmOpen}
         onClose={() => setClearConfirmOpen(false)}
         title="Empty Trash"
@@ -246,7 +247,7 @@ export function BinView() {
       >
         <Stack gap="md">
           <Text size="sm">
-            Are you sure you want to permanently delete all {bin.length}{' '}
+            Are you sure you want to permanently delete all {formatNumber(bin.length)}{' '}
             {bin.length === 1 ? 'item' : 'items'} in Trash?
             This action cannot be undone.
           </Text>
@@ -259,7 +260,7 @@ export function BinView() {
             </Button>
           </MantineGroup>
         </Stack>
-      </Modal>
+      </ManagerModal>
     </Stack>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeState } from './schema';
+import { defaultGroupTitle, normalizeState } from './schema';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_SETTINGS, FILE_LAYOUT_VERSION, BOOTSTRAP_KEY, FILE_PING_KEY, FILE_STORE_DB, FILE_STORE_STORE, FILE_STORE_HANDLE_KEY } from './constants';
 
 describe('normalizeState quickList migration', () => {
@@ -49,6 +49,13 @@ describe('normalizeState quickList migration', () => {
   it('ignores non-array quickList values without throwing', () => {
     const normalized = normalizeState({ quickList: 'not-an-array' });
     expect(normalized.groups.some((group) => group.title === 'Former Quick list')).toBe(false);
+  });
+});
+
+describe('default session titles', () => {
+  it('formats the timestamp with Intl date and time semantics', () => {
+    expect(defaultGroupTitle(new Date('2026-07-27T10:00:00.000Z'), 'en-US', 'UTC'))
+      .toBe('Saved Jul 27, 2026, 10:00 AM');
   });
 });
 

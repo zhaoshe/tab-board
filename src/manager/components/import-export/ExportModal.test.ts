@@ -71,6 +71,19 @@ describe('ExportModal layout', () => {
     expect(footer?.querySelector('button')?.textContent).toContain('Close');
     expect(footer?.textContent).toContain('Copy');
     expect(footer?.textContent).toContain('Download');
+    expect(footer?.querySelector('.manager-export-action--copy')?.textContent).toContain('Copy');
+    expect(footer?.querySelector('.manager-export-action--download')?.textContent).toContain('Download');
+  });
+
+  it('names the export format and read-only data controls', async () => {
+    await mountExportModal();
+
+    expect(document.querySelector('[role="radiogroup"][aria-label="Export format"]')).not.toBeNull();
+    expect(document.querySelector<HTMLInputElement>('input[name="export-format"]')).not.toBeNull();
+    const textarea = document.querySelector<HTMLTextAreaElement>('textarea');
+    expect(textarea?.name).toBe('session-export-text');
+    expect(textarea?.autocomplete).toBe('off');
+    expect(textarea?.getAttribute('spellcheck')).toBe('false');
   });
 });
 
@@ -84,6 +97,7 @@ describe('ExportModal copy feedback timer', () => {
     const copyButton = getButton('Copy');
     await clickButton(copyButton);
     expect(copyButton.textContent?.trim()).toBe('Copied!');
+    expect(document.querySelector('[role="status"]')?.textContent).toContain('Copied');
 
     await act(async () => {
       vi.advanceTimersByTime(1_000);

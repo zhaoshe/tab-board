@@ -192,6 +192,26 @@ afterEach(async () => {
 });
 
 describe('mounted manager overlay behavior', () => {
+  it('moves focus into preview actions when Tab is pressed on the trigger', async () => {
+    const mounted = await mountOverlay();
+
+    await act(async () => mounted.trigger.focus());
+    expect(document.querySelector('.manager-info-popover')).not.toBeNull();
+
+    await act(async () => {
+      mounted.trigger.dispatchEvent(new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key: 'Tab',
+      }));
+    });
+
+    expect(document.activeElement).toBe(
+      document.querySelector<HTMLButtonElement>('.manager-info-popover button'),
+    );
+    expect(document.querySelector('.manager-info-popover')).not.toBeNull();
+  });
+
   it('binds global listeners once across menu and preview state changes', async () => {
     const addListener = vi.spyOn(document, 'addEventListener');
     const removeListener = vi.spyOn(document, 'removeEventListener');

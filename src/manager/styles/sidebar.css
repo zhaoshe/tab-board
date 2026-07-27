@@ -1,0 +1,307 @@
+.manager-sidebar {
+  position: relative;
+  grid-column: 1;
+  grid-row: 1 / -1;
+  min-width: 0;
+  min-height: 0;
+  overflow: visible;
+}
+
+.manager-sidebar__overlay {
+  position: relative;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: var(--manager-sidebar-padding);
+  border-right: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+  transition: opacity 140ms ease, transform 160ms ease;
+}
+
+@media (min-width: 901px) {
+  .manager-sidebar__overlay {
+    width: var(--manager-sidebar-expanded-width);
+  }
+}
+
+.manager-open-tab-select,
+.manager-open-tab-close {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.manager-open-tab-row {
+  position: relative;
+  min-height: 36px;
+  margin-inline: 0;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 36px;
+}
+
+.manager-window-tab-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.manager-open-tabs .mantine-ScrollArea-root {
+  margin-inline: calc(-1 * var(--manager-sidebar-padding));
+  padding-top: 2px;
+}
+
+.manager-open-tabs-selection-bar {
+  box-sizing: border-box;
+  flex: 0 0 28px;
+  height: 28px;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  margin-inline: calc(-1 * var(--manager-sidebar-padding));
+  padding: 0 calc(var(--manager-sidebar-padding) + 4px);
+}
+
+.manager-open-tabs-selection-bar[data-selection-mode] {
+  background: color-mix(in srgb, var(--mantine-color-blue-9) 12%, var(--mantine-color-body));
+}
+
+.manager-open-tab-content {
+  position: relative;
+  z-index: 0;
+  flex: 1 1 auto;
+  min-height: 36px;
+  padding-inline: var(--manager-open-tab-leading-offset);
+}
+
+.manager-open-tab-select {
+  position: absolute;
+  inset-inline-start: var(--manager-open-tab-leading-offset);
+  top: 50%;
+  z-index: 3;
+  transform: translateY(-50%);
+}
+
+.manager-open-tab-select input,
+.manager-open-tab-select .mantine-Checkbox-inner,
+.manager-open-tab-select .mantine-Checkbox-input {
+  width: 20px;
+  height: 20px;
+}
+
+.manager-open-tab-close {
+  position: absolute;
+  inset-inline-end: 6px;
+  z-index: 1;
+}
+
+.manager-open-tab-favicon {
+  position: relative;
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--mantine-color-dimmed);
+  pointer-events: none;
+}
+
+.manager-open-tab-favicon img,
+.manager-open-tab-favicon__fallback {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+}
+
+.manager-open-tab-favicon img {
+  object-fit: cover;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.manager-open-tab-favicon:has(img[data-loaded='true']) .manager-open-tab-favicon__fallback {
+  display: none;
+}
+
+.manager-open-tab-row:hover .manager-open-tab-select,
+.manager-open-tab-row:hover .manager-open-tab-close,
+.manager-open-tab-row:focus-within .manager-open-tab-select,
+.manager-open-tab-row:focus-within .manager-open-tab-close,
+.manager-open-tabs--selection-mode .manager-open-tab-select {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.manager-open-tabs--selection-mode .manager-open-tab-close {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.manager-open-tab-row[data-selected='true'] {
+  background: color-mix(in srgb, var(--mantine-color-blue-5) 14%, transparent) !important;
+}
+
+.manager-open-tabs-selection-actions {
+  width: 100%;
+  min-height: 28px;
+  padding: 0 4px;
+}
+
+.manager-open-tabs-selection-actions__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.manager-open-tabs-selection-actions__tools {
+  display: flex;
+  margin-left: auto;
+  gap: 4px;
+}
+
+.manager-sidebar-content,
+.manager-open-tabs-layout {
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.manager-open-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+}
+
+.manager-open-tabs-window-bar {
+  height: 48px;
+  flex: 0 0 48px;
+  margin: calc(-1 * var(--manager-sidebar-padding)) calc(-1 * var(--manager-sidebar-padding)) 0;
+  padding-inline: var(--manager-sidebar-padding);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: color-mix(in srgb, var(--mantine-color-body) 92%, var(--mantine-color-blue-9));
+}
+
+.manager-shell--sidebar-collapsed {
+  grid-template-columns: var(--manager-sidebar-rail-width) minmax(0, 1fr);
+}
+
+.manager-shell--sidebar-collapsed:not(.manager-shell--sidebar-hover-suppressed):has(.manager-sidebar:hover) {
+  grid-template-columns: var(--manager-sidebar-expanded-width) minmax(0, 1fr);
+}
+
+.manager-shell--sidebar-collapsed .manager-sidebar__overlay {
+  position: relative;
+  inset: auto;
+  width: var(--manager-sidebar-rail-width);
+  padding: 8px;
+  border-right: 1px solid var(--mantine-color-default-border);
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+}
+
+.manager-shell--sidebar-collapsed:not(.manager-shell--sidebar-hover-suppressed) .manager-sidebar:hover .manager-sidebar__overlay,
+.manager-shell--sidebar-overlay-open .manager-sidebar__overlay {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--manager-sidebar-expanded-width);
+}
+
+.manager-shell--sidebar-collapsed:is(:not(:has(.manager-sidebar:hover)), .manager-shell--sidebar-hover-suppressed):not(.manager-shell--sidebar-overlay-open) .manager-open-tab-details,
+.manager-shell--sidebar-collapsed:is(:not(:has(.manager-sidebar:hover)), .manager-shell--sidebar-hover-suppressed):not(.manager-shell--sidebar-overlay-open) .manager-open-tab-select,
+.manager-shell--sidebar-collapsed:is(:not(:has(.manager-sidebar:hover)), .manager-shell--sidebar-hover-suppressed):not(.manager-shell--sidebar-overlay-open) .manager-open-tab-close,
+.manager-shell--sidebar-collapsed:is(:not(:has(.manager-sidebar:hover)), .manager-shell--sidebar-hover-suppressed):not(.manager-shell--sidebar-overlay-open) #open-tabs-filter-input {
+  display: none;
+}
+
+.manager-shell--sidebar-collapsed:is(:not(:has(.manager-sidebar:hover)), .manager-shell--sidebar-hover-suppressed):not(.manager-shell--sidebar-overlay-open) .manager-open-tabs .mantine-ScrollArea-root {
+  margin-inline: calc(-1 * var(--manager-sidebar-padding));
+}
+
+.manager-shell--sidebar-collapsed:is(:not(:has(.manager-sidebar:hover)), .manager-shell--sidebar-hover-suppressed):not(.manager-shell--sidebar-overlay-open) .manager-open-tab-content {
+  flex: 1 1 auto !important;
+  justify-content: flex-start;
+  padding-inline: var(--manager-open-tab-leading-offset) !important;
+}
+
+.manager-shell--sidebar-collapsed:is(:not(:has(.manager-sidebar:hover)), .manager-shell--sidebar-hover-suppressed):not(.manager-shell--sidebar-overlay-open) .manager-open-tabs-window-bar {
+  padding-inline: 0;
+}
+
+.manager-shell--sidebar-collapsed:is(:not(:has(.manager-sidebar:hover)), .manager-shell--sidebar-hover-suppressed):not(.manager-shell--sidebar-overlay-open) .manager-window-switcher {
+  width: 100%;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.manager-shell--open-tabs-drag-active .manager-sidebar__overlay {
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.manager-shell--open-tabs-drag-active .manager-sidebar__overlay:hover {
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.manager-shell--open-tabs-drag-active .manager-sidebar-content {
+  visibility: hidden;
+}
+
+html[data-tabboard-hover-suppressed] .manager-open-tabs:not(.manager-open-tabs--selection-mode) .manager-open-tab-select,
+html[data-tabboard-hover-suppressed] .manager-open-tab-close {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: none !important;
+}
+
+.manager-sidebar-header-action,
+.manager-sidebar-utility-action {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+}
+
+.manager-sidebar-compact-toggle {
+  position: absolute;
+  inset-inline-start: 10px;
+  inset-block-end: 8px;
+  z-index: 4;
+}
+
+.manager-refresh-icon--loading {
+  transform-origin: center;
+  animation: manager-refresh-spin 700ms linear infinite;
+}
+
+@keyframes manager-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
+.manager-window-switcher {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.manager-window-glyph {
+  position: relative;
+  width: 32px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 2px solid currentColor;
+  border-radius: 6px;
+}
+
+:root[data-mantine-color-scheme='light'] .manager-window-glyph {
+  background: var(--mantine-color-blue-0);
+  color: var(--mantine-color-blue-9);
+}
+
+:root[data-mantine-color-scheme='dark'] .manager-window-glyph {
+  background: var(--mantine-color-dark-7);
+  color: var(--mantine-color-blue-2);
+}

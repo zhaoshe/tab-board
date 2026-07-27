@@ -577,6 +577,12 @@ manager.html
         -> SessionCard / TabItemRow
 ```
 
+Manager page-local navigation state 由 `src/manager/core/managerPageState.ts` 纯 owner 与 `src/manager/hooks/useManagerPageState.ts` React adapter 负责。它只管理 URL 中的 `workspace/category/view/q`，不进入 `TabBoardState`、Storage Authority 或 Zustand persistent projection。Navigation 使用 `pushState`，搜索使用 `replaceState`，`popstate` 反向恢复页面；validation 复用 shared category ownership，拒绝不存在或跨 workspace 的 folder category。
+
+Workspace create/rename UI 由 `WorkspaceMenu` 管理 validated modal；不使用 `window.prompt`。Sidebar disclosure 由 `useSidebarDisclosure` 管理 collapsed/overlay/focus 生命周期。Header global actions 由 `ManagerGlobalActions` 以同一 command model 渲染 desktop icon actions 与 compact overflow menu。
+
+Options 的 Advanced disclosure 使用页面 URL 中的 `advanced=1`，通过 `replaceState` 同步，不进入 persistent settings。`useColorScheme` 在首个 client render 直接读取 system preference，`usePageTheme` 同步 native `color-scheme` 与匹配实际 body 背景的 `theme-color`。Manager 使用专属 Mantine theme：Tooltip/Menu portal 到 `#manager-main`，Modal 继续由 `ManagerModal` portal 到同一 landmark；floating transitions 为 0ms，避免关闭过渡留下 landmark 外或半透明的可访问性节点。
+
 状态更新路径：
 
 1. UI DnD resolver生成 shared typed `DropIntent`；其他 UI action生成 typed `StateMutation`。
@@ -591,7 +597,7 @@ manager.html
 
 ### 大 board 性能
 
-`WorkspaceContent` 一次渲染当前 active category 的全部 session card（横向 track），不做 JS 虚拟化，以保持 `@dnd-kit` 的 collision/measurement、浏览器 find-in-page 与 `scrollIntoView` 正常工作。为控制成本，`.session-board__group-slot` 使用 CSS `content-visibility: auto` + `contain-intrinsic-size`：滚出视口的 session slot 跳过 layout/paint，但仍留在 DOM 中，可被拖拽 measurement、搜索定位和滚动命中。该行为由 `src/manager/core/layout.test.ts` 的 CSS 契约和 `tests/e2e/large-board.e2e.ts`（60 sessions 全部在 DOM、远端 card 可滚动可见）守护。若单 category 达到数百 session 仍出现压力，再评估引入真正的虚拟列表及其与 `@dnd-kit` 的兼容性。
+`WorkspaceContent` 一次渲染当前 active category 的全部 session card（横向 track），不做 JS 虚拟化，以保持 `@dnd-kit` 的 collision/measurement、浏览器 find-in-page 与 `scrollIntoView` 正常工作。为控制成本，`.session-board__group-slot` 使用 CSS `content-visibility: auto` + `contain-intrinsic-size`：滚出视口的 session slot 跳过 layout/paint，但仍留在 DOM 中，可被拖拽 measurement、搜索定位和滚动命中。Trash 最多保留 80 项，`.manager-bin-entry` 使用相同 paint-containment 策略。该行为由 `src/manager/core/layout.test.ts` 的 CSS 契约和 `tests/e2e/large-board.e2e.ts`（60 sessions 全部在 DOM、远端 card 可滚动可见）守护。若单 category 达到数百 session 仍出现压力，再评估引入真正的虚拟列表及其与 `@dnd-kit` 的兼容性。
 
 Open Tabs 同样保留全部 rows 与每行的 DnD/focus/preview hooks。`useOpenTabsRuntime()` 用 `useDeferredValue` 延后 query，`openTabsWorkflow.ts` projection 统一派生 filtered rows 与 selection drag records；`.manager-open-tab-row` 使用 `content-visibility: auto` 与 intrinsic size 跳过 off-screen layout/paint。Overlay provider 的 document/window listeners 在生命周期内只绑定一次；commands 与 menu/preview observable state 分离，普通 row/card 只订阅自身 key 的 open boolean。
 
@@ -619,7 +625,9 @@ Omnibox search：
 Theme：
 
 - `system` / `light` / `dark`。
-- CSS 使用 `prefers-color-scheme` 和 `:root[data-theme]`。
+- `useColorScheme` 首帧读取 `matchMedia`，并监听后续 system theme 变化。
+- `usePageTheme` 同步 `color-scheme` 与 `meta[name=theme-color]`；dark theme-color 使用实际 Mantine body 背景 `#242424`。
+- 日期、相对时间和可见计数分别由共享 `Intl.DateTimeFormat` / `Intl.RelativeTimeFormat` / `Intl.NumberFormat` owner 格式化。
 
 Icons：
 

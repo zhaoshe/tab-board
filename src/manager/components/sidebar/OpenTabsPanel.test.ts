@@ -22,6 +22,8 @@ interface DraggableOptions {
 }
 
 const testHarness = vi.hoisted(() => ({
+  confirmDestructive: vi.fn(async () => true),
+  confirmBeforeDestructive: true,
   draggables: [] as DraggableOptions[],
 }));
 
@@ -40,7 +42,8 @@ vi.mock('@mantine/core', async () => {
     createElement('button', { ...props, ref }, children as ReactNode));
   const Checkbox = ({ children: _children, ...props }: NativeProps) =>
     createElement('input', { ...props, type: 'checkbox' });
-  const TextInput = (props: NativeProps) => createElement('input', props);
+  const TextInput = ({ rightSection: _rightSection, ...props }: NativeProps) =>
+    createElement('input', props);
   const UnstyledButton = forwardRef<HTMLButtonElement, NativeProps>(({ children, ...props }, ref) =>
     createElement('button', { ...props, ref }, children as ReactNode));
 
@@ -108,6 +111,16 @@ vi.mock('../../hooks/useManagerOverlays', async () => {
     useManagerOverlayLifecycle: () => undefined,
   };
 });
+
+vi.mock('../../../shared/components/DestructiveConfirmation', () => ({
+  useDestructiveConfirmation: () => testHarness.confirmDestructive,
+}));
+
+vi.mock('../../../shared/store/useTabBoardStore', () => ({
+  useTabBoardStore: (selector: (state: unknown) => unknown) => selector({
+    settings: { confirmBeforeDestructive: testHarness.confirmBeforeDestructive },
+  }),
+}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -214,6 +227,7 @@ function createProps(overrides: Partial<ComponentProps<typeof OpenTabsPanel>> = 
     sidebarPinned: true,
     onCaptureSelectedTabs: vi.fn(async () => undefined),
     sidebarToggleRef: { current: null },
+    sidebarCompactToggleRef: { current: null },
     onToggleSidebar: vi.fn(),
     ...overrides,
   };
@@ -230,6 +244,8 @@ async function mountPanel(overrides: Partial<ComponentProps<typeof OpenTabsPanel
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  testHarness.confirmDestructive.mockReset().mockResolvedValue(true);
+  testHarness.confirmBeforeDestructive = true;
   testHarness.draggables = [];
 });
 
@@ -265,5 +281,101 @@ describe('OpenTabsPanel drag constraints', () => {
     const closeButton = document.querySelector<HTMLButtonElement>('[aria-label="Close Closing"]');
     expect(closeButton).not.toBeNull();
     expect(closeButton?.disabled).toBe(true);
+  });
+
+  it('provides complete filter metadata and fixed favicon dimensions', async () => {
+    const faviconTabs = tabs.map((tab, index) => ({
+      ...tab,
+      favIconUrl: index === 0 ? 'https://regular.test/favicon.ico' : tab.favIconUrl,
+    }));
+    await mountPanel({
+      workflow: {
+        ...createProps().workflow,
+        model: {
+          ...createProps().workflow.model,
+          windows: [{ ...selectedWindow, tabs: faviconTabs }],
+          selectedWindow: { ...selectedWindow, tabs: faviconTabs },
+          filteredTabs: faviconTabs,
+        },
+      },
+    });
+
+    const filter = document.querySelector<HTMLInputElement>('#open-tabs-filter-input');
+    expect(filter?.name).toBe('open-tabs-filter');
+    expect(filter?.autocomplete).toBe('off');
+    expect(filter?.getAttribute('spellcheck')).toBe('false');
+    expect(filter?.placeholder).toBe('Filter tabs…');
+
+    const favicon = document.querySelector<HTMLImageElement>('.manager-open-tab-favicon img');
+    expect(favicon?.width).toBe(20);
+    expect(favicon?.height).toBe(20);
+    expect(favicon?.loading).toBe('lazy');
+  });
+
+  it('uses singular window copy and stable selection names', async () => {
+    const singleTabWindow = {
+      ...selectedWindow,
+      tabCount: 1,
+      tabs: [tabs[0]],
+    };
+    await mountPanel({
+      workflow: {
+        ...createProps().workflow,
+        model: {
+          ...createProps().workflow.model,
+          windows: [singleTabWindow],
+          selectedWindow: singleTabWindow,
+          filteredTabs: [tabs[0]],
+          selection: {
+            active: true,
+            ids: [41],
+            count: 1,
+            records: [tabs[0]],
+            recordIds: [41],
+          },
+        },
+      },
+    });
+
+    expect(document.querySelector('[aria-label="1 tab, current browser window"]')).not.toBeNull();
+    expect(document.querySelector<HTMLInputElement>('[aria-label="Select Regular"]')?.name)
+      .toBe('open-tab-selection');
+  });
+
+  it('confirms both single-tab and selected-tab close actions', async () => {
+    const props = createProps();
+    await mountPanel(props);
+
+    const closeButton = document.querySelector<HTMLButtonElement>('[aria-label="Close Regular"]');
+    await act(async () => closeButton?.click());
+    expect(testHarness.confirmDestructive).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Close Browser Tab',
+      confirmLabel: 'Close Tab',
+    }));
+    await vi.waitFor(() => expect(props.workflow.commands.closeTab).toHaveBeenCalledWith(41));
+
+    const closeSelected = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Close 2 Selected Tabs"]',
+    );
+    await act(async () => closeSelected?.click());
+    expect(testHarness.confirmDestructive).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Close Browser Tabs',
+      confirmLabel: 'Close 2 Tabs',
+    }));
+    await vi.waitFor(() => expect(props.workflow.commands.closeSelection).toHaveBeenCalledTimes(1));
+  });
+
+  it('still confirms irreversible browser-tab closing when saved-item confirmation is off', async () => {
+    testHarness.confirmBeforeDestructive = false;
+    const props = createProps();
+    await mountPanel(props);
+
+    const closeButton = document.querySelector<HTMLButtonElement>('[aria-label="Close Regular"]');
+    await act(async () => closeButton?.click());
+
+    expect(testHarness.confirmDestructive).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Close Browser Tab',
+    }));
+    await vi.waitFor(() => expect(props.workflow.commands.closeTab).toHaveBeenCalledWith(41));
   });
 });

@@ -216,19 +216,26 @@ describe('import commands', () => {
   });
 
   it('keeps workspace and category command paths reachable from the current shell', () => {
-    const header = readFileSync(new URL('../components/workspace/WorkspaceHeader.tsx', import.meta.url), 'utf8');
+    const header = [
+      'WorkspaceHeader.tsx',
+      'WorkspaceMenu.tsx',
+      'CategoryManager.tsx',
+    ].map((file) => readFileSync(
+      new URL(`../components/workspace/${file}`, import.meta.url),
+      'utf8',
+    )).join('\n');
     const sidebar = readFileSync(new URL('../components/sidebar/Sidebar.tsx', import.meta.url), 'utf8');
 
-    expect(header).toContain('onClick={handleAddWorkspace}');
-    expect(header).toContain('onClick={handleRenameWorkspace}');
+    expect(header).toContain("if (dialogMode === 'create') onCreate(validation.value)");
+    expect(header).toContain("if (dialogMode === 'rename' && workspace) onRename(workspace.id, validation.value)");
     expect(header).not.toContain('handleDeleteWorkspace');
-    expect(header).toContain('updateCategoryOrder(workspace.id, order)');
-    expect(header).toContain('Manage categories');
+    expect(header).toContain('state.updateCategoryOrder(workspace.id, order)');
+    expect(header).toContain('Manage Categories');
     expect(header).toContain('runValidatedCategoryMutation');
     expect(header).toContain('state.addFolder(workspace.id');
-    expect(header).toContain('state.renameFolder(folder.id');
+    expect(header).toContain('onRenameFolder(editingFolderId, value)');
     expect(header).toContain('runCategoryMutation');
-    expect(header).toContain('state.deleteFolder(deletedId');
+    expect(header).toContain('onDeleteFolder(deletedId)');
     expect(sidebar).not.toContain('addFolder');
     expect(sidebar).not.toContain('renameFolder');
     expect(sidebar).not.toContain('deleteFolder');

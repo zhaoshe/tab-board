@@ -5,6 +5,7 @@ import { useBoardProjection } from '../../hooks/useBoardProjection';
 import { useSearchQuery, useSetSearchQuery } from '../../hooks/useSearchQuery';
 import { filterGroupsByQuery, type CategoryFilter } from '../../core/selectors';
 import { normalizeSearch } from '../../../shared/model';
+import { formatNumber } from '../../../shared/utils/formatters';
 
 interface SearchBarProps {
   autoFocus?: boolean;
@@ -58,24 +59,27 @@ export function SearchBar({ autoFocus = false, inputId, category = 'inbox', full
       <TextInput
         id={inputId}
         ref={inputRef}
-        placeholder="Search sessions, tabs, URLs, notes..."
-        leftSection={<IconSearch size={16} />}
+        name="saved-session-search"
+        aria-label="Search Saved Sessions"
+        autoComplete="off"
+        placeholder="Search sessions, tabs, URLs, notes…"
+        leftSection={<IconSearch size={16} aria-hidden="true" />}
         rightSectionPointerEvents="all"
         rightSection={
           onEscape ? (
-            <Tooltip label="Close search" position="left">
-              <ActionIcon variant="subtle" onClick={handleClose} aria-label="Close search">
-                <IconX size={16} />
+            <Tooltip label="Close Search" position="left">
+              <ActionIcon variant="subtle" onClick={handleClose} aria-label="Close Search">
+                <IconX size={16} aria-hidden="true" />
               </ActionIcon>
             </Tooltip>
           ) : localValue ? (
-            <ActionIcon variant="subtle" onClick={handleClear} title="Clear (Esc)" aria-label="Clear search">
-              <IconX size={16} />
+            <ActionIcon variant="subtle" onClick={handleClear} title="Clear (Esc)" aria-label="Clear Search">
+              <IconX size={16} aria-hidden="true" />
             </ActionIcon>
           ) : (
             <Tooltip label="/ or Ctrl/Cmd + K" position="left">
               <span aria-hidden="true">
-                <IconKeyboard size={14} />
+                <IconKeyboard size={14} aria-hidden="true" />
               </span>
             </Tooltip>
           )
@@ -96,6 +100,7 @@ export function SearchBar({ autoFocus = false, inputId, category = 'inbox', full
       />
       {normalized && matchCount > 0 && (
         <Badge
+          className="tabular-nums"
           size="sm"
           variant="light"
           style={{
@@ -106,7 +111,7 @@ export function SearchBar({ autoFocus = false, inputId, category = 'inbox', full
             pointerEvents: 'none',
           }}
         >
-          {matchCount} {matchCount === 1 ? 'result' : 'results'}
+          {formatNumber(matchCount)} {matchCount === 1 ? 'result' : 'results'}
         </Badge>
       )}
     </div>

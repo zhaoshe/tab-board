@@ -14,6 +14,14 @@ body,
   background: var(--mantine-color-default);
 }
 
+.popup-app--loading {
+  min-height: 180px;
+}
+
+.popup-app__loading {
+  min-height: 180px;
+}
+
 .popup-app__header {
   min-height: 40px;
   padding: 0 12px;
@@ -40,6 +48,7 @@ body,
   align-items: center;
   min-height: 32px;
   letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
 }
 
 .popup-app__filters,
@@ -53,6 +62,10 @@ body,
   background: var(--mantine-color-default-border);
 }
 
+.popup-app__duplicate--contrast {
+  color: var(--mantine-color-text);
+}
+
 .popup-app__dedupe {
   grid-column: 2;
 }
@@ -62,6 +75,14 @@ body,
   min-height: 32px;
   border-radius: var(--mantine-radius-sm);
   font-weight: 600;
+}
+
+.popup-app__save.mantine-Button-root {
+  background: var(--mantine-color-blue-8);
+}
+
+.popup-app__save.mantine-Button-root:hover {
+  background: var(--mantine-color-blue-9);
 }
 
 .popup-app__filters .mantine-Checkbox-root {

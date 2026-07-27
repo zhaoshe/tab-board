@@ -1158,6 +1158,82 @@ Implementation note（2026-07-26）：
 
 ## Decision template
 
+## D046: Manager context is URL-backed page state
+
+Context:
+
+Workspace、category、Bin 和 search 原来分散在 local React state、Zustand active workspace、SearchQueryStore 与临时 URL 参数中，刷新或 Back/Forward 无法稳定恢复完整页面上下文。
+
+Decision:
+
+使用 framework-neutral `ManagerPageState` owner 管理 `workspace/category/view/q`。Workspace/category/Bin 导航写 `pushState`，search 写 `replaceState`，`popstate` 恢复同一上下文。该 owner 不进入 persistent schema。
+
+Rationale:
+
+- 页面导航需要 deep link 和浏览器历史语义。
+- Search 仍由既有 `SearchQueryStore` 提供同步 imperative snapshot；page-state adapter 只协调 URL。
+- Validation 使用 shared category ownership，避免 orphan/cross-workspace folder URL 产生不可渲染状态。
+
+Trade-offs:
+
+- URL 更长，但可复制、刷新和回退。
+- `activeWorkspaceId` 仍持久化；page adapter 在 URL 和 store 不一致时同步 store。
+
+Status:
+
+Accepted。
+
+## D047: Compact header preserves commands through overflow
+
+Context:
+
+原 760px breakpoint 直接隐藏 Import、Export、Trash；展开 280px Search 又与 category 和 Options 重叠。
+
+Decision:
+
+Desktop 与 compact 使用同一 global command model。Compact 收入 More actions；Search 展开时独占 header 内容区。Category reorder targets 绝对定位，不参与 topbar flow。
+
+Rationale:
+
+- Responsive layout 可以改变呈现，但不能删除能力。
+- 单一 command model 避免 desktop/compact 行为漂移。
+- 绝对定位保持 DnD target 语义，同时固定 topbar 几何。
+
+Trade-offs:
+
+- Compact 多一次菜单点击。
+- Header 增加明确的 responsive composition contract。
+
+Status:
+
+Accepted。
+
+## D048: Page-local disclosures and floating UI remain URL/landmark owned
+
+Context:
+
+最终 Web Interface Guidelines 复审发现两类恢复性问题：Options 的 Advanced 展开状态刷新后丢失；Mantine Tooltip/Menu 默认 portal 到 `body`，关闭 fade 期间会留下 landmark 外或半透明的 accessibility nodes。
+
+Decision:
+
+Options Advanced 使用 `?advanced=1` 并通过 `replaceState` 同步。Manager 使用专属 Mantine theme，把 Tooltip/Menu portal 到 `#manager-main`；ManagerModal 继续把 Modal 放入同一 main landmark。Tooltip/Menu/Modal transition duration 统一为 0ms。页面 theme 在首个 client render 读取 system preference，并让 `theme-color` 匹配实际 body 背景。
+
+Rationale:
+
+- Stateful disclosure 可 deep-link，刷新与 Back/Forward 后可恢复。
+- Floating UI 属于 Manager 主工作台，应被同一 landmark 拥有，而不是挂在 body。
+- 透明度过渡不应制造短暂的错误对比度或 stale accessibility tree。
+- 首帧 theme 与 system preference 一致可以避免 light→dark 对比度闪烁。
+
+Trade-offs:
+
+- Floating overlays 不再淡入淡出，视觉更直接但状态更确定。
+- Options URL 增加一个低频 query param，不影响 persistent schema。
+
+Status:
+
+Accepted。
+
 ```md
 ## D00X: Title
 

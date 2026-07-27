@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react';
 import {
-  Modal,
   Textarea,
   Button,
   Group,
@@ -15,7 +14,9 @@ import {
 import { IconUpload, IconFileImport, IconAlertCircle, IconCheck } from '@tabler/icons-react';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import { parseImportedText } from '../../../shared/model/session-operations';
+import { formatNumber } from '../../../shared/utils/formatters';
 import type { CategoryFilter } from '../../core/selectors';
+import { ManagerModal } from '../shell/ManagerModal';
 
 interface ImportModalProps {
   opened: boolean;
@@ -45,7 +46,8 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
       setPreview({ groupCount: groups.length, tabCount });
       setError(null);
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Failed to parse import text';
+      const detail = e instanceof Error ? e.message : 'The import text could not be parsed.';
+      const message = `${detail} Check that the text is a TabBoard export or OneTab URL list.`;
       setPreview(null);
       setError(message);
     }
@@ -85,7 +87,7 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
     reader.onerror = () => {
       setImportText('');
       setPreview(null);
-      setError('Failed to read file');
+      setError('The file could not be read. Choose a readable JSON or text export and try again.');
     };
     reader.readAsText(file);
   };
@@ -98,7 +100,7 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
 
   const handleImport = () => {
     if (!importText.trim()) {
-      setError('Please enter or paste import text');
+      setError('Paste a TabBoard export or OneTab URL list before importing.');
       return;
     }
     try {
@@ -108,7 +110,7 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
       setError(null);
       onClose();
     } catch (e) {
-      setError('Import failed: ' + (e instanceof Error ? e.message : 'Unknown error'));
+      setError(`Import failed: ${e instanceof Error ? e.message : 'unknown error'}. Check the format and try again.`);
     }
   };
 
@@ -120,7 +122,7 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
   };
 
   return (
-    <Modal
+    <ManagerModal
       opened={opened}
       onClose={handleClose}
       title="Import Sessions"
@@ -138,11 +140,10 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
             padding: 'var(--mantine-spacing-xl)',
             textAlign: 'center',
             backgroundColor: isDragging ? 'var(--mantine-color-blue-0)' : 'transparent',
-            transition: 'all 0.2s ease',
           }}
         >
           <Stack gap="xs" align="center">
-            <IconUpload size={32} style={{ color: 'var(--mantine-color-gray-5)' }} />
+            <IconUpload size={32} aria-hidden="true" style={{ color: 'var(--mantine-color-gray-5)' }} />
             <Text size="sm" c="dimmed">
               Drag and drop a file here, or
             </Text>
@@ -150,11 +151,15 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
               <FileButton
                 onChange={handleFileSelect}
                 accept=".json,.txt"
+                inputProps={{
+                  name: 'session-import-file',
+                  'aria-label': 'Import Session File',
+                }}
               >
                 {(props) => (
                   <Button
                     variant="light"
-                    leftSection={<IconFileImport size={16} />}
+                    leftSection={<IconFileImport size={16} aria-hidden="true" />}
                     {...props}
                   >
                     Choose File
@@ -168,7 +173,11 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
         <Divider label="or paste text" labelPosition="center" />
 
         <Textarea
-          placeholder="Paste import text here..."
+          name="session-import-text"
+          aria-label="Session import text"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="Paste import text here…"
           value={importText}
           onChange={(e) => handleTextChange(e.target.value)}
           minRows={10}
@@ -182,7 +191,7 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
           </Text>
           <Stack gap={4}>
             <Text size="xs">
-              <strong>TabBoard JSON</strong> - Full export format from TabBoard
+              <strong translate="no">TabBoard JSON</strong> - Full export format from <span translate="no">TabBoard</span>
             </Text>
             <Text size="xs">
               <strong>OneTab text</strong> - OneTab export format (title + URL pairs)
@@ -191,22 +200,22 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
         </Paper>
 
         {preview && preview.groupCount > 0 && (
-          <Alert icon={<IconCheck size={16} />} color="green" variant="light">
-            <Text size="sm">
-              Will import <strong>{preview.groupCount}</strong> session{preview.groupCount !== 1 ? 's' : ''}{' '}
-              with <strong>{preview.tabCount}</strong> tab{preview.tabCount !== 1 ? 's' : ''}
+          <Alert icon={<IconCheck size={16} aria-hidden="true" />} color="green" variant="light">
+            <Text size="sm" className="tabular-nums">
+              Will import <strong>{formatNumber(preview.groupCount)}</strong> session{preview.groupCount !== 1 ? 's' : ''}{' '}
+              with <strong>{formatNumber(preview.tabCount)}</strong> tab{preview.tabCount !== 1 ? 's' : ''}
             </Text>
           </Alert>
         )}
 
         {preview && preview.groupCount === 0 && importText.trim() && (
-          <Alert icon={<IconAlertCircle size={16} />} color="yellow" variant="light">
+          <Alert icon={<IconAlertCircle size={16} aria-hidden="true" />} color="yellow" variant="light">
             <Text size="sm">No sessions found in the import text</Text>
           </Alert>
         )}
 
         {error && (
-          <Alert icon={<IconAlertCircle size={16} />} color="red" variant="light">
+          <Alert icon={<IconAlertCircle size={16} aria-hidden="true" />} color="red" variant="light">
             <Text size="sm">{error}</Text>
           </Alert>
         )}
@@ -218,12 +227,12 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
           <Button
             onClick={handleImport}
             disabled={!preview || preview.groupCount === 0}
-            leftSection={<IconUpload size={16} />}
+            leftSection={<IconUpload size={16} aria-hidden="true" />}
           >
             Import
           </Button>
         </Group>
       </Stack>
-    </Modal>
+    </ManagerModal>
   );
 }

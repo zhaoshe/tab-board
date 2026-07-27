@@ -1,0 +1,96 @@
+.options-header {
+  min-width: 0;
+}
+
+.options-advanced {
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-body);
+}
+
+.options-advanced > summary {
+  padding: var(--mantine-spacing-md) var(--mantine-spacing-lg);
+  cursor: pointer;
+  font-weight: 650;
+  list-style-position: inside;
+}
+
+.options-advanced[open] > summary {
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.options-advanced > .mantine-Stack-root {
+  padding: 0 var(--mantine-spacing-md) var(--mantine-spacing-md);
+}
+
+:root[data-mantine-color-scheme='light'] .options-theme-control {
+  --sc-color: var(--mantine-color-blue-0);
+}
+
+:root[data-mantine-color-scheme='light'] .options-theme-control .mantine-SegmentedControl-label {
+  color: var(--mantine-color-gray-9);
+}
+
+:root[data-mantine-color-scheme='light'] .options-theme-control .mantine-SegmentedControl-indicator {
+  background: var(--mantine-color-blue-0);
+}
+
+:root[data-mantine-color-scheme='light'] .options-theme-control .mantine-SegmentedControl-label[data-active='true'] {
+  color: var(--mantine-color-blue-9);
+}
+
+:root[data-mantine-color-scheme='dark'] .options-theme-control {
+  --sc-color: var(--mantine-color-gray-0);
+}
+
+:root[data-mantine-color-scheme='dark'] .options-theme-control .mantine-SegmentedControl-label {
+  color: var(--mantine-color-gray-0);
+}
+
+:root[data-mantine-color-scheme='dark'] .options-theme-control .mantine-SegmentedControl-indicator {
+  background: var(--mantine-color-gray-0);
+}
+
+:root[data-mantine-color-scheme='dark'] .options-theme-control .mantine-SegmentedControl-label[data-active='true'] {
+  color: var(--mantine-color-dark-9);
+}
+
+.options-action-primary {
+  background: var(--mantine-color-blue-9);
+  color: var(--mantine-color-white);
+}
+
+.options-action-primary:hover {
+  background: var(--mantine-color-blue-8);
+}
+
+.options-action-danger {
+  --button-color: var(--mantine-color-red-9) !important;
+  --button-bg: var(--mantine-color-white) !important;
+  --button-bd: 1px solid var(--mantine-color-red-8) !important;
+  --button-hover: var(--mantine-color-red-0) !important;
+  border-color: var(--mantine-color-red-8);
+  color: var(--mantine-color-red-9);
+}
+
+:root[data-mantine-color-scheme='dark'] .options-action-danger {
+  --button-color: var(--mantine-color-red-2) !important;
+  --button-bg: var(--mantine-color-dark-7) !important;
+  --button-bd: 1px solid var(--mantine-color-red-4) !important;
+  --button-hover: var(--mantine-color-dark-6) !important;
+  border-color: var(--mantine-color-red-4);
+  color: var(--mantine-color-red-2);
+}
+
+@media (max-width: 40em) {
+  .options-header,
+  .options-advanced-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .options-header > *,
+  .options-advanced-actions > * {
+    width: 100%;
+  }
+}

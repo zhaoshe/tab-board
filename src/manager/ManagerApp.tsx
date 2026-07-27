@@ -2,14 +2,16 @@ import { useEffect, useState } from 'react';
 import { MantineProvider, LoadingOverlay, Center, Stack, Text, Button, Group } from '@mantine/core';
 import '@mantine/core/styles.css';
 import './styles/manager.css';
-import { theme } from '../shared/styles/theme';
+import { managerTheme, theme } from '../shared/styles/theme';
 import { ManagerLayout } from './components/shell/ManagerLayout';
 import { ErrorBoundary } from './components/shell/ErrorBoundary';
 import { useStoreHydration } from '../shared/hooks/useStoreHydration';
 import { useColorScheme } from '../shared/hooks/useColorScheme';
+import { usePageTheme } from '../shared/hooks/usePageTheme';
 import { ToastProvider, useToast } from './hooks/useToast';
 import { onFallback } from '../shared/store/activeAdapter';
 import { logBreadcrumb, logWarning } from '../shared/utils/diagnostics';
+import { DestructiveConfirmationProvider } from '../shared/components/DestructiveConfirmation';
 
 // If hydration has not completed within this window, stop showing a blank
 // loading overlay and offer a recovery action instead of an endless white page.
@@ -32,12 +34,15 @@ function FileStorageFallbackToast() {
 
 function AppContent() {
   const colorScheme = useColorScheme();
+  usePageTheme(colorScheme);
 
   return (
-    <MantineProvider theme={theme} forceColorScheme={colorScheme}>
+    <MantineProvider theme={managerTheme} forceColorScheme={colorScheme}>
       <ToastProvider>
-        <FileStorageFallbackToast />
-        <ManagerLayout />
+        <DestructiveConfirmationProvider portalTarget="#manager-main">
+          <FileStorageFallbackToast />
+          <ManagerLayout />
+        </DestructiveConfirmationProvider>
       </ToastProvider>
     </MantineProvider>
   );
@@ -48,7 +53,7 @@ function HydrationStalled() {
     <MantineProvider theme={theme}>
       <Center h="100vh" p="md">
         <Stack align="center" gap="sm" maw={420}>
-          <Text fw={600}>TabBoard is taking longer than expected to load</Text>
+          <Text fw={600}><span translate="no">TabBoard</span> is taking longer than expected to load</Text>
           <Text size="sm" c="dimmed" ta="center">
             The saved data could not be read yet. This usually recovers on reload.
             If it keeps happening, open the extension diagnostics to report it.

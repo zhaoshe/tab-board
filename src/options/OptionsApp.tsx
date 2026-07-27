@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   MantineProvider,
+  Center,
   Container,
   Title,
   Stack,
@@ -14,6 +15,7 @@ import {
   Button,
   Notification,
   Textarea,
+  Loader,
 } from '@mantine/core';
 import {
   IconSettings,
@@ -26,20 +28,26 @@ import '@mantine/core/styles.css';
 import { theme } from '../shared/styles/theme';
 import { useTabBoardStore } from '../shared/store/useTabBoardStore';
 import { useStoreHydration } from '../shared/hooks/useStoreHydration';
+import { useColorScheme } from '../shared/hooks/useColorScheme';
+import { usePageTheme } from '../shared/hooks/usePageTheme';
 import { DEFAULT_SETTINGS } from '../shared/model';
 import { DataStorageCard } from './components/DataStorageCard';
+import { ConfirmDialog } from '../shared/components/ConfirmDialog';
+import './options.css';
 
 export function OptionsApp() {
   const { hydrated } = useStoreHydration();
   const settings = useTabBoardStore((state) => state.settings);
+  const colorScheme = useColorScheme();
+  usePageTheme(colorScheme);
   const updateSettings = useTabBoardStore((state) => state.updateSettings);
-  const groups = useTabBoardStore((state) => state.groups);
 
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
-
-  const totalTabs = groups.reduce((sum, g) => sum + g.tabs.length, 0);
-  const totalGroups = groups.length;
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(
+    () => new URLSearchParams(window.location.search).get('advanced') === '1',
+  );
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -64,6 +72,7 @@ export function OptionsApp() {
   const handleResetSettings = () => {
     updateSettings(DEFAULT_SETTINGS);
     showToast('Settings reset to defaults');
+    setResetConfirmOpen(false);
   };
 
   const handleOpenShortcuts = () => {
@@ -78,82 +87,96 @@ export function OptionsApp() {
     document.title = 'TabBoard - Settings';
   }, []);
 
+  useEffect(() => {
+    const handlePopState = () => {
+      setAdvancedOpen(
+        new URLSearchParams(window.location.search).get('advanced') === '1',
+      );
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const handleAdvancedToggle = (open: boolean) => {
+    setAdvancedOpen(open);
+    const params = new URLSearchParams(window.location.search);
+    if (open) params.set('advanced', '1');
+    else params.delete('advanced');
+    const search = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash}`,
+    );
+  };
+
   if (!hydrated) {
-    return null;
+    return (
+      <MantineProvider theme={theme} forceColorScheme={colorScheme}>
+        <main>
+          <Center mih="100vh" role="status" aria-live="polite">
+            <Stack align="center" gap="xs">
+              <Loader size="sm" />
+              <Text size="sm">Loading settings…</Text>
+            </Stack>
+          </Center>
+        </main>
+      </MantineProvider>
+    );
   }
 
   return (
-    <MantineProvider theme={theme} defaultColorScheme="light">
-      <div
-        style={{
-          position: 'fixed',
-          top: 20,
-          right: 20,
-          zIndex: 1000,
-        }}
-      >
-        <Notification
-          icon={<IconCheck size={20} />}
-          color="teal"
-          withBorder
-          withCloseButton={false}
+    <MantineProvider theme={theme} forceColorScheme={colorScheme}>
+      {toastVisible && (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
           style={{
-            opacity: toastVisible ? 1 : 0,
-            transform: toastVisible ? 'translateY(0)' : 'translateY(-10px)',
-            transition: 'opacity 0.2s ease, transform 0.2s ease',
-            pointerEvents: 'none',
+            position: 'fixed',
+            top: 20,
+            right: 20,
+            zIndex: 1000,
           }}
         >
-          {toastMessage}
-        </Notification>
-      </div>
+          <Notification
+            icon={<IconCheck size={20} aria-hidden="true" />}
+            color="teal"
+            withBorder
+            withCloseButton={false}
+            style={{ pointerEvents: 'none' }}
+          >
+            {toastMessage}
+          </Notification>
+        </div>
+      )}
 
-      <Container size="sm" py="xl">
-        <Stack gap="xl">
-          <Group justify="space-between" align="flex-start">
+      <main>
+        <Container size="sm" py="xl">
+          <Stack gap="xl">
+          <Group className="options-header" justify="space-between" align="flex-start">
             <div>
               <Title order={1} size="h3">
-                TabBoard Settings
+                <span translate="no">TabBoard</span> Settings
               </Title>
               <Text c="dimmed" size="sm" mt={4}>
-                Configure how TabBoard works
+                Configure how <span translate="no">TabBoard</span> works
               </Text>
             </div>
             <Button
-              variant="light"
-              leftSection={<IconExternalLink size={16} />}
+              variant="default"
+              leftSection={<IconExternalLink size={16} aria-hidden="true" />}
               onClick={handleOpenManager}
             >
               Open Manager
             </Button>
           </Group>
 
-          <Group grow>
-            <Card withBorder shadow="sm" padding="md">
-              <Text size="xl" fw={700}>
-                {totalGroups}
-              </Text>
-              <Text size="sm" c="dimmed">
-                Saved groups
-              </Text>
-            </Card>
-            <Card withBorder shadow="sm" padding="md">
-              <Text size="xl" fw={700}>
-                {totalTabs}
-              </Text>
-              <Text size="sm" c="dimmed">
-                Saved tabs
-              </Text>
-            </Card>
-          </Group>
-
-          <Divider />
-
           <Card withBorder shadow="sm" padding="lg">
             <Stack gap="md">
               <div>
                 <Group gap="xs" mb={2}>
-                  <IconSettings size={18} />
+                  <IconSettings size={18} aria-hidden="true" />
                   <Title order={2} size="h5">
                     Toolbar
                   </Title>
@@ -164,6 +187,7 @@ export function OptionsApp() {
               </div>
 
               <Radio.Group
+                label="Extension button behavior"
                 value={settings.actionClick}
                 onChange={(value) =>
                   handleSettingChange(
@@ -194,6 +218,7 @@ export function OptionsApp() {
 
               <Stack gap="sm">
                 <Switch
+                  name="close-tabs-after-save"
                   label="Close tabs after saving"
                   description="Tabs are closed once they are stored in a session"
                   checked={settings.closeTabsAfterSave}
@@ -206,6 +231,7 @@ export function OptionsApp() {
                 />
 
                 <Switch
+                  name="open-manager-after-save"
                   label="Open manager after save"
                   description="Show the manager page after saving tabs"
                   checked={settings.openManagerAfterSave}
@@ -218,6 +244,7 @@ export function OptionsApp() {
                 />
 
                 <Switch
+                  name="dedupe-on-save"
                   label="Deduplicate on save"
                   description="Skip tabs whose URL is already saved somewhere"
                   checked={settings.dedupeOnSave}
@@ -234,7 +261,10 @@ export function OptionsApp() {
                 <Textarea
                   label="Custom filter rules"
                   description="Hide matching open tabs. Separate URL keywords with commas or new lines."
-                  placeholder="example.com, chrome://newtab"
+                  placeholder="example.com, chrome://newtab…"
+                  name="custom-url-filter"
+                  autoComplete="off"
+                  spellCheck={false}
                   autosize
                   minRows={2}
                   value={settings.customUrlFilter}
@@ -257,6 +287,7 @@ export function OptionsApp() {
 
               <Stack gap="sm">
                 <Switch
+                  name="delete-restored-tabs"
                   label="Delete saved tabs after restore"
                   description="Remove tabs from the session when restored"
                   checked={settings.deleteRestoredTabs}
@@ -269,6 +300,7 @@ export function OptionsApp() {
                 />
 
                 <Switch
+                  name="restore-groups-in-new-window"
                   label="Restore groups in new window"
                   description="Open entire tab groups in a new window"
                   checked={settings.restoreGroupsInNewWindow}
@@ -281,6 +313,7 @@ export function OptionsApp() {
                 />
 
                 <Switch
+                  name="restore-next-to-current"
                   label="Restore next to current tab"
                   description="Open restored tabs next to the currently active tab"
                   checked={settings.restoreNextToCurrent}
@@ -293,6 +326,7 @@ export function OptionsApp() {
                 />
 
                 <Switch
+                  name="focus-restored-tabs"
                   label="Focus restored tabs"
                   description="Bring focus to newly opened tabs"
                   checked={settings.focusRestoredTabs}
@@ -307,8 +341,6 @@ export function OptionsApp() {
             </Stack>
           </Card>
 
-          <DataStorageCard />
-
           <Card withBorder shadow="sm" padding="lg">
             <Stack gap="md">
               <div>
@@ -321,6 +353,9 @@ export function OptionsApp() {
               </div>
 
               <SegmentedControl
+                className="options-theme-control"
+                aria-label="Theme preference"
+                name="theme"
                 value={settings.theme}
                 onChange={(value) =>
                   handleSettingChange(
@@ -339,67 +374,85 @@ export function OptionsApp() {
             </Stack>
           </Card>
 
-          <Card withBorder shadow="sm" padding="lg">
-            <Stack gap="md">
-              <div>
-                <Title order={2} size="h5">
-                  Safety
-                </Title>
-                <Text size="sm" c="dimmed">
-                  Confirmation dialogs for destructive actions
-                </Text>
-              </div>
+          <details
+            className="options-advanced"
+            open={advancedOpen}
+            onToggle={(event) => handleAdvancedToggle(event.currentTarget.open)}
+          >
+            <summary>Advanced Settings</summary>
+            <Stack gap="md" mt="md">
+              <DataStorageCard />
 
-              <Stack gap="sm">
-                <Switch
-                  label="Confirm before destructive actions"
-                  description="Show a confirmation dialog before deleting tabs, sessions, and other important operations"
-                  checked={settings.confirmBeforeDestructive}
-                  onChange={(e) =>
-                    handleSettingChange(
-                      'confirmBeforeDestructive',
-                      e.currentTarget.checked
-                    )
-                  }
-                />
-              </Stack>
+              <Card withBorder shadow="sm" padding="lg">
+                <Stack gap="md">
+                  <div>
+                    <Title order={2} size="h5">
+                      Safety
+                    </Title>
+                    <Text size="sm" c="dimmed">
+                      Confirmation for saved-item deletion
+                    </Text>
+                  </div>
+
+                  <Switch
+                    name="confirm-before-destructive"
+                    label="Confirm before deleting saved items"
+                    description="Session and saved-item deletion can skip confirmation. Closing browser tabs and permanent deletion always require confirmation."
+                    checked={settings.confirmBeforeDestructive}
+                    onChange={(e) =>
+                      handleSettingChange(
+                        'confirmBeforeDestructive',
+                        e.currentTarget.checked
+                      )
+                    }
+                  />
+                </Stack>
+              </Card>
+
+              <Card withBorder shadow="sm" padding="lg">
+                <Stack gap="md">
+                  <div>
+                    <Title order={2} size="h5">
+                      Keyboard & Reset
+                    </Title>
+                    <Text size="sm" c="dimmed">
+                      Chrome shortcuts and settings recovery
+                    </Text>
+                  </div>
+
+                  <Group className="options-advanced-actions" grow>
+                    <Button
+                      variant="default"
+                      leftSection={<IconKeyboard size={16} aria-hidden="true" />}
+                      onClick={handleOpenShortcuts}
+                    >
+                      Open Keyboard Shortcuts
+                    </Button>
+                    <Button
+                      className="options-action-danger"
+                      variant="outline"
+                      color="red"
+                      leftSection={<IconRefresh size={16} aria-hidden="true" />}
+                      onClick={() => setResetConfirmOpen(true)}
+                    >
+                      Reset to Defaults
+                    </Button>
+                  </Group>
+                </Stack>
+              </Card>
             </Stack>
-          </Card>
-
-          <Divider />
-
-          <Card withBorder shadow="sm" padding="lg">
-            <Stack gap="md">
-              <div>
-                <Title order={2} size="h5">
-                  Keyboard & Advanced
-                </Title>
-                <Text size="sm" c="dimmed">
-                  Shortcuts and reset options
-                </Text>
-              </div>
-
-              <Group grow>
-                <Button
-                  variant="light"
-                  leftSection={<IconKeyboard size={16} />}
-                  onClick={handleOpenShortcuts}
-                >
-                  Open keyboard shortcuts
-                </Button>
-                <Button
-                  variant="light"
-                  color="red"
-                  leftSection={<IconRefresh size={16} />}
-                  onClick={handleResetSettings}
-                >
-                  Reset to defaults
-                </Button>
-              </Group>
-            </Stack>
-          </Card>
-        </Stack>
-      </Container>
+          </details>
+          </Stack>
+        </Container>
+      </main>
+      <ConfirmDialog
+        opened={resetConfirmOpen}
+        title="Reset Settings"
+        message="Reset all settings? Saved data stays."
+        confirmLabel="Reset Settings"
+        onCancel={() => setResetConfirmOpen(false)}
+        onConfirm={handleResetSettings}
+      />
     </MantineProvider>
   );
 }

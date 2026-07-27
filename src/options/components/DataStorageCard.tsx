@@ -23,6 +23,7 @@ import {
 } from '../../shared/store/activeAdapter';
 import { FolderPickerDialog } from './FolderPickerDialog';
 import { DisconnectDialog } from './DisconnectDialog';
+import { formatRelativeTime } from '../../shared/utils/formatters';
 
 interface SavedRootInfo {
   name: string | null;
@@ -45,24 +46,6 @@ async function readLastSavedFromAuthority(): Promise<string | null> {
     return state.updatedAt || null;
   } catch {
     return null;
-  }
-}
-
-function formatRelativeTime(iso: string): string {
-  try {
-    const t = Date.parse(iso);
-    if (!Number.isFinite(t)) return iso;
-    const diffMs = Date.now() - t;
-    const diffSec = Math.round(diffMs / 1000);
-    if (diffSec < 60) return `${diffSec}s ago`;
-    const diffMin = Math.round(diffSec / 60);
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.round(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
-    const diffDay = Math.round(diffHr / 24);
-    return `${diffDay}d ago`;
-  } catch {
-    return iso;
   }
 }
 
@@ -151,13 +134,15 @@ export function DataStorageCard() {
         <Stack gap="md">
           <div>
             <Group gap="xs" mb={2}>
-              {fileMode ? <IconFolder size={18} /> : <IconDatabase size={18} />}
+              {fileMode
+                ? <IconFolder size={18} aria-hidden="true" />
+                : <IconDatabase size={18} aria-hidden="true" />}
               <Title order={2} size="h5">
                 Data Storage
               </Title>
             </Group>
             <Text size="sm" c="dimmed">
-              Where TabBoard saves your sessions
+              Where <span translate="no">TabBoard</span> saves your sessions
             </Text>
           </div>
 
@@ -172,16 +157,17 @@ export function DataStorageCard() {
           )}
 
           {fallbackReason && (
-            <Alert color="red" icon={<IconAlertTriangle size={16} />}>
+            <Alert color="red" icon={<IconAlertTriangle size={16} aria-hidden="true" />}>
               <Text size="sm">{fallbackReason}</Text>
               <Group mt="sm">
                 <Button
                   size="xs"
-                  leftSection={<IconRefresh size={14} />}
+                  leftSection={<IconRefresh size={14} aria-hidden="true" />}
                   loading={reconnecting}
+                  aria-label={reconnecting ? 'Reconnecting…' : 'Reconnect Folder'}
                   onClick={() => void handleReconnect()}
                 >
-                  Reconnect folder
+                  {reconnecting ? 'Reconnecting…' : 'Reconnect Folder'}
                 </Button>
               </Group>
             </Alert>
@@ -190,30 +176,35 @@ export function DataStorageCard() {
           <Group gap="xs">
             {!fileMode && (
               <Button
-                variant="light"
-                leftSection={<IconFolder size={16} />}
+                className="options-action-primary"
+                variant="filled"
+                color="blue"
+                leftSection={<IconFolder size={16} aria-hidden="true" />}
                 onClick={() => setPickerOpen(true)}
               >
-                Choose folder…
+                Choose Folder…
               </Button>
             )}
             {fileMode && (
               <>
                 <Button
-                  variant="light"
-                  leftSection={<IconRefresh size={16} />}
+                  className="options-action-primary"
+                  variant="filled"
+                  color="blue"
+                  leftSection={<IconRefresh size={16} aria-hidden="true" />}
                   loading={reconnecting}
+                  aria-label={reconnecting ? 'Reconnecting…' : 'Reconnect Folder'}
                   onClick={() => void handleReconnect()}
                 >
-                  Reconnect folder
+                  {reconnecting ? 'Reconnecting…' : 'Reconnect Folder'}
                 </Button>
                 <Button
                   variant="outline"
                   color="red"
-                  leftSection={<IconPlugConnectedX size={16} />}
+                  leftSection={<IconPlugConnectedX size={16} aria-hidden="true" />}
                   onClick={() => setDisconnectOpen(true)}
                 >
-                  Stop using file storage
+                  Stop Using File Storage
                 </Button>
               </>
             )}

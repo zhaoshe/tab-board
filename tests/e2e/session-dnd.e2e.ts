@@ -99,10 +99,14 @@ test.describe('Session drag lifecycle (@dnd-kit keyboard sensor)', () => {
     await handle.focus();
     await page.keyboard.press('Space');
     await expect(page.locator(OVERLAY)).toBeVisible();
+    const liveRegion = page.locator('[role="status"]');
+    await expect(liveRegion).toContainText('group-insert-group_alpha');
 
     // Move past Beta's insertion point so the drop is not an adjacent no-op.
     await page.keyboard.press('ArrowRight');
+    await expect(liveRegion).toContainText('group-insert-group_beta');
     await page.keyboard.press('ArrowRight');
+    await expect(liveRegion).toContainText('group-insert-group_gamma');
     await page.keyboard.press('Space');
 
     await expect(page.locator(OVERLAY)).toBeHidden();

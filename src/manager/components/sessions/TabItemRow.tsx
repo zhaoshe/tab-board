@@ -35,6 +35,7 @@ import {
   useManagerOverlayCommands,
   useManagerPreviewOpen,
 } from '../../hooks/useManagerOverlays';
+import { useDestructiveConfirmation } from '../../../shared/components/DestructiveConfirmation';
 
 export function getTabDropMarkerPlacement(
   marker: DragMarker | null | undefined,
@@ -89,6 +90,7 @@ export function TabItemRow({
   const infoKey = `saved:${groupId}:${tab.id}`;
   const isPreviewOpen = useManagerPreviewOpen(infoKey);
   const { showError, showSuccess } = useToast();
+  const confirmDestructive = useDestructiveConfirmation();
   const updateTab = useTabBoardStore((state) => state.updateTab);
   const deleteTab = useTabBoardStore((state) => state.deleteTab);
   const settings = useTabBoardStore((state) => state.settings);
@@ -145,9 +147,16 @@ export function TabItemRow({
     }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (locked) return;
-    if (settings.confirmBeforeDestructive && !confirm('Delete this saved tab?')) return;
+    if (settings.confirmBeforeDestructive) {
+      const confirmed = await confirmDestructive({
+        title: tab.itemType === ITEM_LINK ? 'Delete Saved Tab' : 'Delete Saved Note',
+        message: `Move “${tab.title}” to Trash?`,
+        confirmLabel: tab.itemType === ITEM_LINK ? 'Delete Saved Tab' : 'Delete Saved Note',
+      });
+      if (!confirmed) return;
+    }
     closeOverlays();
     deleteTab(groupId, tab.id);
   };
@@ -168,7 +177,15 @@ export function TabItemRow({
     setIsEditingNote(false);
   };
 
-  const handleNoteDelete = () => {
+  const handleNoteDelete = async () => {
+    if (settings.confirmBeforeDestructive) {
+      const confirmed = await confirmDestructive({
+        title: 'Delete Note',
+        message: `Delete the note attached to “${tab.title}”?`,
+        confirmLabel: 'Delete Note',
+      });
+      if (!confirmed) return;
+    }
     updateTab(groupId, tab.id, { note: '' });
     setIsEditingNote(false);
   };
@@ -181,7 +198,7 @@ export function TabItemRow({
 
   const handleCopy = async () => {
     try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard is unavailable.');
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard is unavailable. Copy the text manually.');
       await navigator.clipboard.writeText(tab.itemType === ITEM_LINK ? tab.url : tab.note || tab.title);
       showSuccess('Copied');
     } catch (error: unknown) {
@@ -191,14 +208,14 @@ export function TabItemRow({
 
   const infoActions = (
     <>
-      <Tooltip label={tab.itemType === ITEM_LINK ? 'Add note' : 'Edit note'}>
-        <ActionIcon className="manager-info-card-action" variant="subtle" aria-label={tab.itemType === ITEM_LINK ? 'Add note' : 'Edit note'} onClick={handleEditNote}>
-          <IconNotes size={16} />
+      <Tooltip label={tab.itemType === ITEM_LINK ? 'Add Note' : 'Edit Note'}>
+        <ActionIcon className="manager-info-card-action" variant="subtle" aria-label={tab.itemType === ITEM_LINK ? 'Add Note' : 'Edit Note'} onClick={handleEditNote}>
+          <IconNotes size={16} aria-hidden="true" />
         </ActionIcon>
       </Tooltip>
       <Tooltip label={tab.itemType === ITEM_LINK ? 'Copy URL' : 'Copy text'}>
         <ActionIcon className="manager-info-card-action" variant="subtle" aria-label={tab.itemType === ITEM_LINK ? 'Copy URL' : 'Copy text'} onClick={() => void handleCopy()}>
-          <IconCopy size={16} />
+          <IconCopy size={16} aria-hidden="true" />
         </ActionIcon>
       </Tooltip>
     </>
@@ -228,23 +245,26 @@ export function TabItemRow({
       >
         <Textarea
           ref={noteTextareaRef}
+          name="saved-tab-note"
+          aria-label={`Note for ${tab.title}`}
+          autoComplete="off"
           value={noteValue}
           onChange={(event) => setNoteValue(event.target.value)}
           onKeyDown={handleNoteKeyDown}
           size="xs"
           minRows={2}
           maxRows={6}
-          placeholder="Add a note..."
+          placeholder="Add a note…"
           autosize
         />
         <MantineGroup gap={6} mt={6} justify="flex-end">
-          <Button size="xs" variant="subtle" color="red" leftSection={<IconTrash size={14} />} onClick={handleNoteDelete}>
+          <Button size="xs" variant="subtle" color="red" leftSection={<IconTrash size={14} aria-hidden="true" />} onClick={handleNoteDelete}>
             Delete
           </Button>
-          <Button size="xs" variant="subtle" leftSection={<IconX size={14} />} onClick={handleNoteCancel}>
+          <Button size="xs" variant="subtle" leftSection={<IconX size={14} aria-hidden="true" />} onClick={handleNoteCancel}>
             Cancel
           </Button>
-          <Button size="xs" leftSection={<IconCheck size={14} />} onClick={handleNoteSubmit}>
+          <Button size="xs" leftSection={<IconCheck size={14} aria-hidden="true" />} onClick={handleNoteSubmit}>
             Save
           </Button>
         </MantineGroup>
@@ -313,11 +333,14 @@ export function TabItemRow({
         }}
       >
         <span className="tab-item-row__icon" aria-hidden="true">
-          {tab.itemType === ITEM_LINK ? <IconLink size={14} /> : <IconFileText size={14} />}
+          {tab.itemType === ITEM_LINK
+            ? <IconLink size={14} aria-hidden="true" />
+            : <IconFileText size={14} aria-hidden="true" />}
         </span>
         {!isDragOverlay && (
           <Checkbox
             size="sm"
+             name="saved-tab-selection"
             checked={selected}
             aria-label={`Select ${tab.title}`}
             className="tab-item-row__select"
@@ -344,19 +367,19 @@ export function TabItemRow({
               {tab.title}
             </button>
           ) : (
-            <Text
+            <button
               ref={isDragOverlay ? undefined : infoTriggerRef}
-              component="span"
-              size="xs"
+              type="button"
               className="tab-item-row__title"
               data-info-popover={isDragOverlay ? undefined : 'saved'}
               data-info-key={isDragOverlay ? undefined : infoKey}
               aria-haspopup={isDragOverlay ? undefined : 'dialog'}
               aria-expanded={isDragOverlay ? undefined : isPreviewOpen}
+              disabled={isDragOverlay}
               tabIndex={isDragOverlay ? -1 : 0}
             >
               {tab.note || tab.title}
-            </Text>
+            </button>
           )}
           {tab.itemType === ITEM_LINK && tab.url && (
             <Text className="tab-item-row__url" component="span" size="xs" c="dimmed">
@@ -380,7 +403,7 @@ export function TabItemRow({
               disabled={locked}
               onClick={handleDelete}
             >
-              <IconX size={14} />
+              <IconX size={14} aria-hidden="true" />
             </ActionIcon>
           </Tooltip>
         ) : null}

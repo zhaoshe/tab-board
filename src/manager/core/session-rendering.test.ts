@@ -5,13 +5,23 @@ import { getTabDropMarkerPlacement } from '../components/sessions/TabItemRow';
 
 const managerRoot = resolve(process.cwd(), 'src/manager');
 const workspace = readFileSync(resolve(managerRoot, 'components/workspace/WorkspaceContent.tsx'), 'utf8');
-const layout = readFileSync(resolve(managerRoot, 'components/shell/ManagerLayout.tsx'), 'utf8');
+const layout = [
+  'components/shell/ManagerLayout.tsx',
+  'components/shell/ManagerDndCoordinator.tsx',
+  'hooks/useCaptureReveal.ts',
+].map((file) => readFileSync(resolve(managerRoot, file), 'utf8')).join('\n');
 const card = readFileSync(resolve(managerRoot, 'components/sessions/SessionCard.tsx'), 'utf8');
 const row = readFileSync(resolve(managerRoot, 'components/sessions/TabItemRow.tsx'), 'utf8');
+const composer = readFileSync(resolve(managerRoot, 'components/sessions/SessionItemComposer.tsx'), 'utf8');
 const placeholder = readFileSync(resolve(managerRoot, 'components/sessions/SessionPlaceholder.tsx'), 'utf8');
 const runtimePath = resolve(managerRoot, 'hooks/useManagerRuntime.ts');
 const runtime = existsSync(runtimePath) ? readFileSync(runtimePath, 'utf8') : '';
-const css = readFileSync(resolve(managerRoot, 'styles/manager.css'), 'utf8');
+const css = [
+  'shell.css',
+  'session.css',
+  'overlays.css',
+  'responsive.css',
+].map((file) => readFileSync(resolve(managerRoot, 'styles', file), 'utf8')).join('\n');
 
 function cssBlock(selector: string): string {
   const start = css.indexOf(`${selector} {`);
@@ -49,10 +59,11 @@ describe('Task108 session rendering contracts', () => {
 
   it('keeps the end target narrow without allocating a session-sized track', () => {
     const sessions = cssBlock('.session-board');
-    const endTarget = cssBlock('.session-board__end-target');
+    const endTarget = cssBlock('.session-board > .session-board__end-target');
     expect(sessions).toContain('position: relative');
     expect(sessions).toContain('padding-inline-end: 16px');
     expect(endTarget).toContain('position: absolute');
+    expect(endTarget).toContain('inset-inline-start: auto');
     expect(endTarget).toContain('inset-inline-end: 0');
     expect(endTarget).toContain('width: 16px');
     expect(endTarget).not.toContain('grid-column');
@@ -132,8 +143,17 @@ describe('Task108 session rendering contracts', () => {
   it('keeps session metadata directly beneath the session title', () => {
     expect(card).toContain('className="session-card__heading"');
     expect(card).toContain('className="session-card__meta"');
+    expect(card).toContain('role="group"');
+    expect(card).toContain('aria-label="Session Details"');
     expect(card).not.toContain('session-card__footer');
     expect(cssBlock('.session-card__meta')).toContain('flex-wrap: wrap');
+  });
+
+  it('uses semantic buttons for both link and note preview triggers', () => {
+    const details = row.match(/<div className="tab-item-row__details">[\s\S]*?<\/div>/)?.[0] ?? '';
+    expect(details.match(/<button/g)).toHaveLength(2);
+    expect(details).toContain('aria-haspopup={isDragOverlay ? undefined : \'dialog\'}');
+    expect(details).toContain('aria-expanded={isDragOverlay ? undefined : isPreviewOpen}');
   });
 
   it('keeps insertion targets inside session slots instead of allocating grid tracks', () => {
@@ -176,7 +196,7 @@ describe('Task108 session rendering contracts', () => {
   });
 
   it('keeps the approved session and tab action surfaces', () => {
-    for (const label of ['Add link', 'Add note', 'Rename', 'Move to category', 'Lock', 'Unlock', 'Copy', 'Delete']) {
+    for (const label of ['Add Link', 'Add Note', 'Rename', 'Move to Category', 'Lock', 'Unlock', 'Copy', 'Delete']) {
       expect(card).toContain(label);
     }
     expect(card).not.toContain('<ManagerMenuItem onClick={handleEditNote}>Edit note</ManagerMenuItem>');
@@ -191,6 +211,15 @@ describe('Task108 session rendering contracts', () => {
     expect(row).not.toContain('preview');
   });
 
+  it('uses a validated in-app composer instead of native prompts', () => {
+    expect(card).toContain('<SessionItemComposer');
+    expect(card).not.toContain('window.prompt');
+    expect(composer).toContain('name="session-link-url"');
+    expect(composer).toContain('name="session-link-title"');
+    expect(composer).toContain('name="session-note-text"');
+    expect(composer).not.toContain('window.prompt');
+  });
+
   it('keeps Restore as an external action instead of repeating it in More', () => {
     const moreMenu = card.match(/const menuItems = [\s\S]*?\n\n  if \(isDragging/)?.[0] || '';
     expect(moreMenu).not.toContain('Restore');
@@ -202,6 +231,28 @@ describe('Task108 session rendering contracts', () => {
     expect(row).toContain('locked');
     expect(row).toMatch(/if \(locked[^\n]*return/);
     expect(card).toMatch(/if \(group\.locked[^\n]*return/);
+  });
+
+  it('routes saved-item deletion through the shared confirmation owner', () => {
+    expect(card).toContain('useDestructiveConfirmation');
+    expect(row).toContain('useDestructiveConfirmation');
+    expect(card).not.toContain('window.confirm');
+    expect(card).not.toMatch(/\bconfirm\(/);
+    expect(row).not.toContain('window.confirm');
+    expect(row).not.toMatch(/\bconfirm\(/);
+    expect(card).toContain('confirmBeforeDestructive');
+    expect(row).toContain('confirmBeforeDestructive');
+    expect(row).toContain('Delete Saved Note');
+  });
+
+  it('replaces saved drag sources and disables text selection during drag', () => {
+    expect(card).toContain('if (isDragging && !isDragOverlay)');
+    expect(card).toContain('className="session-card__placeholder-slot"');
+    expect(row).toContain('if (isDragging && !isDragOverlay)');
+    expect(row).toContain('className="tab-item-row-placeholder"');
+    expect(layout).toContain('dragActive={Boolean(dnd.activeId)}');
+    expect(css).toContain('.manager-shell--drag-active');
+    expect(css).toContain('user-select: none');
   });
 
   it('keeps saved-tab identity on direct delete controls', () => {
@@ -223,10 +274,13 @@ describe('Task108 session rendering contracts', () => {
     expect(card).not.toContain('ref={isDragOverlay ? undefined : setActivatorNodeRef}');
     // The keyboard sensor uses sortable coordinates so arrows traverse columns.
     expect(layout).toContain('sortableKeyboardCoordinates');
-    expect(layout).toContain('coordinateGetter: sortableKeyboardCoordinates');
+    expect(layout).toContain('coordinateGetter: keyboardCoordinates');
   });
 
   it('uses immutable drag-start geometry for source placeholders', () => {
+    const placeholderSlot = cssBlock('.session-card__placeholder-slot');
+    const placeholderStyle = cssBlock('.session-placeholder');
+    const overlayPreview = cssBlock('.manager-drag-overlay__preview');
     expect(placeholder).not.toContain('height = 200');
     expect(placeholder).not.toContain('height,');
     expect(row).not.toContain('height: 28');
@@ -235,6 +289,18 @@ describe('Task108 session rendering contracts', () => {
     expect(row).toContain('sourceRect');
     expect(card).not.toContain('rect.current');
     expect(row).not.toContain('rect.current');
+    expect(placeholderSlot).toContain('height: 100%');
+    expect(placeholderStyle).toContain('height: 100%');
+    expect(placeholderStyle).toContain('border: 2px dashed');
+    expect(overlayPreview).toContain('box-sizing: border-box');
+    expect(overlayPreview).toContain('overflow: hidden');
+  });
+
+  it('renders explicit session and tab insertion markers', () => {
+    expect(css).toContain(".session-board__group-insert-target[data-over='true']");
+    expect(cssBlock('.session-board__drop-marker')).toContain('position: absolute');
+    expect(cssBlock('.session-card__drop-marker')).toContain('min-height: 4px');
+    expect(css).toMatch(/\.tab-item-row__drop-marker\s*\{[\s\S]*?height: 4px;/);
   });
 
   it('keeps hidden search sessions in canonical end-target indexing', () => {

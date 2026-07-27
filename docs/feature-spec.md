@@ -55,6 +55,17 @@ Window selector 展示 Chrome normal windows 的 ordinal 和原始 tab 总数，
 
 Open Tabs 刷新期间保留上一份 window/tab rows，不插入 loading 文案或空白占位；sidebar 顶部 Refresh icon 持续旋转并通过 `aria-busy` 暴露刷新状态，请求成功后再原子替换列表。
 
+Manager 页面上下文同步到 URL：
+
+- `workspace=<workspaceId>` 表示当前 workspace。
+- `category=inbox|saved|archive|folder:<id>` 表示当前 category。
+- `view=board|bin` 表示 board 或 Bin。
+- `q=<query>` 表示 saved-session 搜索。
+- 用户导航会进入浏览器历史；Back/Forward 恢复 workspace、category、view 和 query。
+- URL 中无效或跨 workspace 的 category 自动回退到 Inbox。
+
+窄屏下 Search 独占 topbar 的内容区；Import、Export、Trash、Options 收入 More actions，不隐藏能力。Sidebar 收起后保留可聚焦的 Expand sidebar 控件。
+
 ### Popup
 
 Popup 是快动作入口：
@@ -66,6 +77,8 @@ Popup 是快动作入口：
 
 Save 完成后 popup 关闭，打开或聚焦最近访问的 manager，并在 manager 中定位刚保存的 session。Popup 不承载重命名、分类、编辑等管理流程。
 
+Popup hydration 时展示轻量 loading 状态，不显示空白页。Dedupe 会先确认将关闭的重复 tab 数量，再执行关闭。
+
 ### Options
 
 Options 分为 Basic 和 Advanced：
@@ -76,6 +89,11 @@ Options 分为 Basic 和 Advanced：
 - Favicons 始终展示，不再是设置项。
 - 危险操作默认识别，可在设置中关闭二次确认。
 - Session card 外露动作不再可配置。
+- Options 跟随 system / light / dark 主题。
+- Toolbar、Capture、Restore、Appearance 保持在 Basic 区；Data Storage、Safety、Chrome shortcuts 和 Reset 放在 Advanced Settings。
+- Advanced Settings 展开状态同步到 `?advanced=1`；刷新和浏览器 Back/Forward 保持同一 disclosure context。
+- Reset to Defaults 需要确认；确认文案明确 saved data 保留不变。
+- Popup、Options 和 Manager 的动态计数统一使用当前 locale 的 `Intl.NumberFormat`；异步按钮在执行期间暴露以 `…` 结尾的进行中名称。
 
 ### Context menu
 

@@ -192,18 +192,26 @@ function resolveGroupDrop(
     return null;
   }
 
-  const categoryGroups = groupsForCategory(state, category, payload.workspaceId).filter((g) => g.id !== source.id);
   const sourceCategory = categoryForGroup(state, source);
-  const sourceIndex = groupsForCategory(state, sourceCategory, payload.workspaceId).findIndex(
+  const sourceCategoryGroups = groupsForCategory(state, sourceCategory, payload.workspaceId);
+  const sourceIndex = sourceCategoryGroups.findIndex(
     (group) => group.id === source.id,
   );
+  const categoryGroups = groupsForCategory(state, category, payload.workspaceId)
+    .filter((group) => group.id !== source.id);
   const requestedIndex = target.kind === 'category-column' ? categoryGroups.length : target.index;
-  if (!isValidInsertionIndex(requestedIndex, categoryGroups.length)) {
+  const boundaryLength = sourceCategory === category
+    ? sourceCategoryGroups.length
+    : categoryGroups.length;
+  if (!isValidInsertionIndex(requestedIndex, boundaryLength)) {
     return null;
   }
   const finalIndex = sourceCategory === category && sourceIndex >= 0 && sourceIndex < requestedIndex
     ? requestedIndex - 1
     : requestedIndex;
+  if (!isValidInsertionIndex(finalIndex, categoryGroups.length)) {
+    return null;
+  }
   if (sourceCategory === category && finalIndex === sourceIndex) {
     return null;
   }

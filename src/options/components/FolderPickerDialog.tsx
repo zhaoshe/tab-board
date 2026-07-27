@@ -112,7 +112,7 @@ export function FolderPickerDialog({ opened, onClose, onComplete }: FolderPicker
       if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'NotAllowedError')) {
         return;
       }
-      setErrorMsg(err instanceof Error ? err.message : String(err));
+      setErrorMsg(`${err instanceof Error ? err.message : String(err)} Choose a writable local folder and try again.`);
       setStep('error');
     }
   }
@@ -172,7 +172,7 @@ export function FolderPickerDialog({ opened, onClose, onComplete }: FolderPicker
     <Modal
       opened={opened}
       onClose={handleClose}
-      title="Choose storage folder"
+      title="Choose Storage Folder"
       centered
       size="md"
     >
@@ -180,22 +180,22 @@ export function FolderPickerDialog({ opened, onClose, onComplete }: FolderPicker
         {step === 'choose' && (
           <>
             <Text size="sm" c="dimmed">
-              Pick a local folder where TabBoard will save your sessions as plain JSON files.
+              Pick a local folder where <span translate="no">TabBoard</span> will save your sessions as plain JSON files.
               The folder must be on a local disk and writable.
             </Text>
             <Button
-              leftSection={<IconFolder size={16} />}
+              leftSection={<IconFolder size={16} aria-hidden="true" />}
               onClick={() => void pickFolder()}
             >
-              Choose folder
+              Choose Folder
             </Button>
           </>
         )}
 
         {step === 'inspecting' && (
-          <Center py="xl">
+          <Center py="xl" role="status" aria-live="polite">
             <Stack align="center" gap="sm">
-              <Loader />
+              <Loader aria-hidden="true" />
               <Text size="sm" c="dimmed">Inspecting folder…</Text>
             </Stack>
           </Center>
@@ -209,7 +209,7 @@ export function FolderPickerDialog({ opened, onClose, onComplete }: FolderPicker
             <Group justify="flex-end">
               <Button variant="default" onClick={handleClose}>Cancel</Button>
               <Button onClick={() => void handleEmptyConfirm()}>
-                Export & use folder
+                Export & Use Folder
               </Button>
             </Group>
           </>
@@ -218,9 +218,11 @@ export function FolderPickerDialog({ opened, onClose, onComplete }: FolderPicker
         {step === 'existing-choices' && (
           <>
             <Text size="sm">
-              This folder already contains TabBoard data. How should we proceed?
+              This folder already contains <span translate="no">TabBoard</span> data. How should we proceed?
             </Text>
             <Radio.Group
+              label="Existing folder data"
+              name="existing-folder-data"
               value={migrationMode}
               onChange={(value) => setMigrationMode(value as MigrationMode)}
             >
@@ -237,44 +239,44 @@ export function FolderPickerDialog({ opened, onClose, onComplete }: FolderPicker
                 />
                 <Radio
                   value="merge"
-                  label="Merge both (newer items win)"
-                  description="Combines data from both sources; newer items win on conflict."
+                  label="Merge folder and browser data"
+                  description="Combines both sources. Folder data wins when the same item ID exists in both places."
                 />
               </Stack>
             </Radio.Group>
             <Group justify="flex-end" mt="sm">
               <Button variant="default" onClick={handleClose}>Cancel</Button>
               <Button onClick={() => void handleExistingConfirm()}>
-                Continue
+                Apply Storage Choice
               </Button>
             </Group>
           </>
         )}
 
         {step === 'migrating' && (
-          <Center py="xl">
+          <Center py="xl" role="status" aria-live="polite">
             <Stack align="center" gap="sm">
-              <Loader />
+              <Loader aria-hidden="true" />
               <Text size="sm" c="dimmed">Switching storage…</Text>
             </Stack>
           </Center>
         )}
 
         {step === 'success' && (
-          <Alert color="teal" icon={<IconCheck size={16} />}>
+          <Alert color="teal" icon={<IconCheck size={16} aria-hidden="true" />} role="status">
             Switched to file storage. Reloading…
           </Alert>
         )}
 
         {step === 'error' && (
           <>
-            <Alert color="red" icon={<IconAlertTriangle size={16} />}>
-              {errorMsg || 'An unknown error occurred.'}
+            <Alert color="red" icon={<IconAlertTriangle size={16} aria-hidden="true" />}>
+              {errorMsg || 'The folder could not be used. Choose a writable local folder and try again.'}
             </Alert>
             <Group justify="flex-end">
               <Button variant="default" onClick={handleClose}>Close</Button>
               <Button onClick={() => { reset(); }}>
-                Try again
+                Try Again
               </Button>
             </Group>
           </>

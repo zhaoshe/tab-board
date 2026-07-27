@@ -28,6 +28,7 @@ import {
   utf8ByteLength,
   MAX_CANONICAL_DIGEST_BYTES,
 } from '../validation';
+import { formatDateTime } from '../utils/formatters';
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -421,14 +422,12 @@ function titleFromText(text: string): string {
     .join(' ');
 }
 
-export function defaultGroupTitle(date = new Date()): string {
-  return `Saved ${date.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })}`;
+export function defaultGroupTitle(
+  date = new Date(),
+  locale?: Intl.LocalesArgument,
+  timeZone?: string,
+): string {
+  return `Saved ${formatDateTime(date, locale, timeZone)}`;
 }
 
 export function isRestorableTab(tab: TabItem): boolean {

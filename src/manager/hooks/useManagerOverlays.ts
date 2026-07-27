@@ -17,6 +17,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { IconBrowser } from '@tabler/icons-react';
+import { formatDateTime } from '../../shared/utils/formatters';
 
 export const OPEN_DELAY_MS = 180;
 export const CLOSE_DELAY_MS = 120;
@@ -76,8 +77,8 @@ function getDomain(url: string): string {
 
 export function formatSavedTime(value: string | undefined): string {
   if (!value) return '';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '' : `Saved ${date.toLocaleString()}`;
+  const formatted = formatDateTime(value);
+  return formatted ? `Saved ${formatted}` : '';
 }
 
 export function renderManagerInfoPopoverContent(model: ManagerInfoPopoverModel): ReactNode {
@@ -96,6 +97,8 @@ export function renderManagerInfoPopoverContent(model: ManagerInfoPopoverModel):
           ? createElement('img', {
             src: model.favIconUrl,
             alt: '',
+            width: 20,
+            height: 20,
             onLoad: (event: React.SyntheticEvent<HTMLImageElement>) => {
               event.currentTarget.dataset.loaded = 'true';
             },
@@ -660,6 +663,17 @@ export function useManagerOverlays({
       event.preventDefault();
       menuItems[nextIndex]?.focus();
     };
+    const handlePreviewKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Tab' || event.shiftKey || !previewRef.current) return;
+      if (event.target !== previewRef.current.trigger) return;
+      const firstAction = previewElementRef.current?.querySelector<HTMLElement>(
+        'button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!firstAction) return;
+      event.preventDefault();
+      cancelClosePreview();
+      firstAction.focus();
+    };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape' || (!menuRef.current && !previewRef.current)) return;
       event.preventDefault();
@@ -707,6 +721,10 @@ export function useManagerOverlays({
     };
     const handleFocusIn = (event: FocusEvent) => {
       if (isManagerHoverSuppressed()) return;
+      if (isInside(previewElementRef.current, event.target)) {
+        cancelClosePreview();
+        return;
+      }
       const trigger = getTarget(event.target)?.closest<HTMLElement>('[data-info-popover]');
       const wasRestoredFocus = restoredFocusRef.current === trigger;
       restoredFocusRef.current = null;
@@ -736,6 +754,7 @@ export function useManagerOverlays({
 
     document.addEventListener('pointerdown', handlePointerDown, true);
     document.addEventListener('keydown', handleMenuKeyDown);
+    document.addEventListener('keydown', handlePreviewKeyDown);
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('mouseover', handleMouseOver);
     document.addEventListener('mouseout', handleMouseOut);
@@ -753,6 +772,7 @@ export function useManagerOverlays({
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown, true);
       document.removeEventListener('keydown', handleMenuKeyDown);
+      document.removeEventListener('keydown', handlePreviewKeyDown);
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('mouseover', handleMouseOver);
       document.removeEventListener('mouseout', handleMouseOut);

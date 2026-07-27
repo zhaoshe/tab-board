@@ -224,7 +224,7 @@ describe('Task107 source contracts', () => {
   it('defers long-list filtering while preserving CSS-contained rows', () => {
     const runtime = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useOpenTabsRuntime.ts'), 'utf8');
     const workflow = readFileSync(resolve(process.cwd(), 'src/manager/core/openTabsWorkflow.ts'), 'utf8');
-    const css = readFileSync(resolve(process.cwd(), 'src/manager/styles/manager.css'), 'utf8');
+    const css = readFileSync(resolve(process.cwd(), 'src/manager/styles/sidebar.css'), 'utf8');
     const rowStart = css.indexOf('.manager-open-tab-row {');
     const rowEnd = css.indexOf('}', rowStart);
     const row = css.slice(rowStart, rowEnd + 1);
@@ -341,7 +341,10 @@ describe('Task107 source contracts', () => {
 
   it('keeps Open Tabs completion and filter ownership off global DOM events', () => {
     const runtime = read('manager/hooks/useOpenTabsRuntime.ts');
-    const layout = read('manager/components/shell/ManagerLayout.tsx');
+    const layout = [
+      read('manager/components/shell/ManagerLayout.tsx'),
+      read('manager/components/shell/ManagerDndCoordinator.tsx'),
+    ].join('\n');
     const sidebar = read('manager/components/sidebar/Sidebar.tsx');
     const production = `${runtime}\n${layout}\n${sidebar}`;
 

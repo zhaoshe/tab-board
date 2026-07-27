@@ -5,17 +5,20 @@ import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  getWorkspaceFiltersAfterDelete,
+  ManagerLayout,
+} from './ManagerLayout';
+import {
   createGeometryCollisionDetection,
   getCollisionSelection,
   getDragEndTarget,
   getFinishedDragState,
+  getGroupKeyboardCoordinates,
   isPointWithinRect,
-  getWorkspaceFiltersAfterDelete,
-  ManagerLayout,
   persistDropWithFeedback,
   shouldInvalidateDragReplacement,
   type GeometryCandidate,
-} from './ManagerLayout';
+} from './ManagerDndCoordinator';
 import type { DropTarget } from '../../core/dnd';
 
 const testHarness = vi.hoisted(() => {
@@ -158,7 +161,14 @@ vi.mock('../../core/dnd', async () => {
   return { ...actual, resolveDrop: testHarness.resolveDrop };
 });
 
-const source = readFileSync(resolve(process.cwd(), 'src/manager/components/shell/ManagerLayout.tsx'), 'utf8');
+const layoutSource = readFileSync(resolve(process.cwd(), 'src/manager/components/shell/ManagerLayout.tsx'), 'utf8');
+const dndSource = readFileSync(resolve(process.cwd(), 'src/manager/components/shell/ManagerDndCoordinator.tsx'), 'utf8');
+const captureSource = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useCaptureReveal.ts'), 'utf8');
+const frameSource = readFileSync(resolve(process.cwd(), 'src/manager/components/shell/ManagerFrame.tsx'), 'utf8');
+const source = `${layoutSource}
+${dndSource}
+${captureSource}
+${frameSource}`;
 const runtimeSource = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useOpenTabsRuntime.ts'), 'utf8');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -244,10 +254,10 @@ function createOpenTabsDragEndEvent(): unknown {
 
 describe('tooltip dismissal', () => {
   it('dismisses active tooltips whenever a pointer press starts', () => {
-    expect(source).toContain('function ManagerTooltipDismissal()');
-    expect(source).toContain("document.querySelectorAll<HTMLElement>('[aria-describedby]')");
-    expect(source).toContain("new MouseEvent('mouseout'");
-    expect(source).toContain("document.addEventListener('pointerdown', dismiss, true)");
+    expect(frameSource).toContain('function ManagerTooltipDismissal()');
+    expect(frameSource).toContain("document.querySelectorAll<HTMLElement>('[aria-describedby]')");
+    expect(frameSource).toContain("new MouseEvent('mouseout'");
+    expect(frameSource).toContain("document.addEventListener('pointerdown', dismiss, true)");
   });
 });
 
@@ -292,8 +302,8 @@ describe('drag end lifecycle', () => {
   });
 
   it('wires geometry target precedence without collapsing it into UI state fallback', () => {
-    expect(source).toContain(`event.over,\n        lockedTargetRef.current,\n        dragUiStateRef.current.target,`);
-    expect(source).not.toContain('dragUiStateRef.current.target ?? lockedTargetRef.current');
+    expect(dndSource).toContain(`event.over,\n        lockedTargetRef.current,\n        dragUiStateRef.current.target,`);
+    expect(dndSource).not.toContain('dragUiStateRef.current.target ?? lockedTargetRef.current');
   });
 
   it('invalidates only replaced or disappeared drag sources', () => {
@@ -317,8 +327,73 @@ describe('drag end lifecycle', () => {
   });
 
   it('suppresses no-op session targets before rendering a marker', () => {
-    expect(source).toContain("payload?.kind === 'group' && !resolveDrop({ payload, target, state: useTabBoardStore.getState() })");
-    expect(source).toContain('target: null, marker: null');
+    expect(dndSource).toMatch(/payload\?\.kind === 'group'[\s\S]*!resolveDrop\(\{ payload, target, state: useTabBoardStore\.getState\(\) \}\)/);
+    expect(dndSource).toContain('target: null, marker: null');
+  });
+});
+
+describe('group keyboard coordinates', () => {
+  const collisionRect = {
+    left: 100,
+    right: 460,
+    top: 40,
+    bottom: 640,
+    width: 360,
+    height: 600,
+  };
+  const targets = [
+    {
+      target: {
+        kind: 'group-insert',
+        category: 'inbox',
+        index: 0,
+        workspaceId: 'workspace_default',
+      } as const,
+      rect: { ...collisionRect, left: 92, right: 108, width: 16 },
+    },
+    {
+      target: {
+        kind: 'group-insert',
+        category: 'inbox',
+        index: 1,
+        workspaceId: 'workspace_default',
+      } as const,
+      rect: { ...collisionRect, left: 468, right: 484, width: 16 },
+    },
+    {
+      target: {
+        kind: 'group-insert',
+        category: 'inbox',
+        index: 2,
+        workspaceId: 'workspace_default',
+      } as const,
+      rect: { ...collisionRect, left: 844, right: 860, width: 16 },
+    },
+  ];
+
+  it('moves directly between insertion targets instead of stopping on session bodies', () => {
+    expect(getGroupKeyboardCoordinates(
+      'ArrowRight',
+      0,
+      collisionRect,
+      targets,
+    )).toEqual({ coordinates: { x: 296, y: 40 }, index: 1 });
+
+    expect(getGroupKeyboardCoordinates(
+      'ArrowRight',
+      1,
+      collisionRect,
+      targets,
+    )).toEqual({ coordinates: { x: 672, y: 40 }, index: 2 });
+  });
+
+  it('returns null when the arrow has no insertion target in that direction', () => {
+    expect(getGroupKeyboardCoordinates(
+      'ArrowLeft',
+      0,
+      collisionRect,
+      targets,
+    )).toBeNull();
   });
 });
 
@@ -582,16 +657,15 @@ describe('Task108 target reveal contracts', () => {
   });
 
   it('clears persisted search only when accepting a valid target group', () => {
-    expect(source).toContain('useSetSearchQuery');
-    expect(source).toContain('const setSearchQuery = useSetSearchQuery();');
+    expect(source).toContain('useManagerPageState');
     const targetStart = source.indexOf('const targetGroupId =');
-    const targetEnd = source.indexOf('const feedback =', targetStart);
+    const targetEnd = source.indexOf('const savedCount =', targetStart);
     const targetHandling = source.slice(targetStart, targetEnd);
-    const validTargetIndex = targetHandling.indexOf('if (targetGroup) {');
-    const clearSearchIndex = targetHandling.indexOf("setSearchQuery('');");
+    const validTargetIndex = targetHandling.indexOf('if (targetGroup');
+    const clearSearchIndex = targetHandling.indexOf("pageState.setQuery('');");
     expect(validTargetIndex).toBeGreaterThanOrEqual(0);
     expect(clearSearchIndex).toBeGreaterThan(validTargetIndex);
-    expect([...source.matchAll(/setSearchQuery\(''\)/g)]).toHaveLength(1);
+    expect([...source.matchAll(/pageState\.setQuery\(''\)/g)]).toHaveLength(1);
   });
 });
 
@@ -602,8 +676,7 @@ describe('Task174 capture selection ownership contracts', () => {
     const selectionGuardIndex = source.indexOf('if (!detail.selectionCurrent) return;', toastIndex);
     const filterOwnershipIndex = source.indexOf('if (!detail.filterCurrent) return;', selectionGuardIndex);
     const resetIndices = [
-      source.indexOf('setShowBin(false);', selectionGuardIndex),
-      source.indexOf('setSelectedCategory(\'inbox\');', selectionGuardIndex),
+      source.indexOf("pageState.replace({ category: 'inbox', view: 'board' });", selectionGuardIndex),
     ];
     const pendingTargetIndices = [
       source.indexOf('setPendingTargetWorkspaceId(detail.sourceWorkspaceId);', selectionGuardIndex),
@@ -625,11 +698,11 @@ describe('Task110 capture category race contracts', () => {
   it('checks capture-start category before resetting category or revealing', () => {
     expect(source).toContain('sameCaptureCategorySnapshot');
     expect(source).toContain('if (!detail.filterCurrent) return;');
-    expect(source).toContain('const currentCategorySnapshot: CaptureCategorySnapshot = {');
+    expect(source).toContain('const currentCategorySnapshot = useMemo<CaptureCategorySnapshot>');
     expect(source).toContain('currentCategorySnapshotRef.current');
     const categoryGuardIndex = source.indexOf('sameCaptureCategorySnapshot(');
     const filterGuardIndex = source.indexOf('if (!detail.filterCurrent) return;');
-    const resetIndex = source.indexOf('setShowBin(false);', categoryGuardIndex);
+    const resetIndex = source.indexOf("pageState.replace({ category: 'inbox', view: 'board' });", categoryGuardIndex);
     expect(categoryGuardIndex).toBeGreaterThanOrEqual(0);
     expect(filterGuardIndex).toBeGreaterThanOrEqual(0);
     expect(resetIndex).toBeGreaterThan(categoryGuardIndex);
@@ -677,7 +750,7 @@ describe('Task110 capture category race contracts', () => {
     const revealIndex = source.indexOf('setHighlightedGroupId(pendingTargetGroupId);');
     const ownershipStateIndex = source.indexOf('highlightOwnership');
     const ownershipIndex = source.indexOf('setHighlightOwnership({', revealIndex);
-    const pendingClearIndex = source.indexOf('setPendingTargetGroupId(null);', ownershipIndex);
+    const pendingClearIndex = source.indexOf('clearPendingTarget();', ownershipIndex);
     const ownershipBlock = source.slice(ownershipIndex, pendingClearIndex);
 
     expect(source).toMatch(/const \[highlightOwnership,\s*setHighlightOwnership\]\s*=\s*useState<[^;]+>\(null\);/);
@@ -705,7 +778,7 @@ describe('Task110 capture category race contracts', () => {
   it('invalidates highlight ownership on view changes and clears it on timeout', () => {
     const invalidationMarker = source.search(/if\s*\(\s*!highlightOwnership\s*\)\s*(?:return;|\{\s*return;\s*\})/);
     const effectStart = source.lastIndexOf('useEffect', invalidationMarker);
-    const effectEnd = source.indexOf('useToastNotifications', invalidationMarker);
+    const effectEnd = source.indexOf('return { highlightedGroupId', invalidationMarker);
     const invalidationEffect = source.slice(effectStart, effectEnd);
 
     expect(invalidationMarker).toBeGreaterThanOrEqual(0);
@@ -739,10 +812,14 @@ describe('Task110 capture category race contracts', () => {
     ]) {
       expect(dependencies).toContain(dependency);
     }
-    expect(invalidationEffect).toContain('setHighlightedGroupId(null);');
-    expect(invalidationEffect).toContain('setHighlightOwnership(null);');
-    expect(invalidationEffect).toContain('clearTimeout(highlightTimeoutRef.current)');
-    expect(invalidationEffect).toContain('highlightTimeoutRef.current = null;');
+    expect(invalidationEffect).toContain('clearCaptureHighlight();');
+    const clearHelperStart = source.indexOf('const clearCaptureHighlight = useCallback(() => {');
+    const clearHelperEnd = source.indexOf('}, []);', clearHelperStart);
+    const clearHelper = source.slice(clearHelperStart, clearHelperEnd);
+    expect(clearHelper).toContain('setHighlightedGroupId(null);');
+    expect(clearHelper).toContain('setHighlightOwnership(null);');
+    expect(clearHelper).toContain('clearTimeout(highlightTimeoutRef.current)');
+    expect(clearHelper).toContain('highlightTimeoutRef.current = null;');
 
     const timeoutStart = source.indexOf('highlightTimeoutRef.current = setTimeout(() => {');
     const timeoutEnd = source.indexOf('}, 3000);', timeoutStart);

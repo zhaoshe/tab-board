@@ -11,19 +11,26 @@ import {
 } from './WorkspaceHeader';
 
 const source = readFileSync(resolve(process.cwd(), 'src/manager/components/workspace/WorkspaceHeader.tsx'), 'utf8');
+const globalActionsSource = readFileSync(resolve(process.cwd(), 'src/manager/components/workspace/ManagerGlobalActions.tsx'), 'utf8');
+const workspaceMenuSource = readFileSync(resolve(process.cwd(), 'src/manager/components/workspace/WorkspaceMenu.tsx'), 'utf8');
+const categoryNavSource = readFileSync(resolve(process.cwd(), 'src/manager/components/workspace/CategoryNav.tsx'), 'utf8');
+const categoryManagerSource = readFileSync(resolve(process.cwd(), 'src/manager/components/workspace/CategoryManager.tsx'), 'utf8');
+const searchCommandSource = readFileSync(resolve(process.cwd(), 'src/manager/components/workspace/ManagerSearchCommand.tsx'), 'utf8');
 const searchSource = readFileSync(resolve(process.cwd(), 'src/manager/components/search/SearchBar.tsx'), 'utf8');
 const boardProjectionSource = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useBoardProjection.ts'), 'utf8');
 const selectorsSource = readFileSync(resolve(process.cwd(), 'src/manager/core/selectors.ts'), 'utf8');
 
 describe('WorkspaceHeader source contracts', () => {
   it('renders an accessible category strip with a single category options menu', () => {
-    expect(source).toContain('aria-label="Categories"');
-    expect(source).toContain("aria-current={isActive ? 'page' : undefined}");
-    expect(source).toContain('aria-label="Category options"');
-    expect(source).toContain('Manage categories');
-    expect(source).toContain('Add category');
-    expect(source).not.toContain('aria-label={`Actions for ${item.label}`}');
-    expect(source).toContain('Menu.Target');
+    expect(source).toContain('<CategoryNav');
+    expect(source).toContain('<CategoryManager');
+    expect(categoryNavSource).toContain('aria-label="Categories"');
+    expect(categoryNavSource).toContain("aria-current={isActive ? 'page' : undefined}");
+    expect(categoryManagerSource).toContain('aria-label="Category Options"');
+    expect(categoryManagerSource).toContain('Manage Categories');
+    expect(categoryManagerSource).toContain('Add Category');
+    expect(categoryNavSource).not.toContain('aria-label={`Actions for ${item.label}`}');
+    expect(categoryManagerSource).toContain('Menu.Target');
   });
 
   it('matches locked category markers only to their category and placement', () => {
@@ -36,40 +43,44 @@ describe('WorkspaceHeader source contracts', () => {
   });
 
   it('keeps category drag labels focused on navigation', () => {
-    const categorySource = source.slice(source.indexOf('{categories.map'), source.indexOf('</nav>'));
-    expect(source).toContain('data-category-trigger="label"');
-    expect(source).not.toContain('data-category-trigger="dots"');
-    expect(categorySource).not.toContain('className="manager-category-actions"');
-    expect(source.indexOf('className="manager-category-actions"')).toBeGreaterThan(source.indexOf('</nav>'));
+    expect(categoryNavSource).toContain('data-category-trigger="label"');
+    expect(categoryNavSource).not.toContain('data-category-trigger="dots"');
+    expect(categoryNavSource).not.toContain('className="manager-category-actions"');
+    expect(categoryManagerSource).toContain('className="manager-category-actions"');
   });
 
   it('manages category creation, ordering, and custom-category naming in one surface', () => {
-    expect(source).toContain('title="Manage categories"');
-    expect(source).toContain('handleMoveCategory');
+    expect(categoryManagerSource).toContain('title="Manage Categories"');
+    expect(categoryManagerSource).toContain('moveCategory');
     expect(source).toContain('state.updateCategoryOrder(workspace.id, order)');
-    expect(source).toContain('openRenameModal(item.folderId!)');
-    expect(source).toContain('Add category');
+    expect(categoryManagerSource).toContain('openRename(item.folderId!)');
+    expect(categoryManagerSource).toContain('Add Category');
   });
 
   it('shares validated and core mutation orchestration paths', () => {
-    expect(source).toContain('validateFolderName');
-    expect(source).toContain('runValidatedCategoryMutation');
+    expect(categoryManagerSource).toContain('validateFolderName');
+    expect(categoryManagerSource).toContain('runValidatedCategoryMutation');
     expect(source).toContain('state.addFolder(workspace.id');
-    expect(source).toContain('state.renameFolder(folder.id');
-    expect(source).toContain('runCategoryMutation');
-    expect(source).toContain('state.deleteFolder(deletedId');
-    expect(source).toContain("onSelectCategory('inbox')");
+    expect(source).toContain('onRenameFolder={state.renameFolder}');
+    expect(categoryManagerSource).toContain('runCategoryMutation');
+    expect(source).toContain('onDeleteFolder={state.deleteFolder}');
+    expect(categoryManagerSource).toContain("onSelectCategory('inbox')");
+    expect(categoryManagerSource).toContain('loading={submitting}');
   });
 
   it('keeps workspace selection and actions separate from header actions', () => {
-    expect(source).toContain('New workspace');
-    expect(source).toContain('Rename workspace');
-    expect(source).toContain('Current workspace');
-    expect(source).toContain('IconCheck');
-    expect(source).toContain('aria-label="Import"');
-    expect(source).toContain('aria-label="Export"');
-    expect(source).toContain('aria-label="Trash"');
-    expect(source).toContain('aria-label="Options"');
+    expect(source).toContain('<WorkspaceMenu');
+    expect(workspaceMenuSource).toContain('New Workspace');
+    expect(workspaceMenuSource).toContain('Rename Workspace');
+    expect(workspaceMenuSource).toContain('Current Workspace');
+    expect(workspaceMenuSource).toContain('IconCheck');
+    expect(workspaceMenuSource).not.toContain('window.prompt');
+    expect(source).toContain('<ManagerGlobalActions');
+    expect(globalActionsSource).toContain('aria-label="Import"');
+    expect(globalActionsSource).toContain('aria-label="Export"');
+    expect(globalActionsSource).toContain('aria-label="Trash"');
+    expect(globalActionsSource).toContain('aria-label="Options"');
+    expect(globalActionsSource).toContain('aria-label="More Actions"');
     expect(source).not.toContain('Delete workspace');
     expect(source).not.toContain('Workspace Stats');
     expect(source).not.toContain('Reset category order');
@@ -78,17 +89,18 @@ describe('WorkspaceHeader source contracts', () => {
   });
 
   it('owns expandable search state and keeps shortcut effects independent of query changes', () => {
-    expect(source).toContain('aria-controls={SEARCH_INPUT_ID}');
-    expect(source).toContain('aria-expanded={isSearchExpanded}');
-    expect(source).toContain('setIsSearchExpanded');
-    expect(source).toContain("workspace-header${isSearchExpanded ? ' workspace-header--search-expanded' : ''}");
-    expect(source).toContain('fullWidth={false}');
-    expect(source).toContain('onEscape={() => setIsSearchExpanded(false)}');
+    expect(source).toContain('<ManagerSearchCommand');
+    expect(searchCommandSource).toContain('aria-controls={SEARCH_INPUT_ID}');
+    expect(searchCommandSource).toContain('aria-expanded={expanded}');
+    expect(searchCommandSource).toContain('setExpanded');
+    expect(source).toContain("workspace-header${searchExpanded ? ' workspace-header--search-expanded' : ''}");
+    expect(searchCommandSource).toContain('fullWidth={false}');
+    expect(searchCommandSource).toContain('onEscape={() => setSearchExpanded(collapseSearchState(query).isExpanded)}');
     expect(getInitialSearchExpanded('needle')).toBe(true);
     expect(getInitialSearchExpanded('')).toBe(false);
     expect(collapseSearchState('needle')).toEqual({ query: 'needle', isExpanded: false });
 
-    const effects = [...source.matchAll(/useEffect\(\(\) => \{([\s\S]*?)\n\s*\},\s*\[([^\]]*)\]\);/g)];
+    const effects = [...searchCommandSource.matchAll(/useEffect\(\(\) => \{([\s\S]*?)\n\s*\},\s*\[([^\]]*)\]\);/g)];
     const shortcutEffect = effects.find(([, body]) => body.includes("window.addEventListener('keydown'"));
     expect(shortcutEffect).toBeDefined();
     expect(shortcutEffect?.[2].trim()).toBe('');
@@ -195,9 +207,9 @@ describe('WorkspaceHeader search shortcut guard', () => {
   });
 
   it('expands only from slash or Ctrl/Cmd+K while preserving the editable-target guard', () => {
-    expect(source).toContain("event.key.toLowerCase() === 'k'");
-    expect(source).not.toContain("event.key.toLowerCase() === 'f'");
-    expect(source).toContain("event.key === '/'");
+    expect(searchCommandSource).toContain("event.key.toLowerCase() === 'k'");
+    expect(searchCommandSource).not.toContain("event.key.toLowerCase() === 'f'");
+    expect(searchCommandSource).toContain("event.key === '/'");
   });
 
   it('does not steal slash from editable controls', () => {
@@ -213,7 +225,7 @@ describe('WorkspaceHeader search shortcut guard', () => {
     const textInputStart = searchSource.indexOf('<TextInput');
     const textInputEnd = searchSource.indexOf('\n      />', textInputStart);
     const textInputSource = searchSource.slice(textInputStart, textInputEnd);
-    expect(textInputSource).toMatch(/rightSectionPointerEvents="all"[\s\S]*rightSection=\{[\s\S]*aria-label="Close search"/);
+    expect(textInputSource).toMatch(/rightSectionPointerEvents="all"[\s\S]*rightSection=\{[\s\S]*aria-label="Close Search"/);
     expect(searchSource).toContain("label=\"/ or Ctrl/Cmd + K\"");
   });
 });

@@ -14,12 +14,28 @@ import { isCategoryDragMarkerFor } from '../components/workspace/WorkspaceHeader
 
 const managerRoot = resolve(process.cwd(), 'src/manager');
 const hook = readFileSync(resolve(managerRoot, 'hooks/useManagerOverlays.ts'), 'utf8');
-const layout = readFileSync(resolve(managerRoot, 'components/shell/ManagerLayout.tsx'), 'utf8');
+const layout = [
+  'components/shell/ManagerLayout.tsx',
+  'components/shell/ManagerDndCoordinator.tsx',
+  'components/shell/ManagerFrame.tsx',
+].map((file) => readFileSync(resolve(managerRoot, file), 'utf8')).join('\n');
 const card = readFileSync(resolve(managerRoot, 'components/sessions/SessionCard.tsx'), 'utf8');
 const row = readFileSync(resolve(managerRoot, 'components/sessions/TabItemRow.tsx'), 'utf8');
 const openTabs = readFileSync(resolve(managerRoot, 'components/sidebar/OpenTabsPanel.tsx'), 'utf8');
-const header = readFileSync(resolve(managerRoot, 'components/workspace/WorkspaceHeader.tsx'), 'utf8');
-const css = readFileSync(resolve(managerRoot, 'styles/manager.css'), 'utf8');
+const header = [
+  'components/workspace/WorkspaceHeader.tsx',
+  'components/workspace/CategoryNav.tsx',
+  'components/workspace/CategoryManager.tsx',
+  'components/workspace/WorkspaceMenu.tsx',
+].map((file) => readFileSync(resolve(managerRoot, file), 'utf8')).join('\n');
+const css = [
+  'header.css',
+  'sidebar.css',
+  'shell.css',
+  'session.css',
+  'overlays.css',
+  'responsive.css',
+].map((file) => readFileSync(resolve(managerRoot, 'styles', file), 'utf8')).join('\n');
 
 const sourceFiles = [layout, card, row, openTabs, header];
 
@@ -222,8 +238,8 @@ describe('centralized manager overlay contracts', () => {
     expect(card).toContain('isContextMenuKey');
     expect(row).not.toContain('isContextMenuKey');
     expect(openTabs).not.toContain('isContextMenuKey');
-    expect(header).toContain('aria-label="Category options"');
-    expect(header).toContain('Manage categories');
+    expect(header).toContain('aria-label="Category Options"');
+    expect(header).toContain('Manage Categories');
   });
 
   it('keeps invalid open tabs out of the application menu', () => {
@@ -322,8 +338,11 @@ describe('centralized manager overlay contracts', () => {
   });
 
   it('keeps category management in the unified native menu', () => {
-    expect(header).toContain('<Menu shadow="md" width={190} position="bottom-end">');
-    expect(header).toContain('setCategoryManagerOpened(true)');
+    expect(header).toContain('<Menu');
+    expect(header).toContain('{...MANAGER_MENU_A11Y_PROPS}');
+    expect(header).toContain('width={190}');
+    expect(header).toContain('position="bottom-end"');
+    expect(header).toContain('setManagerOpen(true)');
   });
 
   it('keeps menu semantics on sessions while saved tabs use a preview dialog', () => {
@@ -336,8 +355,8 @@ describe('centralized manager overlay contracts', () => {
     expect(openTabs).toContain('aria-haspopup="dialog"');
     expect(openTabs).toContain('aria-expanded={isPreviewOpen}');
     expect(openTabs).not.toContain('onContextMenu');
-    expect(header).toContain('aria-label="Category options"');
-    expect(header).toContain('Manage categories');
+    expect(header).toContain('aria-label="Category Options"');
+    expect(header).toContain('Manage Categories');
     expect(header).not.toContain('data-category-trigger="dots"');
   });
 

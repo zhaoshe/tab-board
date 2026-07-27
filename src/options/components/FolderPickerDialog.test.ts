@@ -176,3 +176,20 @@ describe('migrateToFile', () => {
     expect(fileState.groups.length).toBe(fileGroupCountBefore);
   });
 });
+
+describe('folder migration copy', () => {
+  it('states that folder data wins same-ID merge conflicts', async () => {
+    const source = await import('node:fs/promises').then(({ readFile }) =>
+      readFile(new URL('./FolderPickerDialog.tsx', import.meta.url), 'utf8'));
+
+    expect(source).toContain('Folder data wins when the same item ID exists in both places.');
+    expect(source).not.toContain('newer items win');
+  });
+
+  it('uses the contrast-safe primary action class', async () => {
+    const source = await import('node:fs/promises').then(({ readFile }) =>
+      readFile(new URL('./DataStorageCard.tsx', import.meta.url), 'utf8'));
+
+    expect(source).toContain('className="options-action-primary"');
+  });
+});

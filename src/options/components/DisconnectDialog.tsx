@@ -49,7 +49,7 @@ export function DisconnectDialog({ opened, onClose, onComplete }: DisconnectDial
       reset();
       onComplete();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
+      setErrorMsg(`${err instanceof Error ? err.message : String(err)} Keep file storage connected and try again.`);
       setStep('error');
     }
   }
@@ -58,18 +58,20 @@ export function DisconnectDialog({ opened, onClose, onComplete }: DisconnectDial
     <Modal
       opened={opened}
       onClose={handleClose}
-      title="Stop using file storage"
+      title="Stop Using File Storage"
       centered
       size="md"
     >
       <Stack gap="md">
         {step === 'choose' && (
           <>
-            <Alert color="yellow" icon={<IconPlugConnectedX size={16} />}>
+            <Alert color="yellow" icon={<IconPlugConnectedX size={16} aria-hidden="true" />}>
               This will stop using the file-based storage and switch back to browser storage.
             </Alert>
             <Text size="sm">What should happen to the data in your file folder?</Text>
             <Radio.Group
+              label="File data"
+              name="file-data-migration"
               value={copyData ? 'copy' : 'keep'}
               onChange={(val) => setCopyData(val === 'copy')}
             >
@@ -89,16 +91,16 @@ export function DisconnectDialog({ opened, onClose, onComplete }: DisconnectDial
             <Group justify="flex-end" mt="sm">
               <Button variant="default" onClick={handleClose}>Cancel</Button>
               <Button color="red" onClick={() => void handleConfirm()}>
-                Stop using file storage
+                Stop Using File Storage
               </Button>
             </Group>
           </>
         )}
 
         {step === 'disconnecting' && (
-          <Center py="xl">
+          <Center py="xl" role="status" aria-live="polite">
             <Stack align="center" gap="sm">
-              <Loader />
+              <Loader aria-hidden="true" />
               <Text size="sm" c="dimmed">Switching storage…</Text>
             </Stack>
           </Center>
@@ -106,8 +108,8 @@ export function DisconnectDialog({ opened, onClose, onComplete }: DisconnectDial
 
         {step === 'error' && (
           <>
-            <Alert color="red" icon={<IconAlertTriangle size={16} />}>
-              {errorMsg || 'An unknown error occurred.'}
+            <Alert color="red" icon={<IconAlertTriangle size={16} aria-hidden="true" />}>
+              {errorMsg || 'Storage could not be switched. Keep file storage connected and try again.'}
             </Alert>
             <Group justify="flex-end">
               <Button variant="default" onClick={handleClose}>Close</Button>

@@ -70,11 +70,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const getIcon = (type: NotificationType) => {
     switch (type) {
       case 'success':
-        return <IconCheck size={18} />;
+        return <IconCheck size={18} aria-hidden="true" />;
       case 'error':
-        return <IconAlertCircle size={18} />;
+        return <IconAlertCircle size={18} aria-hidden="true" />;
       default:
-        return <IconInfoCircle size={18} />;
+        return <IconInfoCircle size={18} aria-hidden="true" />;
     }
   };
 
@@ -95,6 +95,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <Portal>
         <Stack
           gap="xs"
+          aria-live="polite"
+          aria-atomic="false"
           style={{
             position: 'fixed',
             top: 16,
@@ -111,6 +113,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               title={notification.title}
               onClose={() => removeNotification(notification.id)}
               withCloseButton
+              role={notification.type === 'error' ? 'alert' : 'status'}
             >
               {notification.message}
             </Notification>

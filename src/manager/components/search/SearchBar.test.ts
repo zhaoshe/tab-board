@@ -156,6 +156,13 @@ afterEach(async () => {
 });
 
 describe('SearchBar query lifecycle', () => {
+  it('exposes a durable form name, label, autocomplete policy, and ellipsis placeholder', () => {
+    expect(input().name).toBe('saved-session-search');
+    expect(input().getAttribute('aria-label')).toBe('Search Saved Sessions');
+    expect(input().autocomplete).toBe('off');
+    expect(input().placeholder).toBe('Search sessions, tabs, URLs, notes…');
+  });
+
   it('counts canonical category matches immediately before query debounce', async () => {
     await changeInput('needle');
 

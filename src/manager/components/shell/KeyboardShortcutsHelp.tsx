@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { Modal, Stack, Group, Text, Kbd } from '@mantine/core';
+import { Stack, Group, Text, Kbd } from '@mantine/core';
+import { ManagerModal } from './ManagerModal';
 
 interface Shortcut {
   keys: string[];
@@ -40,7 +41,7 @@ export function KeyboardShortcutsHelp({ opened, onClose, onOpen }: KeyboardShort
   }, [opened, onClose, onOpen]);
 
   return (
-    <Modal
+    <ManagerModal
       opened={opened}
       onClose={onClose}
       title="Keyboard Shortcuts"
@@ -62,6 +63,6 @@ export function KeyboardShortcutsHelp({ opened, onClose, onOpen }: KeyboardShort
           </Group>
         ))}
       </Stack>
-    </Modal>
+    </ManagerModal>
   );
 }

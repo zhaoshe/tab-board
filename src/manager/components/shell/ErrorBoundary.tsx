@@ -72,16 +72,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return (
       <div role="alert" className="tabboard-error-boundary">
         <div className="tabboard-error-boundary__panel">
-          <h1 className="tabboard-error-boundary__title">TabBoard hit an error</h1>
+          <h1 className="tabboard-error-boundary__title"><span translate="no">TabBoard</span> Hit an Error</h1>
           <p className="tabboard-error-boundary__message">{error.message || 'Something went wrong while rendering.'}</p>
           <div className="tabboard-error-boundary__actions">
             <button type="button" onClick={this.handleReload}>Reload</button>
             <button type="button" onClick={this.handleCopy}>
-              {copied ? 'Copied \u2713' : 'Copy diagnostics'}
+              {copied ? 'Copied \u2713' : 'Copy Diagnostics'}
             </button>
           </div>
           <details className="tabboard-error-boundary__details" open>
-            <summary>Diagnostics (share this to report the issue)</summary>
+            <summary>Diagnostics (Share This to Report the Issue)</summary>
             <pre className="tabboard-error-boundary__log">{diagnosticsText || 'Collecting…'}</pre>
           </details>
         </div>

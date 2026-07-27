@@ -4,6 +4,7 @@ import {
   type ApplicationFeedback,
 } from '../../../shared/applicationFeedback';
 import { useToast } from '../../hooks/useToast';
+import { formatNumber } from '../../../shared/utils/formatters';
 
 export interface FeedbackPresenter {
   showSuccess(message: string, title?: string): void;
@@ -17,20 +18,20 @@ export function presentApplicationFeedback(
   switch (feedback.kind) {
     case 'save-succeeded':
       presenter.showSuccess(
-        `${feedback.tabCount} tab${feedback.tabCount === 1 ? '' : 's'} saved`,
+        `${formatNumber(feedback.tabCount)} tab${feedback.tabCount === 1 ? '' : 's'} saved`,
         feedback.title,
       );
       return;
     case 'import-succeeded':
       presenter.showSuccess(
-        `Imported ${feedback.groupCount} session${feedback.groupCount === 1 ? '' : 's'} (${feedback.tabCount} tabs)`,
+        `Imported ${formatNumber(feedback.groupCount)} session${feedback.groupCount === 1 ? '' : 's'} (${formatNumber(feedback.tabCount)} tabs)`,
         'Import successful',
       );
       return;
     case 'restore-succeeded':
       if (feedback.item === 'group') {
         presenter.showSuccess(
-          `Restored ${feedback.count} tab${feedback.count === 1 ? '' : 's'}`,
+          `Restored ${formatNumber(feedback.count)} tab${feedback.count === 1 ? '' : 's'}`,
           feedback.label,
         );
       } else {

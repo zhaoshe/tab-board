@@ -32,6 +32,73 @@ afterEach(async () => {
 });
 
 describe('ManagerApp hydration', () => {
+  it('provides a skip link and page heading for keyboard navigation', async () => {
+    root = createRoot(container!);
+
+    await act(async () => {
+      root?.render(createElement(ManagerApp));
+    });
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('.manager-shell')).not.toBeNull();
+    });
+
+    const skipLink = document.querySelector<HTMLAnchorElement>('a.skip-link');
+    expect(skipLink?.getAttribute('href')).toBe('#manager-main');
+    expect(skipLink?.textContent).toBe('Skip to Saved Sessions');
+    expect(document.querySelector('h1')?.textContent).toBe('TabBoard Tab Manager');
+  });
+
+  it.each(['Enter', 'F2'])('starts session rename with %s', async (key) => {
+    root = createRoot(container!);
+
+    await act(async () => {
+      root?.render(createElement(ManagerApp));
+    });
+
+    const savedCategory = await vi.waitFor(() => {
+      const element = document.querySelector<HTMLButtonElement>('[data-category-id="saved"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    await act(async () => savedCategory.click());
+
+    const title = await vi.waitFor(() => {
+      const element = document.querySelector<HTMLButtonElement>('.session-card__title');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    await act(async () => {
+      title.focus();
+      title.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key }));
+    });
+
+    const input = document.querySelector<HTMLInputElement>('.session-card__heading input');
+    expect(input?.value).toBe('Starred preview session');
+  });
+
+  it('renders an existing session note as a keyboard button', async () => {
+    root = createRoot(container!);
+
+    await act(async () => {
+      root?.render(createElement(ManagerApp));
+    });
+
+    const customCategory = await vi.waitFor(() => {
+      const element = document.querySelector<HTMLButtonElement>('[data-category-id^="folder:"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    await act(async () => customCategory.click());
+
+    const note = await vi.waitFor(() => {
+      const element = document.querySelector<HTMLButtonElement>('button.session-card__note');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    expect(note.textContent).toContain('A group-level note for the locked fixture.');
+  });
+
   it('mounts once under StrictMode without exceeding React update depth', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     root = createRoot(container!);

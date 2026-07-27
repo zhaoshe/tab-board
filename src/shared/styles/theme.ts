@@ -1,7 +1,8 @@
 import { createTheme, type MantineThemeOverride } from '@mantine/core';
+import './accessibility.css';
 import './tooltip.css';
 
-export const theme: MantineThemeOverride = createTheme({
+const baseTheme: MantineThemeOverride = {
   primaryColor: 'blue',
   primaryShade: 6,
   colors: {
@@ -29,6 +30,17 @@ export const theme: MantineThemeOverride = createTheme({
     Tooltip: {
       defaultProps: {
         openDelay: 1000,
+        transitionProps: { duration: 0 },
+      },
+    },
+    Menu: {
+      defaultProps: {
+        transitionProps: { duration: 0 },
+      },
+    },
+    Modal: {
+      defaultProps: {
+        transitionProps: { duration: 0 },
       },
     },
     Button: {
@@ -52,6 +64,29 @@ export const theme: MantineThemeOverride = createTheme({
     ScrollArea: {
       defaultProps: {
         scrollbarSize: 6,
+      },
+    },
+  },
+};
+
+export const theme: MantineThemeOverride = createTheme(baseTheme);
+
+export const managerTheme: MantineThemeOverride = createTheme({
+  ...baseTheme,
+  components: {
+    ...baseTheme.components,
+    Tooltip: {
+      defaultProps: {
+        openDelay: 1000,
+        transitionProps: { duration: 0 },
+        portalProps: { target: '#manager-main' },
+        zIndex: 1100,
+      },
+    },
+    Menu: {
+      defaultProps: {
+        transitionProps: { duration: 0 },
+        portalProps: { target: '#manager-main' },
       },
     },
   },

@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  Modal,
   Textarea,
   Button,
   Group,
@@ -12,6 +11,7 @@ import {
 import { IconDownload, IconCopy, IconCheck, IconAlertCircle } from '@tabler/icons-react';
 import { persistedSnapshot, useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import { exportToText } from '../../../shared/model';
+import { ManagerModal } from '../shell/ManagerModal';
 
 interface ExportModalProps {
   opened: boolean;
@@ -76,7 +76,7 @@ export function ExportModal({ opened, onClose }: ExportModalProps) {
         setCopied(false);
       }, COPY_FEEDBACK_DURATION_MS);
     } catch (e) {
-      setError('Failed to copy to clipboard');
+      setError('Clipboard access failed. Use Download instead.');
     }
   };
 
@@ -96,7 +96,7 @@ export function ExportModal({ opened, onClose }: ExportModalProps) {
   };
 
   return (
-    <Modal
+    <ManagerModal
       opened={opened}
       onClose={onClose}
       title="Export Sessions"
@@ -114,6 +114,8 @@ export function ExportModal({ opened, onClose }: ExportModalProps) {
           style={{ minHeight: 0, overflowY: 'auto' }}
         >
         <SegmentedControl
+          aria-label="Export format"
+          name="export-format"
           value={format}
           onChange={(value) => setFormat(value as ExportFormat)}
           data={[
@@ -125,7 +127,7 @@ export function ExportModal({ opened, onClose }: ExportModalProps) {
 
         {format === 'json' && (
           <Text size="xs" c="dimmed">
-            TabBoard full format with all workspaces, folders, sessions, and settings.
+            <span translate="no">TabBoard</span> full format with all workspaces, folders, sessions, and settings.
           </Text>
         )}
         {format === 'text' && (
@@ -135,16 +137,19 @@ export function ExportModal({ opened, onClose }: ExportModalProps) {
         )}
 
         <Textarea
+          name="session-export-text"
           value={exportContent}
           readOnly
           aria-label="Exported session data"
+          autoComplete="off"
+          spellCheck={false}
           minRows={15}
           autosize
           style={{ fontFamily: 'monospace', fontSize: 'var(--mantine-font-size-xs)' }}
         />
 
         {error && (
-          <Alert icon={<IconAlertCircle size={16} />} color="red" variant="light">
+          <Alert icon={<IconAlertCircle size={16} aria-hidden="true" />} color="red" variant="light">
             <Text size="sm">{error}</Text>
           </Alert>
         )}
@@ -162,16 +167,23 @@ export function ExportModal({ opened, onClose }: ExportModalProps) {
           </Button>
           <Group gap="xs">
             <Button
+              className="manager-export-action--copy"
               variant="light"
-              leftSection={copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+              leftSection={copied
+                ? <IconCheck size={16} aria-hidden="true" />
+                : <IconCopy size={16} aria-hidden="true" />}
               onClick={handleCopy}
               disabled={!exportContent}
               color={copied ? 'green' : 'blue'}
             >
               {copied ? 'Copied!' : 'Copy'}
             </Button>
+            <span className="visually-hidden" role="status" aria-live="polite">
+              {copied ? 'Copied export data to the clipboard.' : ''}
+            </span>
             <Button
-              leftSection={<IconDownload size={16} />}
+              className="manager-export-action--download"
+              leftSection={<IconDownload size={16} aria-hidden="true" />}
               onClick={handleDownload}
               disabled={!exportContent}
             >
@@ -180,6 +192,6 @@ export function ExportModal({ opened, onClose }: ExportModalProps) {
           </Group>
         </Group>
       </Stack>
-    </Modal>
+    </ManagerModal>
   );
 }

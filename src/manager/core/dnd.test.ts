@@ -173,6 +173,28 @@ function openTab(id: number, title = `Open ${id}`): OpenTabInfo {
 }
 
 describe('resolveDrop', () => {
+  it('moves a session to the end of its current category using the pre-removal boundary', () => {
+    const state = fixtureState();
+    const intent = resolveDrop({
+      payload: payload('group'),
+      target: {
+        kind: 'group-insert',
+        category: 'inbox',
+        index: 2,
+        workspaceId: 'workspace-a',
+      },
+      state,
+    });
+
+    expect(intent).toEqual({
+      kind: 'move-session',
+      groupId: 'source',
+      category: 'inbox',
+      index: 1,
+      workspaceId: 'workspace-a',
+    });
+  });
+
   it('rejects Open Tabs without the captured records required for validation', () => {
     const state = fixtureState();
     const openTabs = [openTab(101), openTab(102)];

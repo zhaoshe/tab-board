@@ -115,7 +115,7 @@ export function WorkspaceContent({
     if (hasSearch) {
       return (
         <Box {...emptyStateProps}>
-          <IconSearch size={48} style={{ opacity: 0.3 }} />
+          <IconSearch size={48} aria-hidden="true" style={{ opacity: 0.3 }} />
           <Text mt="md" fw={500}>No results for "{searchQuery}"</Text>
           <Text size="sm" c="dimmed">Try different keywords or check your spelling</Text>
         </Box>
@@ -125,7 +125,7 @@ export function WorkspaceContent({
     if (category === 'saved') {
       return (
         <Box {...emptyStateProps}>
-          <IconStar size={48} style={{ opacity: 0.3 }} />
+          <IconStar size={48} aria-hidden="true" style={{ opacity: 0.3 }} />
           <Text mt="md" fw={500}>No saved sessions yet</Text>
           <Text size="sm" c="dimmed">Star important sessions to find them quickly</Text>
         </Box>
@@ -135,7 +135,7 @@ export function WorkspaceContent({
     if (category === 'archive') {
       return (
         <Box {...emptyStateProps}>
-          <IconArchive size={48} style={{ opacity: 0.3 }} />
+          <IconArchive size={48} aria-hidden="true" style={{ opacity: 0.3 }} />
           <Text mt="md" fw={500}>No archived sessions yet</Text>
           <Text size="sm" c="dimmed">Archive old sessions to keep your inbox clean</Text>
         </Box>
@@ -145,7 +145,7 @@ export function WorkspaceContent({
     if (category.startsWith('folder:')) {
       return (
         <Box {...emptyStateProps}>
-          <IconFolder size={48} style={{ opacity: 0.3 }} />
+          <IconFolder size={48} aria-hidden="true" style={{ opacity: 0.3 }} />
           <Text mt="md" fw={500}>This category is empty</Text>
           <Text size="sm" c="dimmed">Move sessions here to organize your work</Text>
         </Box>
@@ -154,7 +154,7 @@ export function WorkspaceContent({
 
     return (
       <Box {...emptyStateProps}>
-        <IconArchive size={48} style={{ opacity: 0.3 }} />
+        <IconArchive size={48} aria-hidden="true" style={{ opacity: 0.3 }} />
         <Text mt="md" fw={500}>No sessions here yet</Text>
         <Text size="sm" c="dimmed">Save tabs from your browser to get started</Text>
       </Box>

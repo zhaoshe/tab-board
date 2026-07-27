@@ -41,8 +41,14 @@ import {
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
 import { useToast } from '../../hooks/useToast';
+import { formatDate, formatNumber } from '../../../shared/utils/formatters';
 import { TabItemRow } from './TabItemRow';
 import { SessionPlaceholder } from './SessionPlaceholder';
+import {
+  SessionItemComposer,
+  type SessionItemComposerMode,
+} from './SessionItemComposer';
+import { useDestructiveConfirmation } from '../../../shared/components/DestructiveConfirmation';
 import {
   ManagerMenuItem,
   isContextMenuKey,
@@ -77,6 +83,7 @@ export const SessionCard = memo(function SessionCard({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(group.title);
   const [isEditingNote, setIsEditingNote] = useState(false);
+  const [composerMode, setComposerMode] = useState<SessionItemComposerMode | null>(null);
   const [noteValue, setNoteValue] = useState(group.note);
   const { openMenu, closeOverlays } = useManagerOverlayCommands();
   const menuKey = `session:${group.id}`;
@@ -87,6 +94,7 @@ export const SessionCard = memo(function SessionCard({
   const moreActionRef = useRef<HTMLButtonElement>(null);
   const [selectedTabIds, setSelectedTabIds] = useState<Set<string>>(new Set());
   const { showError, showSuccess } = useToast();
+  const confirmDestructive = useDestructiveConfirmation();
 
   const {
     attributes,
@@ -120,6 +128,9 @@ export const SessionCard = memo(function SessionCard({
   const lockGroup = useTabBoardStore((state) => state.lockGroup);
   const addTabToGroup = useTabBoardStore((state) => state.addTabToGroup);
   const addNoteToGroup = useTabBoardStore((state) => state.addNoteToGroup);
+  const confirmBeforeDestructive = useTabBoardStore(
+    (state) => state.settings.confirmBeforeDestructive,
+  );
 
   const normalizedQuery = normalizeSearch(searchQuery);
   const titleMatches = normalizedQuery.length > 0 && group.title.toLowerCase().includes(normalizedQuery);
@@ -176,7 +187,7 @@ export const SessionCard = memo(function SessionCard({
 
   const copyText = async (text: string): Promise<void> => {
     try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard is unavailable.');
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard is unavailable. Copy the text manually.');
       await navigator.clipboard.writeText(text);
       showSuccess('Copied');
     } catch (error: unknown) {
@@ -194,12 +205,28 @@ export const SessionCard = memo(function SessionCard({
     lockGroup(group.id);
   };
 
-  const handleDelete = () => {
-    if (group.locked || !confirm(`Delete "${group.title}"?`)) return;
+  const handleDelete = async () => {
+    if (group.locked) return;
+    if (confirmBeforeDestructive) {
+      const confirmed = await confirmDestructive({
+        title: 'Delete Session',
+        message: `Move “${group.title}” to Trash?`,
+        confirmLabel: 'Delete Session',
+      });
+      if (!confirmed) return;
+    }
     deleteGroup(group.id);
   };
 
   const handleTitleDoubleClick = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    setTitleValue(group.title);
+    setIsEditingTitle(true);
+  };
+
+  const handleTitleActivationKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!['Enter', 'F2', ' '].includes(event.key)) return;
+    event.preventDefault();
     event.stopPropagation();
     setTitleValue(group.title);
     setIsEditingTitle(true);
@@ -244,24 +271,14 @@ export const SessionCard = memo(function SessionCard({
   };
 
   const handleAddLink = () => {
-    const url = window.prompt('Link URL');
-    if (!url?.trim()) return;
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(url.trim());
-    } catch {
-      showError('Enter a valid URL.');
-      return;
-    }
-    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-      showError('Only HTTP and HTTPS links can be added.');
-      return;
-    }
-    const title = window.prompt('Link title', parsedUrl.href)?.trim() || parsedUrl.href;
+    setComposerMode('link');
+  };
+
+  const addLink = ({ url, title }: { url: string; title: string }) => {
     addTabToGroup(group.id, {
       itemType: ITEM_LINK,
       title,
-      url: parsedUrl.href,
+      url,
       favIconUrl: '',
       note: '',
       pinned: false,
@@ -275,8 +292,7 @@ export const SessionCard = memo(function SessionCard({
   };
 
   const handleAddNote = () => {
-    const text = window.prompt('Note');
-    if (text?.trim()) addNoteToGroup(group.id, text.trim());
+    setComposerMode('note');
   };
 
   const handleCopyGroup = () => {
@@ -335,10 +351,10 @@ export const SessionCard = memo(function SessionCard({
 
   const menuItems = () => (
     <>
-      <ManagerMenuItem onClick={handleAddLink}>Add link</ManagerMenuItem>
-      <ManagerMenuItem onClick={handleAddNote}>Add note</ManagerMenuItem>
+      <ManagerMenuItem onClick={handleAddLink}>Add Link</ManagerMenuItem>
+      <ManagerMenuItem onClick={handleAddNote}>Add Note</ManagerMenuItem>
       <ManagerMenuItem onClick={handleRename}>Rename</ManagerMenuItem>
-      <button type="button" role="menuitem" className="manager-overlay-menu__item" onClick={openMoveMenu}>Move to category</button>
+      <button type="button" role="menuitem" className="manager-overlay-menu__item" onClick={openMoveMenu}>Move to Category</button>
       <ManagerMenuItem onClick={handleToggleLock}>{group.locked ? 'Unlock' : 'Lock'}</ManagerMenuItem>
       <ManagerMenuItem onClick={handleCopyGroup}>Copy</ManagerMenuItem>
       <div role="separator" className="manager-overlay-menu__divider" />
@@ -406,7 +422,7 @@ export const SessionCard = memo(function SessionCard({
       >
         {isDragOverlay ? (
           <span className="session-card__drag-handle session-card__drag-handle--static" aria-hidden="true">
-            <IconGripVertical size={16} />
+            <IconGripVertical size={16} aria-hidden="true" />
           </span>
         ) : (
           <button
@@ -417,13 +433,16 @@ export const SessionCard = memo(function SessionCard({
             {...attributes}
             {...listeners}
           >
-            <IconGripVertical size={16} />
+            <IconGripVertical size={16} aria-hidden="true" />
           </button>
         )}
         <div className="session-card__heading">
           {isEditingTitle ? (
             <TextInput
               ref={titleInputRef}
+              name="session-title"
+              aria-label={`Session title for ${group.title}`}
+              autoComplete="off"
               value={titleValue}
               onChange={(event) => setTitleValue(event.target.value)}
               onBlur={handleTitleSubmit}
@@ -436,6 +455,7 @@ export const SessionCard = memo(function SessionCard({
               type="button"
               className="session-card__title"
               onDoubleClick={isDragOverlay ? undefined : handleTitleDoubleClick}
+              onKeyDown={isDragOverlay ? undefined : handleTitleActivationKeyDown}
               disabled={isDragOverlay}
               tabIndex={isDragOverlay ? -1 : undefined}
             >
@@ -447,7 +467,7 @@ export const SessionCard = memo(function SessionCard({
           {tabMetadata.restorableTabCount > 0 && (
             <Tooltip label="Restore">
               <ActionIcon size="sm" variant="subtle" color="blue" disabled={isDragOverlay} onClick={handleRestore} aria-label="Restore">
-                <IconRestore size={16} />
+                <IconRestore size={16} aria-hidden="true" />
               </ActionIcon>
             </Tooltip>
           )}
@@ -464,16 +484,16 @@ export const SessionCard = memo(function SessionCard({
               onContextMenu={isDragOverlay ? undefined : (event) => openSessionMenu(event, event.currentTarget)}
               onKeyDown={isDragOverlay ? undefined : (event) => openSessionMenu(event, event.currentTarget)}
             >
-              <IconDots size={16} />
+              <IconDots size={16} aria-hidden="true" />
             </ActionIcon>
           </Tooltip>
         </div>
-        <div className="session-card__meta" aria-label="Session details">
-          {tabMetadata.linkCount > 0 && <span className="session-card__meta-item"><IconLink size={12} />{tabMetadata.linkCount} link{tabMetadata.linkCount === 1 ? '' : 's'}</span>}
-          {tabMetadata.noteCount > 0 && <span className="session-card__meta-item"><IconFileText size={12} />{tabMetadata.noteCount} note{tabMetadata.noteCount === 1 ? '' : 's'}</span>}
-          {group.locked && <span className="session-card__meta-item"><IconLock size={12} />Locked</span>}
+        <div className="session-card__meta" role="group" aria-label="Session Details">
+          {tabMetadata.linkCount > 0 && <span className="session-card__meta-item"><IconLink size={12} aria-hidden="true" />{formatNumber(tabMetadata.linkCount)} link{tabMetadata.linkCount === 1 ? '' : 's'}</span>}
+          {tabMetadata.noteCount > 0 && <span className="session-card__meta-item"><IconFileText size={12} aria-hidden="true" />{formatNumber(tabMetadata.noteCount)} note{tabMetadata.noteCount === 1 ? '' : 's'}</span>}
+          {group.locked && <span className="session-card__meta-item"><IconLock size={12} aria-hidden="true" />Locked</span>}
           <Text className="session-card__created" size="xs" c="dimmed">
-            {new Date(group.createdAt).toLocaleDateString()}
+            {formatDate(group.createdAt)}
           </Text>
         </div>
       </header>
@@ -482,6 +502,9 @@ export const SessionCard = memo(function SessionCard({
         <Textarea
           ref={noteTextareaRef}
           className="session-card__note"
+          name="session-note"
+          aria-label={`Session note for ${group.title}`}
+          autoComplete="off"
           value={noteValue}
           onChange={(event) => setNoteValue(event.target.value)}
           onBlur={handleNoteSubmit}
@@ -489,17 +512,22 @@ export const SessionCard = memo(function SessionCard({
           size="xs"
           minRows={2}
           maxRows={6}
-          placeholder="Add a note..."
+          placeholder="Add a note…"
           autosize
         />
       ) : (
         group.note && (
-          <Box className="session-card__note" onClick={handleEditNote} title="Click to edit note">
+          <button
+            type="button"
+            className="session-card__note"
+            onClick={handleEditNote}
+            aria-label={`Edit note for ${group.title}`}
+          >
             <Text size="xs" c="dimmed" lineClamp={2}>
-              <IconFileText size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
+              <IconFileText size={12} aria-hidden="true" style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
               {group.note}
             </Text>
-          </Box>
+          </button>
         )
       )}
 
@@ -535,6 +563,14 @@ export const SessionCard = memo(function SessionCard({
         </SortableContext>
         {normalizedQuery && tabMetadata.visibleTabs.length === 0 && <Text size="xs" c="dimmed">No matching tabs</Text>}
       </div>
+      {composerMode && (
+        <SessionItemComposer
+          mode={composerMode}
+          onClose={() => setComposerMode(null)}
+          onAddLink={addLink}
+          onAddNote={(text) => addNoteToGroup(group.id, text)}
+        />
+      )}
     </article>
   );
 });
