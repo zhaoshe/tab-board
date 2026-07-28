@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { STATE_KEY } from '../model/constants';
+import {
+  SETTINGS_PROJECTION_KEY,
+  STATE_KEY,
+} from '../model/constants';
 import { createEmptyState } from '../model';
 import { resetActiveAdapterForTests } from './activeAdapter';
 import { ensureStateForHydration } from './chromeStorage';
+import { projectionFromState } from './settingsProjection';
 
 afterEach(() => {
   resetActiveAdapterForTests();
@@ -69,6 +73,9 @@ describe('ensureStateForHydration (worker-decoupled read)', () => {
 
     expect(result.workspaces.length).toBeGreaterThan(0);
     // First-install seeding still happens locally so the write path has a base.
-    expect(set).toHaveBeenCalledWith({ [STATE_KEY]: expect.anything() });
+    expect(set).toHaveBeenCalledWith({
+      [STATE_KEY]: result,
+      [SETTINGS_PROJECTION_KEY]: projectionFromState(result),
+    });
   });
 });

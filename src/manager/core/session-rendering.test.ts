@@ -24,6 +24,7 @@ const placeholder = readFileSync(resolve(managerRoot, 'components/sessions/Sessi
 const runtimePath = resolve(managerRoot, 'hooks/useManagerRuntime.ts');
 const runtime = existsSync(runtimePath) ? readFileSync(runtimePath, 'utf8') : '';
 const css = [
+  'header.css',
   'shell.css',
   'session.css',
   'overlays.css',
@@ -62,6 +63,14 @@ describe('Task108 session rendering contracts', () => {
     expect(sessions).toContain('grid-auto-columns: minmax(320px, 360px)');
     expect(sessions).toContain('width: max-content');
     expect(sessions).toContain('height: 100%');
+  });
+
+  it('inherits the semantic foreground through native session title buttons', () => {
+    const shell = cssBlock('.manager-shell');
+    const titles = cssBlock('.session-card__title,\n.tab-item-row__title');
+
+    expect(shell).toContain('color: var(--mantine-color-text)');
+    expect(titles).toContain('color: inherit');
   });
 
   it('keeps the end target narrow without allocating a session-sized track', () => {

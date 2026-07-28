@@ -67,7 +67,7 @@ export function filterOpenTabs(
   query: string,
 ): OpenTabInfo[] {
   const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) return [...tabs];
+  if (!normalizedQuery) return tabs;
   return tabs.filter((tab) =>
     tab.title.toLowerCase().includes(normalizedQuery)
     || tab.url.toLowerCase().includes(normalizedQuery),

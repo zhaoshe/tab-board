@@ -42,7 +42,7 @@ import {
   useManagerOverlayLifecycle,
 } from '../../hooks/useManagerOverlays';
 import { useOverflowCues } from '../../hooks/useOverflowCues';
-import type { SessionSortableBindings } from './SessionSlot';
+import type { SessionSortableBindings } from './SessionSortableBindings';
 
 interface SessionCardProps {
   group: Group;
@@ -73,7 +73,7 @@ export const SessionCard = memo(function SessionCard({
   const { openMenu, closeOverlays } = useManagerOverlayCommands();
   const menuKey = `session:${group.id}`;
   const isSessionMenuOpen = useManagerMenuOpen(menuKey);
-  useManagerOverlayLifecycle(`${group.id}:${group.updatedAt}:${group.tabs.map((tab) => tab.id).join(',')}`);
+  useManagerOverlayLifecycle(group);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const noteTextareaRef = useRef<HTMLTextAreaElement>(null);
   const moreActionRef = useRef<HTMLButtonElement>(null);

@@ -178,7 +178,7 @@ export function ManagerLayout() {
     <ManagerOverlaysProvider
       workspaceKey={workspace?.id}
       categoryKey={`${selectedCategory}:${showBin ? 'bin' : 'workspace'}`}
-      itemKey={groups.map((group) => `${group.id}:${group.updatedAt}`).join('|')}
+      groupItems={groups}
     >
       <ManagerDndCoordinator
         activeWorkspaceId={activeWorkspaceId}

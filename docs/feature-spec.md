@@ -55,6 +55,8 @@ Window selector 展示 Chrome normal windows 的 ordinal 和原始 tab 总数，
 
 Open Tabs 刷新期间保留上一份 window/tab rows，不插入 loading 文案或空白占位；sidebar 顶部 Refresh icon 持续旋转并通过 `aria-busy` 暴露刷新状态，请求成功后再原子替换列表。
 
+大分类中的每个 session 都保留稳定的横向 slot、session drag handle 和 insertion geometry。初次只激活前 6 个以及 viewport + 720px overscan 附近的完整 card/tab 交互树；远端 slot 显示包含 title、link/note count 和 lock 状态的轻量 shell，接近视口、被搜索/高亮或点击 title 后升级为完整 card。TabBoard 自身搜索仍扫描全部 canonical state；浏览器 Ctrl+F 只能命中已经激活的完整 card 和远端 shell 的 session summary，不能命中尚未激活的 tab row。
+
 Manager 页面上下文同步到 URL：
 
 - `workspace=<workspaceId>` 表示当前 workspace。
@@ -94,6 +96,8 @@ Options 分为 Basic 和 Advanced：
 - Options 跟随 system / light / dark 主题。
 - Toolbar、Capture、Restore、Appearance 保持在 Basic 区；Data Storage、Safety、Chrome shortcuts 和 Reset 放在 Advanced Settings。
 - Advanced Settings 展开状态同步到 `?advanced=1`；刷新和浏览器 Back/Forward 保持同一 disclosure context。
+- Basic 从轻量 settings projection 启动，不读取与页面无关的 sessions/folders/bin。Advanced 关闭时不挂载 storage UI、migration dialogs 或 file backend；首次展开时再异步加载，并在 chunk 加载失败时提供 Reload。
+- Options header、Open Manager 和 Basic shell 不等待 projection I/O；hydration 完成前 Basic fieldset 保持 disabled + `aria-busy`，save status 显示 `Loading settings…`，Advanced 暂不显示。真实 settings 到达后原地启用 controls。
 - Reset to Defaults 需要确认；确认文案明确 saved data 保留不变。
 - Popup、Options 和 Manager 的动态计数统一使用当前 locale 的 `Intl.NumberFormat`；异步按钮在执行期间暴露以 `…` 结尾的进行中名称。
 

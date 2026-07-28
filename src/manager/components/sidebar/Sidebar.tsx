@@ -18,7 +18,7 @@ interface SidebarProps {
   sidebarRailToggleRef: RefObject<HTMLButtonElement>;
   onToggleSidebar: (expanded: boolean) => void;
   onSelectionModeChange?: (selectionMode: boolean) => void;
-  onOpenTabsSourceKeyChange?: (key: string) => void;
+  onOpenTabsSourceKeyChange?: (key: unknown) => void;
   workflow: OpenTabsWorkflow;
   onCaptureCompleted: (completion: CaptureCompletion | null) => void;
 }

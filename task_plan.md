@@ -123,7 +123,7 @@ Status: complete
 
 ### Phase 12 - React startup performance implementation
 
-Status: in_progress
+Status: complete
 
 - Establish a repository-owned production startup benchmark.
 - Collapse page hydration to one Storage Authority read.
@@ -144,9 +144,10 @@ Status: in_progress
 | Implement all accepted findings | The user explicitly approved the entire recommendation set. |
 | Use inline execution | Subagents were not explicitly requested; perform TDD locally in this worktree. |
 | Reject the generated portfolio design system | It conflicts with the extension's productivity-tool domain, existing dense workbench model, and product constraints. |
-| Preserve full-DOM list rendering | Existing structural sharing plus `content-visibility` is an explicit project decision; this review does not add a runtime virtualization dependency. |
+| Preserve stable DnD geometry, not every interaction tree | Every session slot/insertion target remains mounted; expensive card/tab trees activate near the viewport without a runtime virtualization dependency. |
 | Diagnose startup before optimizing | The reported delay can come from local bundle execution, storage initialization, state normalization, or first render; each needs separate evidence. |
 | Reopen D033 only with profiler evidence | Hundreds of sessions and thousands of tab rows now reproduce a multi-second initial mount, satisfying the prior decision's threshold for reconsidering full interactive DOM. |
+| Prefer stable references over serialized lifecycle keys | Structural sharing now drives DnD, overlay, Open Tabs, and activation invalidation without joining every group/tab ID during render. |
 
 ## Errors Encountered
 
@@ -167,5 +168,5 @@ Status: in_progress
 
 ## Next Step
 
-Write the single-read hydration RED tests and remove the redundant page startup
-state reads.
+Run the interleaved five-run production benchmark, then complete full
+check/unit/E2E/browser/a11y/DnD acceptance and commit the final evidence.

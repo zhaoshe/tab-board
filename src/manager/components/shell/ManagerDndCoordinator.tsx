@@ -124,7 +124,7 @@ function ManagerOverlayDragLifecycle() {
 export interface ManagerDndState {
   activeId: string | null;
   dragUiState: DragUiState;
-  onOpenTabsSourceKeyChange: (key: string) => void;
+  onOpenTabsSourceKeyChange: (key: unknown) => void;
 }
 
 interface ManagerDndCoordinatorProps {
@@ -161,7 +161,7 @@ export function ManagerDndCoordinator({
   const lockedTargetRef = useRef<DropTarget | null>(null);
   const groupKeyboardIndexRef = useRef<number | null>(null);
   const dragReplacementKeyRef = useRef<DragReplacementSnapshot | null>(null);
-  const openTabsSourceKeyRef = useRef<string | null>(null);
+  const openTabsSourceKeyRef = useRef<unknown>(null);
   const replacementSnapshot = useMemo(
     () => getDragReplacementSnapshot(
       activeWorkspaceId,
@@ -189,7 +189,7 @@ export function ManagerDndCoordinator({
     setActiveId(finished.activeId);
     applyDragUiState(finished.dragUiState);
   }, [applyDragUiState]);
-  const onOpenTabsSourceKeyChange = useCallback((key: string) => {
+  const onOpenTabsSourceKeyChange = useCallback((key: unknown) => {
     const previous = openTabsSourceKeyRef.current;
     openTabsSourceKeyRef.current = key;
     if (

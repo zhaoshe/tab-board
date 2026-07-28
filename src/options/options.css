@@ -11,7 +11,11 @@
 }
 
 .options-basic {
+  min-inline-size: 0;
+  margin: 0;
+  border-inline: 0;
   border-block: 1px solid var(--mantine-color-default-border);
+  padding: 0;
 }
 
 .options-settings-section {
@@ -49,6 +53,10 @@
   padding: 0 var(--mantine-spacing-md) var(--mantine-spacing-md);
 }
 
+.options-theme-control .mantine-SegmentedControl-label {
+  transition: none;
+}
+
 :root[data-mantine-color-scheme='light'] .options-theme-control {
   --sc-color: var(--mantine-color-blue-0);
 }
@@ -58,11 +66,12 @@
 }
 
 :root[data-mantine-color-scheme='light'] .options-theme-control .mantine-SegmentedControl-indicator {
-  background: var(--mantine-color-blue-0);
+  display: none;
 }
 
 :root[data-mantine-color-scheme='light'] .options-theme-control .mantine-SegmentedControl-label[data-active='true'] {
-  color: var(--mantine-color-blue-9);
+  background: var(--mantine-color-blue-0);
+  color: var(--mantine-color-gray-9);
 }
 
 :root[data-mantine-color-scheme='dark'] .options-theme-control {
@@ -74,10 +83,11 @@
 }
 
 :root[data-mantine-color-scheme='dark'] .options-theme-control .mantine-SegmentedControl-indicator {
-  background: var(--mantine-color-gray-0);
+  display: none;
 }
 
 :root[data-mantine-color-scheme='dark'] .options-theme-control .mantine-SegmentedControl-label[data-active='true'] {
+  background: var(--mantine-color-gray-0);
   color: var(--mantine-color-dark-9);
 }
 

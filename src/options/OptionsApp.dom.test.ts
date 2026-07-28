@@ -116,12 +116,21 @@ describe('OptionsApp information architecture', () => {
     )).not.toBeNull();
   });
 
-  it('renders a visible hydration status instead of a blank page', async () => {
+  it('renders the settings shell immediately and disables controls during hydration', async () => {
     harness.hydrated = false;
     await mountOptions();
 
     expect(document.querySelector('main')).not.toBeNull();
+    expect(document.querySelector('.options-header h1')?.textContent)
+      .toBe('TabBoard Settings');
     expect(document.querySelector('[role="status"]')?.textContent).toContain('Loading settings…');
+    const basic = document.querySelector<HTMLFieldSetElement>('fieldset.options-basic');
+    expect(basic?.disabled).toBe(true);
+    expect(basic?.getAttribute('aria-busy')).toBe('true');
+    expect(document.querySelector('details.options-advanced')).toBeNull();
+    expect([...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === 'Open Manager')?.disabled)
+      .toBe(false);
   });
 
   it('names settings controls and uses an example placeholder with an ellipsis', async () => {

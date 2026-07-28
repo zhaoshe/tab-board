@@ -13,7 +13,6 @@ import {
   useManagerOverlayCommands,
   useManagerOverlayLifecycle,
 } from '../../hooks/useManagerOverlays';
-import type { OpenTabInfo } from '../../../shared/openTabs';
 import type { OpenTabsWorkflow } from '../../hooks/useOpenTabsRuntime';
 import { useDestructiveConfirmation } from '../../../shared/components/DestructiveConfirmation';
 import { formatNumber } from '../../../shared/utils/formatters';
@@ -34,27 +33,11 @@ export interface OpenTabsPanelProps {
   sidebarToggleRef: RefObject<HTMLButtonElement>;
   sidebarCompactToggleRef: RefObject<HTMLButtonElement>;
   onToggleSidebar: (expanded: boolean) => void;
-  onSourceKeyChange?: (key: string) => void;
+  onSourceKeyChange?: (key: unknown) => void;
 }
 
 function isValidTabId(id: number | undefined): id is number {
   return Number.isSafeInteger(id);
-}
-
-function getOpenTabOverlayLifecycleKey(tab: OpenTabInfo): string {
-  return JSON.stringify([
-    tab.id,
-    tab.windowId,
-    tab.title,
-    tab.url,
-    tab.favIconUrl,
-    tab.active,
-    tab.pinned,
-    tab.index,
-    tab.browserGroup,
-    tab.storable,
-    tab.reason,
-  ]);
 }
 
 export function OpenTabsPanel({
@@ -94,11 +77,11 @@ export function OpenTabsPanel({
   } = useManagerOverlayCommands();
   const confirmDestructive = useDestructiveConfirmation();
   const openTabsOverflow = useOverflowCues<HTMLDivElement>();
-  const overlayItemKey = useMemo(
-    () => `${selectedWindowId ?? 'none'}:${filteredTabs.map(getOpenTabOverlayLifecycleKey).join('|')}`,
+  const sourceSnapshot = useMemo(
+    () => ({ selectedWindowId, filteredTabs }),
     [filteredTabs, selectedWindowId],
   );
-  useManagerOverlayLifecycle(overlayItemKey);
+  useManagerOverlayLifecycle(sourceSnapshot);
 
   const selectedTabIdSet = useMemo(() => new Set(selectedTabIds), [selectedTabIds]);
   const closingTabIdSet = useMemo(() => new Set(closingTabIds), [closingTabIds]);
@@ -106,8 +89,8 @@ export function OpenTabsPanel({
   const selectedStorableTabIds = selection.recordIds;
 
   useEffect(() => {
-    onSourceKeyChange?.(overlayItemKey);
-  }, [onSourceKeyChange, overlayItemKey]);
+    onSourceKeyChange?.(sourceSnapshot);
+  }, [onSourceKeyChange, sourceSnapshot]);
 
   const closeTabFromAction = async (event: MouseEvent<HTMLButtonElement>, tabId: number | undefined) => {
     if (!isValidTabId(tabId)) return;

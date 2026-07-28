@@ -769,7 +769,8 @@ Trade-offs:
 
 Status:
 
-Accepted。
+Partially superseded by D050 for session interaction DOM。Open Tabs 仍保留完整
+rows；session board 只保留完整 slots/geometry，远端 card 内容改为 shell。
 
 ## D034: File System Access API for local file storage (no companion app)
 
@@ -1265,6 +1266,57 @@ Trade-offs:
 Status:
 
 Accepted。
+
+## D050: Keep stable session geometry and activate interaction trees near the viewport
+
+Context:
+
+D033 保留了 session board 的完整 card/tab interaction DOM，并使用
+`content-visibility` 跳过 off-screen layout/paint。生产测量证明，当 state
+达到 300 sessions × 20 tabs 时，Manager 仍需在首次有效 commit 前创建
+196 个完整 cards 和 3,920 个 `TabItemRow`；最后一次 state read 结束后仍有
+约 2.10s React/dnd-kit mount 工作。Options 同时为完全不渲染的 session
+collections 支付完整 hydration 成本。
+
+Decision:
+
+- 保留每个 session 的固定 `SessionSlot`、group `useSortable` owner 和全部
+  insertion targets，维持 horizontal board geometry 与 DnD measurement。
+- 初始只激活前 6 个 session；IntersectionObserver 以 board 为 root，在
+  左右 720px overscan 内单调激活完整 `SessionCard`。搜索/高亮/显式 shell
+  title activation 同样强制激活。
+- 未激活 slot 渲染 `SessionCardShell`：保留 title、link/note count、lock
+  状态和 session drag handle，但不挂载 tab rows、tab sortables、row
+  subscriptions、overlay registry 或 overflow observers。
+- Options Basic 使用 disposable SettingsProjection；Authoritative
+  Publication hydration 只执行一次 Storage Authority read。
+- 不新增 virtualization runtime dependency，不改变 persistent schema、
+  mutation wire 或 DropIntent semantics。
+
+Rationale:
+
+- `content-visibility` 不能减少 React component、hook 或 dnd-kit
+  registration；限制完整 interaction tree 数量才使 startup work 与 viewport
+  有界。
+- slot geometry 与 card content activation 分层，可以保留 session reorder、
+  cross-category move 和 new-session insertion 的既有坐标模型。
+- structural sharing 让 groups/filtered tabs 引用本身成为可靠的生命周期
+  token，不需要每次 render 拼接全部 ID/timestamp。
+- Options projection 是 canonical state 的可修复 read model；写入真相仍由
+  Storage Authority 和 worker mutation path 拥有。
+
+Trade-offs:
+
+- 浏览器 Ctrl+F 只看得到已激活 card 的 tab rows，以及远端 shell 的 session
+  summary；TabBoard 自身 search 仍扫描全量 canonical state并激活匹配 session。
+- 激活在同一 workspace/category/search context 内单调增长，长时间横向浏览
+  最终可能挂载较多 cards；切换 context 会重置到新的 bounded initial set。
+- 缺少 IntersectionObserver 的环境退化为全部激活，以正确性优先。
+
+Status:
+
+Accepted。Partially supersedes D033 for session interaction DOM；Open Tabs
+rows 仍使用 D033 的完整列表 + `content-visibility` 策略。
 
 ```md
 ## D00X: Title

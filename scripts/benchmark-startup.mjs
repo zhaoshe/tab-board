@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
 import {
+  createBenchmarkSchedule,
   createBenchmarkState,
   summarizeRuns,
 } from './startup-benchmark-core.mjs';
@@ -218,6 +219,8 @@ async function measure(profilePath, extensionId, pageName) {
       const record = globalThis.__TABBOARD_STARTUP_BENCHMARK__;
       const stateReads = record.calls.filter(({ label, end }) =>
         label === 'storage:get:tabboardState' && end !== null);
+      const projectionReads = record.calls.filter(({ label, end }) =>
+        label === 'storage:get:tabboardSettingsProjection' && end !== null);
       const listCalls = record.calls.filter(({ label }) =>
         label === 'runtime:list-open-tabs');
       return {
@@ -225,6 +228,9 @@ async function measure(profilePath, extensionId, pageName) {
         rootMs: record.firstRootContent,
         stateReadEndMs: stateReads.length
           ? Math.max(...stateReads.map(({ end }) => end))
+          : 0,
+        projectionReadEndMs: projectionReads.length
+          ? Math.max(...projectionReads.map(({ end }) => end))
           : 0,
         cards: document.querySelectorAll('.session-card:not(.session-card--shell)').length,
         shells: document.querySelectorAll('[data-session-shell="true"]').length,
@@ -246,32 +252,37 @@ const { runs, scenario } = parseArguments(process.argv.slice(2));
 await assertProductionBuild();
 const extensionId = extensionIdForPath(DIST_PATH);
 const selected = scenario ? [[scenario, SCENARIOS[scenario]]] : Object.entries(SCENARIOS);
-const results = [];
+const sampleGroups = new Map();
 
-for (const [name, configuration] of selected) {
-  for (const pageName of configuration.pages) {
-    const samples = [];
-    for (let index = 0; index < runs; index += 1) {
-      const profilePath = await mkdtemp(resolve(
-        tmpdir(),
-        `tabboard-${name}-${pageName}-`,
-      ));
-      try {
-        await seedProfile(profilePath, extensionId, configuration.state);
-        samples.push(await measure(profilePath, extensionId, pageName));
-      } finally {
-        await rm(profilePath, { recursive: true, force: true });
-      }
-    }
-    results.push({
+for (const {
+  scenario: name,
+  page: pageName,
+  configuration,
+} of createBenchmarkSchedule(selected, runs)) {
+  const profilePath = await mkdtemp(resolve(
+    tmpdir(),
+    `tabboard-${name}-${pageName}-`,
+  ));
+  try {
+    await seedProfile(profilePath, extensionId, configuration.state);
+    const key = `${name}:${pageName}`;
+    const group = sampleGroups.get(key) ?? {
       scenario: name,
       page: pageName,
       bytes: Buffer.byteLength(JSON.stringify(configuration.state)),
-      summary: summarizeRuns(samples),
-      samples,
-    });
+      samples: [],
+    };
+    group.samples.push(await measure(profilePath, extensionId, pageName));
+    sampleGroups.set(key, group);
+  } finally {
+    await rm(profilePath, { recursive: true, force: true });
   }
 }
+
+const results = [...sampleGroups.values()].map((group) => ({
+  ...group,
+  summary: summarizeRuns(group.samples),
+}));
 
 console.table(results.map(({ scenario: name, page, bytes, summary }) => ({
   scenario: name,

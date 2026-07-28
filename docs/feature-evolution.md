@@ -1154,6 +1154,50 @@ Playwright、三轮15/15 DnD与三轮compact gate通过；最终静态/渲染复
 unresolved finding，完整证据见
 `docs/reviews/2026-07-27-ui-ux-pro-max-review.md`。
 
+### 2026-07-28: Manager / Options 启动性能重构
+
+问题：
+
+- Options Basic 只显示 settings，却等待完整 state 经 MV3 worker、Storage
+  Authority 和 Zustand 重复读取/normalize。
+- 300 sessions × 20 tabs 的生产 fixture 会在 Manager 首次 commit 前挂载
+  196 个完整 session cards 和 3,920 个 tab rows；CSS
+  `content-visibility` 无法跳过 React hooks 和 dnd-kit registration。
+- Open Tabs 启动事件、diagnostics storage 写入和 file-only modules 继续
+  争用首屏。
+
+变化：
+
+- Authoritative Publication 改为订阅优先并只执行一次 Storage Authority
+  initializer；页面 hydration 不再通过 worker 往返完整 state。
+- 新增 disposable SettingsProjection。Options Basic 只读取该 projection，
+  缺失/损坏时才执行一次 canonical repair；mutation 仍由既有 worker wire
+  提交。
+- 每个 session 保留稳定 `SessionSlot` 和 insertion geometry，但仅初始 6
+  个、近视口 overscan、搜索/高亮或显式点击目标挂载完整 card/tab tree；
+  远端使用可拖拽的 `SessionCardShell`。
+- Open Tabs lifecycle event 使用单 active + 单 trailing coalescer；tab row
+  不再各自订阅 event-only store commands，category/index derivation 改为
+  单次遍历和 Map。
+- info diagnostics 250ms batch；warn/error 立即 flush。Options Advanced 与
+  file backend 改为 literal dynamic import；browser mode 不加载 file-only
+  modules。
+- production benchmark 纳入 repo，并按轮次交错场景/页面，避免整批顺序
+  偏差。
+
+判断：
+
+- 不引入第三方 virtualization；虚拟化的是昂贵交互内容，不是 DnD
+  geometry。
+- D033 的完整 session interaction DOM 决策被部分取代。TabBoard search
+  仍覆盖全部 canonical state；浏览器 Ctrl+F 不再命中未激活 tab row。
+- structural sharing 继续是 authoritative owner；稳定引用同时用于 DnD、
+  overlay lifecycle 和 activation，未散落局部深比较。
+
+当前状态：实现完成，最终 production benchmark、全量测试和 Chrome
+acceptance 证据记录在
+`docs/reviews/2026-07-28-react-startup-performance-review.md`。
+
 ## 待观察问题
 
 - 右键菜单触发筛选是否足够容易被发现。

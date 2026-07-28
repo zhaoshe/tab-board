@@ -30,8 +30,6 @@ export function useSessionActivation({
   initialCount?: number;
   overscanPx?: number;
 }) {
-  const groupKey = groupIds.join('|');
-  const forcedKey = forcedIds.join('|');
   const [root, setRoot] = useState<HTMLElement | null>(null);
   const [activation, setActivation] = useState(() => ({
     contextKey,
@@ -58,7 +56,7 @@ export function useSessionActivation({
       }
       return { contextKey, ids: new Set([...base, id]) };
     });
-  }, [contextKey, forcedKey, groupKey, initialCount]);
+  }, [contextKey, forcedIds, groupIds, initialCount]);
 
   const registerSlot = useCallback((id: string) => {
     let callback = slotRefCallbacks.current.get(id);
@@ -92,7 +90,7 @@ export function useSessionActivation({
         ? { contextKey, ids: new Set([...current.ids, ...missing]) }
         : current;
     });
-  }, [contextKey, forcedKey, groupKey, initialCount]);
+  }, [contextKey, forcedIds, groupIds, initialCount]);
 
   useEffect(() => {
     if (!root) return undefined;
@@ -127,7 +125,7 @@ export function useSessionActivation({
       observerRef.current = null;
       observer.disconnect();
     };
-  }, [contextKey, forcedKey, groupKey, initialCount, overscanPx, root]);
+  }, [contextKey, forcedIds, groupIds, initialCount, overscanPx, root]);
 
   return useMemo(() => ({
     activeIds,

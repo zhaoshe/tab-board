@@ -79,7 +79,7 @@ npm run benchmark:startup -- --runs 1 --scenario empty
 
 Expected: Manager and Options JSON results with positive useful UI timings.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```sh
 git add package.json scripts/startup-benchmark-core.mjs scripts/startup-benchmark-core.test.mjs scripts/benchmark-startup.mjs
@@ -142,7 +142,7 @@ npx vitest run src/shared/hooks/useStoreHydration.test.ts src/shared/store/activ
 
 Run empty and medium scenarios. Record before/after timings in the review; do not claim the final target yet.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Commit only hydration files and review evidence with message `perf(storage): hydrate from one authority read`, ending in the required trailer.
 
@@ -207,7 +207,7 @@ Run projection, adapter, hook, Options DOM, service-worker, state persistence, a
 
 Run five empty and large-state Options iterations. Required gate: median difference at most 100ms and cold median at most 500ms, or document the remaining measured blocker before proceeding.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 Commit as `perf(options): hydrate a settings projection`, ending in the required trailer.
 
@@ -247,7 +247,7 @@ Render every full `SessionCard` exactly as before. Move only `useSortable`, node
 
 Run focused unit tests and complete `session-dnd.e2e.ts`. No performance behavior changes yet.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit as `refactor(dnd): own group sorting in session slots`, ending in the required trailer.
 
@@ -299,7 +299,7 @@ Run hook/session/layout tests, large-board E2E, session DnD E2E, and category ha
 
 Run five heavy iterations. Required gate: median useful UI at most 1,000ms and first useful UI has only viewport + overscan tab rows.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 Commit as `perf(manager): activate session content near the viewport`, ending in the required trailer.
 
@@ -338,7 +338,7 @@ Run coalescer and Open Tabs hook suites. Add a DOM test that emits startup event
 
 Startup benchmark must report no more than one initial plus one trailing call.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Commit as `perf(open-tabs): coalesce startup refresh events`, ending in the required trailer.
 
@@ -381,7 +381,7 @@ Read event-only actions at SessionCard ownership. Build maps/counts once. Remove
 
 Run selector, session rendering, overlay, DnD, ManagerLayout, and UI ownership suites.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit as `perf(manager): reduce session render fan-out`, ending in the required trailer.
 
@@ -429,7 +429,7 @@ Run diagnostics, Options, file storage, active adapter, and production entry tes
 
 If empty Manager/Options still miss targets, document bundle evidence before considering selective Mantine CSS. Do not add unmeasured icon/CSS rewrites.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Commit as `perf(startup): defer diagnostics and optional modules`, ending in the required trailer.
 
@@ -451,23 +451,23 @@ Commit as `perf(startup): defer diagnostics and optional modules`, ending in the
 - D033 becomes partially superseded by the stable-slot activation decision
 - Review gains after-measurement table and completion matrix
 
-- [ ] **Step 1: Update current behavior and decision history**
+- [x] **Step 1: Update current behavior and decision history**
 
 Document projection ownership, one-read hydration, stable slot activation,
 Ctrl+F tradeoff, Open Tabs coalescing, and benchmark command.
 
-- [ ] **Step 2: Run plan/spec coverage audit**
+- [x] **Step 2: Run plan/spec coverage audit**
 
 Map every P0/P1/P2 recommendation to code, test, and measurement evidence.
 Scan for placeholders and stale full-DOM statements.
 
-- [ ] **Step 3: Run Vercel React practices re-review**
+- [x] **Step 3: Run Vercel React practices re-review**
 
 Re-check bundle waterfalls, conditional imports, state subscriptions, initial
 render scale, content visibility, and transient values. Fix any new issue with
 its own RED/GREEN cycle.
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 Commit as `docs(performance): record startup optimization results`, ending in
 the required trailer.
@@ -479,26 +479,26 @@ the required trailer.
 **Files:**
 - Modify only files needed for failures proven during this task
 
-- [ ] **Step 1: Run static/build gates**
+- [x] **Step 1: Run static/build gates**
 
 ```sh
 npm run check
 git diff --check
 ```
 
-- [ ] **Step 2: Run complete unit suite**
+- [x] **Step 2: Run complete unit suite**
 
 ```sh
 npm test
 ```
 
-- [ ] **Step 3: Run E2E sequentially**
+- [x] **Step 3: Run E2E sequentially**
 
 ```sh
 npm run test:e2e
 ```
 
-- [ ] **Step 4: Run production benchmark**
+- [x] **Step 4: Run production benchmark**
 
 ```sh
 npm run benchmark:startup -- --runs 5
@@ -506,22 +506,22 @@ npm run benchmark:startup -- --runs 5
 
 Record medians and compare every target.
 
-- [ ] **Step 5: Run production browser and accessibility matrix**
+- [x] **Step 5: Run production browser and accessibility matrix**
 
 Audit Manager and Options default/open, light/dark, desktop/compact, reduced
 motion, and storage Advanced states. Require axe zero violations/incomplete.
 
-- [ ] **Step 6: Run DnD acceptance**
+- [x] **Step 6: Run DnD acceptance**
 
 Verify all five AGENTS.md paths plus repeated keyboard reorder and category
 handle isolation. Check canonical persisted state after every drop.
 
-- [ ] **Step 7: Request review**
+- [x] **Step 7: Request review**
 
 Use `superpowers:requesting-code-review`. Since no subagents were requested,
 perform the same requirements/diff review locally and fix every Critical or
 Important finding with TDD.
 
-- [ ] **Step 8: Final commit if verification produced fixes**
+- [x] **Step 8: Final commit if verification produced fixes**
 
 Use an accurate message and ensure exactly one required co-author trailer.

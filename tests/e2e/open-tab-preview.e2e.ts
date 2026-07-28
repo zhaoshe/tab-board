@@ -52,12 +52,12 @@ test.describe('Open tab preview positioning', () => {
       window.dispatchEvent(new FocusEvent('focus'));
     });
     await expect(page.locator('.manager-info-popover')).toHaveCount(0);
+    await expect(page.locator('.manager-open-tab-row')).toHaveCount(81);
 
     const openTabTrigger = page.locator('[data-info-popover="open"]').first();
     await openTabTrigger.dispatchEvent('pointermove', { movementX: 1, movementY: 0 });
     await openTabTrigger.hover();
     await expect(page.locator('.manager-info-popover')).toBeVisible();
-    await expect(page.locator('.manager-open-tab-row')).toHaveCount(81);
     await expect(page.locator('.tabboard-error-boundary')).toHaveCount(0);
     expect(errors, `unexpected page errors: ${errors.join('\n')}`).toHaveLength(0);
   });

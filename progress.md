@@ -261,3 +261,66 @@
 - Fresh five-run empty production benchmark: Manager median useful UI 275.5ms,
   Options 406ms, Options canonical state reads 0, Manager startup Open Tabs
   calls 1, and maximum observed longest task 64ms.
+- Final Vercel practices re-review found one remaining P2 render cost: Manager
+  overlays and Open Tabs still serialized all visible item identities into
+  lifecycle strings. Replaced those strings with structurally shared
+  group/filtered-tab references while preserving expected-removal focus rules.
+- The benchmark scheduler now interleaves scenario/page samples by round and
+  reverses alternate rounds, reducing batch-order and machine-warmup bias.
+  Benchmark core RED/GREEN passes 5/5.
+- Stable lifecycle reference focused verification passes 5 files / 122 tests;
+  production build passes and the Manager entry decreased from 225.40 kB to
+  224.97 kB raw.
+- Current behavior docs now describe one-read hydration, SettingsProjection,
+  stable-slot activation, Ctrl+F tradeoff, coalesced Open Tabs refresh,
+  conditional modules, and diagnostics batching. D050 partially supersedes
+  D033 for session interaction DOM while leaving Open Tabs full-row behavior
+  unchanged.
+- Final rotated five-run production benchmark: empty Manager 250.1ms, large
+  Manager 478.0ms with 6 cards / 190 shells / 196 slots / 120 rows, longest
+  task 163ms, and one Open Tabs request. Empty Options is 405.4ms; large
+  Options is 369.5ms, a 35.9ms difference with zero canonical state reads.
+- Medium Options in the full 35-profile suite records a 790.4ms median, while
+  its standalone 4-run median is 454.0ms. Instrumentation places almost the
+  entire slow interval inside `chrome.storage.local.get` for the projection;
+  React reaches useful UI about 18ms after that I/O returns. No Chromium
+  process leak remains, so the raw outlier is retained as cold storage noise.
+- Final static gate initially found a type-only SessionSlot/Card/Shell import
+  cycle. Extracted `SessionSortableBindings.ts`; the strict graph then passes
+  with 201 source files and the architecture gate passes 120 production files.
+- Full Vitest checkpoint found two stale tests that expected Chrome state writes
+  without the projection sidecar. Updated them to require canonical state and
+  SettingsProjection in the same atomic write. Fresh full Vitest passes 81
+  files / 1,037 tests at that checkpoint.
+- Full E2E exposed two acceptance-level issues: diagnostics tests read before
+  the 250ms batch and preview Chrome did not preserve virtual storage across
+  reload; Open Tabs also rebuilt equal refresh rows and closed a newly opened
+  preview. Added preview storage persistence, empty-query/reference structural
+  sharing, equivalent refresh sharing, and current-protocol diagnostics gates.
+- Playwright checkpoint passes 27/27, including diagnostics reload,
+  80-to-81 Open Tabs refresh, large-board activation, responsive geometry, and
+  pointer/keyboard session/category DnD.
+- Final rendered review found and fixed dark Manager native-button contrast by
+  owning semantic foreground at `.manager-shell`. Manager desktop/compact,
+  light/dark/reduced-motion, session menu and Open Tab details now report axe
+  0 violations / 0 incomplete, with no overflow or page errors.
+- Production Options default/Advanced and explicit Light/Dark/System at 390px
+  report axe 0/0 after moving selected segmented-control background/foreground
+  onto the label and removing its color transition. Default Advanced stays
+  unmounted; opening it loads the optional chunks on demand.
+- Added a repeatable five-path pointer DnD acceptance spec. It verifies
+  persisted state for same-category session reorder, cross-category move,
+  saved tab to existing session, multi-selected Open Tabs to existing session,
+  and multi-selected Open Tabs to a new session. Fresh result: 5/5.
+- A final benchmark rerun exposed cold `chrome.storage.local.get` stalls that
+  could push empty Options past 500ms even though React completed about 20ms
+  after projection I/O. Options now mounts the header and a disabled/busy Basic
+  fieldset immediately; controls and Advanced enable only after hydration.
+- Fresh final scenario medians after shell decoupling: empty Options 469.4ms,
+  large Options 435.4ms (34.0ms difference, zero canonical reads); large
+  Manager 536.7ms with 120 rows, one Open Tabs request, and 182ms maximum long
+  task. Projection I/O may finish after useful Options UI without blocking it.
+- Final post-fix verification: `npm run check` passed (201 source files, 120
+  production architecture files); `npm test` passed 81 files / 1,040 tests;
+  `npm run test:e2e` passed 32/32 including the five persisted-state DnD paths;
+  `git diff --check` passed.

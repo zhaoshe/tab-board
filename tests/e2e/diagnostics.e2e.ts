@@ -20,6 +20,18 @@ async function readDiagnostics(page: import('@playwright/test').Page): Promise<D
   }, DIAGNOSTICS_KEY);
 }
 
+async function waitForDiagnostics(
+  page: import('@playwright/test').Page,
+  predicate: (entries: DiagnosticEntry[]) => boolean,
+): Promise<DiagnosticEntry[]> {
+  let entries: DiagnosticEntry[] = [];
+  await expect.poll(async () => {
+    entries = await readDiagnostics(page);
+    return predicate(entries);
+  }).toBe(true);
+  return entries;
+}
+
 /**
  * A white screen destroys the page console, so TabBoard persists a breadcrumb /
  * error trail to `chrome.storage.local` (key `tabboardDiagnostics`) that
@@ -38,49 +50,54 @@ test.describe('Crash-surviving diagnostics', () => {
     await page.goto(PREVIEW_PATH);
     await expect(page.locator('.manager-shell')).toBeVisible();
 
-    const entries = await readDiagnostics(page);
+    const entries = await waitForDiagnostics(
+      page,
+      (current) => current.some((entry) =>
+        entry.scope === 'manager'
+        && entry.message === 'hydration complete, rendering manager'),
+    );
     const messages = entries.map((entry) => `${entry.scope}: ${entry.message}`);
     expect(messages).toContain('manager: manager entry script loaded');
     expect(messages).toContain('manager: ManagerApp mounted');
-    expect(messages.some((m) => m.startsWith('hydration:'))).toBe(true);
+    expect(messages).toContain('manager: hydration complete, rendering manager');
   });
 
-  test('records the worker fallback path when ensure-state fails', async ({ page }) => {
-    await page.addInitScript(() => {
-      const patch = () => {
-        const runtime = (window as unknown as { chrome?: { runtime?: { sendMessage?: (m: unknown) => Promise<unknown> } } }).chrome?.runtime;
-        if (!runtime?.sendMessage) {
-          setTimeout(patch, 0);
-          return;
-        }
-        const original = runtime.sendMessage.bind(runtime);
-        runtime.sendMessage = async (message: unknown) => {
-          if (message && typeof message === 'object' && (message as { type?: string }).type === 'tabboard-ensure-state') {
-            throw new Error('Could not establish connection. Receiving end does not exist.');
-          }
-          return original(message);
-        };
-      };
-      patch();
-    });
-
+  test('records global errors without waiting for the info batch', async ({ page }) => {
     await page.goto(PREVIEW_PATH);
     await expect(page.locator('.manager-shell')).toBeVisible();
+    await page.evaluate(() => {
+      window.dispatchEvent(new ErrorEvent('error', {
+        message: 'diagnostics e2e error',
+        error: new Error('diagnostics e2e error'),
+      }));
+    });
 
-    const entries = await readDiagnostics(page);
-    const fallback = entries.find((entry) => entry.scope === 'hydration' && /fall(ing|back) back|local storage fallback/i.test(entry.message));
-    expect(fallback, `diagnostics: ${JSON.stringify(entries.map((e) => e.message))}`).toBeTruthy();
+    const entries = await waitForDiagnostics(
+      page,
+      (current) => current.some((entry) =>
+        entry.scope === 'manager'
+        && entry.level === 'error'
+        && entry.message === 'diagnostics e2e error'),
+    );
+    expect(entries.some((entry) => entry.message === 'diagnostics e2e error')).toBe(true);
   });
 
   test('diagnostics survive a reload', async ({ page }) => {
     await page.goto(PREVIEW_PATH);
     await expect(page.locator('.manager-shell')).toBeVisible();
-    const before = await readDiagnostics(page);
-    expect(before.length).toBeGreaterThan(0);
+    const before = await waitForDiagnostics(page, (entries) => entries.length > 0);
+    const firstEntry = before[0]!;
 
     await page.reload();
     await expect(page.locator('.manager-shell')).toBeVisible();
-    const after = await readDiagnostics(page);
+    const after = await waitForDiagnostics(
+      page,
+      (entries) => entries.length >= before.length
+        && entries.some((entry) =>
+          entry.ts === firstEntry.ts
+          && entry.scope === firstEntry.scope
+          && entry.message === firstEntry.message),
+    );
     // The pre-reload trail is still present (plus new boot breadcrumbs).
     expect(after.length).toBeGreaterThanOrEqual(before.length);
   });

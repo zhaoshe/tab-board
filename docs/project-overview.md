@@ -145,7 +145,7 @@ Bin：
 
 - Manager UI 逻辑较多，后续新增行为要注意维持 components / core / hooks 的边界。
 - 拖拽交互基于 `@dnd-kit`（pointer/touch/keyboard sensors + 自定义 collision detection），视觉反馈和落点几何仍是最易出边界 bug 的区域。
-- session 数量继续增长后，当前用 CSS `content-visibility` 让 off-screen session slot 跳过 layout/paint；若单 category 达到数百 session，仍可能需要引入真正的虚拟列表（需评估与 `@dnd-kit` measurement 的兼容性）。
+- session 数量继续增长后，所有 horizontal slots 和 DnD insertion geometry 仍保持挂载，但只有首批与近视口 session 挂载完整 tab 交互树；远端使用轻量 shell 并在接近视口时升级。若单 category 达到数百 session 后 stable-slot activation 仍有压力，再评估更深的虚拟化及其与 `@dnd-kit` measurement 的兼容性。
 - 右键菜单触发筛选、icon-only 操作的可发现性仍需观察。
 - Session 拖拽通过 `.session-card__drag-handle`（携带 `@dnd-kit` activator + attributes）支持 pointer 与键盘两条路径；handle 默认低调，hover/focus 时才显现，其可发现性仍需观察。
 

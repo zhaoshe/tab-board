@@ -186,6 +186,18 @@ describe('project UI accessibility markup', () => {
     expect(optionsCss).toContain(
       ":root[data-mantine-color-scheme='dark'] .options-theme-control .mantine-SegmentedControl-label[data-active='true']",
     );
+    expect(optionsCss).toMatch(
+      /\.options-theme-control \.mantine-SegmentedControl-indicator\s*\{[^}]*display: none;/,
+    );
+    expect(optionsCss).toMatch(
+      /\.options-theme-control \.mantine-SegmentedControl-label\s*\{[^}]*transition: none;/,
+    );
+    expect(optionsCss).toMatch(
+      /data-mantine-color-scheme='light'[\s\S]*label\[data-active='true'\]\s*\{[^}]*background: var\(--mantine-color-blue-0\)/,
+    );
+    expect(optionsCss).toMatch(
+      /data-mantine-color-scheme='dark'[\s\S]*label\[data-active='true'\]\s*\{[^}]*background: var\(--mantine-color-gray-0\)/,
+    );
     expect(optionsCss).toContain('.options-action-primary');
     expect(optionsCss).toContain('.options-action-danger');
   });

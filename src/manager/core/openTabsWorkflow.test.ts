@@ -42,6 +42,34 @@ function windowInfo(
 }
 
 describe('Open Tabs workflow reducer', () => {
+  it('structurally shares equivalent refresh rows and unchanged siblings', () => {
+    const first = tab(1);
+    const second = tab(2);
+    const currentWindow = windowInfo(1, [first, second]);
+    const initial = {
+      ...createOpenTabsWorkflowState(),
+      windows: [currentWindow],
+      selectedWindowId: 1,
+    };
+
+    const equivalent = reduceOpenTabsWorkflow(initial, {
+      type: 'refresh-succeeded',
+      windows: [windowInfo(1, [tab(1), tab(2)])],
+    });
+    expect(equivalent.windows).toBe(initial.windows);
+    expect(equivalent.windows[0]).toBe(currentWindow);
+    expect(equivalent.windows[0]?.tabs).toBe(currentWindow.tabs);
+
+    const changed = reduceOpenTabsWorkflow(initial, {
+      type: 'refresh-succeeded',
+      windows: [windowInfo(1, [tab(1), tab(2, { title: 'Updated' })])],
+    });
+    expect(changed.windows).not.toBe(initial.windows);
+    expect(changed.windows[0]).not.toBe(currentWindow);
+    expect(changed.windows[0]?.tabs[0]).toBe(first);
+    expect(changed.windows[0]?.tabs[1]).not.toBe(second);
+  });
+
   it('applies refresh atomically and removes selected IDs that are no longer selectable', () => {
     const initial = {
       ...createOpenTabsWorkflowState(),

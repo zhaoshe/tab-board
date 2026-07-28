@@ -1,6 +1,23 @@
 const TIMESTAMP = '2026-01-01T00:00:00.000Z';
 const WORKSPACE_ID = 'workspace_default';
 
+export function createBenchmarkSchedule(selected, runs) {
+  const oneRound = selected.flatMap(([scenario, configuration]) =>
+    configuration.pages.map((page) => ({
+      scenario,
+      page,
+      configuration,
+    })));
+  return Array.from({ length: runs }, (_, runIndex) => {
+    const offset = oneRound.length ? runIndex % oneRound.length : 0;
+    const round = [
+      ...oneRound.slice(offset),
+      ...oneRound.slice(0, offset),
+    ];
+    return round.map((entry) => ({ ...entry, runIndex }));
+  }).flat();
+}
+
 export function createBenchmarkState({
   groupCount,
   tabsPerGroup,
@@ -108,6 +125,9 @@ export function summarizeRuns(runs) {
     medianUsefulMs: median(runs.map(({ usefulMs }) => usefulMs)),
     medianRootMs: median(runs.map(({ rootMs }) => rootMs)),
     medianStateReadEndMs: median(runs.map(({ stateReadEndMs }) => stateReadEndMs)),
+    medianProjectionReadEndMs: median(
+      runs.map(({ projectionReadEndMs }) => projectionReadEndMs),
+    ),
     medianCards: median(runs.map(({ cards }) => cards)),
     medianShells: median(runs.map(({ shells }) => shells)),
     medianSlots: median(runs.map(({ slots }) => slots)),

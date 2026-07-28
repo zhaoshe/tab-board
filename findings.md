@@ -613,3 +613,41 @@ the other sessions belonged to Saved, Archive, or custom categories.
   rows.
 - Replacing structural sharing is not indicated. It protects update paths after
   hydration and should remain the authoritative reconciliation strategy.
+
+### Implementation completion matrix
+
+| Finding | Implemented owner | Current evidence |
+|---|---|---|
+| P0 Options full-state hydration | `settingsProjection.ts`, `useOptionsSettings.ts` | Basic reads projection; large benchmark records 0 canonical reads |
+| P0 Manager full interaction mount | `SessionSlot`, `SessionCardShell`, `useSessionActivation` | 60 slots / 6 initial cards E2E; production large rows bounded to 120 |
+| P1 duplicate hydration reads | `authoritativePublication.ts`, `useTabBoardStore.ts` | subscribe-first single initializer contracts; no page worker ensure message |
+| P1 Open Tabs event burst | `refreshCoalescer.ts`, `useOpenTabsRuntime.ts` | one active + one trailing contract; production startup records 1 request |
+| P1 optional file UI/backend | Options lazy Advanced, ActiveAdapter literal imports | default Options preloads neither Authority nor file chunks |
+| P1 row subscription fan-out | Session-owned command ports | `TabItemRow` has no Zustand store import |
+| P2 repeated scans/serialized keys | selector Maps/count pass and stable group/tab references | focused selector/overlay/DnD contracts |
+| P2 diagnostics contention | 250ms info batch, immediate warn/error flush | 25 breadcrumbs produce one storage get/set |
+
+### Vercel React practices re-review
+
+- `async-defer-await`: file modules and canonical Options state are awaited only
+  inside the branches that require them.
+- `bundle-conditional` / `bundle-dynamic-imports`: Advanced Settings,
+  `fileStorage`, and `fsDirectory` are separate literal dynamic chunks.
+- `rerender-defer-reads`: Options Basic and `TabItemRow` no longer subscribe to
+  unrelated application state.
+- `rendering-content-visibility`: retained for Open Tabs/Trash and combined
+  with session interaction activation, because containment alone did not bound
+  React mount work.
+- `js-index-maps` / `js-combine-iterations`: canonical group indexes and
+  category counts are built once; overlay and DnD lifecycle use structurally
+  shared references instead of all-item strings.
+- `bundle-barrel-imports` and selective Mantine CSS remain intentionally
+  deferred. The measured empty-state cost is within the target, while changing
+  those imports has higher build/design-system regression risk than current
+  evidence justifies.
+
+No Critical or Important source finding remains after the local final review.
+Final evidence: empty/large Options useful UI 469.4ms/435.4ms, large Manager
+536.7ms with 120 rows and 182ms longest task, `npm run check`, 81 files /
+1,040 Vitest, 32/32 Playwright, rendered axe matrix 0/0, and five persisted-state
+pointer DnD paths 5/5.

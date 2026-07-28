@@ -362,3 +362,78 @@ CSS 与 icon import transform。
 - 不建议先引入第三方 virtualization dependency。当前固定横向 card
   geometry可以用项目内的 stable-slot activation 解决，并降低 DnD 风险。
 - 不建议只显示更漂亮的 loading。它改善反馈，但不缩短实际等待。
+
+## 实施结果
+
+全部 P0/P1/P2 建议已落地，且没有改变 persistent schema、mutation wire 或
+DropIntent 语义：
+
+| 原问题 | 当前 owner / 行为 | 自动化证据 |
+|---|---|---|
+| Options 等完整 state | disposable SettingsProjection + `useOptionsSettings` | projection/hook/adapter tests；production canonical reads = 0 |
+| Manager 全量 card/tab mount | stable `SessionSlot` + near-viewport activation | 60 slots / 6 initial cards / far-shell upgrade E2E |
+| hydration 重复 read | subscribe-first `initializeAuthoritativeState()` | publication/store lifecycle tests |
+| Open Tabs event burst | 75ms dirty-bit coalescer | core + suspended in-flight DOM tests |
+| per-row store subscription | SessionCard command ports | source contract + session rendering tests |
+| repeated scans/giant keys | one-pass counts, index Map, stable reference lifecycle | selector/overlay/DnD tests |
+| diagnostics storage contention | info 250ms batch；warn/error immediate flush | diagnostics 9/9 |
+| optional file modules | lazy Advanced + literal ActiveAdapter imports | Options/adapter/file tests + production chunk graph |
+
+当前 production build 将 `AdvancedSettingsContent`（约 16.5kB）、
+`fileStorage`（约 9.8kB）和 `fsDirectory`（约 1.2kB）拆为 dynamic chunks。
+默认 Options 不 preload Storage Authority 或 file UI/backend；Manager/Popup
+只 preload 约 12.3kB Authority，不 preload file-only chunks。
+
+Vercel practices 复审还发现 overlay、Open Tabs 与 session lifecycle 在 render
+中拼接所有 item identity。最终改为直接消费 structural-sharing references；
+预期 session remove/update 仍逐项验证未变化 siblings，避免削弱 keyboard
+mutation 后的 focus restoration。
+
+## 最终测量
+
+最终表使用 repo-owned production extension benchmark，隔离 profile、每档
+5 次 median。runner 按轮次交错 scenario/page，并在奇数轮反向，降低整批
+顺序与机器升温偏差。原始 samples 由命令 JSON 输出保留。
+
+| 场景 | useful UI median | state/projection read end | cards / shells / slots / rows | requests / longest task |
+|---|---:|---:|---:|---:|
+| empty Manager | 307.3ms | state 286.7ms | 0 / 0 / 0 / 0 | 1 / 0ms |
+| empty Options | 469.4ms | projection 828.6ms | 0 / 0 / 0 / 0 | 0 / 106ms |
+| large Manager (300×20) | 536.7ms | state 386.9ms | 6 / 190 / 196 / 120 | 1 / 182ms |
+| large Options (300×20) | 435.4ms | projection 472.2ms | 0 / 0 / 0 / 0 | 0 / 87ms |
+
+验收解释：
+
+- Manager large 必须低于 1,000ms，首屏 tab rows 仅来自 activated cards。
+- Options empty/large 都必须低于 500ms，median 差值不超过 100ms，且
+  canonical state reads 为 0。
+- Open Tabs startup 最多 1 initial + 1 trailing request；session mount long
+  task 不超过 200ms。
+- empty-state 指标在完成 diagnostics/module splitting 后为 Manager 275.5ms、
+  Options 406ms，表明不需要继续承担 selective Mantine CSS 或 icon transform
+  的高回归风险。
+
+empty / large Options median 差值为 34.0ms，两个场景都没有 canonical state
+read，满足 ≤100ms 差值与 ≤500ms useful UI 门槛。最终实现不再用 projection
+I/O gate 整个页面：header、Open Manager 和 disabled/busy Basic shell 立即
+挂载，projection 返回后再启用 controls 和 Advanced。empty slow samples 中
+useful UI 可在 466ms 出现，而 projection 到 829ms 才返回；用户不再为
+Chrome storage cold-I/O 抖动等待全屏 loading。
+
+## 完成状态
+
+实现、文档与 rendered acceptance 已完成：
+
+- strict build/check：201 source files 无 forbidden edge/cycle，120 production
+  files 通过 architecture gate。
+- Vitest：81 files / 1,040 tests。
+- Playwright：32/32，内含五路径 pointer DnD persisted-state acceptance 5/5。
+- Manager desktop/compact、light/dark/reduced-motion、session menu、Open Tab
+  details：axe 0 violations / 0 incomplete，无 horizontal overflow 或 page
+  error。
+- production Options 390px default/Advanced 和 Light/Dark/System：axe 0/0；
+  default 不挂载 Advanced，展开后按需加载 optional chunks。
+- browser/file storage、migration、fallback、projection atomic write 与
+  cross-context publication 由完整 unit suite 覆盖。
+
+最终 gate 在验收修复后重新执行，结果见同日 `progress.md` 与提交记录。

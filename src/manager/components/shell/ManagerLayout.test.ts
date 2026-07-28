@@ -35,7 +35,7 @@ const testHarness = vi.hoisted(() => {
   return {
     dndOnDragEnd: null as ((event: unknown) => Promise<void>) | null,
     dndOnDragStart: null as ((event: unknown) => void) | null,
-    onOpenTabsSourceKeyChange: null as ((key: string) => void) | null,
+    onOpenTabsSourceKeyChange: null as ((key: unknown) => void) | null,
     completeDrop: vi.fn(),
     resolveDrop: vi.fn(() => ({
       kind: 'create-session' as const,
@@ -82,7 +82,7 @@ vi.mock('@dnd-kit/core', () => ({
 
 vi.mock('@dnd-kit/sortable', () => ({ sortableKeyboardCoordinates: () => undefined }));
 vi.mock('../sidebar/Sidebar', () => ({
-  Sidebar: ({ onOpenTabsSourceKeyChange }: { onOpenTabsSourceKeyChange: (key: string) => void }) => {
+  Sidebar: ({ onOpenTabsSourceKeyChange }: { onOpenTabsSourceKeyChange: (key: unknown) => void }) => {
     testHarness.onOpenTabsSourceKeyChange = onOpenTabsSourceKeyChange;
     return null;
   },

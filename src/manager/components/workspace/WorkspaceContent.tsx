@@ -105,7 +105,10 @@ export function WorkspaceContent({
     () => getCanonicalGroupIndexById(categoryGroups),
     [categoryGroups],
   );
-  const forcedIds = highlightedGroupId ? [highlightedGroupId] : [];
+  const forcedIds = useMemo(
+    () => highlightedGroupId ? [highlightedGroupId] : [],
+    [highlightedGroupId],
+  );
   const sessionActivation = useSessionActivation({
     contextKey: activationContextKey,
     forcedIds,

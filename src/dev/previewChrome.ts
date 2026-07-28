@@ -33,11 +33,17 @@ export type PreviewWindowOptions = Omit<Partial<PreviewWindow>, 'tabs'> & {
   tabs?: readonly Partial<PreviewTab>[];
 };
 
+export interface PreviewStoragePersistence {
+  read(): string | null;
+  write(value: string): void;
+}
+
 export interface PreviewChromeOptions {
   state?: unknown;
   tabs?: readonly Partial<PreviewTab>[];
   windows?: readonly PreviewWindowOptions[];
   extensionBaseUrl?: string;
+  storagePersistence?: PreviewStoragePersistence;
 }
 
 export interface PreviewResponse<T = unknown> {
@@ -167,6 +173,40 @@ class EventHub implements PreviewEventHub {
 
 const DEFAULT_EXTENSION_BASE_URL = 'chrome-extension://preview/';
 const PREVIEW_EXTENSION_PAGE_URL_PATTERN = /^\/dev\/(?:manager|popup|options)-preview\.html(?:[?#]|$)/i;
+const PREVIEW_STORAGE_KEY = 'tabboardPreviewChromeStorage';
+
+function browserStoragePersistence(): PreviewStoragePersistence | undefined {
+  if (typeof window === 'undefined' || !window.sessionStorage) return undefined;
+  return {
+    read: () => window.sessionStorage.getItem(PREVIEW_STORAGE_KEY),
+    write: (value) => window.sessionStorage.setItem(PREVIEW_STORAGE_KEY, value),
+  };
+}
+
+function readPersistedStorage(
+  persistence: PreviewStoragePersistence | undefined,
+): Record<string, unknown> | null {
+  if (!persistence) return null;
+  try {
+    const raw = persistence.read();
+    const parsed = raw ? JSON.parse(raw) : null;
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistStorage(
+  persistence: PreviewStoragePersistence | undefined,
+  storageData: Record<string, unknown>,
+): void {
+  if (!persistence) return;
+  try {
+    persistence.write(JSON.stringify(storageData));
+  } catch {
+    // The preview harness must remain usable when session storage is blocked.
+  }
+}
 
 function fixtureState(): TabBoardState {
   const empty = createEmptyState();
@@ -517,7 +557,13 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
   if (injected && typeof injected === 'object') {
     options = { ...injected, ...options };
   }
-  let state = normalizeState(options.state ?? fixtureState());
+  const storagePersistence = options.storagePersistence ?? browserStoragePersistence();
+  const persistedStorage = readPersistedStorage(storagePersistence);
+  let state = normalizeState(
+    persistedStorage?.[STATE_KEY]
+    ?? options.state
+    ?? fixtureState(),
+  );
   let tabs: PreviewTab[];
   let windows: StoredPreviewWindow[];
   if (options.windows) {
@@ -534,7 +580,9 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
   let nextTabId = Math.max(0, ...tabs.map((tab) => tab.id)) + 1;
   let nextWindowId = Math.max(0, ...windows.map((window) => window.id)) + 1;
   let openedOptionsCount = 0;
-  let storageData: Record<string, unknown> = { [STATE_KEY]: clone(state) };
+  let storageData: Record<string, unknown> = persistedStorage
+    ? clone(persistedStorage)
+    : { [STATE_KEY]: clone(state) };
   const sentMessages: unknown[] = [];
   const hubs = new Map<EventName, EventHub>(EVENT_NAMES.map((name) => [name, new EventHub()]));
   const extensionBaseUrl = options.extensionBaseUrl || DEFAULT_EXTENSION_BASE_URL;
@@ -609,6 +657,7 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
           newValue: clone(nextValue),
         };
       }
+      persistStorage(storagePersistence, storageData);
       if (Object.keys(changes).length) getHub('storage.onChanged').emit(changes, 'local');
     },
   };

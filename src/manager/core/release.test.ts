@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createEmptyState } from '../../shared/model';
-import { STATE_KEY } from '../../shared/model/constants';
+import {
+  SETTINGS_PROJECTION_KEY,
+  STATE_KEY,
+} from '../../shared/model/constants';
 import { resetActiveAdapterForTests } from '../../shared/store/activeAdapter';
 import { getState, setState } from '../../shared/store/chromeStorage';
+import { projectionFromState } from '../../shared/store/settingsProjection';
 import { applyStateMutation, type StateMutation } from '../../shared/store/stateMutations';
 import { createStatePersistence } from '../../background/statePersistence';
 import { getCaptureMessage, getCaptureOutcome, shouldRevealCapture } from './capture';
@@ -32,7 +36,10 @@ describe('core contracts', () => {
 
     expect(STATE_KEY).toBe('tabboardState');
     expect(get).toHaveBeenCalledWith(STATE_KEY);
-    expect(set).toHaveBeenCalledWith({ [STATE_KEY]: state });
+    expect(set).toHaveBeenCalledWith({
+      [STATE_KEY]: state,
+      [SETTINGS_PROJECTION_KEY]: projectionFromState(state),
+    });
   });
 
   it('executes representative DnD, state, persistence, replay, and feedback contracts', async () => {

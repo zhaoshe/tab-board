@@ -14,6 +14,7 @@
   min-height: 0;
   overflow: hidden;
   background: var(--mantine-color-body);
+  color: var(--mantine-color-text);
 }
 
 @media (prefers-reduced-motion: reduce) {

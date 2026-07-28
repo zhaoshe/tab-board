@@ -28,6 +28,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `src/manager/components/`: Mantine shell、workspace header、sidebar/Open Tabs、session board、Bin、import/export、search 和 overlays。
 - `src/manager/core/`: selectors、SearchQueryStore、capture、Open Tabs workflow、typed DnD interaction resolution、overlay/focus 等纯 contracts，以及 core tests。
 - `src/manager/hooks/`: hydration、saved-search/board projection、runtime message、Open Tabs 和 overlay 生命周期。
+- `src/options/`: SettingsProjection-backed Options entry、Basic settings external store 和 lazy Advanced storage controls。
 - `src/background/service-worker.ts`: Chrome API boundary、capture/restore、runtime messages、sender verification。
 - `src/background/statePersistence.ts`: serialized mutation queue、optional Web Locks、normalized atomic writes。
 - `src/shared/model/`: schema/types、normalize、category/session semantics、DropIntent contract/validation/execution/replay、capture policy、import/export 和 search。
@@ -85,6 +86,8 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
   - `ChromeStorageAdapter`（`chromeStorageAdapter.ts`）：封装 `chrome.storage.local["tabboardState"]`，是默认后端。
   - `FileStorageAdapter`（`fileStorage.ts` + `fileSerialization.ts` + `fsAtomic.ts`）：通过 File System Access API 把数据写入用户选择的本地文件夹；详见下文「File Store Layout」。
 - `activeAdapter` 是稳定的 Storage Authority。启动时读 `chrome.storage.local["tabboardStorageConfig"]`（BOOTSTRAP_KEY，一个极小的 bootstrap key：`{ mode: 'browser' | 'file' }`）决定内部 backend；callers 可长期持有同一个 authority interface，backend 切换不会让 subscription 或缓存引用失效。
+- `settingsProjection.ts` 持有可丢弃的 `tabboardSettingsProjection` read model（settings + mutationRevision + updatedAt）。Chrome commit 与 canonical state 原子写入 projection；File commit 在 final meta commit 后发布 projection。projection 缺失或损坏时只允许一次 canonical state repair，不成为第二写入真相。
+- `activeAdapter` 只在 file bootstrap、迁移、reconnect 或 handle 清理分支通过 literal dynamic import 加载 `fileStorage` / `fsDirectory`；browser mode 不执行 file backend 模块。
 - `storageEvents.ts` 独立承载 file commit ping 与跨 context fallback event；authority 只在 File backend 活跃时绑定这两类 transport，并按 event id 去重。
 - File backend 在初始化、读取、写入或 ping reload 时失败，authority 会切换 backend、重绑 subscription 并通知 UI。本 context 首次发现故障时先把最后一次有效 snapshot 保存到 Chrome；收到其他 context 的 fallback event 时直接读取对方已提交的 Chrome state，禁止用旧 File snapshot 反向覆盖。本次失败写仍 reject，避免把未提交 mutation 误报为成功；既有 persistence retry 会在 Chrome backend 上重试。
 - `authoritativePublication.ts` 是 Manager-side publication owner。它不依赖 Zustand、React、DOM event 或具体 Chrome adapter，独占 optimistic queue、in-flight batch、remote buffer、drop/category waiter、bounded retry、terminal isolation、authoritative reconciliation、structural sharing 和 hydration generation。
@@ -126,6 +129,14 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - DnD 不复用未类型化 payload；resolver 先校验 workspace/ownership/URL/locked/index 边界，session body 不产生 merge intent。
 - Manager production 不拥有 session/drop execution module；`src/manager/core/commands.ts` 已删除。Shared/background production modules不得导入 Manager。
 - `ManagerLayout` 持有一个 Open Tabs workflow；`Sidebar` / `OpenTabsPanel` 只消费 grouped `model/commands`。capture 使用 selection snapshot 与 pending guard并直接返回 completion evidence；persisted Open Tabs drop 直接调用 `completeDrop()`，不使用全局 DOM event。
+- `SessionSlot` 是普通 session 唯一的 group `useSortable` owner；`useSessionActivation` 保留所有 slot/insertion target，但只为初始、近视口、搜索/高亮或显式激活的 session 挂载完整 `SessionCard`。远端 `SessionCardShell` 不挂载 tab rows、tab sortables、per-row overlays 或 overflow observers。
+
+### `src/options/`
+
+- `useOptionsSettings()` 通过 `useSyncExternalStore` 读取和订阅 SettingsProjection；Basic settings 不依赖 Zustand application store 或完整 `TabBoardState` hydration。
+- Options 静态 shell 不以 projection I/O 为 render gate：header/Open Manager 立即挂载，Basic fieldset 在 hydration 前 disabled + `aria-busy`，Advanced 等 projection 可用后再出现。
+- settings mutation 仍发送既有 worker mutation RPC，并以 authoritative response 更新 projection；optimistic failure 回滚到提交前 projection。
+- `OptionsApp` 只在 Advanced disclosure 打开时 lazy-load `AdvancedSettingsContent`。Data Storage、file migration、disconnect/reset dialogs 和 Storage Authority 都不进入默认 Options preload graph。
 
 ### 图标
 
@@ -430,9 +441,9 @@ File backend 的初始化、读取、写入或 `reloadFromDisk()` 抛出错误�
 
 ### Manager 启动与降级
 
-Manager 启动先由 React shell 和 `useStoreHydration()` 生成 normalized default state，准备并渲染可用 layout，同时由 `useOpenTabsRuntime()` 发起 Open Tabs 请求；storage state 在后台异步读取，完成后再应用到当前页面。Mantine render 或 runtime message 失败只影响对应 surface，不应阻断基础 Manager shell。
+Manager 启动由 `useStoreHydration()` 委托 Authoritative Publication。publication 先订阅 Storage Authority，再调用一次 `initializeAuthoritativeState()`；当前 browser/file backend 的 `ensureActiveState()` 同时完成初始化和 canonical read。read/subscribe gap 中到达的 state 先 buffer，最后按 mutationRevision 优先、updatedAt 次优选取最新值并做 structural sharing。页面 hydration 不发送 `tabboard-ensure-state`，也不经 worker 往返完整 state；worker 继续拥有 mutation serialization、capture/restore 和 Chrome API。
 
-Hydration 不依赖 MV3 service worker：manager 页面可以通过 Storage Authority 直接读取当前 backend，worker 只在**写入**时用于跨页面串行化。`store.hydrate()` 委托 Authoritative Publication；publication 先调用 `ensureStateForHydration()`——优先发 `tabboard-ensure-state` 给 worker（顺便唤醒它、给空存储播种默认值），但**如果 worker 处于空闲挂起、冷启动竞态或消息通道断开**（典型报错 `Could not establish connection` / `message port closed`），则 catch 后降级为 authority `ensureState()`。publication 在 initial read 前订阅 authority publication，缓冲 read/subscribe gap 中到达的 state，并用 revision 优先、timestamp 次优选择最新 state。这样 worker 不可达时页面仍能正常起来，避免此前"单次 `sendMessage` 失败 → `hydrated` 永远为 false → 无限 loading 白屏"的问题。只有当 worker 与当前 backend 读取**同时失败**时，`hydrate()` 才会 reject；本 generation subscription 会释放、错误以 `notify: false` 投影，下一次调用可以重试。
+`useOpenTabsRuntime()` 与 hydration 并行发起一次 initial request。focus、visibility、tab/window lifecycle event 经过 75ms coalescer：同一时刻只有一个 active run，in-flight burst 最多生成一个 trailing run；Manager 自己的 extension page created/updated event 被忽略。显式 Refresh 仍立即执行。
 
 `releaseHydration()` 只使当前 UI generation 和旧 subscription callback 失效，不 teardown Storage Authority backend，也不破坏正在持久化的 mutation。页面或测试 context 整体替换时，publication generation 会拒绝旧 waiter、取消旧 timer、回滚真正未完成的 optimistic projection，并让旧 RPC continuation 无法覆盖新 context。错误按阶段降级：popover 失败只关闭信息浮层，storage 失败保留默认 normalized state，migration 失败保留已加载 sessions，shell 失败停止后续启动，Open Tabs 失败保留空面板并提示；loaded/render 失败则保留已启动的基础界面并提示。
 
@@ -606,7 +617,9 @@ Options 的 Advanced disclosure 使用页面 URL 中的 `advanced=1`，通过 `r
 
 ### 大 board 性能
 
-`WorkspaceContent` 一次渲染当前 active category 的全部 session card（横向 track），不做 JS 虚拟化，以保持 `@dnd-kit` 的 collision/measurement、浏览器 find-in-page 与 `scrollIntoView` 正常工作。为控制成本，`.session-board__group-slot` 使用 CSS `content-visibility: auto` + `contain-intrinsic-size`：滚出视口的 session slot 跳过 layout/paint，但仍留在 DOM 中，可被拖拽 measurement、搜索定位和滚动命中。Trash 最多保留 80 项，`.manager-bin-entry` 使用相同 paint-containment 策略。该行为由 `src/manager/core/layout.test.ts` 的 CSS 契约和 `tests/e2e/large-board.e2e.ts`（60 sessions 全部在 DOM、远端 card 可滚动可见）守护。若单 category 达到数百 session 仍出现压力，再评估引入真正的虚拟列表及其与 `@dnd-kit` 的兼容性。
+`WorkspaceContent` 为当前 category 的每个 session 保留一个稳定 `SessionSlot` 和全部 group insertion targets，维持 `@dnd-kit` horizontal collision/measurement 与 reorder geometry。`useSessionActivation()` 初始激活前 6 个 session，并以 board 为 root、左右 720px overscan 的 `IntersectionObserver` 单调激活接近视口的 slot；搜索/高亮/显式 shell title activation 会强制升级目标。active slot 渲染完整 `SessionCard`，inactive slot 渲染 `SessionCardShell`，后者保留 session drag handle 和 summary，但不创建 tab rows、tab sortables、row subscriptions 或 observers。缺少 IntersectionObserver 时退化为全部激活。
+
+所有 session slot 仍留在 DOM，完整 tab row 不再常驻。TabBoard search 继续扫描 canonical state并激活匹配 session；浏览器 find-in-page 只能看到已激活 tab rows和远端 shell summary，这是用初次 mount 上限换取的明确取舍。Trash 最多保留 80 项，并继续使用 `content-visibility`。该行为由 `useSessionActivation.test.ts`、session ownership tests 和 `tests/e2e/large-board.e2e.ts`（60 slots、6 initial cards、远端 shell upgrade）守护。
 
 Open Tabs 同样保留全部 rows 与每行的 DnD/focus/preview hooks。`useOpenTabsRuntime()` 用 `useDeferredValue` 延后 query，`openTabsWorkflow.ts` projection 统一派生 filtered rows 与 selection drag records；`.manager-open-tab-row` 使用 `content-visibility: auto` 与 intrinsic size 跳过 off-screen layout/paint。Overlay provider 的 document/window listeners 在生命周期内只绑定一次；commands 与 menu/preview observable state 分离，普通 row/card 只订阅自身 key 的 open boolean。
 
@@ -665,7 +678,7 @@ git diff --check
 
 当前测试空白：
 
-- 真实 Chrome custom-element/extension lifecycle、Shadow DOM keyboard/focus、完整 DOM render 未自动化覆盖。
+- 真实 Chrome custom-element/extension lifecycle、Shadow DOM keyboard/focus 和 file picker permission prompt 未由 Vitest 覆盖。
 - `@dnd-kit` 拖拽的真实指针/键盘事件时序未由 Vitest 覆盖，只有 typed resolver、geometry、lifecycle 和 cleanup contracts；浏览器级冒烟见 `tests/e2e/`（Playwright，需本地按需运行）。
 - Chrome capture/restore 与 sender integration 仍需要 unpacked extension 手工验证。
 
@@ -693,7 +706,7 @@ git diff --check
 - 清除：`clearDiagnostics()`
 - 全局捕获：`installGlobalErrorCapture(scope)` 安装 `error` + `unhandledrejection` 监听
 - Ring buffer 上限：`DIAGNOSTICS_LIMIT = 100`，最新 100 条
-- 写入串行化：内部 `writeChain` 保证并发日志不会互相覆盖
+- 写入串行化：内部 `writeChain` 保证并发日志不会互相覆盖；info breadcrumb 在 250ms 内合并为一次 storage read/write，warn/error 立即触发当前 batch flush
 - **永不抛错**：所有 storage 访问都被 try/catch 包裹，diagnostics 本身不能成为第二故障源
 
 **白屏后取回日志的方式**：
@@ -708,7 +721,7 @@ git diff --check
 **已埋点的关键轨迹**：
 - `manager: manager entry script loaded` — 入口脚本已执行
 - `manager: ManagerApp mounted` — React 根组件已挂载
-- `hydration: ensured state via service worker` / `via local storage fallback` — 水合走了哪条路径
+- `file-storage: init` — 当前 Storage Authority backend 已完成初始化
 - 全局未捕获错误 / unhandled rejection
 
 **ErrorBoundary**：`src/manager/components/shell/ErrorBoundary.tsx` 包裹整个 ManagerApp，在 React 渲染级崩溃时展示错误信息、刷新按钮、复制诊断日志按钮，以及可展开的完整日志详情。

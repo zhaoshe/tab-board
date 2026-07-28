@@ -94,6 +94,7 @@ describe('open tabs core', () => {
     expect(filterOpenTabs(tabs, 'NEEDLE')).toEqual([tabs[2]]);
     expect(filterOpenTabs(tabs, 'alpha beta')).toEqual([]);
     expect(filterOpenTabs(tabs, '')).toEqual(tabs);
+    expect(filterOpenTabs(tabs, '')).toBe(tabs);
   });
 
   it('uses locale-independent lowercase matching', () => {

@@ -5,10 +5,13 @@ import {
   advanceOverlayFocusEpoch,
   getOverlayFocusRestoreTarget,
   getViewportMenuPosition,
+  hasExpectedGroupRemovalLifecycle,
+  hasExpectedGroupUpdateLifecycle,
   isContextMenuKey,
   scheduleOverlayFocusRestore,
   shouldRestorePreviewFocusOnClose,
 } from '../hooks/useManagerOverlays';
+import type { Group } from '../../shared/model';
 import { getTabDropMarkerPlacement } from '../components/sessions/TabItemRow';
 import { isCategoryDragMarkerFor } from '../components/workspace/WorkspaceHeader';
 
@@ -90,6 +93,35 @@ describe('overlay geometry and keyboard helpers', () => {
 });
 
 describe('overlay focus restoration scheduling', () => {
+  it('accepts only the expected structurally shared group removal or update', () => {
+    const before = { id: 'before' } as Group;
+    const target = { id: 'target' } as Group;
+    const after = { id: 'after' } as Group;
+    const updatedTarget = { id: 'target' } as Group;
+    const changedAfter = { id: 'after' } as Group;
+
+    expect(hasExpectedGroupRemovalLifecycle(
+      [before, target, after],
+      [before, after],
+      'target',
+    )).toBe(true);
+    expect(hasExpectedGroupRemovalLifecycle(
+      [before, target, after],
+      [before, changedAfter],
+      'target',
+    )).toBe(false);
+    expect(hasExpectedGroupUpdateLifecycle(
+      [before, target, after],
+      [before, updatedTarget, after],
+      'target',
+    )).toBe(true);
+    expect(hasExpectedGroupUpdateLifecycle(
+      [before, target, after],
+      [before, updatedTarget, changedAfter],
+      'target',
+    )).toBe(false);
+  });
+
   it('restores menu focus only when the menu opened by keyboard', () => {
     const keyboardTrigger = {} as HTMLElement;
     const pointerTrigger = {} as HTMLElement;
@@ -293,7 +325,7 @@ describe('centralized manager overlay contracts', () => {
     expect(layout).toContain('workspaceKey={workspace?.id}');
     expect(layout).toContain('selectedCategory');
     expect(layout).toMatch(/ManagerOverlaysProvider[\s\S]*workspaceKey=\{workspace\?\.id\}/);
-    expect(hook).toContain('itemKey');
+    expect(hook).toContain('groupItems');
     expect(hook).toContain('trigger.isConnected');
   });
 
@@ -343,7 +375,7 @@ describe('centralized manager overlay contracts', () => {
     expect(hook).toContain('closeOverlays();');
     expect(hook).toContain('restoreFocusAfterMutation');
     expect(card).toContain('aria-hidden={isDragOverlay}');
-    expect(card).toContain('pointerEvents: isDragOverlay ?');
+    expect(card).toContain("? { pointerEvents: 'none' as const }");
     expect(row).toContain('data-selection-mode={selectionMode || undefined}');
     expect(row).toContain('className="tab-item-row__select"');
   });
@@ -442,19 +474,23 @@ describe('centralized manager overlay contracts', () => {
     expect(hook).toContain('intent.lifecycleVersion');
     expect(hook).toContain('intent.workspaceKey');
     expect(hook).toContain('intent.categoryKey');
-    expect(hook).toContain('intent.itemKey');
+    expect(hook).toContain('intent.groupItems');
     expect(openTabs).toContain('lifecycleAllowance="open-tab-removal"');
     expect(hook).toContain('setTimeout(() => restoreFocusAfterMutation(focusIntent), 0)');
     expect(hook).toContain('closeOverlays();');
   });
 
-  it('invalidates open-tab overlays when mutable tab content changes', () => {
-    expect(openTabs).toContain('tab.title');
-    expect(openTabs).toContain('tab.url');
-    expect(openTabs).toContain('tab.favIconUrl');
-    expect(openTabs).toContain('tab.storable');
-    expect(openTabs).toContain('tab.reason');
-    expect(openTabs).toContain('tab.pinned');
+  it('uses stable group references instead of joined list keys for lifecycle invalidation', () => {
+    expect(layout).toContain('groupItems={groups}');
+    expect(layout).not.toContain('groups.map((group) => `${group.id}:${group.updatedAt}`).join');
+    expect(card).not.toContain('group.tabs.map((tab) => tab.id).join');
+  });
+
+  it('invalidates open-tab overlays from the stable filtered-tabs projection', () => {
+    expect(openTabs).toContain('const sourceSnapshot = useMemo');
+    expect(openTabs).toContain('() => ({ selectedWindowId, filteredTabs })');
+    expect(openTabs).toContain('[filteredTabs, selectedWindowId]');
+    expect(openTabs).toContain('useManagerOverlayLifecycle(sourceSnapshot)');
   });
 
   it('limits open-tab lifecycle focus restoration to the expected removal context', () => {
@@ -481,9 +517,9 @@ describe('centralized manager overlay contracts', () => {
 
   it('keeps saved-tab removal valid when its group key stays stable or disappears', () => {
     const savedAllowance = hook.match(/if \(allowance\.kind === 'saved-tab-removal'[\s\S]*?return Boolean[\s\S]*?\n      \}/)?.[0] || '';
-    expect(hook).toContain('return hasExpectedGroupRemovalLifecycle(previousItemKey, currentItemKey, groupId);');
+    expect(hook).toContain('return hasExpectedGroupRemovalLifecycle(previousGroups, currentGroups, groupId);');
     expect(savedAllowance).toContain('.session-board, .manager-board');
-    expect(hook).toContain('if (previousGroupSegment === currentGroupSegment)');
+    expect(hook).toContain('index === currentIndex || group === previousGroups[index]');
   });
 
   it('cycles keyboard-opened shared menus through enabled items with wrapped arrows', () => {

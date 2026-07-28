@@ -261,6 +261,37 @@ describe('preview Chrome fixture', () => {
     });
   });
 
+  it('restores preview storage from the browser session persistence port', async () => {
+    const writes: string[] = [];
+    const storage = new Map<string, string>();
+    const first = installPreviewChrome({
+      storagePersistence: {
+        read: () => storage.get('preview') ?? null,
+        write: (value) => {
+          writes.push(value);
+          storage.set('preview', value);
+        },
+      },
+    });
+    installed.push(first);
+    await first.chrome.storage.local.set({ tabboardDiagnostics: [{ message: 'before reload' }] });
+    first.uninstall();
+    installed.pop();
+
+    const second = installPreviewChrome({
+      storagePersistence: {
+        read: () => storage.get('preview') ?? null,
+        write: (value) => storage.set('preview', value),
+      },
+    });
+    installed.push(second);
+
+    await expect(second.chrome.storage.local.get('tabboardDiagnostics')).resolves.toEqual({
+      tabboardDiagnostics: [{ message: 'before reload' }],
+    });
+    expect(writes).toHaveLength(1);
+  });
+
   it('cleans unlocked restored groups and tabs without restoring them twice', async () => {
     const harness = install();
     const group = harness.state.groups[0];

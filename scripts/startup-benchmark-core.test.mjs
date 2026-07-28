@@ -1,10 +1,36 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  createBenchmarkSchedule,
   createBenchmarkState,
   median,
   summarizeRuns,
 } from './startup-benchmark-core.mjs';
+
+test('createBenchmarkSchedule interleaves pages and rotates every round', () => {
+  const selected = [
+    ['empty', { pages: ['manager', 'options'] }],
+    ['large', { pages: ['manager', 'options'] }],
+  ];
+
+  assert.deepEqual(
+    createBenchmarkSchedule(selected, 2).map(({
+      runIndex,
+      scenario,
+      page,
+    }) => `${runIndex}:${scenario}:${page}`),
+    [
+      '0:empty:manager',
+      '0:empty:options',
+      '0:large:manager',
+      '0:large:options',
+      '1:empty:options',
+      '1:large:manager',
+      '1:large:options',
+      '1:empty:manager',
+    ],
+  );
+});
 
 test('createBenchmarkState builds deterministic canonical state', () => {
   const state = createBenchmarkState({
@@ -60,6 +86,7 @@ test('summarizeRuns reports hand-derived startup medians and maxima', () => {
       usefulMs: 900,
       rootMs: 100,
       stateReadEndMs: 400,
+      projectionReadEndMs: 140,
       cards: 8,
       shells: 20,
       slots: 28,
@@ -71,6 +98,7 @@ test('summarizeRuns reports hand-derived startup medians and maxima', () => {
       usefulMs: 500,
       rootMs: 80,
       stateReadEndMs: 300,
+      projectionReadEndMs: 100,
       cards: 6,
       shells: 22,
       slots: 28,
@@ -82,6 +110,7 @@ test('summarizeRuns reports hand-derived startup medians and maxima', () => {
       usefulMs: 700,
       rootMs: 90,
       stateReadEndMs: 350,
+      projectionReadEndMs: 120,
       cards: 7,
       shells: 21,
       slots: 28,
@@ -96,6 +125,7 @@ test('summarizeRuns reports hand-derived startup medians and maxima', () => {
     medianUsefulMs: 700,
     medianRootMs: 90,
     medianStateReadEndMs: 350,
+    medianProjectionReadEndMs: 120,
     medianCards: 7,
     medianShells: 21,
     medianSlots: 28,

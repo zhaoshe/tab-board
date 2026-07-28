@@ -2,7 +2,7 @@ import { IconGripVertical, IconLink, IconLock, IconNote } from '@tabler/icons-re
 import type { Group } from '../../../shared/model';
 import { ITEM_LINK, ITEM_NOTE } from '../../../shared/model';
 import { formatNumber } from '../../../shared/utils/formatters';
-import type { SessionSortableBindings } from './SessionSlot';
+import type { SessionSortableBindings } from './SessionSortableBindings';
 
 export function SessionCardShell({
   activate,

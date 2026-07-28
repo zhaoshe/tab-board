@@ -1,8 +1,4 @@
 import type { CSSProperties } from 'react';
-import type {
-  DraggableAttributes,
-  DraggableSyntheticListeners,
-} from '@dnd-kit/core';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Group } from '../../../shared/model';
@@ -16,14 +12,7 @@ import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
 import { SessionCard } from './SessionCard';
 import { SessionCardShell } from './SessionCardShell';
 import { SessionPlaceholder } from './SessionPlaceholder';
-
-export interface SessionSortableBindings {
-  attributes: DraggableAttributes;
-  listeners: DraggableSyntheticListeners;
-  setActivatorNodeRef: (element: HTMLElement | null) => void;
-  setNodeRef: (element: HTMLElement | null) => void;
-  style: CSSProperties;
-}
+import type { SessionSortableBindings } from './SessionSortableBindings';
 
 export function SessionSlot({
   dragMarker,

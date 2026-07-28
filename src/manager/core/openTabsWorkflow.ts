@@ -89,6 +89,70 @@ function canonicalSelection(
   return [...new Set(ids.filter((id) => allowed.has(id)))];
 }
 
+function sameBrowserGroup(
+  left: OpenTabInfo['browserGroup'],
+  right: OpenTabInfo['browserGroup'],
+): boolean {
+  return left === right || Boolean(
+    left
+    && right
+    && left.sourceGroupId === right.sourceGroupId
+    && left.title === right.title
+    && left.color === right.color
+    && left.collapsed === right.collapsed,
+  );
+}
+
+function sameOpenTab(left: OpenTabInfo, right: OpenTabInfo): boolean {
+  return left === right || (
+    left.id === right.id
+    && left.windowId === right.windowId
+    && left.title === right.title
+    && left.url === right.url
+    && left.favIconUrl === right.favIconUrl
+    && left.active === right.active
+    && left.pinned === right.pinned
+    && left.index === right.index
+    && sameBrowserGroup(left.browserGroup, right.browserGroup)
+    && left.storable === right.storable
+    && left.reason === right.reason
+  );
+}
+
+function structurallyShareTabs(
+  previous: readonly OpenTabInfo[],
+  next: OpenTabInfo[],
+): OpenTabInfo[] {
+  if (previous.length !== next.length) return next;
+  const shared = next.map((tab, index) =>
+    sameOpenTab(previous[index]!, tab) ? previous[index]! : tab);
+  return shared.every((tab, index) => tab === previous[index])
+    ? previous as OpenTabInfo[]
+    : shared;
+}
+
+function structurallyShareWindows(
+  previous: readonly OpenWindowInfo[],
+  next: OpenWindowInfo[],
+): OpenWindowInfo[] {
+  if (previous.length !== next.length) return next;
+  const shared = next.map((window, index) => {
+    const current = previous[index];
+    if (!current
+      || current.id !== window.id
+      || current.focused !== window.focused
+      || current.incognito !== window.incognito
+      || current.tabCount !== window.tabCount) {
+      return window;
+    }
+    const tabs = structurallyShareTabs(current.tabs, window.tabs);
+    return tabs === current.tabs ? current : { ...window, tabs };
+  });
+  return shared.every((window, index) => window === previous[index])
+    ? previous as OpenWindowInfo[]
+    : shared;
+}
+
 export function reduceOpenTabsWorkflow(
   state: OpenTabsWorkflowState,
   action: OpenTabsWorkflowAction,
@@ -97,13 +161,14 @@ export function reduceOpenTabsWorkflow(
     case 'refresh-started':
       return { ...state, loading: true, error: null };
     case 'refresh-succeeded': {
-      const nextSelectedWindow = resolveSelectedWindow(action.windows, state.selectedWindowId);
+      const windows = structurallyShareWindows(state.windows, action.windows);
+      const nextSelectedWindow = resolveSelectedWindow(windows, state.selectedWindowId);
       const nextSelectedWindowId = nextSelectedWindow?.id ?? null;
       const sameWindow = nextSelectedWindowId === state.selectedWindowId;
       const allowed = new Set(getSelectableOpenTabIds(nextSelectedWindow));
       return {
         ...state,
-        windows: action.windows,
+        windows,
         selectedWindowId: nextSelectedWindowId,
         selectedTabIds: sameWindow
           ? state.selectedTabIds.filter((id) => allowed.has(id))

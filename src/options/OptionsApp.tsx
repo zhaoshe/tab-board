@@ -141,21 +141,6 @@ export function OptionsApp() {
     );
   };
 
-  if (!hydrated) {
-    return (
-      <MantineProvider theme={theme} forceColorScheme={colorScheme}>
-        <main>
-          <Center mih="100vh" role="status" aria-live="polite">
-            <Stack align="center" gap="xs">
-              <Loader size="sm" />
-              <Text size="sm">Loading settings…</Text>
-            </Stack>
-          </Center>
-        </main>
-      </MantineProvider>
-    );
-  }
-
   return (
     <MantineProvider theme={theme} forceColorScheme={colorScheme}>
       <main>
@@ -178,7 +163,13 @@ export function OptionsApp() {
                 c={persistenceError ? 'red' : 'dimmed'}
                 mt={4}
               >
-                {persistenceError ? 'Could not save' : savePending ? 'Saving…' : 'Saved'}
+                {!hydrated
+                  ? 'Loading settings…'
+                  : persistenceError
+                    ? 'Could not save'
+                    : savePending
+                      ? 'Saving…'
+                      : 'Saved'}
               </Text>
             </div>
             <Button
@@ -190,7 +181,11 @@ export function OptionsApp() {
             </Button>
           </Group>
 
-          <div className="options-basic">
+          <fieldset
+            className="options-basic"
+            disabled={!hydrated}
+            aria-busy={!hydrated}
+          >
           <SettingsSection
             title="Toolbar"
             description="Extension button behavior"
@@ -354,32 +349,34 @@ export function OptionsApp() {
                 size="sm"
               />
           </SettingsSection>
-          </div>
+          </fieldset>
 
-          <details
-            className="options-advanced"
-            open={advancedOpen}
-            onToggle={(event) => handleAdvancedToggle(event.currentTarget.open)}
-          >
-            <summary>Advanced Settings</summary>
-            {advancedOpen ? (
-              <AdvancedSettingsErrorBoundary>
-                <Suspense
-                  fallback={(
-                    <Center mt="md" role="status" aria-live="polite">
-                      <Loader size="sm" />
-                      <Text size="sm" ml="xs">Loading Advanced Settings…</Text>
-                    </Center>
-                  )}
-                >
-                  <AdvancedSettingsContent
-                    settings={settings}
-                    updateSettings={updateSettings}
-                  />
-                </Suspense>
-              </AdvancedSettingsErrorBoundary>
-            ) : null}
-          </details>
+          {hydrated ? (
+            <details
+              className="options-advanced"
+              open={advancedOpen}
+              onToggle={(event) => handleAdvancedToggle(event.currentTarget.open)}
+            >
+              <summary>Advanced Settings</summary>
+              {advancedOpen ? (
+                <AdvancedSettingsErrorBoundary>
+                  <Suspense
+                    fallback={(
+                      <Center mt="md" role="status" aria-live="polite">
+                        <Loader size="sm" />
+                        <Text size="sm" ml="xs">Loading Advanced Settings…</Text>
+                      </Center>
+                    )}
+                  >
+                    <AdvancedSettingsContent
+                      settings={settings}
+                      updateSettings={updateSettings}
+                    />
+                  </Suspense>
+                </AdvancedSettingsErrorBoundary>
+              ) : null}
+            </details>
+          ) : null}
           </Stack>
         </Container>
       </main>

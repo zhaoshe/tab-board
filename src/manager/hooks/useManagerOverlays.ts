@@ -17,6 +17,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { IconBrowser } from '@tabler/icons-react';
+import type { Group } from '../../shared/model';
 import { formatDateTime } from '../../shared/utils/formatters';
 
 export const OPEN_DELAY_MS = 180;
@@ -215,7 +216,7 @@ export interface ManagerFocusRestoreIntent {
   focusEpoch: number;
   workspaceKey?: string;
   categoryKey?: string;
-  itemKey?: string;
+  groupItems?: readonly Group[];
   lifecycleAllowance?: ManagerFocusRestoreLifecycleAllowance;
 }
 
@@ -257,7 +258,7 @@ interface ManagerOverlaysProviderProps {
   children: ReactNode;
   workspaceKey?: string;
   categoryKey?: string;
-  itemKey?: string;
+  groupItems?: readonly Group[];
 }
 
 const ManagerOverlaysContext = createContext<ManagerOverlaysController | null>(null);
@@ -328,50 +329,44 @@ function getFocusRestoreSelectors(trigger: HTMLElement | null): string[] {
   return [...new Set(selectors)];
 }
 
-function getLifecycleSegments(value: string | undefined): string[] {
-  return value?.split('|').filter(Boolean) ?? [];
-}
-
-function hasExpectedGroupRemovalLifecycle(
-  previousItemKey: string | undefined,
-  currentItemKey: string | undefined,
+export function hasExpectedGroupRemovalLifecycle(
+  previousGroups: readonly Group[] | undefined,
+  currentGroups: readonly Group[] | undefined,
   groupId: string,
 ): boolean {
-  const previousSegments = getLifecycleSegments(previousItemKey);
-  const currentSegments = getLifecycleSegments(currentItemKey);
-  const removedSegment = previousSegments.find((segment) => segment.startsWith(`${groupId}:`));
-  if (!removedSegment) return false;
-  const expectedSegments = previousSegments.filter((segment) => segment !== removedSegment);
-  return expectedSegments.length === currentSegments.length
-    && expectedSegments.every((segment, index) => currentSegments[index] === segment);
-}
-
-function hasExpectedGroupUpdateLifecycle(
-  previousItemKey: string | undefined,
-  currentItemKey: string | undefined,
-  groupId: string,
-): boolean {
-  const previousSegments = getLifecycleSegments(previousItemKey);
-  const currentSegments = getLifecycleSegments(currentItemKey);
-  const previousGroupSegment = previousSegments.find((segment) => segment.startsWith(`${groupId}:`));
-  const currentGroupSegment = currentSegments.find((segment) => segment.startsWith(`${groupId}:`));
-  if (!previousGroupSegment) return false;
-  if (!currentGroupSegment) return hasExpectedGroupRemovalLifecycle(previousItemKey, currentItemKey, groupId);
-  if (previousGroupSegment === currentGroupSegment) {
-    return previousSegments.length === currentSegments.length
-      && previousSegments.every((segment, index) => currentSegments[index] === segment);
+  if (!previousGroups || !currentGroups) return false;
+  const removedIndex = previousGroups.findIndex((group) => group.id === groupId);
+  if (removedIndex < 0 || currentGroups.length !== previousGroups.length - 1) {
+    return false;
   }
-  const previousOtherSegments = previousSegments.filter((segment) => segment !== previousGroupSegment);
-  const currentOtherSegments = currentSegments.filter((segment) => segment !== currentGroupSegment);
-  return previousOtherSegments.length === currentOtherSegments.length
-    && previousOtherSegments.every((segment, index) => currentOtherSegments[index] === segment);
+  return currentGroups.every((group, index) =>
+    group === previousGroups[index < removedIndex ? index : index + 1]);
+}
+
+export function hasExpectedGroupUpdateLifecycle(
+  previousGroups: readonly Group[] | undefined,
+  currentGroups: readonly Group[] | undefined,
+  groupId: string,
+): boolean {
+  if (!previousGroups || !currentGroups) return false;
+  const previousIndex = previousGroups.findIndex((group) => group.id === groupId);
+  const currentIndex = currentGroups.findIndex((group) => group.id === groupId);
+  if (previousIndex < 0) return false;
+  if (currentIndex < 0) {
+    return hasExpectedGroupRemovalLifecycle(previousGroups, currentGroups, groupId);
+  }
+  if (previousIndex !== currentIndex || previousGroups.length !== currentGroups.length) {
+    return false;
+  }
+  return currentGroups.every((group, index) =>
+    index === currentIndex || group === previousGroups[index]);
 }
 
 export function useManagerOverlays({
   workspaceKey,
   categoryKey,
-  itemKey,
-}: Pick<ManagerOverlaysProviderProps, 'workspaceKey' | 'categoryKey' | 'itemKey'> = {}): ManagerOverlaysController {
+  groupItems,
+}: Pick<ManagerOverlaysProviderProps, 'workspaceKey' | 'categoryKey' | 'groupItems'> = {}): ManagerOverlaysController {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const menuRef = useRef<MenuState | null>(null);
@@ -389,9 +384,9 @@ export function useManagerOverlays({
   const lifecycleVersionRef = useRef(0);
   const focusEpochRef = useRef(0);
   const idRef = useRef(0);
-  const previousLifecycleRef = useRef({ workspaceKey, categoryKey, itemKey });
-  const lifecycleContextRef = useRef({ workspaceKey, categoryKey, itemKey });
-  lifecycleContextRef.current = { workspaceKey, categoryKey, itemKey };
+  const previousLifecycleRef = useRef({ workspaceKey, categoryKey, groupItems });
+  const lifecycleContextRef = useRef({ workspaceKey, categoryKey, groupItems });
+  lifecycleContextRef.current = { workspaceKey, categoryKey, groupItems };
 
   const clearOpenTimer = useCallback(() => {
     if (openTimerRef.current) clearTimeout(openTimerRef.current);
@@ -482,9 +477,9 @@ export function useManagerOverlays({
       focusEpoch: focusEpochRef.current,
       workspaceKey,
       categoryKey,
-      itemKey,
+      groupItems,
     };
-  }, [categoryKey, itemKey, workspaceKey]);
+  }, [categoryKey, groupItems, workspaceKey]);
 
   const restoreFocusAfterMutation = useCallback((intent: ManagerFocusRestoreIntent) => {
     cancelPendingFocusRestore();
@@ -501,21 +496,21 @@ export function useManagerOverlays({
         if (lifecycleVersionRef.current <= intent.lifecycleVersion) {
           return lifecycleVersionRef.current === intent.lifecycleVersion && Boolean(getFocusableTarget(intent.trigger));
         }
-        if (!hasExpectedGroupRemovalLifecycle(intent.itemKey, currentContext.itemKey, allowance.groupId)) return false;
+        if (!hasExpectedGroupRemovalLifecycle(intent.groupItems, currentContext.groupItems, allowance.groupId)) return false;
         return !document.querySelector(`.session-board .session-card[data-group-id="${CSS.escape(allowance.groupId)}"]`);
       }
       if (allowance.kind === 'saved-tab-removal') {
         if (lifecycleVersionRef.current <= intent.lifecycleVersion) {
           return lifecycleVersionRef.current === intent.lifecycleVersion && Boolean(getFocusableTarget(intent.trigger));
         }
-        if (!hasExpectedGroupUpdateLifecycle(intent.itemKey, currentContext.itemKey, allowance.groupId)) return false;
+        if (!hasExpectedGroupUpdateLifecycle(intent.groupItems, currentContext.groupItems, allowance.groupId)) return false;
         if (document.querySelector(`.session-board .tab-item-row[data-group-id="${CSS.escape(allowance.groupId)}"][data-tab-id="${CSS.escape(allowance.tabId)}"]`)) return false;
         return Boolean(
           document.querySelector(`.session-board .session-card[data-group-id="${CSS.escape(allowance.groupId)}"]`)
             || document.querySelector('.session-board, .manager-board'),
         );
       }
-      if (intent.itemKey !== currentContext.itemKey) return false;
+      if (intent.groupItems !== currentContext.groupItems) return false;
       if (lifecycleVersionRef.current !== intent.lifecycleVersion + 1) return false;
       if (document.querySelector(`[data-open-tab-id="${CSS.escape(allowance.tabId)}"]`)) return false;
       return allowance.windowId === null
@@ -613,12 +608,12 @@ export function useManagerOverlays({
 
   useEffect(() => {
     const previous = previousLifecycleRef.current;
-    if (previous.workspaceKey !== workspaceKey || previous.categoryKey !== categoryKey || previous.itemKey !== itemKey) {
+    if (previous.workspaceKey !== workspaceKey || previous.categoryKey !== categoryKey || previous.groupItems !== groupItems) {
       invalidateOverlayLifecycle();
       closeOverlays();
     }
-    previousLifecycleRef.current = { workspaceKey, categoryKey, itemKey };
-  }, [categoryKey, closeOverlays, invalidateOverlayLifecycle, itemKey, workspaceKey]);
+    previousLifecycleRef.current = { workspaceKey, categoryKey, groupItems };
+  }, [categoryKey, closeOverlays, groupItems, invalidateOverlayLifecycle, workspaceKey]);
 
   useEffect(() => {
     const getPreviewOptions = (trigger: HTMLElement): OpenPreviewOptions | null => {
@@ -940,7 +935,7 @@ export function useManagerInfoTrigger(
   return useCallback((element: HTMLElement | null) => registerInfoTrigger(id, entry, element), [entry, id, registerInfoTrigger]);
 }
 
-export function useManagerOverlayLifecycle(itemKey: string): void {
+export function useManagerOverlayLifecycle(itemKey: unknown): void {
   const { closeOverlays, invalidateOverlayLifecycle } = useManagerOverlayCommands();
   const previousKey = useRef(itemKey);
   useEffect(() => {
