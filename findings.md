@@ -510,3 +510,106 @@ The active objective resolves to these concrete deliverables:
 - No package/lockfile/manifest/schema/storage/background or runtime dependency
   diff; no tracked generated/browser artifact.
 - Final complete static and rendered pass: zero unresolved finding.
+
+## React Startup Performance Review - 2026-07-28
+
+### Applicable Vercel rules
+
+- `async-parallel` and `async-defer-await`: startup currently performs
+  sequential full-state operations before useful UI.
+- `bundle-dynamic-imports` and `bundle-conditional`: Options loads closed
+  Advanced file-storage controls and dialogs in its initial graph.
+- `bundle-barrel-imports`: `@tabler/icons-react` barrel imports make Vite
+  analyze thousands of modules. Production tree shaking limits shipped icon
+  code, so this is currently a build/dev cost and a secondary cold-evaluation
+  concern, not the measured runtime root cause.
+- `rerender-defer-reads`: Options should not subscribe to or hydrate session
+  collections it does not render.
+- `rendering-content-visibility`: the existing CSS skips off-screen
+  layout/paint, but does not skip React component creation, hooks, Zustand
+  subscriptions, overlay registration, or dnd-kit sortable registration.
+- `rerender-memo`: already used for `SessionCard`; it cannot remove the initial
+  cost because every card and row mounts once.
+
+### Production bundle baseline
+
+- Manager initial JavaScript graph: about 683 KB raw / 208 KB gzip across the
+  page entry, shared Mantine/theme, storage authority, icon, and accessible
+  action chunks.
+- Options initial JavaScript graph: about 475 KB raw / 146 KB gzip across the
+  page entry, shared Mantine/theme, storage authority, and icon chunks.
+- Shared Mantine CSS is about 205 KB raw / 30 KB gzip. Manager adds about 26 KB
+  raw CSS; Options adds about 3 KB.
+- Extension assets are local, so transfer latency is not the issue; parse,
+  evaluation, and module initialization still run on the page main thread.
+
+### Hydration data flow
+
+`AuthoritativePublication.hydrate()` currently waits for these operations in
+series before setting `hydrated: true`:
+
+1. `ensureStateForHydration()` sends `tabboard-ensure-state` to the MV3 worker.
+   The worker reads and normalizes the full state and returns the full object
+   through runtime messaging.
+2. The page initializes Storage Authority. It reads
+   `tabboardStorageConfig`, then reads and normalizes `tabboardState`.
+3. Hydration subscribes to authority updates.
+4. `readAuthoritativeState()` reads and normalizes `tabboardState` again.
+5. The page structurally shares and publishes the result, then React can render
+   the useful Manager or Options surface.
+
+The first worker result is not reused by publication. The same state therefore
+crosses storage/context boundaries repeatedly and is normalized at least three
+times. Options pays the full cost even though its Basic page initially needs
+only settings and persistence status.
+
+### Production startup measurements
+
+Measurements used the real unpacked `dist` extension in isolated Chrome
+profiles with an init-script probe. `first useful UI` means `.manager-shell` or
+`.options-header` first appeared.
+
+| State | Data size | Manager useful UI | Options useful UI | Dominant evidence |
+|---|---:|---:|---:|---|
+| empty | minimal | 509 ms | 505 ms | bundle + sequential hydration |
+| 60 sessions x 2 tabs | 62.6 KB | 726 ms | 1,186 ms | Options worker ensure-state was 860 ms |
+| 300 sessions x 20 tabs | 2.30 MB | 2,857 ms | 708 ms / 1,247 ms | Manager state reads ended by 757 ms; React commit consumed about 2.10 s |
+
+The large Options variance tracks cold/warm service-worker behavior. Both
+large runs still read and normalize the entire 2.30 MB state despite rendering
+no session. The large Manager rendered 196 Inbox sessions and 3,920 tab rows;
+the other sessions belonged to Saved, Archive, or custom categories.
+
+### Confirmed root causes
+
+1. **P0 - Options is coupled to full application hydration.**
+   Its startup latency grows and varies with unrelated session data and MV3
+   worker cold-start behavior.
+2. **P0 - Manager constructs the complete visible-category React/DnD tree
+   before first useful commit.** `content-visibility` cannot skip the 3,920
+   `TabItemRow` components, their `useSortable` registrations, Mantine controls,
+   Zustand subscriptions, and overlay hooks.
+3. **P1 - Hydration performs redundant serial full-state reads and
+   normalization.** The worker result is discarded, then the page reads the
+   same state twice through Storage Authority.
+4. **P1 - Open Tabs startup receives an event burst.** Empty-state production
+   startup issued four `list-open-tabs` messages; large-state startup continued
+   queued refreshes for seconds after the first Manager commit.
+5. **P1 - Options statically loads Advanced file-storage UI.** The Basic page
+   reaches `DataStorageCard`, folder migration, merge, and disconnect modules
+   even while `<details>` is closed.
+6. **P2 - Manager contains avoidable repeated work.**
+   `WorkspaceContent` calls `categoryGroups.findIndex` inside
+   `visibleGroups.map` (O(n²)); category counts repeatedly scan groups per
+   category; diagnostics persist every breadcrumb via storage read + write.
+
+### Rejected or lower-priority explanations
+
+- Network transfer is not the bottleneck; extension assets load locally.
+- Generic local `useMemo` additions will not solve initial mount. Every visible
+  card/row still mounts and registers hooks.
+- The 330 KB shared Mantine/theme chunk matters for the roughly 0.2-0.5 s empty
+  baseline, but it does not explain the Manager's additional 2.1 s at 3,920
+  rows.
+- Replacing structural sharing is not indicated. It protects update paths after
+  hydration and should remain the authoritative reconciliation strategy.

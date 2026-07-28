@@ -1,15 +1,17 @@
-# TabBoard UI / UX Review and Refactor Plan
+# TabBoard Review and Refactor Plan
 
 ## Goal
 
 Implement every approved recommendation from the Web Interface Guidelines and
 `ui-ux-pro-max` reviews, then repeat static and rendered review until one
-complete pass produces no unresolved issue.
+complete pass produces no unresolved issue. After that baseline, investigate
+the reported Manager and Options startup delay with production measurements and
+produce an evidence-ranked React performance refactor plan.
 
 ## Current Phase
 
-Complete - the `ui-ux-pro-max` refactor, iterative review, and independent
-completion audit passed all required gates.
+Complete - production Manager/Options startup has been measured, root causes
+ranked, and an owner-by-owner refactor plan recorded.
 
 ## Phases
 
@@ -105,6 +107,20 @@ Status: complete
 - Run fresh check, unit, E2E, browser/axe, DnD, and diff gates.
 - Update current behavior and product-decision documentation.
 
+### Phase 11 - Manager and Options startup performance investigation
+
+Status: complete
+
+- Commit the verified UI/UX refactor as a clean performance baseline.
+- Measure production Manager and Options startup with empty and representative
+  large state.
+- Separate bundle parse/evaluation, storage hydration, Chrome API work, React
+  commit, and post-hydration list rendering.
+- Apply the relevant `$vercel-react-best-practices` rules to current source,
+  rejecting framework-specific rules that do not fit a Vite MV3 extension.
+- Produce an evidence-ranked optimization and ownership refactor plan without
+  changing schema, storage protocol, or DnD semantics.
+
 ## Decisions
 
 | Decision | Reason |
@@ -117,6 +133,8 @@ Status: complete
 | Use inline execution | Subagents were not explicitly requested; perform TDD locally in this worktree. |
 | Reject the generated portfolio design system | It conflicts with the extension's productivity-tool domain, existing dense workbench model, and product constraints. |
 | Preserve full-DOM list rendering | Existing structural sharing plus `content-visibility` is an explicit project decision; this review does not add a runtime virtualization dependency. |
+| Diagnose startup before optimizing | The reported delay can come from local bundle execution, storage initialization, state normalization, or first render; each needs separate evidence. |
+| Reopen D033 only with profiler evidence | Hundreds of sessions and thousands of tab rows now reproduce a multi-second initial mount, satisfying the prior decision's threshold for reconsidering full interactive DOM. |
 
 ## Errors Encountered
 
@@ -131,8 +149,11 @@ Status: complete
 | Full Vitest initially failed 4 tests | 1 | Stopped the external 5173 server, migrated stale source/harness assertions to the final owners, and reran 76 files / 1,006 tests. |
 | Category DnD E2E could not find exact `Inbox` | 1 | Category counts changed the accessible name to `Inbox 0`; use stable `data-category-id="inbox"` and verify 5/5 repeated runs. |
 | Parallel repeated Playwright commands competed for port 5173 | 1 | Serialize critical browser gates; DnD then passed 15/15 and compact geometry 3/3. |
+| Playwright benchmark waited for an inactive MV3 worker | 1 | Identified that extension activation must precede worker discovery; discarded the run. |
+| Direct Playwright extension activation returned `ERR_INVALID_URL` / `ERR_ABORTED` in the prototype | 2 | Stopped iterating on the temporary benchmark and retained the already-valid agent-browser production measurements; the plan requires a repository-owned stable benchmark harness before implementation claims. |
+| CPU profiler relaunched the browser onto `about:blank` | 1 | Restarted profiling before navigating to the known extension URL; used profile shape only because profiler overhead distorted absolute startup time. |
 
 ## Next Step
 
-No implementation work remains. Summarize the refactor, iterative findings, and
-fresh verification evidence.
+Review the performance report, then execute Stage 1-4 with TDD and fresh
+production benchmarks if implementation is approved.

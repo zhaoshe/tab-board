@@ -102,4 +102,54 @@
 
 ## Next
 
-- Complete. No unresolved UI/UX Pro Max finding or verification gate remains.
+- Investigate the reported Manager and Options startup delay with production
+  extension measurements and an evidence-ranked React performance review.
+
+## 2026-07-28
+
+- Loaded `$vercel-react-best-practices`, `systematic-debugging`,
+  `planning-with-files`, `agent-browser`, and verification guidance.
+- Recovered the prior structural-sharing and extension E2E performance work;
+  retained its rule to optimize authoritative references before scattered local
+  memoization.
+- Re-read the README, product overview, feature spec, technical architecture,
+  current entry points, store hydration owner, Vite configuration, package
+  scripts, and the pending UI/UX diff.
+- Fresh baseline verification before commit: `npm run check` passed, `npm test`
+  passed 76 files / 1,006 tests, and `git diff --check` passed.
+- Committed the completed UI/UX refactor as `a90d8f0` so startup performance
+  analysis begins from a reviewable clean baseline.
+- Initial production build evidence: Manager page synchronously references
+  roughly 220 KB page JS plus a 330 KB shared Mantine/theme JS chunk; Options
+  references roughly 33 KB page JS plus the same 330 KB shared chunk. Both pages
+  also synchronously preload storage authority and page-theme modules.
+- Source trace shows both pages render only a loading surface until the shared
+  `useStoreHydration()` path completes, even though Options initially needs only
+  settings and storage status.
+- Built and loaded the real production `dist` extension in isolated Chrome
+  profiles with a page-init startup probe. The probe records first useful UI,
+  runtime/storage call boundaries, card/row counts, and navigation timing.
+- Empty-state baseline: Manager first useful UI 509ms; Options 505ms.
+- Medium 62.6KB state (60 sessions / 120 tabs): Manager 726ms; Options
+  1,186ms, including an 860ms worker ensure-state call.
+- Heavy 2.30MB state (300 sessions / 6,000 tabs): Options produced 708ms and
+  1,247ms cold/warm-variance samples; Manager first useful UI was 2,857ms.
+  Manager state reads completed by about 757ms, then the first commit mounted
+  196 Inbox cards and 3,920 rows over the next ~2.10s.
+- CPU profiling significantly perturbed absolute timings and is not used as a
+  startup metric. Its shape still confirmed the full-tree cost: about 13,454
+  text-shaping operations, 1,833 forced style/layout updates, and substantial
+  GC during the heavy Manager mount.
+- Confirmed startup protocol: worker ensure-state returns a full normalized
+  state that publication discards, then page Storage Authority reads bootstrap
+  plus state, and publication reads the same full state again before hydration.
+- Confirmed secondary costs: four startup `list-open-tabs` messages in the
+  empty run, static Advanced/file-storage modules in Options, per-card overflow
+  observers, per-row store/overlay/sortable hooks, O(n²) group index lookup,
+  and one diagnostics storage read+write per breadcrumb.
+- A reusable median benchmark prototype was attempted outside the repository.
+  It was discarded after repeated Playwright/MV3 first-activation navigation
+  failures; no failed benchmark output is used as evidence. The implementation
+  plan calls for a production benchmark owner with stable extension discovery.
+- Wrote the evidence-ranked Chinese review and staged refactor proposal to
+  `docs/reviews/2026-07-28-react-startup-performance-review.md`.
