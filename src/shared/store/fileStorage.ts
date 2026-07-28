@@ -28,6 +28,7 @@
 import {
   FILE_LAYOUT_VERSION,
   FILE_PING_KEY,
+  SETTINGS_PROJECTION_KEY,
   SCHEMA_VERSION,
 } from '../model/constants';
 import {
@@ -55,6 +56,7 @@ import {
   type FileParts,
 } from './fileSerialization';
 import type { AdapterInitError, ReloadableStorageAdapter } from './storageAdapter';
+import { projectionFromState } from './settingsProjection';
 
 // ---------- Types for DOM widenings ----------
 
@@ -503,6 +505,7 @@ class FileStorageAdapterImpl implements ReloadableStorageAdapter {
     try {
       if (this.deps.shouldPublishPing?.() !== false && globalThis.chrome?.storage?.local?.set) {
         await globalThis.chrome.storage.local.set({
+          [SETTINGS_PROJECTION_KEY]: projectionFromState(nextState),
           [FILE_PING_KEY]: {
             mutationRevision: nextState.mutationRevision,
             updatedAt: nextState.updatedAt,

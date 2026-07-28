@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEmptyState, type BrowserGroup, type Group, type TabBoardState } from '../shared/model';
+import {
+  createEmptyState,
+  SETTINGS_PROJECTION_KEY,
+  type BrowserGroup,
+  type Group,
+  type TabBoardState,
+} from '../shared/model';
+import { projectionFromState } from '../shared/store/settingsProjection';
 import type { StateMutation } from '../shared/store/stateMutations';
 
 const TRUSTED_EXTENSION_ID = 'test-extension-id';
@@ -120,6 +127,7 @@ function createChromeHarness(initialState: TabBoardState, options: ChromeHarness
   const commands = createEvent();
   const contextMenus = createEvent();
   const runtimeMessage = createEvent();
+  const startup = createEvent();
   const state = { current: structuredClone(initialState) };
   const writes: TabBoardState[] = [];
   const tabs = options.tabs || [createTab(1), createTab(2)];
@@ -153,16 +161,20 @@ function createChromeHarness(initialState: TabBoardState, options: ChromeHarness
       id: TRUSTED_EXTENSION_ID,
       getURL: vi.fn((path: string) => `chrome-extension://${TRUSTED_EXTENSION_ID}/${path}`),
       onInstalled: createEvent(),
-      onStartup: createEvent(),
+      onStartup: startup,
       onMessage: runtimeMessage,
       openOptionsPage: vi.fn(),
     },
     storage: {
       local: {
-        get: vi.fn(async () => ({ tabboardState: structuredClone(state.current) })),
-        set: vi.fn(async (value: { tabboardState: TabBoardState }) => {
+        get: vi.fn(async (_keys?: unknown): Promise<Record<string, unknown>> => ({
+          tabboardState: structuredClone(state.current),
+          [SETTINGS_PROJECTION_KEY]: projectionFromState(state.current),
+        })),
+        set: vi.fn(async (value: Record<string, unknown>) => {
           await new Promise((resolve) => setTimeout(resolve, 10));
-          const nextState = structuredClone(value.tabboardState);
+          if (!value.tabboardState) return;
+          const nextState = structuredClone(value.tabboardState as TabBoardState);
           writes.push(nextState);
           state.current = nextState;
         }),
@@ -196,7 +208,16 @@ function createChromeHarness(initialState: TabBoardState, options: ChromeHarness
     },
   };
 
-  return { action, contextMenus, runtimeMessage, state, tabs, writes, chromeMock };
+  return {
+    action,
+    contextMenus,
+    runtimeMessage,
+    startup,
+    state,
+    tabs,
+    writes,
+    chromeMock,
+  };
 }
 
 function sendMessage(
@@ -233,6 +254,33 @@ afterEach(() => {
 });
 
 describe('Chrome action settings synchronization', () => {
+  it('reads only the settings projection during browser startup', async () => {
+    const state = createState();
+    state.settings.actionClick = 'popup';
+    const harness = createChromeHarness(state);
+    harness.chromeMock.storage.local.get.mockImplementation(async (keys: unknown) => (
+      keys === SETTINGS_PROJECTION_KEY
+        ? { [SETTINGS_PROJECTION_KEY]: projectionFromState(state) }
+        : { tabboardState: structuredClone(state) }
+    ));
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    const listener = harness.startup.getListener();
+    if (!listener) throw new Error('Expected startup listener was not registered.');
+    await listener();
+
+    expect(harness.chromeMock.storage.local.get).toHaveBeenCalledWith(
+      SETTINGS_PROJECTION_KEY,
+    );
+    expect(harness.chromeMock.storage.local.get).not.toHaveBeenCalledWith(
+      'tabboardState',
+    );
+    expect(harness.chromeMock.action.setPopup).toHaveBeenCalledWith({
+      popup: 'popup.html',
+    });
+  });
+
   it('does not update the action when an unrelated state write keeps actionClick unchanged', async () => {
     const state = createState();
     const harness = createChromeHarness(state);
@@ -295,6 +343,9 @@ describe('Chrome action settings synchronization', () => {
       ...state,
       settings: { ...state.settings, actionClick: 'popup' },
     };
+    harness.chromeMock.storage.local.get.mockResolvedValue({
+      [SETTINGS_PROJECTION_KEY]: projectionFromState(harness.state.current),
+    });
 
     const listener = harness.chromeMock.storage.onChanged.getListener();
     if (!listener) throw new Error('Expected storage change listener was not registered.');
@@ -309,6 +360,12 @@ describe('Chrome action settings synchronization', () => {
       expect(harness.chromeMock.action.setPopup).toHaveBeenCalledWith({ popup: 'popup.html' });
     });
     expect(harness.chromeMock.action.setTitle).toHaveBeenCalledWith({ title: 'Open TabBoard' });
+    expect(harness.chromeMock.storage.local.get).toHaveBeenCalledWith(
+      SETTINGS_PROJECTION_KEY,
+    );
+    expect(harness.chromeMock.storage.local.get).not.toHaveBeenCalledWith(
+      'tabboardState',
+    );
   });
 });
 

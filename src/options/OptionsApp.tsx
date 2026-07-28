@@ -24,24 +24,25 @@ import {
 } from '@tabler/icons-react';
 import '@mantine/core/styles.css';
 import { theme } from '../shared/styles/theme';
-import { useTabBoardStore } from '../shared/store/useTabBoardStore';
-import { useStoreHydration } from '../shared/hooks/useStoreHydration';
-import { useColorScheme } from '../shared/hooks/useColorScheme';
+import { usePreferredColorScheme } from '../shared/hooks/usePreferredColorScheme';
 import { usePageTheme } from '../shared/hooks/usePageTheme';
 import { DEFAULT_SETTINGS } from '../shared/model';
 import { DataStorageCard } from './components/DataStorageCard';
 import { SettingsSection } from './components/SettingsSection';
 import { useSettingsDraft } from './hooks/useSettingsDraft';
+import { useOptionsSettings } from './hooks/useOptionsSettings';
 import { ConfirmDialog } from '../shared/components/ConfirmDialog';
 import './options.css';
 
 export function OptionsApp() {
-  const { hydrated } = useStoreHydration();
-  const settings = useTabBoardStore((state) => state.settings);
-  const persistenceError = useTabBoardStore((state) => state.persistenceError);
-  const colorScheme = useColorScheme();
+  const {
+    hydrated,
+    settings,
+    persistenceError,
+    updateSettings,
+  } = useOptionsSettings();
+  const colorScheme = usePreferredColorScheme(settings.theme);
   usePageTheme(colorScheme);
-  const updateSettings = useTabBoardStore((state) => state.updateSettings);
 
   const [savePending, setSavePending] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);

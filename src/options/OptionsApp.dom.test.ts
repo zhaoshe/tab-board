@@ -14,19 +14,21 @@ const harness = vi.hoisted(() => ({
   settings: {} as typeof DEFAULT_SETTINGS,
 }));
 
-vi.mock('../shared/store/useTabBoardStore', () => ({
-  useTabBoardStore: (selector: (state: unknown) => unknown) => selector({
+vi.mock('./hooks/useOptionsSettings', () => ({
+  useOptionsSettings: () => ({
+    hydrated: harness.hydrated,
     settings: harness.settings,
-    groups: [],
     persistenceError: harness.persistenceError,
+    projection: {
+      settings: harness.settings,
+      mutationRevision: 0,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
     updateSettings: harness.updateSettings,
   }),
 }));
-vi.mock('../shared/hooks/useStoreHydration', () => ({
-  useStoreHydration: () => ({ hydrated: harness.hydrated }),
-}));
-vi.mock('../shared/hooks/useColorScheme', () => ({
-  useColorScheme: () => 'dark',
+vi.mock('../shared/hooks/usePreferredColorScheme', () => ({
+  usePreferredColorScheme: () => 'dark',
 }));
 vi.mock('./components/DataStorageCard', () => ({
   DataStorageCard: () => createElement('section', { 'aria-label': 'Data Storage' }, 'Data Storage'),

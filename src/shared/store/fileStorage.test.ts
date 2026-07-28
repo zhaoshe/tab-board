@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FILE_PING_KEY } from '../model/constants';
+import {
+  FILE_PING_KEY,
+  SETTINGS_PROJECTION_KEY,
+} from '../model/constants';
 import {
   createEmptyState,
   createGroupFromTabRecords,
@@ -12,6 +15,7 @@ import type { MemoryDirectoryHandle, MemoryFileHandle } from '../testing/memoryF
 import { createFileStorageAdapter, initFileStorageDirectory } from './fileStorage';
 import type { AdapterInitError } from './storageAdapter';
 import { atomicWriteFile } from './fsAtomic';
+import { projectionFromState } from './settingsProjection';
 
 // ---------- chrome.storage.local mock ----------
 
@@ -372,7 +376,7 @@ describe('createFileStorageAdapter', () => {
     expect(cb).toHaveBeenCalledTimes(1);
   });
 
-  it('setState writes FILE_PING_KEY to chrome.storage.local for cross-context notification', async () => {
+  it('setState publishes one post-commit projection and file ping update', async () => {
     const root = createMemoryDirectory('root');
     withPermission(root);
     const adapter = await createFileStorageAdapter(root);
@@ -387,5 +391,6 @@ describe('createFileStorageAdapter', () => {
     expect(ping).toBeTruthy();
     expect(ping?.mutationRevision).toBe(state.mutationRevision);
     expect(ping?.updatedAt).toBe(state.updatedAt);
+    expect(lastCall?.[SETTINGS_PROJECTION_KEY]).toEqual(projectionFromState(state));
   });
 });

@@ -51,13 +51,15 @@ import {
   getDropOperationDigest,
   isDropIntentAlreadyApplied,
 } from '../shared/model/drop-operations';
+import { readSettingsProjection } from '../shared/store/settingsProjection';
 
 const MANAGER_PAGE = 'manager.html';
 const POPUP_PAGE = 'popup.html';
 
 async function getSettings(): Promise<Settings> {
-  const state = await getState();
-  return state.settings;
+  return (await readSettingsProjection({
+    readCanonicalState: getState,
+  })).settings;
 }
 
 let persistencePromise: Promise<StatePersistence> | null = null;

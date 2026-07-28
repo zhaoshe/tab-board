@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { STATE_KEY } from '../model/constants';
+import { SETTINGS_PROJECTION_KEY, STATE_KEY } from '../model/constants';
 import { createEmptyState } from '../model';
 import { createChromeStorageAdapter } from './chromeStorageAdapter';
+import { projectionFromState } from './settingsProjection';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -67,11 +68,15 @@ describe('createChromeStorageAdapter', () => {
     expect(result.mutationRevision).toBe(0);
   });
 
-  it('setState writes state under STATE_KEY', async () => {
+  it('setState atomically writes canonical state and its settings projection', async () => {
     const { adapter, set } = createAdapterWithMocks();
     const state = createEmptyState();
     await adapter.setState(state);
-    expect(set).toHaveBeenCalledWith({ [STATE_KEY]: state });
+    expect(set).toHaveBeenCalledTimes(1);
+    expect(set).toHaveBeenCalledWith({
+      [STATE_KEY]: state,
+      [SETTINGS_PROJECTION_KEY]: projectionFromState(state),
+    });
   });
 
   describe('ensureState', () => {
@@ -95,7 +100,10 @@ describe('createChromeStorageAdapter', () => {
       const result = await adapter.ensureState();
 
       expect(get).toHaveBeenCalledWith(STATE_KEY);
-      expect(set).toHaveBeenCalledWith({ [STATE_KEY]: expect.anything() });
+      expect(set).toHaveBeenCalledWith({
+        [STATE_KEY]: expect.anything(),
+        [SETTINGS_PROJECTION_KEY]: expect.anything(),
+      });
       expect(result.workspaces.length).toBeGreaterThan(0);
     });
   });

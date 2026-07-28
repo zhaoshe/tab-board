@@ -171,39 +171,39 @@ Commit only hydration files and review evidence with message `perf(storage): hyd
 - Produces `writeSettingsProjection(state): Promise<void>`
 - Produces `useOptionsSettings()` returning `{ hydrated, settings, persistenceError, updateSettings }`
 
-- [ ] **Step 1: Write failing projection contract tests**
+- [x] **Step 1: Write failing projection contract tests**
 
 Cover valid normalization, malformed/missing fallback to one canonical state read, stale projection repair, and projection never overriding canonical mutation results.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run the new projection test; expected missing-module failure.
 
-- [ ] **Step 3: Implement projection core**
+- [x] **Step 3: Implement projection core**
 
 Keep it framework-neutral. A projection is valid only when settings shape, non-negative revision, and timestamp are valid.
 
-- [ ] **Step 4: Write failing adapter atomic-write tests**
+- [x] **Step 4: Write failing adapter atomic-write tests**
 
 Expect Chrome adapter `setState()` to write state and projection in one call. Expect file adapter to publish projection only after final file commit; projection failure logs a warning but does not roll back committed file data.
 
-- [ ] **Step 5: Verify RED, then implement adapter writes**
+- [x] **Step 5: Verify RED, then implement adapter writes**
 
 Use one `chrome.storage.local.set` in Chrome mode. Add a file post-commit sidecar write.
 
-- [ ] **Step 6: Write failing Options hook/DOM tests**
+- [x] **Step 6: Write failing Options hook/DOM tests**
 
 Assert Basic settings render without `useStoreHydration`, large unrelated groups are never selected/read, mutations use the existing worker mutation message, and authoritative response updates displayed settings.
 
-- [ ] **Step 7: Implement `useOptionsSettings` and migrate Options**
+- [x] **Step 7: Implement `useOptionsSettings` and migrate Options**
 
 The hook reads projection, repairs from canonical state only when necessary, subscribes to projection changes, and sends an `update-settings` mutation. Options no longer imports the Zustand application store for Basic settings.
 
-- [ ] **Step 8: Verify GREEN**
+- [x] **Step 8: Verify GREEN**
 
 Run projection, adapter, hook, Options DOM, service-worker, state persistence, and storage mode suites.
 
-- [ ] **Step 9: Benchmark Options**
+- [x] **Step 9: Benchmark Options**
 
 Run five empty and large-state Options iterations. Required gate: median difference at most 100ms and cold median at most 500ms, or document the remaining measured blocker before proceeding.
 

@@ -1,4 +1,5 @@
 export const STATE_KEY = 'tabboardState';
+export const SETTINGS_PROJECTION_KEY = 'tabboardSettingsProjection';
 export const SCHEMA_VERSION = 1;
 export const TASK_NONE = 'none';
 export const ITEM_LINK = 'link' as const;

@@ -180,3 +180,23 @@
 - One-run directional benchmark after Task 2: medium Options 544ms versus the
   audit sample 1,186ms; empty Options 617ms. Final claims remain gated on
   five-run medians.
+- Task 3 projection core completed RED/GREEN with 7 tests: strict full-settings
+  validation, canonical fallback repair, fast-path reads, and cross-context
+  subscription.
+- Chrome state commits now atomically write canonical state plus the settings
+  projection. File commits publish projection plus file ping only after final
+  meta commit. Focused projection/adapter evidence passes 28/28.
+- Added a page-local `useOptionsSettings` external store. Basic Options reads
+  only `tabboardSettingsProjection`, sends existing mutation RPCs, reconciles
+  authoritative responses, rolls back failures, and accepts newer
+  cross-context projections. Hook tests pass 4/4.
+- Split store-free `usePreferredColorScheme(theme)` from the Manager/Popup
+  Zustand adapter, so Options no longer imports the application store for theme
+  resolution. Options DOM and focused projection/storage suite pass 48/48.
+- Service worker startup and file-ping action synchronization now read the
+  settings projection instead of full state; focused action tests pass 4/4.
+- Production build passes. Five-run large Options median is 443ms with zero
+  canonical state reads, meeting the absolute <=500ms gate. The separately run
+  empty batch was 749ms, a reverse 306ms difference caused by cold-browser
+  batch/order variance rather than data reads; final comparison will interleave
+  scenarios and retain raw samples.

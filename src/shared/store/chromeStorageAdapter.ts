@@ -1,6 +1,7 @@
-import { STATE_KEY } from '../model/constants';
+import { SETTINGS_PROJECTION_KEY, STATE_KEY } from '../model/constants';
 import { normalizeState, type TabBoardState } from '../model';
 import type { StorageAdapter } from './storageAdapter';
+import { projectionFromState } from './settingsProjection';
 
 /**
  * ChromeStorageAdapter implements StorageAdapter against chrome.storage.local.
@@ -16,7 +17,10 @@ class ChromeStorageAdapterImpl implements StorageAdapter {
   }
 
   async setState(state: TabBoardState): Promise<void> {
-    await chrome.storage.local.set({ [STATE_KEY]: state });
+    await chrome.storage.local.set({
+      [STATE_KEY]: state,
+      [SETTINGS_PROJECTION_KEY]: projectionFromState(state),
+    });
   }
 
   async ensureState(): Promise<TabBoardState> {

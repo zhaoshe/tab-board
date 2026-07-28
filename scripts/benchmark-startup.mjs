@@ -175,7 +175,7 @@ function startupProbe() {
   });
 }
 
-async function measure(profilePath, extensionId, pageName, state) {
+async function seedProfile(profilePath, extensionId, state) {
   const context = await launch(profilePath);
   try {
     const worker = await activateWorker(context, extensionId);
@@ -184,16 +184,24 @@ async function measure(profilePath, extensionId, pageName, state) {
       await chrome.storage.local.set({
         tabboardStorageConfig: { mode: 'browser' },
         tabboardState: seed,
+        tabboardSettingsProjection: {
+          settings: seed.settings,
+          mutationRevision: seed.mutationRevision,
+          updatedAt: seed.updatedAt,
+        },
       });
     }, state);
+  } finally {
+    await context.close();
+  }
+}
+
+async function measure(profilePath, extensionId, pageName) {
+  const context = await launch(profilePath);
+  try {
     await context.addInitScript(startupProbe);
-    const targetUrl = `chrome-extension://${extensionId}/${pageName}.html`;
-    const pagePromise = context.waitForEvent('page', { timeout: 15_000 });
-    await worker.evaluate(async (url) => {
-      await chrome.tabs.create({ url, active: true });
-    }, targetUrl);
-    const page = await pagePromise;
-    await page.waitForURL(`${targetUrl}*`, { timeout: 15_000 });
+    const page = context.pages()[0] ?? await context.newPage();
+    await gotoExtensionPage(page, extensionId, pageName);
     const selector = pageName === 'manager' ? '.manager-shell' : '.options-header';
     await page.locator(selector).waitFor({ state: 'attached', timeout: 30_000 });
     const result = await page.evaluate(() => {
@@ -236,12 +244,8 @@ for (const [name, configuration] of selected) {
         `tabboard-${name}-${pageName}-`,
       ));
       try {
-        samples.push(await measure(
-          profilePath,
-          extensionId,
-          pageName,
-          configuration.state,
-        ));
+        await seedProfile(profilePath, extensionId, configuration.state);
+        samples.push(await measure(profilePath, extensionId, pageName));
       } finally {
         await rm(profilePath, { recursive: true, force: true });
       }
