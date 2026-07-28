@@ -271,31 +271,31 @@ Commit as `refactor(dnd): own group sorting in session slots`, ending in the req
 - Returns `{ activeIds, registerSlot, activate }`
 - `SessionCardShell` consumes group summary plus sortable bindings
 
-- [ ] **Step 1: Write failing pure/hook tests**
+- [x] **Step 1: Write failing pure/hook tests**
 
 Cover initial bounded activation, monotonic activation, context reset, forced activation, IntersectionObserver absence fallback, and observer overscan root margin.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run the new hook tests; expected missing-module failure.
 
-- [ ] **Step 3: Implement activation hook and lightweight shell**
+- [x] **Step 3: Implement activation hook and lightweight shell**
 
 Use board-root IntersectionObserver with inline overscan. Keep activated IDs monotonic per context. Shell exposes session title/count/lock state and the same accessible group drag handle.
 
-- [ ] **Step 4: Integrate slots**
+- [x] **Step 4: Integrate slots**
 
 All slots and group insertion targets stay mounted. Active slots render full cards; inactive slots render shells. Highlight/search reveal and drag source/target force activation.
 
-- [ ] **Step 5: Rewrite large-board E2E contract**
+- [x] **Step 5: Rewrite large-board E2E contract**
 
 Assert 60 session slots remain attached, initial full cards are bounded, a far shell scrolls into view and upgrades to a full card, then its tab interactions work.
 
-- [ ] **Step 6: Verify GREEN and DnD**
+- [x] **Step 6: Verify GREEN and DnD**
 
 Run hook/session/layout tests, large-board E2E, session DnD E2E, and category handle isolation.
 
-- [ ] **Step 7: Benchmark Manager**
+- [x] **Step 7: Benchmark Manager**
 
 Run five heavy iterations. Required gate: median useful UI at most 1,000ms and first useful UI has only viewport + overscan tab rows.
 

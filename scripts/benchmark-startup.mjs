@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
@@ -45,6 +45,15 @@ const SCENARIOS = {
     pages: ['manager'],
   },
 };
+
+async function assertProductionBuild() {
+  const managerHtml = await readFile(resolve(DIST_PATH, 'manager.html'), 'utf8');
+  if (managerHtml.includes('localhost:5173') || managerHtml.includes('CRXJS DEV MODE')) {
+    throw new Error(
+      'dist contains the CRXJS development loader. Run npm run build before benchmarking.',
+    );
+  }
+}
 
 function parseArguments(argv) {
   let runs = DEFAULT_RUNS;
@@ -98,7 +107,7 @@ async function activateWorker(context, extensionId) {
   if (worker) return worker;
 
   const page = context.pages()[0] ?? await context.newPage();
-  await gotoExtensionPage(page, extensionId, 'manager');
+  await gotoExtensionPage(page, extensionId, 'options');
   await page.waitForLoadState('load');
   worker = context.serviceWorkers()[0]
     ?? await context.waitForEvent('serviceworker', { timeout: 15_000 });
@@ -178,8 +187,9 @@ function startupProbe() {
 async function seedProfile(profilePath, extensionId, state) {
   const context = await launch(profilePath);
   try {
-    const worker = await activateWorker(context, extensionId);
-    await worker.evaluate(async (seed) => {
+    const page = context.pages()[0] ?? await context.newPage();
+    await gotoExtensionPage(page, extensionId, 'options');
+    await page.evaluate(async (seed) => {
       await chrome.storage.local.clear();
       await chrome.storage.local.set({
         tabboardStorageConfig: { mode: 'browser' },
@@ -216,7 +226,9 @@ async function measure(profilePath, extensionId, pageName) {
         stateReadEndMs: stateReads.length
           ? Math.max(...stateReads.map(({ end }) => end))
           : 0,
-        cards: document.querySelectorAll('.session-card').length,
+        cards: document.querySelectorAll('.session-card:not(.session-card--shell)').length,
+        shells: document.querySelectorAll('[data-session-shell="true"]').length,
+        slots: document.querySelectorAll('[data-session-slot-id]').length,
         rows: document.querySelectorAll('.tab-item-row').length,
         listOpenTabsCalls: listCalls.length,
         longestTaskMs: record.longTasks.length
@@ -231,6 +243,7 @@ async function measure(profilePath, extensionId, pageName) {
 }
 
 const { runs, scenario } = parseArguments(process.argv.slice(2));
+await assertProductionBuild();
 const extensionId = extensionIdForPath(DIST_PATH);
 const selected = scenario ? [[scenario, SCENARIOS[scenario]]] : Object.entries(SCENARIOS);
 const results = [];
@@ -265,6 +278,9 @@ console.table(results.map(({ scenario: name, page, bytes, summary }) => ({
   page,
   bytes,
   usefulMs: summary.medianUsefulMs,
+  cards: summary.medianCards,
+  shells: summary.medianShells,
+  slots: summary.medianSlots,
   rows: summary.medianRows,
   listCalls: summary.maxListOpenTabsCalls,
   longestTaskMs: summary.maxLongestTaskMs,

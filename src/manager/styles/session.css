@@ -12,6 +12,25 @@
   box-shadow: var(--mantine-shadow-sm);
 }
 
+.session-card--shell {
+  gap: var(--mantine-spacing-sm);
+}
+
+.session-card__shell-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--mantine-color-dimmed);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.session-card__shell-summary > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .session-card__header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

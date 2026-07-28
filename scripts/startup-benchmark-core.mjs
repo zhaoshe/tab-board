@@ -109,6 +109,8 @@ export function summarizeRuns(runs) {
     medianRootMs: median(runs.map(({ rootMs }) => rootMs)),
     medianStateReadEndMs: median(runs.map(({ stateReadEndMs }) => stateReadEndMs)),
     medianCards: median(runs.map(({ cards }) => cards)),
+    medianShells: median(runs.map(({ shells }) => shells)),
+    medianSlots: median(runs.map(({ slots }) => slots)),
     medianRows: median(runs.map(({ rows }) => rows)),
     maxListOpenTabsCalls: Math.max(...runs.map(({ listOpenTabsCalls }) => listOpenTabsCalls)),
     maxLongestTaskMs: Math.max(...runs.map(({ longestTaskMs }) => longestTaskMs)),

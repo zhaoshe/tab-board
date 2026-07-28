@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { Box, Text } from '@mantine/core';
 import { IconArchive, IconFolder, IconSearch, IconStar } from '@tabler/icons-react';
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable';
@@ -11,6 +11,7 @@ import type { CategoryFilter } from '../../core/selectors';
 import type { DndData, DragMarker, DragSourceRect } from '../../core/dnd';
 import { SessionSlot } from '../sessions/SessionSlot';
 import { useOverflowCues } from '../../hooks/useOverflowCues';
+import { useSessionActivation } from '../../hooks/useSessionActivation';
 
 interface WorkspaceContentProps {
   category: CategoryFilter;
@@ -94,6 +95,21 @@ export function WorkspaceContent({
   );
   const hasSearch = searchQuery.trim().length > 0;
   const boardOverflow = useOverflowCues<HTMLElement>();
+  const activationContextKey = `${workspaceId}:${category}:${searchQuery}`;
+  const groupIds = useMemo(
+    () => visibleGroups.map((group) => group.id),
+    [visibleGroups],
+  );
+  const forcedIds = highlightedGroupId ? [highlightedGroupId] : [];
+  const sessionActivation = useSessionActivation({
+    contextKey: activationContextKey,
+    forcedIds,
+    groupIds,
+  });
+  const setBoardRef = useCallback((element: HTMLElement | null) => {
+    boardOverflow.ref(element);
+    sessionActivation.rootRef(element);
+  }, [boardOverflow.ref, sessionActivation.rootRef]);
 
   const getTitle = () => {
     if (category === 'saved') return 'Saved';
@@ -165,7 +181,7 @@ export function WorkspaceContent({
 
   return (
     <section
-      ref={boardOverflow.ref}
+      ref={setBoardRef}
       className="manager-board"
       aria-label={`${workspaceName} ${getTitle()} sessions`}
       data-inline-end={boardOverflow.cues.inlineEnd || undefined}
@@ -201,12 +217,15 @@ export function WorkspaceContent({
                     isMarker={dragMarker?.kind === 'group' && dragMarker.index === groupIndex}
                   />
                   <SessionSlot
+                    activate={() => sessionActivation.activate(group.id)}
                     group={group}
                     runtime={runtime}
                     searchQuery={searchQuery}
                     groupIndex={groupIndex}
                     groupCategory={category}
                     highlighted={highlightedGroupId === group.id}
+                    interactive={sessionActivation.activeIds.has(group.id)}
+                    registerSlot={sessionActivation.registerSlot(group.id)}
                     dragMarker={getSessionCardDragMarker(dragMarker, group.id)}
                     sourceRect={sourceRect}
                   />

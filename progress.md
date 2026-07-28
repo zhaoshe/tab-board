@@ -208,3 +208,18 @@
 - Task 4 verification: 3 focused files / 39 tests passed, production build
   passed, and `session-dnd.e2e.ts` passed 5/5 across pointer, keyboard, Escape,
   and category-handle paths.
+- Task 5 RED established bounded/monotonic activation, context reset, forced
+  activation, and no-IntersectionObserver fallback. Hook tests pass 5/5.
+- Added `SessionCardShell` and stable session slots. All 60 slots remain
+  mounted in the E2E fixture, only the first 6 cards mount full tab interaction
+  trees, and a far shell upgrades after horizontal scroll.
+- Task 5 focused evidence: 5 files / 59 tests passed, production build passed,
+  and combined large-board plus session/category DnD E2E passed 7/7.
+- Fresh production five-run large benchmark: Manager median useful UI 487ms
+  versus the prior 4,560ms; first interactive rows 120 versus 3,920; longest
+  task 158ms versus 2,289ms; startup Open Tabs calls 1. Large Options median
+  478ms with zero canonical state reads.
+- Diagnosed and guarded a benchmark-order trap: Vite E2E rewrites `dist` to a
+  CRXJS dev loader. The benchmark now rejects dev-mode dist and must run after a
+  production build. Seeding uses the projection-only Options page so heavy
+  Manager rendering cannot contaminate pre-measurement setup.

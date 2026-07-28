@@ -14,6 +14,7 @@ import {
 } from '../../core/dnd';
 import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
 import { SessionCard } from './SessionCard';
+import { SessionCardShell } from './SessionCardShell';
 import { SessionPlaceholder } from './SessionPlaceholder';
 
 export interface SessionSortableBindings {
@@ -26,19 +27,25 @@ export interface SessionSortableBindings {
 
 export function SessionSlot({
   dragMarker,
+  activate,
   group,
   groupCategory,
   groupIndex,
   highlighted,
+  interactive,
+  registerSlot,
   runtime,
   searchQuery,
   sourceRect,
 }: {
   dragMarker: DragMarker | null;
+  activate: () => void;
   group: Group;
   groupCategory: CategoryFilter;
   groupIndex: number;
   highlighted: boolean;
+  interactive: boolean;
+  registerSlot: (element: Element | null) => void;
   runtime: ManagerRuntime;
   searchQuery: string;
   sourceRect: DragSourceRect | null;
@@ -99,7 +106,7 @@ export function SessionSlot({
     setNodeRef,
     style,
   };
-  return (
+  const content = interactive ? (
     <SessionCard
       dragMarker={dragMarker}
       group={group}
@@ -109,5 +116,21 @@ export function SessionSlot({
       sortable={sortable}
       sourceRect={sourceRect}
     />
+  ) : (
+    <SessionCardShell
+      activate={activate}
+      group={group}
+      sortable={sortable}
+    />
+  );
+  return (
+    <div
+      ref={registerSlot}
+      className="session-slot"
+      data-session-slot-id={group.id}
+      data-session-active={interactive || undefined}
+    >
+      {content}
+    </div>
   );
 }

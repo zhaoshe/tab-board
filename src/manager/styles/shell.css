@@ -85,6 +85,12 @@
   contain-intrinsic-size: auto 340px auto 600px;
 }
 
+.session-slot {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
 .session-board__group-insert-target {
   position: absolute;
   inset-block: 0;
