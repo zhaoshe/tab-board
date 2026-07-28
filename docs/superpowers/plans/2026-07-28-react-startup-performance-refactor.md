@@ -405,27 +405,27 @@ Commit as `perf(manager): reduce session render fan-out`, ending in the required
 - Options Advanced uses `lazy(() => import('./components/DataStorageCard'))`
 - Storage Authority literal-loads file modules only for file-mode operations
 
-- [ ] **Step 1: Write failing diagnostics batching tests**
+- [x] **Step 1: Write failing diagnostics batching tests**
 
 Assert 25 breadcrumbs cause one storage get/set after the timer, warn/error flush immediately, and the bounded ring remains correct.
 
-- [ ] **Step 2: Verify RED, implement batching, verify GREEN**
+- [x] **Step 2: Verify RED, implement batching, verify GREEN**
 
 Use fake timers and an injectable scheduler only if browser globals make direct testing impossible.
 
-- [ ] **Step 3: Write failing lazy-loading contracts**
+- [x] **Step 3: Write failing lazy-loading contracts**
 
 Options DOM should render Basic without Data Storage mounted; opening Advanced mounts it after Suspense. ActiveAdapter browser initialization must not invoke a file-module loader.
 
-- [ ] **Step 4: Implement literal dynamic imports**
+- [x] **Step 4: Implement literal dynamic imports**
 
 Add an actionable Advanced-load fallback. Keep all file migration behavior unchanged.
 
-- [ ] **Step 5: Verify GREEN and build chunks**
+- [x] **Step 5: Verify GREEN and build chunks**
 
 Run diagnostics, Options, file storage, active adapter, and production entry tests. Inspect the production HTML/chunks to confirm closed Advanced and browser mode no longer require file UI/backend modules.
 
-- [ ] **Step 6: Benchmark empty state**
+- [x] **Step 6: Benchmark empty state**
 
 If empty Manager/Options still miss targets, document bundle evidence before considering selective Mantine CSS. Do not add unmeasured icon/CSS rewrites.
 

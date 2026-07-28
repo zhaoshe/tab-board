@@ -46,6 +46,21 @@ async function mountOptions(): Promise<void> {
   });
 }
 
+async function openAdvanced(): Promise<HTMLDetailsElement> {
+  const advanced = document.querySelector<HTMLDetailsElement>('details');
+  if (!advanced) throw new Error('Advanced Settings disclosure was not rendered.');
+  await act(async () => {
+    await import('./components/AdvancedSettingsContent');
+    advanced.open = true;
+    advanced.dispatchEvent(new Event('toggle'));
+    await Promise.resolve();
+  });
+  await vi.waitFor(() => {
+    expect(advanced.textContent).toContain('Data Storage');
+  });
+  return advanced;
+}
+
 function setTextareaValue(element: HTMLTextAreaElement, value: string): void {
   const setter = Object.getOwnPropertyDescriptor(
     HTMLTextAreaElement.prototype,
@@ -115,6 +130,7 @@ describe('OptionsApp information architecture', () => {
     const filter = document.querySelector<HTMLTextAreaElement>('textarea[name="custom-url-filter"]');
     expect(filter?.placeholder).toBe('example.com, chrome://newtab…');
     expect(document.querySelector<HTMLInputElement>('input[name="close-tabs-after-save"]')).not.toBeNull();
+    await openAdvanced();
     expect(document.querySelector<HTMLInputElement>('input[name="confirm-before-destructive"]')).not.toBeNull();
   });
 
@@ -200,11 +216,15 @@ describe('OptionsApp information architecture', () => {
     expect(document.querySelector('.options-basic .mantine-Card-root')).toBeNull();
   });
 
-  it('keeps storage, safety, shortcuts, and reset inside Advanced Settings', async () => {
+  it('defers storage controls until Advanced Settings opens', async () => {
     await mountOptions();
 
     const advanced = document.querySelector<HTMLDetailsElement>('details');
     expect(advanced?.querySelector('summary')?.textContent).toBe('Advanced Settings');
+    expect(advanced?.textContent).not.toContain('Data Storage');
+    expect(advanced?.textContent).not.toContain('Confirm before deleting saved items');
+
+    await openAdvanced();
     expect(advanced?.textContent).toContain('Data Storage');
     expect(advanced?.textContent).toContain('Confirm before deleting saved items');
     expect(advanced?.textContent)
@@ -232,6 +252,7 @@ describe('OptionsApp information architecture', () => {
 
   it('confirms before resetting every setting', async () => {
     await mountOptions();
+    await openAdvanced();
     const reset = [...document.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent?.trim() === 'Reset to Defaults');
     await act(async () => reset?.click());
@@ -248,6 +269,7 @@ describe('OptionsApp information architecture', () => {
 
   it('restores focus to Reset to Defaults after cancelling confirmation', async () => {
     await mountOptions();
+    await openAdvanced();
     const reset = [...document.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent?.trim() === 'Reset to Defaults');
     await act(async () => reset?.click());

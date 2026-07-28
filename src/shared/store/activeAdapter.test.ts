@@ -16,6 +16,7 @@ import { createMemoryDirectory } from '../testing/memoryFs';
 import type { MemoryDirectoryHandle } from '../testing/memoryFs';
 import {
   _setActiveAdapterIdbFactory,
+  _setActiveAdapterModuleLoadersForTests,
   getActiveAdapter,
   isFileModeActive,
   onFallback,
@@ -321,7 +322,41 @@ describe('activeAdapter', () => {
   afterEach(() => {
     resetActiveAdapterForTests();
     _setActiveAdapterIdbFactory(undefined);
+    _setActiveAdapterModuleLoadersForTests(undefined);
     vi.unstubAllGlobals();
+  });
+
+  it('browser bootstrap does not load file-only storage modules', async () => {
+    const loadFileStorageModule = vi.fn(() => import('./fileStorage'));
+    const loadFsDirectoryModule = vi.fn(() => import('./fsDirectory'));
+    _setActiveAdapterModuleLoadersForTests({
+      loadFileStorageModule,
+      loadFsDirectoryModule,
+    });
+
+    await getActiveAdapter();
+
+    expect(loadFileStorageModule).not.toHaveBeenCalled();
+    expect(loadFsDirectoryModule).not.toHaveBeenCalled();
+  });
+
+  it('file bootstrap loads file-only storage modules on demand', async () => {
+    await writeBootstrap('file', chromeMock);
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const { saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(root, idbFactory);
+    const loadFileStorageModule = vi.fn(() => import('./fileStorage'));
+    const loadFsDirectoryModule = vi.fn(() => import('./fsDirectory'));
+    _setActiveAdapterModuleLoadersForTests({
+      loadFileStorageModule,
+      loadFsDirectoryModule,
+    });
+
+    await getActiveAdapter();
+
+    expect(loadFileStorageModule).toHaveBeenCalledTimes(1);
+    expect(loadFsDirectoryModule).toHaveBeenCalledTimes(1);
   });
 
   it('default bootstrap (no key) returns ChromeStorageAdapter', async () => {

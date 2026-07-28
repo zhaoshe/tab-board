@@ -244,3 +244,20 @@
   them through SessionTabList.
 - Combined Task 6-7 verification: 8 focused files / 177 tests passed and the
   production build passed.
+- Task 8 diagnostics RED/GREEN batches info breadcrumbs for 250ms into one
+  storage read/write while warn/error entries trigger the batch immediately.
+  Diagnostics focused tests pass 9/9, including the bounded 100-entry ring.
+- Options Advanced now owns Data Storage, Safety, Keyboard/Reset, and reset
+  confirmation in a `React.lazy` chunk with Suspense and an actionable load
+  error. The closed disclosure mounts none of that optional UI.
+- Storage Authority now literal-imports `fileStorage` and `fsDirectory` only
+  after a file-mode operation is selected. Browser bootstrap invokes neither
+  loader; file bootstrap invokes each cached loader once. Existing migration,
+  rollback, fallback, reconnect, and file persistence regressions remain green.
+- Task 8 focused verification passes 4 files / 56 tests. Production build
+  splits `fileStorage` (9.78 kB), `fsDirectory` (1.23 kB), and Advanced Settings
+  (16.52 kB) into dynamic chunks. Manager/Popup preload only the 12.32 kB
+  Authority; default Options preloads neither Authority nor file UI/backend.
+- Fresh five-run empty production benchmark: Manager median useful UI 275.5ms,
+  Options 406ms, Options canonical state reads 0, Manager startup Open Tabs
+  calls 1, and maximum observed longest task 64ms.

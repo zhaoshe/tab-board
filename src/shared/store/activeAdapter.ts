@@ -19,13 +19,7 @@ import {
 } from '../model';
 import { logBreadcrumb, logError, logWarning } from '../utils/diagnostics';
 import { createChromeStorageAdapter } from './chromeStorageAdapter';
-import { createFileStorageAdapter } from './fileStorage';
-import {
-  clearRootHandle,
-  loadRootHandle,
-  saveRootHandle,
-  type IdbFactory,
-} from './fsDirectory';
+import type { IdbFactory } from './fsDirectory';
 import { readBootstrapMode, writeBootstrapMode } from './fsBootstrap';
 import type {
   ReloadableStorageAdapter,
@@ -42,7 +36,23 @@ import {
 
 // ---------- test injection seam ----------
 
+type FileStorageModule = typeof import('./fileStorage');
+type FsDirectoryModule = typeof import('./fsDirectory');
+
+interface ActiveAdapterModuleLoaders {
+  loadFileStorageModule: () => Promise<FileStorageModule>;
+  loadFsDirectoryModule: () => Promise<FsDirectoryModule>;
+}
+
+const defaultModuleLoaders: ActiveAdapterModuleLoaders = {
+  loadFileStorageModule: () => import('./fileStorage'),
+  loadFsDirectoryModule: () => import('./fsDirectory'),
+};
+
 let testIdbFactory: IdbFactory | undefined;
+let moduleLoaders = defaultModuleLoaders;
+let fileStorageModulePromise: Promise<FileStorageModule> | null = null;
+let fsDirectoryModulePromise: Promise<FsDirectoryModule> | null = null;
 
 /**
  * Test-only: override the IndexedDB factory used to persist the root handle.
@@ -51,6 +61,27 @@ let testIdbFactory: IdbFactory | undefined;
  */
 export function _setActiveAdapterIdbFactory(factory: IdbFactory | undefined): void {
   testIdbFactory = factory;
+}
+
+/**
+ * Test-only: observe or replace conditional file-storage module loading.
+ */
+export function _setActiveAdapterModuleLoadersForTests(
+  loaders: ActiveAdapterModuleLoaders | undefined,
+): void {
+  moduleLoaders = loaders ?? defaultModuleLoaders;
+  fileStorageModulePromise = null;
+  fsDirectoryModulePromise = null;
+}
+
+function loadFileStorageModule(): Promise<FileStorageModule> {
+  fileStorageModulePromise ??= moduleLoaders.loadFileStorageModule();
+  return fileStorageModulePromise;
+}
+
+function loadFsDirectoryModule(): Promise<FsDirectoryModule> {
+  fsDirectoryModulePromise ??= moduleLoaders.loadFsDirectoryModule();
+  return fsDirectoryModulePromise;
 }
 
 const fallbackListeners = new Set<(reason: string) => void>();
@@ -150,6 +181,7 @@ class StorageAuthority implements StorageAdapter {
     }
 
     try {
+      const { loadRootHandle } = await loadFsDirectoryModule();
       const root = await loadRootHandle(testIdbFactory);
       if (!root) {
         throw Object.assign(
@@ -157,6 +189,7 @@ class StorageAuthority implements StorageAdapter {
           { code: 'NO_HANDLE' },
         );
       }
+      const { createFileStorageAdapter } = await loadFileStorageModule();
       const adapter = await createFileStorageAdapter(root);
       this.installBackend({ mode: 'file', adapter });
       logBreadcrumb('file-storage: init', 'file adapter active');
@@ -369,6 +402,11 @@ function getAuthority(): StorageAuthority {
 async function commitFileHandleAndBootstrap(
   root: FileSystemDirectoryHandle,
 ): Promise<void> {
+  const {
+    clearRootHandle,
+    loadRootHandle,
+    saveRootHandle,
+  } = await loadFsDirectoryModule();
   const previousRoot = await loadRootHandle(testIdbFactory);
   await saveRootHandle(root, testIdbFactory);
   try {
@@ -466,6 +504,7 @@ export async function switchToFileMode(
   initialState: TabBoardState,
 ): Promise<void> {
   logBreadcrumb('file-storage: migration', `switching to file mode, revision=${initialState.mutationRevision}`);
+  const { createFileStorageAdapter } = await loadFileStorageModule();
   let committed = false;
   const adapter = await createFileStorageAdapter(root, {
     shouldPublishPing: () => committed,
@@ -504,6 +543,7 @@ export async function switchToBrowserMode(copyFileData: boolean): Promise<void> 
   const state = await chromeAdapter.getState();
   await writeBootstrapMode('browser');
   try {
+    const { clearRootHandle } = await loadFsDirectoryModule();
     await clearRootHandle(testIdbFactory);
   } catch (err) {
     logWarning('activeAdapter', 'Failed to clear root handle during switch to browser mode', err);
@@ -520,6 +560,7 @@ export async function switchToBrowserMode(copyFileData: boolean): Promise<void> 
  */
 export async function reconnectFolder(root: FileSystemDirectoryHandle): Promise<void> {
   logBreadcrumb('file-storage: reconnect', 'reconnecting to file folder');
+  const { createFileStorageAdapter } = await loadFileStorageModule();
   const adapter = await createFileStorageAdapter(root);
   const state = await adapter.getState();
   await commitFileHandleAndBootstrap(root);

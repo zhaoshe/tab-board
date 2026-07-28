@@ -7,6 +7,7 @@ import {
   formatDiagnostics,
   logBreadcrumb,
   logError,
+  logWarning,
   readDiagnostics,
   serializeDetail,
   type DiagnosticEntry,
@@ -28,6 +29,7 @@ function stubChromeStorage() {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
   enableDiagnosticsPersistence(true);
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -35,6 +37,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.runOnlyPendingTimers();
+  vi.useRealTimers();
   enableDiagnosticsPersistence(false);
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -46,6 +50,7 @@ describe('diagnostics ring buffer', () => {
 
     logBreadcrumb('hydration', 'started');
     logError('manager', 'boom', new Error('kaboom'));
+    await vi.runAllTimersAsync();
     await readDiagnostics(); // flush the serialized write chain
 
     const entries = store[DIAGNOSTICS_KEY] as DiagnosticEntry[];
@@ -66,6 +71,7 @@ describe('diagnostics ring buffer', () => {
     for (let i = 0; i < DIAGNOSTICS_LIMIT + 25; i += 1) {
       logBreadcrumb('loop', `entry ${i}`);
     }
+    await vi.advanceTimersByTimeAsync(250);
     await readDiagnostics();
 
     const entries = store[DIAGNOSTICS_KEY] as DiagnosticEntry[];
@@ -83,11 +89,42 @@ describe('diagnostics ring buffer', () => {
   it('clears diagnostics on request', async () => {
     const { store } = stubChromeStorage();
     logBreadcrumb('scope', 'one');
+    await vi.advanceTimersByTimeAsync(250);
     await readDiagnostics();
     expect(store[DIAGNOSTICS_KEY]).toBeDefined();
 
     await clearDiagnostics();
     expect(store[DIAGNOSTICS_KEY]).toBeUndefined();
+  });
+
+  it('batches an info breadcrumb burst into one storage read and write', async () => {
+    const { local } = stubChromeStorage();
+
+    for (let index = 0; index < 25; index += 1) {
+      logBreadcrumb('startup', `entry ${index}`);
+    }
+    expect(local.get).not.toHaveBeenCalled();
+    expect(local.set).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(249);
+    expect(local.get).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(local.get).toHaveBeenCalledTimes(1);
+    expect(local.set).toHaveBeenCalledTimes(1);
+  });
+
+  it('flushes warning and error entries without waiting for the info timer', async () => {
+    const { local } = stubChromeStorage();
+
+    logWarning('startup', 'warning');
+    logError('startup', 'error');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(local.get).toHaveBeenCalledTimes(1);
+    expect(local.set).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('serializes errors, strings, and objects into readable detail', () => {

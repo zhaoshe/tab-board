@@ -67,6 +67,9 @@ export function serializeDetail(detail: unknown): string | undefined {
 // Serialize writes so concurrent log calls cannot clobber each other's ring.
 let writeChain: Promise<void> = Promise.resolve();
 let persistenceEnabled = true;
+let pendingEntries: DiagnosticEntry[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+const INFO_FLUSH_DELAY_MS = 250;
 
 export function enableDiagnosticsPersistence(enabled: boolean): void {
   persistenceEnabled = enabled;
@@ -81,15 +84,24 @@ if (isVitestEnvironment()) {
   persistenceEnabled = false;
 }
 
-async function appendEntry(entry: DiagnosticEntry): Promise<void> {
-  if (!persistenceEnabled) return;
+function clearFlushTimer(): void {
+  if (flushTimer === null) return;
+  clearTimeout(flushTimer);
+  flushTimer = null;
+}
+
+async function flushPendingEntries(): Promise<void> {
+  clearFlushTimer();
+  if (!persistenceEnabled || !pendingEntries.length) return;
   const local = chromeStorage();
+  const batch = pendingEntries;
+  pendingEntries = [];
   if (!local) return;
   const run = writeChain.then(async () => {
     try {
       const stored = await local.get(DIAGNOSTICS_KEY);
       const existing = normalizeEntries(stored[DIAGNOSTICS_KEY]);
-      const next = [...existing, entry].slice(-DIAGNOSTICS_LIMIT);
+      const next = [...existing, ...batch].slice(-DIAGNOSTICS_LIMIT);
       await local.set({ [DIAGNOSTICS_KEY]: next });
     } catch {
       // Diagnostics must never surface their own failures.
@@ -97,6 +109,21 @@ async function appendEntry(entry: DiagnosticEntry): Promise<void> {
   });
   writeChain = run.then(() => undefined, () => undefined);
   return run;
+}
+
+function appendEntry(entry: DiagnosticEntry): void {
+  if (!persistenceEnabled) return;
+  pendingEntries.push(entry);
+  if (entry.level !== 'info') {
+    void flushPendingEntries();
+    return;
+  }
+  if (flushTimer === null) {
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      void flushPendingEntries();
+    }, INFO_FLUSH_DELAY_MS);
+  }
 }
 
 function log(level: DiagnosticLevel, scope: string, message: string, detail?: unknown): void {
@@ -110,7 +137,7 @@ function log(level: DiagnosticLevel, scope: string, message: string, detail?: un
   // Mirror to the console too, for the case where the page is still alive.
   const consoleMethod = level === 'error' ? console.error : level === 'warn' ? console.warn : console.info;
   consoleMethod?.(`[tabboard:${scope}] ${message}`, detail ?? '');
-  void appendEntry(entry);
+  appendEntry(entry);
 }
 
 export function logBreadcrumb(scope: string, message: string, detail?: unknown): void {
@@ -131,6 +158,7 @@ export async function readDiagnostics(): Promise<DiagnosticEntry[]> {
   if (!local) return [];
   // Wait for any in-flight appends so a read taken right after logging (e.g.
   // from the ErrorBoundary) reflects the latest breadcrumbs.
+  await flushPendingEntries();
   await writeChain;
   try {
     const stored = await local.get(DIAGNOSTICS_KEY);
@@ -142,6 +170,9 @@ export async function readDiagnostics(): Promise<DiagnosticEntry[]> {
 
 export async function clearDiagnostics(): Promise<void> {
   if (!persistenceEnabled) return;
+  clearFlushTimer();
+  pendingEntries = [];
+  await writeChain;
   const local = chromeStorage();
   if (!local) return;
   try {

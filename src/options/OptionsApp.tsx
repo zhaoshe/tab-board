@@ -1,5 +1,14 @@
-import { useState, useEffect, useRef } from 'react';
 import {
+  Component,
+  Suspense,
+  lazy,
+  useEffect,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+} from 'react';
+import {
+  Alert,
   MantineProvider,
   Center,
   Container,
@@ -9,7 +18,6 @@ import {
   Text,
   Divider,
   Group,
-  Card,
   Radio,
   SegmentedControl,
   Button,
@@ -18,21 +26,51 @@ import {
 } from '@mantine/core';
 import {
   IconSettings,
-  IconRefresh,
-  IconKeyboard,
   IconExternalLink,
+  IconAlertTriangle,
 } from '@tabler/icons-react';
 import '@mantine/core/styles.css';
 import { theme } from '../shared/styles/theme';
 import { usePreferredColorScheme } from '../shared/hooks/usePreferredColorScheme';
 import { usePageTheme } from '../shared/hooks/usePageTheme';
-import { DEFAULT_SETTINGS } from '../shared/model';
-import { DataStorageCard } from './components/DataStorageCard';
 import { SettingsSection } from './components/SettingsSection';
 import { useSettingsDraft } from './hooks/useSettingsDraft';
 import { useOptionsSettings } from './hooks/useOptionsSettings';
-import { ConfirmDialog } from '../shared/components/ConfirmDialog';
 import './options.css';
+
+const AdvancedSettingsContent = lazy(async () => ({
+  default: (await import('./components/AdvancedSettingsContent'))
+    .AdvancedSettingsContent,
+}));
+
+class AdvancedSettingsErrorBoundary extends Component<
+  { children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(_error: Error, _info: ErrorInfo) {}
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <Alert
+        mt="md"
+        color="red"
+        icon={<IconAlertTriangle size={16} aria-hidden="true" />}
+      >
+        Advanced Settings could not load.
+        <Button ml="sm" size="xs" variant="light" onClick={() => window.location.reload()}>
+          Reload
+        </Button>
+      </Alert>
+    );
+  }
+}
 
 export function OptionsApp() {
   const {
@@ -45,8 +83,6 @@ export function OptionsApp() {
   usePageTheme(colorScheme);
 
   const [savePending, setSavePending] = useState(false);
-  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
-  const resetActionRef = useRef<HTMLButtonElement>(null);
   const [advancedOpen, setAdvancedOpen] = useState(
     () => new URLSearchParams(window.location.search).get('advanced') === '1',
   );
@@ -66,13 +102,6 @@ export function OptionsApp() {
     }
   };
 
-  const handleResetSettings = () => {
-    setSavePending(true);
-    updateSettings(DEFAULT_SETTINGS);
-    setSavePending(false);
-    setResetConfirmOpen(false);
-  };
-
   const customFilter = useSettingsDraft({
     value: settings.customUrlFilter,
     onCommit: (value) => {
@@ -80,10 +109,6 @@ export function OptionsApp() {
     },
     onPendingChange: setSavePending,
   });
-
-  const handleOpenShortcuts = () => {
-    void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
-  };
 
   const handleOpenManager = () => {
     void chrome.tabs.create({ url: 'manager.html' });
@@ -337,81 +362,27 @@ export function OptionsApp() {
             onToggle={(event) => handleAdvancedToggle(event.currentTarget.open)}
           >
             <summary>Advanced Settings</summary>
-            <Stack gap="md" mt="md">
-              <DataStorageCard />
-
-              <Card withBorder shadow="sm" padding="lg">
-                <Stack gap="md">
-                  <div>
-                    <Title order={2} size="h5">
-                      Safety
-                    </Title>
-                    <Text size="sm" c="dimmed">
-                      Confirmation for saved-item deletion
-                    </Text>
-                  </div>
-
-                  <Switch
-                    name="confirm-before-destructive"
-                    label="Confirm before deleting saved items"
-                    description="Session and saved-item deletion can skip confirmation. Closing browser tabs and permanent deletion always require confirmation."
-                    checked={settings.confirmBeforeDestructive}
-                    onChange={(e) =>
-                      handleSettingChange(
-                        'confirmBeforeDestructive',
-                        e.currentTarget.checked
-                      )
-                    }
+            {advancedOpen ? (
+              <AdvancedSettingsErrorBoundary>
+                <Suspense
+                  fallback={(
+                    <Center mt="md" role="status" aria-live="polite">
+                      <Loader size="sm" />
+                      <Text size="sm" ml="xs">Loading Advanced Settings…</Text>
+                    </Center>
+                  )}
+                >
+                  <AdvancedSettingsContent
+                    settings={settings}
+                    updateSettings={updateSettings}
                   />
-                </Stack>
-              </Card>
-
-              <Card withBorder shadow="sm" padding="lg">
-                <Stack gap="md">
-                  <div>
-                    <Title order={2} size="h5">
-                      Keyboard & Reset
-                    </Title>
-                    <Text size="sm" c="dimmed">
-                      Chrome shortcuts and settings recovery
-                    </Text>
-                  </div>
-
-                  <Group className="options-advanced-actions" grow>
-                    <Button
-                      variant="default"
-                      leftSection={<IconKeyboard size={16} aria-hidden="true" />}
-                      onClick={handleOpenShortcuts}
-                    >
-                      Open Keyboard Shortcuts
-                    </Button>
-                    <Button
-                      ref={resetActionRef}
-                      className="options-action-danger"
-                      variant="outline"
-                      color="red"
-                      leftSection={<IconRefresh size={16} aria-hidden="true" />}
-                      onClick={() => setResetConfirmOpen(true)}
-                    >
-                      Reset to Defaults
-                    </Button>
-                  </Group>
-                </Stack>
-              </Card>
-            </Stack>
+                </Suspense>
+              </AdvancedSettingsErrorBoundary>
+            ) : null}
           </details>
           </Stack>
         </Container>
       </main>
-      <ConfirmDialog
-        opened={resetConfirmOpen}
-        title="Reset Settings"
-        message="Reset all settings? Saved data stays."
-        confirmLabel="Reset Settings"
-        finalFocusRef={resetActionRef}
-        onCancel={() => setResetConfirmOpen(false)}
-        onConfirm={handleResetSettings}
-      />
     </MantineProvider>
   );
 }
