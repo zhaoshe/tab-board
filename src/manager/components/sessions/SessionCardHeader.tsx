@@ -45,14 +45,14 @@ export function SessionCardHeader({
   titleInputRef,
   titleValue,
 }: {
-  attributes: DraggableAttributes;
+  attributes: DraggableAttributes | undefined;
   createdAt: string;
-  dragHandleRef: (element: HTMLElement | null) => void;
+  dragHandleRef: ((element: HTMLElement | null) => void) | undefined;
   isDragOverlay: boolean;
   isEditingTitle: boolean;
   isMenuOpen: boolean;
   linkCount: number;
-  listeners: DraggableSyntheticListeners;
+  listeners: DraggableSyntheticListeners | undefined;
   locked: boolean;
   moreActionRef: RefObject<HTMLButtonElement>;
   noteCount: number;

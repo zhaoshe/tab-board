@@ -14,6 +14,7 @@ const layout = [
   'hooks/useCaptureReveal.ts',
 ].map((file) => readFileSync(resolve(managerRoot, file), 'utf8')).join('\n');
 const card = readFileSync(resolve(managerRoot, 'components/sessions/SessionCard.tsx'), 'utf8');
+const slot = readFileSync(resolve(managerRoot, 'components/sessions/SessionSlot.tsx'), 'utf8');
 const cardHeader = readFileSync(resolve(managerRoot, 'components/sessions/SessionCardHeader.tsx'), 'utf8');
 const cardMeta = readFileSync(resolve(managerRoot, 'components/sessions/SessionCardMeta.tsx'), 'utf8');
 const tabList = readFileSync(resolve(managerRoot, 'components/sessions/SessionTabList.tsx'), 'utf8');
@@ -254,8 +255,8 @@ describe('Task108 session rendering contracts', () => {
   });
 
   it('replaces saved drag sources and disables text selection during drag', () => {
-    expect(card).toContain('if (isDragging && !isDragOverlay)');
-    expect(card).toContain('className="session-card__placeholder-slot"');
+    expect(slot).toContain('if (isDragging)');
+    expect(slot).toContain('className="session-card__placeholder-slot"');
     expect(row).toContain('if (isDragging && !isDragOverlay)');
     expect(row).toContain('className="tab-item-row-placeholder"');
     expect(layout).toContain('dragActive={Boolean(dnd.activeId)}');
@@ -273,12 +274,12 @@ describe('Task108 session rendering contracts', () => {
     // The activator lives on a focusable button (not the non-focusable header),
     // so @dnd-kit's KeyboardSensor can pick up and reorder sessions. Spreading
     // attributes provides role/tabindex/aria-roledescription for AT.
-    expect(card).toContain('dragHandleRef={setActivatorNodeRef}');
+    expect(card).toContain('dragHandleRef={sortable?.setActivatorNodeRef');
     expect(cardHeader).toContain('ref={dragHandleRef}');
     expect(cardHeader).toContain('className="session-card__drag-handle"');
     expect(cardHeader).toContain('aria-label={`Drag ${title} to reorder`}');
     expect(cardHeader).toContain('{...attributes}');
-    expect(card).toContain('setActivatorNodeRef');
+    expect(slot).toContain('setActivatorNodeRef');
     // The header no longer owns the activator ref or keyboard listeners.
     expect(cardHeader).not.toContain('ref={isDragOverlay ? undefined : dragHandleRef}');
     // The keyboard sensor uses sortable coordinates so arrows traverse columns.
@@ -293,8 +294,8 @@ describe('Task108 session rendering contracts', () => {
     expect(placeholder).not.toContain('height = 200');
     expect(placeholder).not.toContain('height,');
     expect(row).not.toContain('height: 28');
-    expect(card).toContain('<SessionPlaceholder');
-    expect(card).toContain('sourceRect');
+    expect(slot).toContain('<SessionPlaceholder');
+    expect(slot).toContain('sourceRect');
     expect(row).toContain('sourceRect');
     expect(card).not.toContain('rect.current');
     expect(row).not.toContain('rect.current');

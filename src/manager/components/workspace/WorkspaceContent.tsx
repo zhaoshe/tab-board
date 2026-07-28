@@ -9,7 +9,7 @@ import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import type { CategoryFilter } from '../../core/selectors';
 import type { DndData, DragMarker, DragSourceRect } from '../../core/dnd';
-import { SessionCard } from '../sessions/SessionCard';
+import { SessionSlot } from '../sessions/SessionSlot';
 import { useOverflowCues } from '../../hooks/useOverflowCues';
 
 interface WorkspaceContentProps {
@@ -200,7 +200,7 @@ export function WorkspaceContent({
                     workspaceId={workspaceId}
                     isMarker={dragMarker?.kind === 'group' && dragMarker.index === groupIndex}
                   />
-                  <SessionCard
+                  <SessionSlot
                     group={group}
                     runtime={runtime}
                     searchQuery={searchQuery}

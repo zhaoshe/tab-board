@@ -49,6 +49,7 @@ describe('Manager UI ownership', () => {
 
   it('keeps SessionCard focused on state and command orchestration', () => {
     const source = read('src/manager/components/sessions/SessionCard.tsx');
+    const slot = read('src/manager/components/sessions/SessionSlot.tsx');
     const header = read('src/manager/components/sessions/SessionCardHeader.tsx');
     const meta = read('src/manager/components/sessions/SessionCardMeta.tsx');
     const editor = read('src/manager/components/sessions/SessionCardEditor.tsx');
@@ -60,6 +61,10 @@ describe('Manager UI ownership', () => {
     expect(source).not.toContain('<header');
     expect(source).not.toContain('<Textarea');
     expect(source).not.toContain('<SortableContext');
+    expect(source).not.toContain('useSortable');
+    expect(slot).toContain('useSortable');
+    expect(slot).toContain('<SessionCard');
+    expect(slot).toContain('<SessionPlaceholder');
     expect(header).toContain('<SessionCardMeta');
     expect(meta).toContain('export function SessionCardMeta');
     expect(editor).toContain('export function SessionCardEditor');

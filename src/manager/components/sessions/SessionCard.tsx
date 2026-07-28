@@ -8,13 +8,9 @@ import {
   IconPlus,
   IconTrash,
 } from '@tabler/icons-react';
-import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 import { useShallow } from 'zustand/react/shallow';
 import type { Group, TabItem } from '../../../shared/model';
-import type { CategoryFilter } from '../../core/selectors';
 import {
-  getDragPlaceholderStyle,
   type DragMarker,
   type DragSourceRect,
   type SavedTabRef,
@@ -30,7 +26,6 @@ import {
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
 import { useToast } from '../../hooks/useToast';
-import { SessionPlaceholder } from './SessionPlaceholder';
 import { SessionCardHeader } from './SessionCardHeader';
 import { SessionCardEditor } from './SessionCardEditor';
 import { SessionTabList } from './SessionTabList';
@@ -47,16 +42,16 @@ import {
   useManagerOverlayLifecycle,
 } from '../../hooks/useManagerOverlays';
 import { useOverflowCues } from '../../hooks/useOverflowCues';
+import type { SessionSortableBindings } from './SessionSlot';
 
 interface SessionCardProps {
   group: Group;
   runtime: ManagerRuntime;
   searchQuery?: string;
-  groupIndex?: number;
-  groupCategory?: CategoryFilter;
   isDragOverlay?: boolean;
   highlighted?: boolean;
   dragMarker?: DragMarker | null;
+  sortable?: SessionSortableBindings;
   sourceRect?: DragSourceRect | null;
 }
 
@@ -64,11 +59,10 @@ export const SessionCard = memo(function SessionCard({
   group,
   runtime,
   searchQuery = '',
-  groupIndex = 0,
-  groupCategory = 'inbox',
   isDragOverlay = false,
   highlighted = false,
   dragMarker = null,
+  sortable,
   sourceRect = null,
 }: SessionCardProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -87,30 +81,6 @@ export const SessionCard = memo(function SessionCard({
   const { showError, showSuccess } = useToast();
   const confirmDestructive = useDestructiveConfirmation();
   const tabOverflow = useOverflowCues<HTMLDivElement>();
-
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({
-    id: `group-${group.id}`,
-    data: {
-      type: 'group',
-      groupId: group.id,
-      workspaceId: group.workspaceId,
-      dnd: {
-        payload: { kind: 'group', groupId: group.id, workspaceId: group.workspaceId },
-        targets: [{ kind: 'group-body', groupId: group.id, workspaceId: group.workspaceId }],
-        groupIndex,
-        groupCategory,
-      },
-    },
-    disabled: isDragOverlay,
-  });
 
   const updateGroup = useTabBoardStore((state) => state.updateGroup);
   const folders = useTabBoardStore(
@@ -155,13 +125,9 @@ export const SessionCard = memo(function SessionCard({
     };
   }, [group.id, group.tabs, normalizedQuery, selectedTabIds, titleMatches]);
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-    cursor: isDragging ? 'grabbing' : 'default',
-    pointerEvents: isDragOverlay ? 'none' as const : undefined,
-  };
+  const style = isDragOverlay
+    ? { pointerEvents: 'none' as const }
+    : sortable?.style;
 
   useEffect(() => {
     if (isEditingTitle && titleInputRef.current) {
@@ -380,17 +346,9 @@ export const SessionCard = memo(function SessionCard({
     });
   };
 
-  if (isDragging && !isDragOverlay) {
-    return (
-      <div ref={setNodeRef} style={style} className="session-card__placeholder-slot">
-        <SessionPlaceholder style={getDragPlaceholderStyle(sourceRect)} />
-      </div>
-    );
-  }
-
   return (
     <article
-      ref={setNodeRef}
+      ref={sortable?.setNodeRef}
       style={style}
       id={`session-card-${group.id}`}
       className="session-card"
@@ -404,14 +362,14 @@ export const SessionCard = memo(function SessionCard({
       onKeyDown={isDragOverlay ? undefined : (event) => openSessionMenu(event)}
     >
       <SessionCardHeader
-        attributes={attributes}
+        attributes={sortable?.attributes}
         createdAt={group.createdAt}
-        dragHandleRef={setActivatorNodeRef}
+        dragHandleRef={sortable?.setActivatorNodeRef}
         isDragOverlay={isDragOverlay}
         isEditingTitle={isEditingTitle}
         isMenuOpen={isSessionMenuOpen}
         linkCount={tabMetadata.linkCount}
-        listeners={listeners}
+        listeners={sortable?.listeners}
         locked={group.locked}
         moreActionRef={moreActionRef}
         noteCount={tabMetadata.noteCount}
@@ -419,7 +377,7 @@ export const SessionCard = memo(function SessionCard({
           if (event.target instanceof Element && event.target.closest('button, input, textarea, a, [data-no-drag]')) {
             return;
           }
-          listeners?.onPointerDown?.(event);
+          sortable?.listeners?.onPointerDown?.(event);
         }}
         onOpenMenu={openSessionMenu}
         onRestore={handleRestore}

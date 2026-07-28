@@ -124,18 +124,34 @@ vi.mock('@dnd-kit/core', () => ({
 vi.mock('@dnd-kit/sortable', () => ({
   SortableContext: ({ children }: { children?: ReactNode }) => children,
   rectSortingStrategy: () => undefined,
+  useSortable: (options: {
+    data: {
+      groupId: string;
+      dnd: { groupIndex: number };
+    };
+  }) => {
+    testHarness.sessionCards.push({
+      groupId: options.data.groupId,
+      groupIndex: options.data.dnd.groupIndex,
+    });
+    return {
+      attributes: {},
+      listeners: {},
+      setNodeRef: () => undefined,
+      setActivatorNodeRef: () => undefined,
+      transform: null,
+      transition: undefined,
+      isDragging: false,
+    };
+  },
 }));
 
 vi.mock('../sessions/SessionCard', () => ({
   SessionCard: (props: {
     group: TestGroup;
-    groupIndex: number;
   }) => {
     testHarness.sessionCardRenderCount += 1;
-    testHarness.sessionCards.push({
-      groupId: props.group.id,
-      groupIndex: props.groupIndex,
-    });
+    void props.group;
     return null;
   },
 }));

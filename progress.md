@@ -200,3 +200,11 @@
   empty batch was 749ms, a reverse 306ms difference caused by cold-browser
   batch/order variance rather than data reads; final comparison will interleave
   scenarios and retain raw samples.
+- Task 4 RED required `SessionSlot` to become the only ordinary group
+  `useSortable` owner while preserving the complete SessionCard contract.
+- Extracted group sortable metadata, refs, transforms, activator bindings, and
+  drag placeholder into `SessionSlot`. SessionCard remains the state/command
+  owner and drag-overlay cards remain static without sortable registration.
+- Task 4 verification: 3 focused files / 39 tests passed, production build
+  passed, and `session-dnd.e2e.ts` passed 5/5 across pointer, keyboard, Escape,
+  and category-handle paths.

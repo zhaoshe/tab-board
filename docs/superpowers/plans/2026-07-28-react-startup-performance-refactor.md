@@ -231,19 +231,19 @@ Commit as `perf(options): hydrate a settings projection`, ending in the required
 - `SessionCard` consumes `sortable: SessionSortableBindings`
 - Drag-overlay `SessionCard` receives disabled overlay bindings
 
-- [ ] **Step 1: Write failing ownership and DOM tests**
+- [x] **Step 1: Write failing ownership and DOM tests**
 
 Assert exactly one group sortable owner, the slot keeps `data-group-id`, full cards retain IDs/handles, and drag overlay remains disabled.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run focused session/ownership tests; expected missing `SessionSlot`.
 
-- [ ] **Step 3: Extract sortable ownership without activation**
+- [x] **Step 3: Extract sortable ownership without activation**
 
 Render every full `SessionCard` exactly as before. Move only `useSortable`, node ref, transform, transition, placeholder, and drag-handle ports into `SessionSlot`.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run focused unit tests and complete `session-dnd.e2e.ts`. No performance behavior changes yet.
 
