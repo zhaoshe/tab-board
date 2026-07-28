@@ -104,7 +104,7 @@ Append the required co-author trailer.
 - Produces dependency `initializeAuthoritativeState(): Promise<TabBoardState>`
 - Uses existing `subscribeAuthoritativeState(callback)`
 
-- [ ] **Step 1: Write failing hydration tests**
+- [x] **Step 1: Write failing hydration tests**
 
 Add tests that assert:
 
@@ -114,7 +114,7 @@ Add tests that assert:
 - repeated calls share one in-flight initializer;
 - release during initialization prevents stale publication.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```sh
 npx vitest run src/shared/store/authoritativePublication.test.ts src/shared/store/useTabBoardStore.test.ts
@@ -122,15 +122,15 @@ npx vitest run src/shared/store/authoritativePublication.test.ts src/shared/stor
 
 Expected: compile/test failure because the new dependency does not exist.
 
-- [ ] **Step 3: Implement one-read hydration**
+- [x] **Step 3: Implement one-read hydration**
 
 Subscribe first, call `initializeAuthoritativeState()` once, reconcile against the buffered newest state, structurally share, and publish hydrated state. Keep generation/dispose guards.
 
-- [ ] **Step 4: Wire the store directly to `ensureActiveState()`**
+- [x] **Step 4: Wire the store directly to `ensureActiveState()`**
 
 Remove the page hydration dependency on `ensureStateForHydration()`. Keep worker-based functions for callers that explicitly need worker persistence.
 
-- [ ] **Step 5: Verify GREEN and focused regressions**
+- [x] **Step 5: Verify GREEN and focused regressions**
 
 Run the focused tests plus:
 
@@ -138,7 +138,7 @@ Run the focused tests plus:
 npx vitest run src/shared/hooks/useStoreHydration.test.ts src/shared/store/activeAdapter.test.ts
 ```
 
-- [ ] **Step 6: Run startup benchmark checkpoint**
+- [x] **Step 6: Run startup benchmark checkpoint**
 
 Run empty and medium scenarios. Record before/after timings in the review; do not claim the final target yet.
 

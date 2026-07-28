@@ -145,8 +145,6 @@ class StorageAuthority implements StorageAdapter {
     if (mode === 'browser') {
       const adapter = createChromeStorageAdapter();
       this.installBackend({ mode, adapter });
-      const state = await adapter.getState();
-      this.recordState(state);
       logBreadcrumb('file-storage: init', 'browser storage active');
       return { mode, adapter };
     }
@@ -161,9 +159,7 @@ class StorageAuthority implements StorageAdapter {
       }
       const adapter = await createFileStorageAdapter(root);
       this.installBackend({ mode: 'file', adapter });
-      const state = await adapter.getState();
-      this.recordState(state);
-      logBreadcrumb('file-storage: init', `file adapter active, revision=${state.mutationRevision}`);
+      logBreadcrumb('file-storage: init', 'file adapter active');
       return { mode: 'file', adapter };
     } catch (error: unknown) {
       logWarning('activeAdapter', 'File adapter initialization failed; falling back to browser storage', error);
@@ -172,8 +168,6 @@ class StorageAuthority implements StorageAdapter {
         : fallbackReason(error);
       const adapter = createChromeStorageAdapter();
       this.installBackend({ mode: 'browser', adapter });
-      const state = await adapter.getState();
-      this.recordState(state);
       await this.publishFallback(reason);
       return { mode: 'browser', adapter };
     }

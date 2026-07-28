@@ -33,8 +33,7 @@ export interface AuthoritativePublicationDependencies {
   readProjection(): PublicationProjection;
   publishProjection(state: TabBoardState, status?: PublicationStatus): void;
   patchStatus(status: PublicationStatus): void;
-  ensureState(): Promise<TabBoardState>;
-  readAuthoritativeState(): Promise<TabBoardState>;
+  initializeAuthoritativeState(): Promise<TabBoardState>;
   subscribeAuthoritativeState(callback: (state: TabBoardState) => void): () => void;
   sendMutations(mutations: readonly StateMutation[]): Promise<TabBoardState>;
   currentContext(): unknown;
@@ -479,7 +478,7 @@ export function createAuthoritativePublication(
   const recoverAuthoritativeState = async (): Promise<TabBoardState | null> => {
     let recovered: TabBoardState | null = null;
     try {
-      recovered = await dependencies.readAuthoritativeState();
+      recovered = await dependencies.initializeAuthoritativeState();
     } catch {
       recovered = null;
     }
@@ -1021,9 +1020,6 @@ export function createAuthoritativePublication(
       const hydration = (async () => {
         let pendingHydrationState: TabBoardState | null = null;
         try {
-          await dependencies.ensureState();
-          if (disposed || generation !== hydrationGeneration) return;
-
           hydrationUnsubscribe?.();
           hydrationUnsubscribe = dependencies.subscribeAuthoritativeState(
             (state) => {
@@ -1038,7 +1034,7 @@ export function createAuthoritativePublication(
               acceptRemoteState(state);
             },
           );
-          const authoritative = await dependencies.readAuthoritativeState();
+          const authoritative = await dependencies.initializeAuthoritativeState();
           if (disposed || generation !== hydrationGeneration) return;
           const projection = dependencies.readProjection();
           const shared = structurallyShareState(

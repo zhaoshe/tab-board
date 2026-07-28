@@ -165,3 +165,18 @@
   a separate measured tab, and reports JSON plus a table.
 - Benchmark smoke passed for empty state: Manager useful UI 666ms, Options
   useful UI 663ms, and Manager startup recorded 4 `list-open-tabs` calls.
+- Task 2 RED replaced the two hydration dependencies with one initializer and
+  failed because production still called `ensureState`; it also proved the
+  subscription was installed after the initial read.
+- Task 2 GREEN: Authoritative Publication subscribes before one
+  `initializeAuthoritativeState()` call, buffers read-gap updates, and keeps
+  release/dispose generation guards.
+- Store hydration now calls `ensureActiveState()` directly and sends zero
+  `tabboard-ensure-state` runtime messages. Storage Authority initialization no
+  longer pre-reads state before `ensureState()`, so browser startup performs one
+  bootstrap read and one canonical state read.
+- Fresh Task 2 verification: production build passed; 4 focused files / 119
+  tests passed, and the broader storage checkpoint passed 7 files / 143 tests.
+- One-run directional benchmark after Task 2: medium Options 544ms versus the
+  audit sample 1,186ms; empty Options 617ms. Final claims remain gated on
+  five-run medians.

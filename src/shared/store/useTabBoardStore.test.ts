@@ -2358,40 +2358,45 @@ describe('TabBoard store hydration lifecycle', () => {
 
   it('shares one in-flight hydrate request and subscription', async () => {
     const { activeListeners, chromeMock, persisted } = setupChrome();
-    let resolveEnsure: ((response: { ok: boolean; result: TabBoardState }) => void) | undefined;
-    chromeMock.runtime.sendMessage.mockImplementationOnce(() => new Promise<{ ok: boolean; result: TabBoardState }>((resolve) => {
-      resolveEnsure = resolve;
-    }));
+    let resolveStateRead: (() => void) | undefined;
+    chromeMock.storage.local.get.mockImplementation((key: string) => {
+      if (key === 'tabboardStorageConfig') return Promise.resolve({});
+      return new Promise<Record<string, TabBoardState>>((resolve) => {
+        resolveStateRead = () => resolve({
+          tabboardState: structuredClone(persisted),
+        });
+      });
+    });
 
     const first = useTabBoardStore.getState().hydrate();
     const second = useTabBoardStore.getState().hydrate();
 
     expect(second).toBe(first);
-    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledTimes(1);
-    resolveEnsure?.({ ok: true, result: structuredClone(persisted) });
+    await vi.waitFor(() => expect(resolveStateRead).toBeTypeOf('function'));
+    expect(chromeMock.runtime.sendMessage).not.toHaveBeenCalled();
+    resolveStateRead?.();
     await Promise.all([first, second]);
 
     expect(chromeMock.storage.onChanged.addListener).toHaveBeenCalledTimes(1);
+    expect(chromeMock.storage.local.get.mock.calls.filter(
+      ([key]) => key === 'tabboardState',
+    )).toHaveLength(1);
     expect(activeListeners).toHaveLength(1);
   });
 
-  it('hydrates from local storage when the ensure-state worker call fails', async () => {
-    // An idle/cold MV3 worker (or torn-down message port) must not blank the
-    // manager: hydration is decoupled from the worker and reads storage directly.
+  it('hydrates directly from local storage without waking the service worker', async () => {
     const { chromeMock } = setupChrome();
-    chromeMock.runtime.sendMessage.mockRejectedValueOnce(new Error('worker unavailable'));
 
     await useTabBoardStore.getState().hydrate();
 
     expect(useTabBoardStore.getState().hydrated).toBe(true);
     expect(useTabBoardStore.getState().persistenceError).toBeNull();
-    // Fell back to reading chrome.storage.local rather than failing.
+    expect(chromeMock.runtime.sendMessage).not.toHaveBeenCalled();
     expect(chromeMock.storage.local.get).toHaveBeenCalled();
   });
 
-  it('records a hydration failure and permits retry when storage is also unreachable', async () => {
+  it('records a hydration failure and permits retry when storage is unreachable', async () => {
     const { chromeMock } = setupChrome();
-    chromeMock.runtime.sendMessage.mockRejectedValueOnce(new Error('worker unavailable'));
     chromeMock.storage.local.get.mockRejectedValueOnce(new Error('storage unavailable'));
 
     await expect(useTabBoardStore.getState().hydrate()).rejects.toThrow('storage unavailable');
@@ -2425,20 +2430,26 @@ describe('TabBoard store hydration lifecycle', () => {
     expect(useTabBoardStore.getState().groups.map(({ id }) => id)).toEqual(['accepted-after-rehydrate']);
   });
 
-  it('does not attach a stale listener when cleanup wins an in-flight hydrate', async () => {
+  it('ignores the initialized state when cleanup wins an in-flight hydrate', async () => {
     const { activeListeners, chromeMock, persisted } = setupChrome();
-    let resolveEnsure: ((response: { ok: boolean; result: TabBoardState }) => void) | undefined;
-    chromeMock.runtime.sendMessage.mockImplementationOnce(() => new Promise<{ ok: boolean; result: TabBoardState }>((resolve) => {
-      resolveEnsure = resolve;
-    }));
+    let resolveStateRead: (() => void) | undefined;
+    chromeMock.storage.local.get.mockImplementation((key: string) => {
+      if (key === 'tabboardStorageConfig') return Promise.resolve({});
+      return new Promise<Record<string, TabBoardState>>((resolve) => {
+        resolveStateRead = () => resolve({
+          tabboardState: structuredClone(persisted),
+        });
+      });
+    });
 
     const hydration = useTabBoardStore.getState().hydrate();
+    await vi.waitFor(() => expect(resolveStateRead).toBeTypeOf('function'));
     useTabBoardStore.getState().releaseHydration();
-    resolveEnsure?.({ ok: true, result: structuredClone(persisted) });
+    resolveStateRead?.();
     await hydration;
 
-    expect(activeListeners).toHaveLength(0);
-    expect(chromeMock.storage.onChanged.addListener).not.toHaveBeenCalled();
+    expect(activeListeners).toHaveLength(1);
+    expect(chromeMock.storage.onChanged.addListener).toHaveBeenCalledTimes(1);
     expect(useTabBoardStore.getState().hydrated).toBe(false);
   });
 

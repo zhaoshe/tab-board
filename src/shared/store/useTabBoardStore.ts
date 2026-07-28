@@ -7,8 +7,9 @@ import {
   exportToJson,
   createNoteRecord,
 } from '../model';
-import { ensureStateForHydration, sendStateMutations } from './chromeStorage';
+import { sendStateMutations } from './chromeStorage';
 import {
+  ensureActiveState,
   getActiveState,
   onFallback,
   subscribeActiveState,
@@ -164,8 +165,7 @@ const publication = createAuthoritativePublication({
   patchStatus: (status) => {
     useTabBoardStore.setState(status);
   },
-  ensureState: ensureStateForHydration,
-  readAuthoritativeState: getActiveState,
+  initializeAuthoritativeState: ensureActiveState,
   subscribeAuthoritativeState: subscribeActiveState,
   sendMutations: sendStateMutations,
   currentContext: () => globalThis.chrome,

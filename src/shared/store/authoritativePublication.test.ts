@@ -101,8 +101,7 @@ function createHarness(initialState: TabBoardState = createEmptyState()) {
     patchStatus: (status) => {
       projection = { ...projection, ...status };
     },
-    ensureState: async () => authoritative,
-    readAuthoritativeState: async () => authoritative,
+    initializeAuthoritativeState: async () => authoritative,
     subscribeAuthoritativeState: (callback) => {
       subscriber = callback;
       return () => {
@@ -703,10 +702,10 @@ describe('authoritative publication lifecycle', () => {
   it('shares one in-flight hydration and creates one subscription', async () => {
     const harness = createHarness();
     harness.dependencies.patchStatus({ hydrated: false });
-    let resolveEnsure: ((state: TabBoardState) => void) | undefined;
-    harness.dependencies.ensureState = vi.fn(() =>
+    let resolveInitialize: ((state: TabBoardState) => void) | undefined;
+    harness.dependencies.initializeAuthoritativeState = vi.fn(() =>
       new Promise<TabBoardState>((resolve) => {
-        resolveEnsure = resolve;
+        resolveInitialize = resolve;
       }),
     );
     const subscribe = vi.fn(harness.dependencies.subscribeAuthoritativeState);
@@ -717,8 +716,9 @@ describe('authoritative publication lifecycle', () => {
     const second = publication.hydrate();
 
     expect(second).toBe(first);
-    expect(harness.dependencies.ensureState).toHaveBeenCalledTimes(1);
-    resolveEnsure?.(harness.getProjection().state);
+    expect(harness.dependencies.initializeAuthoritativeState).toHaveBeenCalledTimes(1);
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    resolveInitialize?.(harness.getProjection().state);
     await Promise.all([first, second]);
     expect(subscribe).toHaveBeenCalledTimes(1);
     expect(harness.getProjection().hydrated).toBe(true);
@@ -760,7 +760,7 @@ describe('authoritative publication lifecycle', () => {
       groups: [group('event-group')],
       updatedAt: eventUpdatedAt,
     };
-    harness.dependencies.readAuthoritativeState = vi.fn(async () => {
+    harness.dependencies.initializeAuthoritativeState = vi.fn(async () => {
       subscriber?.(eventState);
       return readState;
     });
@@ -772,24 +772,29 @@ describe('authoritative publication lifecycle', () => {
       .toEqual([expectedGroupId]);
   });
 
-  it('does not subscribe when release wins an in-flight hydration', async () => {
+  it('unsubscribes when release wins an in-flight initialization', async () => {
     const harness = createHarness();
     harness.dependencies.patchStatus({ hydrated: false });
-    let resolveEnsure: ((state: TabBoardState) => void) | undefined;
-    harness.dependencies.ensureState = () =>
+    let resolveInitialize: ((state: TabBoardState) => void) | undefined;
+    harness.dependencies.initializeAuthoritativeState = () =>
       new Promise<TabBoardState>((resolve) => {
-        resolveEnsure = resolve;
+        resolveInitialize = resolve;
       });
+    const unsubscribe = vi.fn();
     const subscribe = vi.fn(harness.dependencies.subscribeAuthoritativeState);
-    harness.dependencies.subscribeAuthoritativeState = subscribe;
+    harness.dependencies.subscribeAuthoritativeState = (callback) => {
+      subscribe(callback);
+      return unsubscribe;
+    };
     const publication = createAuthoritativePublication(harness.dependencies);
 
     const hydration = publication.hydrate();
     publication.releaseHydration();
-    resolveEnsure?.(harness.getProjection().state);
+    resolveInitialize?.(harness.getProjection().state);
     await hydration;
 
-    expect(subscribe).not.toHaveBeenCalled();
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
     expect(harness.getProjection().hydrated).toBe(false);
   });
 
@@ -820,7 +825,7 @@ describe('authoritative publication lifecycle', () => {
     const harness = createHarness();
     harness.dependencies.patchStatus({ hydrated: false });
     let attempts = 0;
-    harness.dependencies.ensureState = vi.fn(async () => {
+    harness.dependencies.initializeAuthoritativeState = vi.fn(async () => {
       attempts += 1;
       if (attempts === 1) throw new Error('storage unavailable');
       return harness.getProjection().state;
