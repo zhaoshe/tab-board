@@ -10,8 +10,8 @@ produce an evidence-ranked React performance refactor plan.
 
 ## Current Phase
 
-Complete - production Manager/Options startup has been measured, root causes
-ranked, and an owner-by-owner refactor plan recorded.
+Phase 12 - execute the approved startup performance refactor with TDD and
+production-extension benchmarks.
 
 ## Phases
 
@@ -121,6 +121,18 @@ Status: complete
 - Produce an evidence-ranked optimization and ownership refactor plan without
   changing schema, storage protocol, or DnD semantics.
 
+### Phase 12 - React startup performance implementation
+
+Status: in_progress
+
+- Establish a repository-owned production startup benchmark.
+- Collapse page hydration to one Storage Authority read.
+- Decouple Options Basic settings from full application hydration.
+- Preserve stable session geometry while activating expensive card content near
+  the viewport.
+- Coalesce startup runtime work and defer non-critical modules/diagnostics.
+- Re-run full correctness, browser, accessibility, DnD, and performance gates.
+
 ## Decisions
 
 | Decision | Reason |
@@ -155,5 +167,5 @@ Status: complete
 
 ## Next Step
 
-Review the performance report, then execute Stage 1-4 with TDD and fresh
-production benchmarks if implementation is approved.
+Write the single-read hydration RED tests and remove the redundant page startup
+state reads.

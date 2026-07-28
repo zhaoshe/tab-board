@@ -153,3 +153,15 @@
   plan calls for a production benchmark owner with stable extension discovery.
 - Wrote the evidence-ranked Chinese review and staged refactor proposal to
   `docs/reviews/2026-07-28-react-startup-performance-review.md`.
+- User approved execution of all recommendations. Added and committed the
+  implementation design (`b52a4e8`) and task-level TDD plan (`9835114`).
+- Task 1 RED: `node --test scripts/startup-benchmark-core.test.mjs` failed
+  because the benchmark core did not exist.
+- Task 1 GREEN: benchmark core tests pass 4/4 for deterministic state fixtures,
+  median calculation, and summary output.
+- Added `npm run benchmark:startup` and a production-extension Playwright
+  runner. It derives the unpacked extension ID from the canonical dist path,
+  verifies the actual MV3 worker ID, seeds state in the worker context, creates
+  a separate measured tab, and reports JSON plus a table.
+- Benchmark smoke passed for empty state: Manager useful UI 666ms, Options
+  useful UI 663ms, and Manager startup recorded 4 `list-open-tabs` calls.

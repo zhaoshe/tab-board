@@ -15,7 +15,8 @@
     "test:react": "vitest run",
     "test:run": "npm run test:react",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "benchmark:startup": "npm run build && node scripts/benchmark-startup.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

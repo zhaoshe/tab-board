@@ -37,11 +37,11 @@
 - Produces: `summarizeRuns(runs)`
 - Produces CLI: `npm run benchmark:startup -- --runs 5`
 
-- [ ] **Step 1: Write failing pure benchmark tests**
+- [x] **Step 1: Write failing pure benchmark tests**
 
 Test literal state sizes/counts, median behavior for odd/even input, and summary fields including useful UI, state-read end, row/card count, and Open Tabs request count.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -51,19 +51,19 @@ node --test scripts/startup-benchmark-core.test.mjs
 
 Expected: FAIL because `startup-benchmark-core.mjs` does not exist.
 
-- [ ] **Step 3: Implement pure benchmark helpers**
+- [x] **Step 3: Implement pure benchmark helpers**
 
 Keep fixtures deterministic and JSON serializable. Do not import application source into the Node benchmark.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run the same Node test; expected PASS.
 
-- [ ] **Step 5: Implement production extension runner**
+- [x] **Step 5: Implement production extension runner**
 
 Use Playwright `chromium.launchPersistentContext` with unpacked `dist`. Discover the extension ID from `context.serviceWorkers()`, using an extension-page activation fallback that tolerates `ERR_ABORTED` after commit. Seed state in the worker context, add the startup probe before page navigation, run each scenario in a fresh profile, and print JSON plus a compact table.
 
-- [ ] **Step 6: Add explicit package command and smoke the runner**
+- [x] **Step 6: Add explicit package command and smoke the runner**
 
 Add:
 
