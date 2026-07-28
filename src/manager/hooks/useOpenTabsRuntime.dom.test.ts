@@ -227,6 +227,73 @@ describe('Open Tabs runtime refresh', () => {
       event.type === 'tabboard-capture-completed')).toBe(false);
   });
 
+  it('captures every eligible tab in the selected window through the existing worker contract', async () => {
+    const capturable = createTab({ id: 1 });
+    const second = createTab({ id: 2, title: 'Second', url: 'https://second.test', index: 1 });
+    const excluded = createTab({
+      id: 3,
+      title: 'Excluded',
+      url: 'https://excluded.test',
+      index: 2,
+      storable: false,
+      reason: 'Matches custom filter rule',
+    });
+    await mountRuntime(createWindow([capturable, second, excluded]));
+
+    const persisted = createEmptyState();
+    persisted.groups = [{
+      id: 'window-capture',
+      title: 'Window Capture',
+      note: '',
+      workspaceId: persisted.activeWorkspaceId,
+      folderId: null,
+      locked: false,
+      starred: false,
+      archived: false,
+      collapsed: false,
+      tabs: [],
+      createdAt: persisted.createdAt,
+      updatedAt: persisted.updatedAt,
+    }];
+    testHarness.getPersistedState.mockResolvedValueOnce(persisted);
+    testHarness.sendMessage
+      .mockResolvedValueOnce({
+        ok: true,
+        result: {
+          storedTabs: 2,
+          storedGroups: 1,
+          cleanedDuplicates: 0,
+          createdGroupIds: ['window-capture'],
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        result: { windows: createWindow([capturable, second, excluded]) },
+      });
+
+    let completion: Awaited<ReturnType<OpenTabsWorkflow['commands']['captureWindow']>> = null;
+    await act(async () => {
+      completion = await runtime?.commands.captureWindow(
+        { showBin: false, category: 'inbox' },
+        () => ({ showBin: false, category: 'inbox' }),
+      ) ?? null;
+    });
+
+    expect(testHarness.sendMessage).toHaveBeenNthCalledWith(2, {
+      type: 'saveSelectedTabs',
+      tabIds: [1, 2],
+      selectedWindowId: 1,
+      workspaceId: persisted.activeWorkspaceId,
+    });
+    expect(completion).toMatchObject({
+      committed: true,
+      reconciled: true,
+      selectionCurrent: true,
+      createdGroupIds: ['window-capture'],
+    });
+    expect(runtime?.model.selection.active).toBe(false);
+  });
+
   it('captures a URL filter set in the same call stack before React effects run', async () => {
     const tab = createTab({ url: 'https://filter.test/path' });
     await mountRuntime(createWindow([tab]));

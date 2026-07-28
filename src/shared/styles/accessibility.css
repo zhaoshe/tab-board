@@ -44,6 +44,16 @@
   font-variant-numeric: tabular-nums;
 }
 
+.accessible-icon-action[data-density='compact'] {
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.accessible-icon-action[data-density='touch'] {
+  min-width: 44px;
+  min-height: 44px;
+}
+
 .destructive-confirm-action {
   --button-bg: var(--mantine-color-red-8) !important;
   --button-hover: var(--mantine-color-red-9) !important;
@@ -68,6 +78,68 @@
 .manager-overlay-menu,
 .manager-info-popover {
   overscroll-behavior: contain;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .manager-category-control,
+  .manager-header-actions,
+  .manager-sidebar-utilities,
+  .session-card__actions,
+  .popup-app__footer {
+    gap: 8px !important;
+  }
+
+  .accessible-icon-action,
+  .manager-category-drag-handle,
+  .manager-search-toggle,
+  .manager-header-actions .mantine-ActionIcon-root,
+  .manager-sidebar-header-action,
+  .manager-sidebar-utility-action,
+  .manager-sidebar-compact-toggle,
+  .manager-open-tab-select,
+  .manager-open-tab-drag-handle,
+  .manager-open-tab-more,
+  .manager-open-tab-close,
+  .session-card__drag-handle,
+  .session-card__actions .mantine-ActionIcon-root,
+  .tab-item-row__select,
+  .tab-item-row__more {
+    min-width: 44px;
+    min-height: 44px;
+    opacity: 1;
+  }
+}
+
+@media (max-width: 760px) {
+  .manager-category-control,
+  .manager-header-actions,
+  .manager-sidebar-utilities,
+  .session-card__actions,
+  .popup-app__footer {
+    gap: 8px !important;
+  }
+
+  .manager-workspace-trigger,
+  .manager-category-drag-handle,
+  .manager-category-item [data-category-trigger='label'],
+  .manager-search-toggle,
+  .manager-header-actions .mantine-ActionIcon-root,
+  .manager-sidebar-header-action,
+  .manager-sidebar-utility-action,
+  .manager-sidebar-compact-toggle,
+  .manager-open-tab-select,
+  .manager-open-tab-drag-handle,
+  .manager-open-tab-content,
+  .manager-open-tab-more,
+  .manager-open-tab-close,
+  .session-card__drag-handle,
+  .session-card__actions .mantine-ActionIcon-root,
+  .tab-item-row__select,
+  .tab-item-row__more {
+    min-width: 44px;
+    min-height: 44px;
+    opacity: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

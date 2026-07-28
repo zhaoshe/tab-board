@@ -53,39 +53,37 @@ describe('Task105 manager layout contracts', () => {
     expect(css).not.toContain('height: 280px');
   });
 
-  it('keeps Open Tabs selection checkboxes above favicons when revealed', () => {
+  it('keeps Open Tabs controls in explicit non-overlapping grid columns', () => {
+    const row = cssBlock('.manager-open-tab-row');
     const select = cssBlock('.manager-open-tab-select');
     const content = cssBlock('.manager-open-tab-content');
     const favicon = cssBlock('.manager-open-tab-favicon');
     const faviconImage = cssBlock('.manager-open-tab-favicon img');
-    const hoverDisclosure = css.match(/\.manager-open-tab-row:hover \.manager-open-tab-select,[\s\S]*?\{[\s\S]*?\}/)?.[0] ?? '';
-    const selectedDisclosure = cssBlock('.manager-open-tabs--selection-mode .manager-open-tab-select');
 
+    expect(row).toContain('grid-template-columns: auto auto minmax(0, 1fr) auto auto');
+    expect(select).toContain('flex: 0 0 auto');
     expect(content).toContain('z-index: 0');
-    expect(select).toContain('z-index: 3');
-    expect(cssBlock('.manager-open-tab-select,\n.manager-open-tab-close')).toContain('pointer-events: none');
     expect(favicon).toContain('pointer-events: none');
     expect(faviconImage).toContain('z-index: 1');
     expect(faviconImage).toContain('pointer-events: none');
-    expect(hoverDisclosure).toContain('opacity: 1');
-    expect(hoverDisclosure).toContain('pointer-events: auto');
-    expect(selectedDisclosure).toContain('opacity: 1');
-    expect(selectedDisclosure).toContain('pointer-events: auto');
   });
 
   it('keeps Open Tabs rows flush while preserving compact spacing below the selection bar', () => {
     const row = cssBlock('.manager-open-tab-row');
     const scrollArea = cssBlock('.manager-open-tabs .mantine-ScrollArea-root');
     const selectionBar = cssBlock('.manager-open-tabs-selection-bar');
-    const openTabsPanel = readFileSync(resolve(managerRoot, 'components/sidebar/OpenTabsPanel.tsx'), 'utf8');
+    const selectionBarSource = readFileSync(
+      resolve(managerRoot, 'components/sidebar/OpenTabsSelectionBar.tsx'),
+      'utf8',
+    );
 
     expect(row).toContain('margin-inline: 0');
     expect(scrollArea).toContain('margin-inline: calc(-1 * var(--manager-sidebar-padding))');
     expect(scrollArea).toContain('padding-top: 2px');
     expect(selectionBar).toContain('height: 28px');
     expect(selectionBar).toContain('flex: 0 0 28px');
-    expect(openTabsPanel).toContain('ActionIcon size={24}');
-    expect(openTabsPanel).toContain('IconSelectAll size={16}');
+    expect(selectionBarSource).toContain('size={24}');
+    expect(selectionBarSource).toContain('IconSelectAll size={16}');
   });
 
   it('uses tabular numerals for changing count displays', () => {
@@ -111,8 +109,8 @@ describe('Task105 manager layout contracts', () => {
     expect(root).toContain(
       '--manager-open-tab-leading-offset: calc((var(--manager-sidebar-rail-width) - 1px - 20px) / 2)',
     );
-    expect(content).toContain('padding-inline: var(--manager-open-tab-leading-offset)');
-    expect(select).toContain('inset-inline-start: var(--manager-open-tab-leading-offset)');
+    expect(content).toContain('padding-inline: 2px');
+    expect(select).toContain('flex: 0 0 auto');
     expect(css).toMatch(
       /\.manager-shell--sidebar-collapsed:is\(:not\(:has\(\.manager-sidebar:hover\)\), \.manager-shell--sidebar-hover-suppressed\):not\(\.manager-shell--sidebar-overlay-open\) \.manager-open-tabs \.mantine-ScrollArea-root\s*\{[\s\S]*?margin-inline: calc\(-1 \* var\(--manager-sidebar-padding\)\)/,
     );
@@ -122,6 +120,12 @@ describe('Task105 manager layout contracts', () => {
     expect(css).not.toMatch(/\.manager-shell--sidebar-collapsed[^{}]*\.manager-open-tab-favicon\s*\{/);
     expect(css).toMatch(
       /\.manager-shell--sidebar-collapsed:is\(:not\(:has\(\.manager-sidebar:hover\)\), \.manager-shell--sidebar-hover-suppressed\):not\(\.manager-shell--sidebar-overlay-open\) \.manager-open-tabs-window-bar\s*\{[\s\S]*?padding-inline: 0;/,
+    );
+    expect(css).toMatch(
+      /\.manager-shell--sidebar-collapsed:is\(:not\(:has\(\.manager-sidebar:hover\)\), \.manager-shell--sidebar-hover-suppressed\):not\(\.manager-shell--sidebar-overlay-open\) \.manager-open-tab-drag-handle,[\s\S]*?\.manager-open-tab-more,[\s\S]*?display: none;/,
+    );
+    expect(css).toMatch(
+      /\.manager-shell--sidebar-collapsed:is\(:not\(:has\(\.manager-sidebar:hover\)\), \.manager-shell--sidebar-hover-suppressed\):not\(\.manager-shell--sidebar-overlay-open\) \.manager-window-button:not\(\[aria-pressed='true'\]\),[\s\S]*?\.manager-sidebar-utilities\s*\{[\s\S]*?display: none;/,
     );
     expect(css).toMatch(
       /\.manager-shell--sidebar-collapsed:is\(:not\(:has\(\.manager-sidebar:hover\)\), \.manager-shell--sidebar-hover-suppressed\):not\(\.manager-shell--sidebar-overlay-open\) \.manager-window-switcher\s*\{[\s\S]*?width: 100%;[\s\S]*?justify-content: center;/,

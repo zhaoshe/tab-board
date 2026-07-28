@@ -402,3 +402,111 @@ The active objective resolves to these concrete deliverables:
 - Kept Manager Tooltip/Menu/Modal content inside `#manager-main`, removed stale fade states, and restored persistent tooltips.
 - Added Trash paint containment and high-contrast destructive confirmation tokens.
 - Verified the final Options Reset confirmation in shipped code at axe 0 violations / 0 incomplete before and after Escape.
+
+## UI / UX Pro Max Review Loop
+
+### Product classification
+
+- TabBoard is a local-first productivity tool and file-manager-like workbench,
+  not a portfolio, landing page, or content marketing site.
+- The generated `ui-ux-pro-max --design-system` result again returned Portfolio
+  Grid, Exaggerated Minimalism, orange surfaces, oversized type, Lora/Raleway,
+  and scroll reveals. Those recommendations are rejected because they conflict
+  with the product model, existing design language, and the approved dense but
+  calm workbench direction.
+- Applicable skill rules: keyboard-complete controls, 44px coarse-pointer
+  targets with 8px spacing, stable press/loading states, explicit overflow
+  ownership, light/dark contrast parity, reduced motion, tabular numbers,
+  predictable navigation, stable list keys, and selective memoization.
+- React list virtualization remains reviewed-and-accepted by design: this
+  project deliberately uses stable structural sharing plus full DOM with
+  `content-visibility`; introducing a runtime windowing dependency would reopen
+  DnD geometry and search contracts without evidence of a current performance
+  failure.
+
+### Final ownership state
+
+- `OpenTabsPanel` owns workflow/confirmation/focus orchestration and composes
+  `OpenTabsWindowBar`, `OpenTabsSelectionBar`, `OpenTabsList`, and
+  `OpenTabsFilterFooter`.
+- `SessionCard` owns state and commands and composes `SessionCardHeader`,
+  `SessionCardMeta`, `SessionCardEditor`, and `SessionTabList`.
+- `ManagerDndCoordinator` owns lifecycle coordination and composes
+  `managerDndGeometry`, `useManagerDndSensors`, and `ManagerDragOverlay`.
+- Source-contract failures after this split were stale test paths, not missing
+  product behavior. The migrated contracts still verify canonical tab indexes,
+  drag markers, keyboard coordinates, close loading, and focus fallback.
+
+### Verification checkpoint
+
+- Final owner focused suite: 4 files / 98 tests passed.
+- Production build: passed, 7,024 modules transformed.
+- `git diff --check`: passed.
+- At this checkpoint, full static, rendered, axe, DnD, and prompt-to-artifact
+  gates remained pending; the Independent completion audit below records their
+  final results.
+
+### Rendered review round 1
+
+- A stale Vite process and a second HTTP port initially caused repeated HMR
+  reconnects because `vite.config.ts` fixes both server and HMR to port 5173.
+  Those sessions were discarded. The audit now uses one clean 5173 server.
+- Manager at 1280x800, Saved category: axe 4.12.1 reports 0 violations and 0
+  incomplete checks; browser page errors are empty.
+- Popup at 390x844: axe reports 0/0; browser page errors are empty.
+- Options at 390x844 with the temporary `/tmp` Chrome API init script: axe
+  reports 0/0; browser page errors are empty.
+- The Manager accessibility tree confirms the intended final interaction model:
+  separate category label/reorder buttons, `Save 7 Tabs in This Window`,
+  explicit Open Tab Focus/More/Close actions, and separate session drag,
+  Restore, and More actions.
+
+### Rendered review round 2 - compact Open Tabs
+
+- At 390x844, the collapsed 62px rail initially kept Drag, Focus, and More as
+  visible 44px controls. Drag and More extended to x=140 and were clipped by the
+  rail. This was a real geometry/focus defect even though axe remained 0/0.
+- The collapsed window bar initially kept all 6 Window controls plus Save,
+  Refresh, and Collapse focusable. Several controls had negative x positions or
+  overlapped inside the clipped rail.
+- The collapsed rail now exposes exactly one current-window control and one
+  Focus control per Open Tab row. All visible targets stay fully inside the
+  rail; the bottom Expand Sidebar command opens the full drawer.
+- In the expanded compact drawer, direct Close duplicated the More action and
+  produced 2px spacing between 44px controls. The coarse/compact row now keeps
+  Select, Drag, Focus, and More at 44px with 8px spacing; Close remains in More.
+  Fine-pointer desktop rows retain the direct Close shortcut.
+- The compact drawer keeps the topbar and main surface inert, uses sidebar
+  z-index 20, and remains axe 0 violations / 0 incomplete.
+- RED/GREEN evidence: the compact E2E failed for each original control set,
+  then passed after the owner CSS fixes. Related focused evidence is 4 Vitest
+  files / 83 tests plus the compact Playwright scenario.
+
+### Rendered review round 3 - open states and focus
+
+- Popup Dedupe and Options Reset initially focused Cancel correctly but returned
+  Escape focus to `body`. `ConfirmDialog` now supports an explicit
+  `finalFocusRef`; both surfaces return to their triggering action.
+- Open Tab info actions initially rendered unnamed `role="menuitem"` buttons
+  inside a dialog/region, causing critical `aria-required-parent` and
+  `button-name` violations. They now use named ordinary button semantics while
+  preserving the shared overlay close/mutation/focus lifecycle.
+- Manager compact global menu, Open Tab details, Import, Export, Popup Dedupe,
+  and Options Advanced/Reset all return axe 0 violations / 0 incomplete.
+- Reduced motion samples are 1ms, one iteration, and auto scroll; dark body and
+  theme-color both resolve to `#242424`.
+
+### Independent completion audit
+
+- `npm run check`: passed; 7,024 transformed modules, 187 source files with no
+  forbidden edge/cycle, and 111 production files passing architecture gates.
+- `npm test`: 76 files / 1,006 tests passed.
+- `npm run test:e2e`: 26/26 passed.
+- DnD repeated gate: 15/15 over three runs; category handle isolation 5/5.
+- Fresh browser state-level acceptance passed all 5 required DnD paths,
+  including saved/Open Tabs existing-session and new-session drops.
+- Compact geometry repeated gate: 3/3.
+- `git diff --check`: passed.
+- No package/lockfile/manifest/schema/storage/background or runtime dependency
+  diff; no tracked generated/browser artifact.
+- Final complete static and rendered pass: zero unresolved finding.

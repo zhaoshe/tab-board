@@ -10,6 +10,7 @@ import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import type { CategoryFilter } from '../../core/selectors';
 import type { DndData, DragMarker, DragSourceRect } from '../../core/dnd';
 import { SessionCard } from '../sessions/SessionCard';
+import { useOverflowCues } from '../../hooks/useOverflowCues';
 
 interface WorkspaceContentProps {
   category: CategoryFilter;
@@ -92,6 +93,7 @@ export function WorkspaceContent({
     })),
   );
   const hasSearch = searchQuery.trim().length > 0;
+  const boardOverflow = useOverflowCues<HTMLElement>();
 
   const getTitle = () => {
     if (category === 'saved') return 'Saved';
@@ -162,7 +164,14 @@ export function WorkspaceContent({
   };
 
   return (
-    <section className="manager-board" aria-label={`${workspaceName} ${getTitle()} sessions`} tabIndex={-1}>
+    <section
+      ref={boardOverflow.ref}
+      className="manager-board"
+      aria-label={`${workspaceName} ${getTitle()} sessions`}
+      data-inline-end={boardOverflow.cues.inlineEnd || undefined}
+      data-inline-start={boardOverflow.cues.inlineStart || undefined}
+      tabIndex={-1}
+    >
       {visibleGroups.length === 0 ? (
         <div className="manager-board__empty-content">
           {getEmptyState()}

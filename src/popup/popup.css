@@ -30,7 +30,7 @@ body,
 
 .popup-app__capture {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px;
+  grid-template-columns: minmax(0, 1fr) 128px;
   align-items: center;
   column-gap: 12px;
   row-gap: 10px;
@@ -52,8 +52,12 @@ body,
 }
 
 .popup-app__filters,
-.popup-app__empty {
+.popup-app__selection-summary {
   grid-column: 1;
+}
+
+.popup-app__selection-summary {
+  min-height: 18px;
 }
 
 .popup-app__separator {
@@ -114,4 +118,37 @@ body,
   width: 28px;
   height: 28px;
   border-radius: var(--mantine-radius-sm);
+}
+
+@media (max-width: 760px) {
+  .popup-app__save.mantine-Button-root,
+  .popup-app__dedupe.mantine-Button-root {
+    min-height: 44px;
+  }
+
+  .popup-app__filters {
+    gap: 8px;
+  }
+
+  .popup-app__filters .mantine-Checkbox-root {
+    min-height: 44px;
+  }
+
+  .popup-app__filters .mantine-Checkbox-inner {
+    width: 24px;
+    height: 24px;
+  }
+
+  .popup-app__filters .mantine-Checkbox-label {
+    line-height: 44px;
+  }
+
+  .popup-app__footer {
+    gap: 8px;
+  }
+
+  .popup-app__footer .mantine-ActionIcon-root {
+    width: 44px;
+    height: 44px;
+  }
 }

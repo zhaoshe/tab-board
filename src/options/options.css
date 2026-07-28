@@ -2,6 +2,32 @@
   min-width: 0;
 }
 
+.options-header__title {
+  min-width: 0;
+}
+
+.options-save-status {
+  min-height: 16px;
+}
+
+.options-basic {
+  border-block: 1px solid var(--mantine-color-default-border);
+}
+
+.options-settings-section {
+  padding: var(--mantine-spacing-lg) 0;
+}
+
+.options-settings-section + .options-settings-section {
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
+.options-settings-section__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+}
+
 .options-advanced {
   border: 1px solid var(--mantine-color-default-border);
   border-radius: var(--mantine-radius-md);

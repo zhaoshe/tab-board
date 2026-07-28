@@ -1103,8 +1103,6 @@ Manager 启动阶段出现依赖或异步顺序问题时，页面不应停在空
 
 当前状态：已实现，自动测试与 Popup preview 验证通过。
 
-## 待观察问题
-
 ### 2026-07-27: UI accessibility, responsive command model, and URL navigation
 
 变化：
@@ -1127,6 +1125,36 @@ Manager 启动阶段出现依赖或异步顺序问题时，页面不应停在空
 - Page-local navigation state 属于 URL，不属于持久化业务 schema。
 
 当前状态：已完成。Manager、Popup、Options 的 light/dark、窄屏、reduced-motion、菜单与对话框开放态均完成浏览器复审；最后一轮 Web Interface Guidelines 静态扫描无 unresolved finding，axe open/default states 为 0 violations / 0 incomplete；全量 build/check/Vitest/E2E 与 DnD 回归通过。
+
+### 2026-07-27: UI / UX Pro Max interaction and ownership refactor
+
+问题：
+
+- 折叠 sidebar hover 推动 board，category navigation 与 keyboard DnD 共用 activator，Manager 缺少 Save Window。
+- Open Tab 主动作依赖 double click，coarse-pointer 动作既过密又可能被 rail 裁剪。
+- Popup 不显示实际保存数量，Options 文本设置逐键保存且 Basic card 过重。
+- Open Tabs、Session Card、Manager DnD 仍混合渲染、状态和 geometry ownership。
+
+变化：
+
+- Sidebar disclosure 改为 absolute overlay，不再改变 main track。Category label 与 reorder handle 分离；Manager Open Tabs 恢复 Save Window，并让单击/Enter Focus tab，More 承载详情动作。
+- `AccessibleIconAction` 增加 compact/touch density；compact drawer使用 44px targets与8px间距，collapsed rail只保留当前 window、row Focus和Expand Sidebar。被覆盖的 topbar/main surface使用`inert`。
+- Popup 的 Save 文案显示实际 selected result；Dedupe confirmation关闭后显式回焦。Options Basic改为无框 sections，自定义过滤规则500ms/blur提交，标题区稳定显示保存状态，Reset confirmation显式回焦。
+- Category/window/session metadata增加orientation data；功能 metadata底线为12px/16px。Board、session tabs、Open Tabs通过`useOverflowCues`只在存在更多内容时显示edge cue。
+- Open Tabs拆为window/selection/list/filter owners；Session Card拆为header/meta/editor/tab-list owners；Manager DnD拆为geometry/sensors/overlay owners。
+
+迭代复审：
+
+- `ui-ux-pro-max`的portfolio/exaggerated-minimalism/orange生成结果与产品不匹配，明确拒绝；采用Productivity Tool/File Manager的dense、flat、low-motion规则。
+- Rendered review额外发现并关闭collapsed rail中的裁剪/离屏focus targets、compact row 2px action spacing、Popup/Options confirmation focus return，以及Open Tab info actions的错误menuitem语义与缺失名称。
+- 保留horizontal session board、完整DOM + `content-visibility`、schema/storage/mutation wire和现有DropIntent语义；没有恢复session merge，也没有新增runtime dependency。
+
+当前状态：已完成。`npm run check`、76 files / 1,006 Vitest、26/26
+Playwright、三轮15/15 DnD与三轮compact gate通过；最终静态/渲染复审无
+unresolved finding，完整证据见
+`docs/reviews/2026-07-27-ui-ux-pro-max-review.md`。
+
+## 待观察问题
 
 - 右键菜单触发筛选是否足够容易被发现。
 - 批量拖动已勾选 open tabs 到已有 session 是否需要更明显的拖拽提示。

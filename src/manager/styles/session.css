@@ -20,13 +20,13 @@
 }
 
 .session-card__drag-handle {
-  width: 18px;
-  height: 22px;
+  width: 24px;
+  height: 28px;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--mantine-color-dimmed);
-  opacity: 0;
+  opacity: 0.45;
 }
 
 .session-card__header:hover .session-card__drag-handle,
@@ -78,6 +78,11 @@
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  --overflow-cue-color: color-mix(
+    in srgb,
+    var(--mantine-color-text) 18%,
+    transparent
+  );
 }
 
 .session-card__meta {
@@ -86,7 +91,22 @@
   flex-wrap: wrap;
   gap: 8px;
   color: var(--mantine-color-dimmed);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.session-card__tabs[data-block-start='true'] {
+  box-shadow: inset 0 12px 10px -14px var(--overflow-cue-color);
+}
+
+.session-card__tabs[data-block-end='true'] {
+  box-shadow: inset 0 -12px 10px -14px var(--overflow-cue-color);
+}
+
+.session-card__tabs[data-block-start='true'][data-block-end='true'] {
+  box-shadow:
+    inset 0 12px 10px -14px var(--overflow-cue-color),
+    inset 0 -12px 10px -14px var(--overflow-cue-color);
 }
 
 .tab-item-row__content {
@@ -99,7 +119,7 @@
 .tab-item-row__select,
 .tab-item-row__more,
 .session-card__actions {
-  opacity: 0;
+  opacity: 0.45;
 }
 
 .tab-item-row__content:hover .tab-item-row__select,
@@ -172,4 +192,20 @@ html[data-tabboard-hover-suppressed] .session-card__actions {
 .tab-item-row__drop-marker {
   height: 4px;
   margin: 0 6px;
+}
+
+@media (max-width: 760px) {
+  .session-card__drag-handle,
+  .session-card__actions .mantine-ActionIcon-root,
+  .tab-item-row__select,
+  .tab-item-row__more {
+    min-width: 44px;
+    min-height: 44px;
+    opacity: 1;
+  }
+
+  .session-card__actions,
+  .tab-item-row__content {
+    gap: 8px;
+  }
 }

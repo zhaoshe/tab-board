@@ -102,6 +102,10 @@ export interface OpenTabsWorkflowCommands {
     categorySnapshot: CaptureCategorySnapshot,
     getCurrentCategorySnapshot: () => CaptureCategorySnapshot,
   ) => Promise<CaptureCompletion | null>;
+  captureWindow: (
+    categorySnapshot: CaptureCategorySnapshot,
+    getCurrentCategorySnapshot: () => CaptureCategorySnapshot,
+  ) => Promise<CaptureCompletion | null>;
   refresh: () => Promise<void>;
 }
 
@@ -404,7 +408,9 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     dispatch({ type: 'query-changed', query: '' });
   }, [dispatch]);
 
-  const captureSelectedTabs = useCallback(async (
+  const captureTabs = useCallback(async (
+    tabIds: readonly number[],
+    isSelectionMode: boolean,
     categorySnapshot: CaptureCategorySnapshot,
     getCurrentCategorySnapshot: () => CaptureCategorySnapshot,
   ): Promise<CaptureCompletion | null> => {
@@ -417,10 +423,10 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     };
     const captureProjection = projectOpenTabsWorkflow(workflowStateRef.current);
     const captureSnapshot = createCaptureSnapshot({
-      selectedTabIds: captureProjection.selection.recordIds,
+      selectedTabIds: [...tabIds],
       selectedWindowId: captureProjection.selectedWindowId,
       workspaceId: sourceWorkspaceId,
-      isSelectionMode: captureProjection.selection.active,
+      isSelectionMode,
     });
     if (!captureSnapshot.selectedTabIds.length) return null;
 
@@ -496,10 +502,12 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
         workspaceId: activeWorkspaceId,
         isSelectionMode: currentProjection.selection.active,
       });
-      const selectionCurrent = sameOpenTabSelection(
-        captureSnapshot.selectedTabIds,
-        currentSelection.selectedTabIds,
-      ) && sameCaptureSnapshot(captureSnapshot, currentSelection);
+      const selectionCurrent = !captureSnapshot.isSelectionMode || (
+        sameOpenTabSelection(
+          captureSnapshot.selectedTabIds,
+          currentSelection.selectedTabIds,
+        ) && sameCaptureSnapshot(captureSnapshot, currentSelection)
+      );
       const outcome = getCaptureOutcome({ committed, reconciled, selectionCurrent });
       if (outcome.shouldClearSelection) {
         dispatch({ type: 'selection-cleared' });
@@ -572,6 +580,32 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     return completion;
   }, [dispatch, refresh, setSavedSearchQuery]);
 
+  const captureSelectedTabs = useCallback((
+    categorySnapshot: CaptureCategorySnapshot,
+    getCurrentCategorySnapshot: () => CaptureCategorySnapshot,
+  ) => {
+    const captureProjection = projectOpenTabsWorkflow(workflowStateRef.current);
+    return captureTabs(
+      captureProjection.selection.recordIds,
+      captureProjection.selection.active,
+      categorySnapshot,
+      getCurrentCategorySnapshot,
+    );
+  }, [captureTabs]);
+
+  const captureWindow = useCallback((
+    categorySnapshot: CaptureCategorySnapshot,
+    getCurrentCategorySnapshot: () => CaptureCategorySnapshot,
+  ) => {
+    const captureProjection = projectOpenTabsWorkflow(workflowStateRef.current);
+    return captureTabs(
+      getSelectableOpenTabIds(captureProjection.selectedWindow),
+      false,
+      categorySnapshot,
+      getCurrentCategorySnapshot,
+    );
+  }, [captureTabs]);
+
   return {
     model: {
       ...projection,
@@ -594,6 +628,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
       clearSessionFilter: clearTabFilter,
       clearQuery: clearFilter,
       captureSelection: captureSelectedTabs,
+      captureWindow,
       refresh,
     },
   };

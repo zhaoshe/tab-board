@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   MantineProvider,
   Center,
@@ -13,7 +13,6 @@ import {
   Radio,
   SegmentedControl,
   Button,
-  Notification,
   Textarea,
   Loader,
 } from '@mantine/core';
@@ -22,7 +21,6 @@ import {
   IconRefresh,
   IconKeyboard,
   IconExternalLink,
-  IconCheck,
 } from '@tabler/icons-react';
 import '@mantine/core/styles.css';
 import { theme } from '../shared/styles/theme';
@@ -32,35 +30,33 @@ import { useColorScheme } from '../shared/hooks/useColorScheme';
 import { usePageTheme } from '../shared/hooks/usePageTheme';
 import { DEFAULT_SETTINGS } from '../shared/model';
 import { DataStorageCard } from './components/DataStorageCard';
+import { SettingsSection } from './components/SettingsSection';
+import { useSettingsDraft } from './hooks/useSettingsDraft';
 import { ConfirmDialog } from '../shared/components/ConfirmDialog';
 import './options.css';
 
 export function OptionsApp() {
   const { hydrated } = useStoreHydration();
   const settings = useTabBoardStore((state) => state.settings);
+  const persistenceError = useTabBoardStore((state) => state.persistenceError);
   const colorScheme = useColorScheme();
   usePageTheme(colorScheme);
   const updateSettings = useTabBoardStore((state) => state.updateSettings);
 
-  const [toastVisible, setToastVisible] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
+  const [savePending, setSavePending] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const resetActionRef = useRef<HTMLButtonElement>(null);
   const [advancedOpen, setAdvancedOpen] = useState(
     () => new URLSearchParams(window.location.search).get('advanced') === '1',
   );
-
-  const showToast = (message: string) => {
-    setToastMessage(message);
-    setToastVisible(true);
-    setTimeout(() => setToastVisible(false), 2000);
-  };
 
   const handleSettingChange = <K extends keyof typeof settings>(
     key: K,
     value: (typeof settings)[K]
   ) => {
+    setSavePending(true);
     updateSettings({ [key]: value } as Partial<typeof settings>);
-    showToast('Settings saved');
+    setSavePending(false);
 
     if (key === 'actionClick') {
       chrome.runtime
@@ -70,10 +66,19 @@ export function OptionsApp() {
   };
 
   const handleResetSettings = () => {
+    setSavePending(true);
     updateSettings(DEFAULT_SETTINGS);
-    showToast('Settings reset to defaults');
+    setSavePending(false);
     setResetConfirmOpen(false);
   };
+
+  const customFilter = useSettingsDraft({
+    value: settings.customUrlFilter,
+    onCommit: (value) => {
+      updateSettings({ customUrlFilter: value });
+    },
+    onPendingChange: setSavePending,
+  });
 
   const handleOpenShortcuts = () => {
     void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
@@ -127,40 +132,27 @@ export function OptionsApp() {
 
   return (
     <MantineProvider theme={theme} forceColorScheme={colorScheme}>
-      {toastVisible && (
-        <div
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          style={{
-            position: 'fixed',
-            top: 20,
-            right: 20,
-            zIndex: 1000,
-          }}
-        >
-          <Notification
-            icon={<IconCheck size={20} aria-hidden="true" />}
-            color="teal"
-            withBorder
-            withCloseButton={false}
-            style={{ pointerEvents: 'none' }}
-          >
-            {toastMessage}
-          </Notification>
-        </div>
-      )}
-
       <main>
         <Container size="sm" py="xl">
           <Stack gap="xl">
           <Group className="options-header" justify="space-between" align="flex-start">
-            <div>
+            <div className="options-header__title">
               <Title order={1} size="h3">
                 <span translate="no">TabBoard</span> Settings
               </Title>
               <Text c="dimmed" size="sm" mt={4}>
                 Configure how <span translate="no">TabBoard</span> works
+              </Text>
+              <Text
+                className="options-save-status"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                size="xs"
+                c={persistenceError ? 'red' : 'dimmed'}
+                mt={4}
+              >
+                {persistenceError ? 'Could not save' : savePending ? 'Saving…' : 'Saved'}
               </Text>
             </div>
             <Button
@@ -172,19 +164,12 @@ export function OptionsApp() {
             </Button>
           </Group>
 
-          <Card withBorder shadow="sm" padding="lg">
-            <Stack gap="md">
-              <div>
-                <Group gap="xs" mb={2}>
-                  <IconSettings size={18} aria-hidden="true" />
-                  <Title order={2} size="h5">
-                    Toolbar
-                  </Title>
-                </Group>
-                <Text size="sm" c="dimmed">
-                  Extension button behavior
-                </Text>
-              </div>
+          <div className="options-basic">
+          <SettingsSection
+            title="Toolbar"
+            description="Extension button behavior"
+            icon={<IconSettings size={18} aria-hidden="true" />}
+          >
 
               <Radio.Group
                 label="Extension button behavior"
@@ -202,19 +187,9 @@ export function OptionsApp() {
                   <Radio value="popup" label="Open popup" />
                 </Group>
               </Radio.Group>
-            </Stack>
-          </Card>
+          </SettingsSection>
 
-          <Card withBorder shadow="sm" padding="lg">
-            <Stack gap="md">
-              <div>
-                <Title order={2} size="h5">
-                  Capture
-                </Title>
-                <Text size="sm" c="dimmed">
-                  Daily save behavior
-                </Text>
-              </div>
+          <SettingsSection title="Capture" description="Daily save behavior">
 
               <Stack gap="sm">
                 <Switch
@@ -246,7 +221,7 @@ export function OptionsApp() {
                 <Switch
                   name="dedupe-on-save"
                   label="Deduplicate on save"
-                  description="Skip tabs whose URL is already saved somewhere"
+                  description="Remove duplicate URLs within the tabs being saved. Keep one copy in the new session and close duplicate source tabs."
                   checked={settings.dedupeOnSave}
                   onChange={(e) =>
                     handleSettingChange(
@@ -267,23 +242,14 @@ export function OptionsApp() {
                   spellCheck={false}
                   autosize
                   minRows={2}
-                  value={settings.customUrlFilter}
-                  onChange={(event) => handleSettingChange('customUrlFilter', event.currentTarget.value)}
+                  value={customFilter.draft}
+                  onChange={(event) => customFilter.setDraft(event.currentTarget.value)}
+                  onBlur={customFilter.flush}
                 />
               </Stack>
-            </Stack>
-          </Card>
+          </SettingsSection>
 
-          <Card withBorder shadow="sm" padding="lg">
-            <Stack gap="md">
-              <div>
-                <Title order={2} size="h5">
-                  Restore
-                </Title>
-                <Text size="sm" c="dimmed">
-                  How saved tabs return
-                </Text>
-              </div>
+          <SettingsSection title="Restore" description="How saved tabs return">
 
               <Stack gap="sm">
                 <Switch
@@ -338,19 +304,9 @@ export function OptionsApp() {
                   }
                 />
               </Stack>
-            </Stack>
-          </Card>
+          </SettingsSection>
 
-          <Card withBorder shadow="sm" padding="lg">
-            <Stack gap="md">
-              <div>
-                <Title order={2} size="h5">
-                  Appearance
-                </Title>
-                <Text size="sm" c="dimmed">
-                  Theme preference
-                </Text>
-              </div>
+          <SettingsSection title="Appearance" description="Theme preference">
 
               <SegmentedControl
                 className="options-theme-control"
@@ -371,8 +327,8 @@ export function OptionsApp() {
                 w="100%"
                 size="sm"
               />
-            </Stack>
-          </Card>
+          </SettingsSection>
+          </div>
 
           <details
             className="options-advanced"
@@ -429,6 +385,7 @@ export function OptionsApp() {
                       Open Keyboard Shortcuts
                     </Button>
                     <Button
+                      ref={resetActionRef}
                       className="options-action-danger"
                       variant="outline"
                       color="red"
@@ -450,6 +407,7 @@ export function OptionsApp() {
         title="Reset Settings"
         message="Reset all settings? Saved data stays."
         confirmLabel="Reset Settings"
+        finalFocusRef={resetActionRef}
         onCancel={() => setResetConfirmOpen(false)}
         onConfirm={handleResetSettings}
       />

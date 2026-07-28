@@ -983,6 +983,8 @@ interface ManagerMenuItemProps {
   onClick: (focusIntent?: ManagerFocusRestoreIntent) => void | Promise<void>;
   disabled?: boolean;
   className?: string;
+  ariaLabel?: string;
+  semanticRole?: 'menuitem' | 'button';
   preventFocusRestore?: boolean;
   lifecycleAllowance?: ManagerFocusRestoreLifecycleAllowance['kind'];
 }
@@ -992,6 +994,8 @@ export function ManagerMenuItem({
   onClick,
   disabled = false,
   className,
+  ariaLabel,
+  semanticRole = 'menuitem',
   preventFocusRestore = false,
   lifecycleAllowance,
 }: ManagerMenuItemProps): ReactNode {
@@ -1000,7 +1004,8 @@ export function ManagerMenuItem({
     'button',
     {
       type: 'button',
-      role: 'menuitem',
+      role: semanticRole === 'menuitem' ? 'menuitem' : undefined,
+      'aria-label': ariaLabel,
       className: `manager-overlay-menu__item${className ? ` ${className}` : ''}`,
       disabled,
       onClick: async (event: ReactMouseEvent<HTMLButtonElement>) => {

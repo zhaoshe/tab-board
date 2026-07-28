@@ -1,7 +1,9 @@
-import { Button, Group, Text } from '@mantine/core';
+import { ActionIcon, Button, Group, Text, Tooltip } from '@mantine/core';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
+import { IconGripVertical } from '@tabler/icons-react';
 import type { CategoryFilter, CategoryStripItem } from '../../core/selectors';
 import type { DndData, DragMarker } from '../../core/dnd';
+import { formatNumber } from '../../../shared/utils/formatters';
 
 export function isCategoryDragMarkerFor(
   marker: DragMarker | null | undefined,
@@ -60,7 +62,12 @@ function CategoryDndItem({
   isActive: boolean;
   onSelect: () => void;
 }) {
-  const { attributes, listeners, setNodeRef: setDragNodeRef } = useDraggable({
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDragNodeRef,
+    setActivatorNodeRef,
+  } = useDraggable({
     id: `category-${item.id}`,
     data: {
       type: 'category',
@@ -81,7 +88,10 @@ function CategoryDndItem({
   const isMarker = dragMarker?.kind === 'category' && dragMarker.categoryId === item.id;
   return (
     <div
-      ref={setColumnNodeRef}
+      ref={(node) => {
+        setColumnNodeRef(node);
+        setDragNodeRef(node);
+      }}
       className="manager-category-item"
       data-category-column={item.id}
       data-over={isOver || isMarker || undefined}
@@ -94,11 +104,21 @@ function CategoryDndItem({
         workspaceId={workspaceId}
         dragMarker={dragMarker}
       />
-      <Group gap={0} wrap="nowrap">
+      <Group className="manager-category-control" gap={0} wrap="nowrap">
+        <Tooltip label={`Reorder ${item.label}`}>
+          <ActionIcon
+            ref={setActivatorNodeRef}
+            {...attributes}
+            {...listeners}
+            className="manager-category-drag-handle"
+            data-category-drag-handle
+            variant="subtle"
+            aria-label={`Reorder ${item.label}`}
+          >
+            <IconGripVertical size={14} aria-hidden="true" />
+          </ActionIcon>
+        </Tooltip>
         <Button
-          ref={setDragNodeRef}
-          {...attributes}
-          {...listeners}
           variant={isActive ? 'light' : 'subtle'}
           color={isActive ? 'blue' : 'gray'}
           size="sm"
@@ -108,6 +128,11 @@ function CategoryDndItem({
           onClick={onSelect}
         >
           <Text size="sm">{item.label}</Text>
+          {(item.count > 0 || isActive) && (
+            <span className="manager-category-count tabular-nums">
+              {formatNumber(item.count)}
+            </span>
+          )}
         </Button>
       </Group>
       <CategoryReorderTarget

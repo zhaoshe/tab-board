@@ -118,3 +118,22 @@ test.describe('Session drag lifecycle (@dnd-kit keyboard sensor)', () => {
     expect(errors, `unexpected page errors: ${errors.join('\n')}`).toHaveLength(0);
   });
 });
+
+test.describe('Category drag lifecycle (@dnd-kit keyboard sensor)', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto(PREVIEW_PATH);
+    await expect(page.locator('[data-category-id="inbox"]')).toBeVisible();
+  });
+
+  test('starts category reorder from its dedicated drag handle', async ({ page }) => {
+    const handle = page.getByRole('button', { name: 'Reorder Inbox' });
+    await handle.focus();
+    await page.keyboard.press('Space');
+
+    await expect(page.locator(OVERLAY)).toBeVisible();
+    await expect(page.locator(OVERLAY)).toContainText('inbox');
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator(OVERLAY)).toBeHidden();
+  });
+});

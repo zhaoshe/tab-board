@@ -9,6 +9,7 @@ import { OptionsApp } from './OptionsApp';
 
 const harness = vi.hoisted(() => ({
   hydrated: true,
+  persistenceError: null as string | null,
   updateSettings: vi.fn(),
   settings: {} as typeof DEFAULT_SETTINGS,
 }));
@@ -17,6 +18,7 @@ vi.mock('../shared/store/useTabBoardStore', () => ({
   useTabBoardStore: (selector: (state: unknown) => unknown) => selector({
     settings: harness.settings,
     groups: [],
+    persistenceError: harness.persistenceError,
     updateSettings: harness.updateSettings,
   }),
 }));
@@ -42,9 +44,19 @@ async function mountOptions(): Promise<void> {
   });
 }
 
+function setTextareaValue(element: HTMLTextAreaElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLTextAreaElement.prototype,
+    'value',
+  )?.set;
+  setter?.call(element, value);
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 beforeEach(() => {
   history.replaceState(null, '', '/options.html');
   harness.hydrated = true;
+  harness.persistenceError = null;
   harness.updateSettings.mockReset();
   harness.settings = { ...DEFAULT_SETTINGS };
   vi.stubGlobal('chrome', {
@@ -60,6 +72,7 @@ afterEach(async () => {
   container = null;
   document.body.innerHTML = '';
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('OptionsApp information architecture', () => {
@@ -103,17 +116,86 @@ describe('OptionsApp information architecture', () => {
     expect(document.querySelector<HTMLInputElement>('input[name="confirm-before-destructive"]')).not.toBeNull();
   });
 
-  it('mounts save feedback only while a live message is visible', async () => {
+  it('keeps one stable page-level save status', async () => {
     await mountOptions();
-    expect(document.querySelector('[role="status"]')).toBeNull();
+    expect(document.querySelector('.options-save-status[role="status"]')?.textContent)
+      .toContain('Saved');
 
     const toggle = document.querySelector<HTMLInputElement>(
       'input[name="close-tabs-after-save"]',
     );
     await act(async () => toggle?.click());
 
-    expect(document.querySelector('[role="status"]')?.textContent)
-      .toContain('Settings saved');
+    expect(document.querySelector('.options-save-status[role="status"]')?.textContent)
+      .toContain('Saved');
+    expect(harness.updateSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('debounces long-text settings and commits only the latest draft', async () => {
+    vi.useFakeTimers();
+    await mountOptions();
+    const filter = document.querySelector<HTMLTextAreaElement>(
+      'textarea[name="custom-url-filter"]',
+    )!;
+
+    await act(async () => {
+      setTextareaValue(filter, 'first.example');
+      setTextareaValue(filter, 'latest.example');
+    });
+
+    expect(harness.updateSettings).not.toHaveBeenCalled();
+    expect(document.querySelector('.options-save-status')?.textContent)
+      .toContain('Saving…');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(harness.updateSettings).toHaveBeenCalledTimes(1);
+    expect(harness.updateSettings).toHaveBeenCalledWith({
+      customUrlFilter: 'latest.example',
+    });
+    expect(document.querySelector('.options-save-status')?.textContent)
+      .toContain('Saved');
+  });
+
+  it('flushes a pending text draft on blur without a later duplicate save', async () => {
+    vi.useFakeTimers();
+    await mountOptions();
+    const filter = document.querySelector<HTMLTextAreaElement>(
+      'textarea[name="custom-url-filter"]',
+    )!;
+
+    await act(async () => {
+      setTextareaValue(filter, 'blur.example');
+      filter.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+
+    expect(harness.updateSettings).toHaveBeenCalledTimes(1);
+    expect(harness.updateSettings).toHaveBeenCalledWith({
+      customUrlFilter: 'blur.example',
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(harness.updateSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces persistence errors in the stable save status', async () => {
+    harness.persistenceError = 'Storage unavailable';
+    await mountOptions();
+
+    expect(document.querySelector('.options-save-status[role="status"]')?.textContent)
+      .toContain('Could not save');
+  });
+
+  it('renders Basic settings as unframed sections instead of cards', async () => {
+    await mountOptions();
+
+    expect(document.querySelectorAll('.options-basic .options-settings-section'))
+      .toHaveLength(4);
+    expect(document.querySelector('.options-basic .mantine-Card-root')).toBeNull();
   });
 
   it('keeps storage, safety, shortcuts, and reset inside Advanced Settings', async () => {
@@ -160,5 +242,18 @@ describe('OptionsApp information architecture', () => {
       .find((button) => button.textContent?.trim() === 'Reset Settings');
     await act(async () => confirm?.click());
     expect(harness.updateSettings).toHaveBeenCalledWith(DEFAULT_SETTINGS);
+  });
+
+  it('restores focus to Reset to Defaults after cancelling confirmation', async () => {
+    await mountOptions();
+    const reset = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === 'Reset to Defaults');
+    await act(async () => reset?.click());
+
+    const cancel = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === 'Cancel');
+    await act(async () => cancel?.click());
+
+    await vi.waitFor(() => expect(document.activeElement).toBe(reset));
   });
 });

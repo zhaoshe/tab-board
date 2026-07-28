@@ -47,11 +47,11 @@ TabBoard 使用 `chrome_url_overrides.newtab` 替换 Chrome 新标签页。
 
 Manager 是 tabExtend-style visual board 主工作台，分为：
 
-- 左侧可折叠 sidebar：64px header rail 内是带 window icon 的 compact window selector、Save/Select/More 和 sidebar actions，下面是单一 Open Tabs 纵向列表。Sidebar 展开时占满视口高度；折叠后显示当前 window、tab favicon 和 Filter tabs 的窄 rail。hover 或 keyboard focus 会把完整 sidebar 作为覆盖层打开，不推动右侧 board；触控入口仍通过 rail/toggle 可达。
-- 右侧 64px toolbar：workspace dropdown、40px category tabs、search、Import、Export、Bin、Options；workspace 控制位于 category tabs 左侧，全部 controls 对齐同一基线。
+- 左侧可折叠 sidebar：48px header rail 内是 compact window selector、Save Window、Refresh 和 collapse actions，下面是单一 Open Tabs 纵向列表。Sidebar 展开时占满视口高度；折叠 rail 只保留当前 window、每行的 Focus favicon 和 Expand Sidebar，其他 window、selection、drag、More、Close 与 Filter 在 overlay drawer 中恢复。hover 或显式 Expand 会把完整 sidebar 作为覆盖层打开，不推动右侧 board。
+- 右侧 48px toolbar：workspace dropdown、category tabs、search、Import、Export、Trash、Options；workspace 控制位于 category tabs 左侧，全部 controls 对齐同一基线。
 - 右侧 active category board：只展示当前 category 的 saved sessions；sessions 直接位于 Nord canvas 上，单行横向排列并滚动，不再有 category outer frame。
 
-Window selector 展示 Chrome normal windows 的 ordinal 和原始 tab 总数，不显示 `Current window` 或 raw Chrome window ID；window icon 作为 selector 的 start icon，一次只渲染 selected window 的 Open Tabs。Selected window 的 tab rows 按 Chrome tab.index 排成一个纵向列表；pinned row 与普通 row 同处列表，并根据 capture policy 显示 badge/reason。Sidebar 底部的 Filter tabs 输入只过滤当前 selected window 的 rows。Selected window 与单一 tab list 共用同一 top edge；Open/saved tab 的完整本地 metadata 通过 hover 或 focus 进入 interactive popover，不显示 eye/preview 按钮，动作执行前关闭 popover，随后将 keyboard focus 归还仍可用的 row、session 或 filter fallback，避免重绘后保留旧 trigger 或隐藏焦点。Session cards 保留 Restore 和 More；Add、Rename、Note、Lock、Copy、Delete 等次级动作进入 More。Card 充满 board 高度，全部 matching tabs 在 card 内部纵向滚动。Manager 使用 Nord semantic tokens 和 Mantine primitives；search、window selector、workspace dropdown、DnD product surfaces 均由 React component contracts 组合，DnD payload/target 仍保持 typed discriminated unions。
+Window selector 展示 Chrome normal windows 的 ordinal 和原始 tab 总数，不显示 `Current window` 或 raw Chrome window ID；一次只渲染 selected window 的 Open Tabs。每个 row 的 checkbox 只负责 selection，独立 drag handle 负责 DnD，点击/Enter title 区域直接 Focus 浏览器 tab，More 打开带名称的 Pin/Close 详情动作。Fine pointer 可保留直接 Close；coarse pointer 和 760px 以下只保留 Select/Drag/Focus/More 四个 44px 目标，并保持 8px 间距。Sidebar 底部的 Filter tabs 输入只过滤当前 selected window 的 rows。Session cards 保留独立 drag handle、Restore 和 More；Add、Rename、Note、Lock、Copy、Delete 等次级动作进入 More。Card 充满 board 高度，全部 matching tabs 在 card 内部纵向滚动。Category label 只负责导航，独立 reorder handle 负责键盘/指针 DnD；category label 同时显示 session count。
 
 Open Tabs 刷新期间保留上一份 window/tab rows，不插入 loading 文案或空白占位；sidebar 顶部 Refresh icon 持续旋转并通过 `aria-busy` 暴露刷新状态，请求成功后再原子替换列表。
 
@@ -64,7 +64,7 @@ Manager 页面上下文同步到 URL：
 - 用户导航会进入浏览器历史；Back/Forward 恢复 workspace、category、view 和 query。
 - URL 中无效或跨 workspace 的 category 自动回退到 Inbox。
 
-窄屏下 Search 独占 topbar 的内容区；Import、Export、Trash、Options 收入 More actions，不隐藏能力。Sidebar 收起后保留可聚焦的 Expand sidebar 控件。
+窄屏下 Search 独占 topbar 的内容区；Import、Export、Trash、Options 收入 More actions，不隐藏能力。Sidebar 收起后只保留当前 window、Open Tab Focus 与可聚焦的 Expand Sidebar，避免裁剪但仍可聚焦的隐藏动作。Drawer 打开时被覆盖的 topbar/main surface 使用 `inert`。
 
 ### Popup
 
@@ -78,16 +78,18 @@ Popup 是快动作入口：
 Save 完成后 popup 关闭，打开或聚焦最近访问的 manager，并在 manager 中定位刚保存的 session。Popup 不承载重命名、分类、编辑等管理流程。
 
 Popup hydration 时展示轻量 loading 状态，不显示空白页。Dedupe 会先确认将关闭的重复 tab 数量，再执行关闭。
+Popup 的 Save 文案与 aria-label 同源显示实际结果，例如 `Save 4 Tabs` 与 `4 of 7 tabs selected`；筛选为 0 时解释恢复路径。Dedupe confirmation 默认聚焦 Cancel，关闭后显式回到 Dedupe。
 
 ### Options
 
 Options 分为 Basic 和 Advanced：
 
-- Basic：日常 toolbar、capture（包括 tab 去重）、restore、theme、确认设置。
-- Advanced：Chrome shortcuts、reset settings。
+- Basic：日常 toolbar、capture（包括 tab 去重）、restore、theme；使用无框 section 和 divider，而不是 card-per-section。
+- Advanced：Data Storage、删除确认、Chrome shortcuts、reset settings。
 - Capture 默认开启 tab 去重；Options 提供自定义 URL 过滤规则，命中的 open tabs 不展示、不可保存也不可拖拽。
 - Favicons 始终展示，不再是设置项。
 - 危险操作默认识别，可在设置中关闭二次确认。
+- Switch/radio/theme 立即保存；自定义过滤文本在停止输入 500ms 或 blur 后提交。标题旁稳定显示 `Saving…`、`Saved` 或 `Could not save`。Reset confirmation 关闭后显式回到 Reset to Defaults。
 - Session card 外露动作不再可配置。
 - Options 跟随 system / light / dark 主题。
 - Toolbar、Capture、Restore、Appearance 保持在 Basic 区；Data Storage、Safety、Chrome shortcuts 和 Reset 放在 Advanced Settings。
@@ -147,7 +149,7 @@ Options 分为 Basic 和 Advanced：
 
 结果：
 
-- 选中 tabs 被创建为一个新 session；多选态在 sidebar footer 替换 Filter tabs，提供创建 session、批量删除、批量 pin、退出多选四个带可访问名称的 icon actions。
+- 选中 tabs 被创建为一个新 session；多选态在 tab list 上方显示 selected count，并提供全选、创建 session、批量关闭、批量 pin、退出五个带可访问名称的 icon actions。
 - 如果拖到已有 session，会追加或插入到该 session。
 - 从任一已选 tab 开始拖动，会携带当前选中的所有 open tabs。
 

@@ -38,10 +38,28 @@ vi.mock('@mantine/core', async () => {
   }: NativeProps) {
     return createElement('div', props, children);
   }
+  const NativeRefElement = forwardRef<HTMLDivElement, NativeProps>(({
+    children,
+    openDelay: _openDelay,
+    lineClamp: _lineClamp,
+    scrollbarSize: _scrollbarSize,
+    ...props
+  }, ref) => createElement('div', { ...props, ref }, children as ReactNode));
   const ActionIcon = forwardRef<HTMLButtonElement, NativeProps>(({ children, loading: _loading, ...props }, ref) =>
     createElement('button', { ...props, ref }, children as ReactNode));
   const Checkbox = ({ children: _children, ...props }: NativeProps) =>
     createElement('input', { ...props, type: 'checkbox' });
+  const ScrollArea = ({
+    children,
+    viewportRef,
+    scrollbarSize: _scrollbarSize,
+    ...props
+  }: NativeProps & { viewportRef?: (element: HTMLDivElement | null) => void }) => (
+    createElement('div', {
+      ...props,
+      ref: viewportRef,
+    }, children as ReactNode)
+  );
   const TextInput = ({ rightSection: _rightSection, ...props }: NativeProps) =>
     createElement('input', props);
   const UnstyledButton = forwardRef<HTMLButtonElement, NativeProps>(({ children, ...props }, ref) =>
@@ -52,8 +70,8 @@ vi.mock('@mantine/core', async () => {
     Alert: NativeElement,
     Button: NativeElement,
     Checkbox,
-    Group: NativeElement,
-    ScrollArea: NativeElement,
+    Group: NativeRefElement,
+    ScrollArea,
     Stack: NativeElement,
     Text: NativeElement,
     TextInput,
@@ -66,7 +84,10 @@ vi.mock('@tabler/icons-react', () => {
   const Icon = () => null;
   return {
     IconBrowser: Icon,
+    IconArchive: Icon,
+    IconDots: Icon,
     IconFolderPlus: Icon,
+    IconGripVertical: Icon,
     IconLayoutSidebarLeftCollapse: Icon,
     IconPin: Icon,
     IconRefresh: Icon,
@@ -83,7 +104,9 @@ vi.mock('@dnd-kit/core', () => ({
       attributes: {},
       listeners: {},
       setNodeRef: () => undefined,
+      setActivatorNodeRef: () => undefined,
       transform: null,
+      isDragging: false,
     };
   },
 }));
@@ -215,6 +238,7 @@ function createProps(overrides: Partial<ComponentProps<typeof OpenTabsPanel>> = 
       pinSelection: vi.fn(async () => undefined),
       clearQuery: vi.fn(),
       captureSelection: vi.fn(async () => null),
+      captureWindow: vi.fn(async () => null),
       refresh: vi.fn(async () => undefined),
       filterSessionsByTab: vi.fn(),
       clearSessionFilter: vi.fn(),
@@ -225,6 +249,7 @@ function createProps(overrides: Partial<ComponentProps<typeof OpenTabsPanel>> = 
     workspaceId: 'workspace_default',
     workflow,
     sidebarPinned: true,
+    onCaptureSelectedWindow: vi.fn(async () => undefined),
     onCaptureSelectedTabs: vi.fn(async () => undefined),
     sidebarToggleRef: { current: null },
     sidebarCompactToggleRef: { current: null },
@@ -259,6 +284,64 @@ afterEach(async () => {
 });
 
 describe('OpenTabsPanel drag constraints', () => {
+  it('exposes one-click Save Window with the eligible tab count', async () => {
+    const props = createProps();
+    await mountPanel(props);
+
+    const saveWindow = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Save 3 Tabs in This Window"]',
+    );
+    expect(saveWindow).not.toBeNull();
+    expect(saveWindow?.disabled).toBe(false);
+
+    await act(async () => saveWindow?.click());
+    expect(props.onCaptureSelectedWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables Save Window with an explanatory name when nothing is capturable', async () => {
+    const unavailableTabs = tabs.map((tab) => ({
+      ...tab,
+      storable: false,
+      reason: 'Matches custom filter rule' as const,
+    }));
+    const unavailableWindow = {
+      ...selectedWindow,
+      tabs: unavailableTabs,
+    };
+    await mountPanel({
+      workflow: {
+        ...createProps().workflow,
+        model: {
+          ...createProps().workflow.model,
+          windows: [unavailableWindow],
+          selectedWindow: unavailableWindow,
+          filteredTabs: unavailableTabs,
+        },
+      },
+    });
+
+    const saveWindow = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Save Window — No Capturable Tabs"]',
+    );
+    expect(saveWindow).not.toBeNull();
+    expect(saveWindow?.disabled).toBe(true);
+  });
+
+  it('focuses an open browser tab with one click and keeps details in More', async () => {
+    const props = createProps();
+    await mountPanel(props);
+
+    const focus = document.querySelector<HTMLButtonElement>('[aria-label="Focus Regular"]');
+    const more = document.querySelector<HTMLButtonElement>(
+      '[aria-label="More Actions for Regular"]',
+    );
+    expect(focus).not.toBeNull();
+    expect(more).not.toBeNull();
+
+    await act(async () => focus?.click());
+    expect(props.workflow.commands.focusTab).toHaveBeenCalledWith(41, 1);
+  });
+
   it('allows pinned storable tabs in selection and drag records', async () => {
     await mountPanel();
 
@@ -337,9 +420,23 @@ describe('OpenTabsPanel drag constraints', () => {
       },
     });
 
-    expect(document.querySelector('[aria-label="1 tab, current browser window"]')).not.toBeNull();
+    expect(document.querySelector(
+      '[aria-label="Window 1: 1 tab, current browser window"]',
+    )).not.toBeNull();
     expect(document.querySelector<HTMLInputElement>('[aria-label="Select Regular"]')?.name)
       .toBe('open-tab-selection');
+  });
+
+  it('shows stable window ordinals and counts in the expanded selector', async () => {
+    await mountPanel();
+
+    expect(document.querySelectorAll('.manager-window-label')).toHaveLength(1);
+    expect(document.querySelector('.manager-window-label')?.textContent)
+      .toContain('Window 1');
+    expect(document.querySelector('.manager-window-label')?.textContent)
+      .toContain('3 tabs');
+    expect(document.querySelector('[aria-label="Window 1: 3 tabs, current browser window"]'))
+      .not.toBeNull();
   });
 
   it('confirms both single-tab and selected-tab close actions', async () => {

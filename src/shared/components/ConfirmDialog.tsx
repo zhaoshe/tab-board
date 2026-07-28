@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, type RefObject } from 'react';
 import {
   Button,
   Group,
@@ -17,6 +17,7 @@ export interface ConfirmDialogProps {
   loading?: boolean;
   confirmColor?: string;
   portalTarget?: HTMLElement | string;
+  finalFocusRef?: RefObject<HTMLElement>;
   onCancel: () => void;
   onConfirm: () => void | Promise<void>;
 }
@@ -31,6 +32,7 @@ export function ConfirmDialog({
   loading = false,
   confirmColor = 'red',
   portalTarget,
+  finalFocusRef,
   onCancel,
   onConfirm,
 }: ConfirmDialogProps) {
@@ -49,7 +51,8 @@ export function ConfirmDialog({
       closeButtonProps={{ 'aria-label': `Close ${title}` }}
       closeOnClickOutside={!loading}
       closeOnEscape={!loading}
-      returnFocus
+      returnFocus={!finalFocusRef}
+      onExitTransitionEnd={() => finalFocusRef?.current?.focus()}
     >
       <Stack gap="md">
         <Text className="confirm-dialog__message" size="sm">{message}</Text>

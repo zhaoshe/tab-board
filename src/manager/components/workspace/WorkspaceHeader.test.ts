@@ -33,6 +33,12 @@ describe('WorkspaceHeader source contracts', () => {
     expect(categoryManagerSource).toContain('Menu.Target');
   });
 
+  it('renders compact category counts without showing inactive zeros', () => {
+    expect(categoryNavSource).toContain('formatNumber(item.count)');
+    expect(categoryNavSource).toContain('item.count > 0 || isActive');
+    expect(categoryNavSource).toContain('className="manager-category-count tabular-nums"');
+  });
+
   it('matches locked category markers only to their category and placement', () => {
     const marker = { kind: 'category-reorder', categoryId: 'folder-a', placement: 'after' } as const;
     expect(isCategoryDragMarkerFor(marker, 'folder-a')).toBe(true);
@@ -44,7 +50,12 @@ describe('WorkspaceHeader source contracts', () => {
 
   it('keeps category drag labels focused on navigation', () => {
     expect(categoryNavSource).toContain('data-category-trigger="label"');
-    expect(categoryNavSource).not.toContain('data-category-trigger="dots"');
+    expect(categoryNavSource).toContain('data-category-drag-handle');
+    expect(categoryNavSource).toContain('setActivatorNodeRef');
+    expect(categoryNavSource).toContain('aria-label={`Reorder ${item.label}`}');
+    expect(categoryNavSource).not.toMatch(
+      /data-category-trigger="label"[\s\S]{0,300}\{\.\.\.listeners\}/,
+    );
     expect(categoryNavSource).not.toContain('className="manager-category-actions"');
     expect(categoryManagerSource).toContain('className="manager-category-actions"');
   });

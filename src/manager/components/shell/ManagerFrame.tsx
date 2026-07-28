@@ -61,7 +61,12 @@ export function ManagerFrame({
         data-drag-marker={dragMarkerKind}
         data-drag-target={dragTargetKind}
       >
-        <header className="manager-topbar">{header}</header>
+        <header
+          className="manager-topbar"
+          {...(sidebarOverlayOpen ? { inert: '' } : {})}
+        >
+          {header}
+        </header>
         <aside
           className="manager-sidebar"
           id="manager-sidebar"
@@ -72,7 +77,12 @@ export function ManagerFrame({
         </aside>
         <main className="manager-main" id="manager-main">
           <h1 className="visually-hidden"><span translate="no">TabBoard</span> Tab Manager</h1>
-          {main}
+          <div
+            className="manager-main-surface"
+            {...(sidebarOverlayOpen ? { inert: '' } : {})}
+          >
+            {main}
+          </div>
           {dialogs}
         </main>
       </div>

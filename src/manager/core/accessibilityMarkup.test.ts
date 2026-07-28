@@ -120,6 +120,22 @@ describe('project UI accessibility markup', () => {
     expect(categoryManager).toContain('<Menu.Dropdown id="category-options-menu">');
   });
 
+  it('makes only covered Manager surfaces inert while the compact sidebar drawer is open', () => {
+    expect(managerFrame).toContain(
+      "{...(sidebarOverlayOpen ? { inert: '' } : {})}",
+    );
+    expect(managerFrame).toContain('className="manager-main-surface"');
+    expect(managerFrame).toMatch(
+      /<div[\s\S]*?className="manager-main-surface"[\s\S]*?\{\.\.\.\(sidebarOverlayOpen \? \{ inert: '' \} : \{\}\)\}/,
+    );
+    expect(managerFrame).toMatch(
+      /<main[\s\S]*?<h1 className="visually-hidden"[\s\S]*?<div[\s\S]*?className="manager-main-surface"/,
+    );
+    expect(managerFrame).not.toContain(
+      'aria-hidden={sidebarOverlayOpen || undefined}',
+    );
+  });
+
   it('routes every Manager modal into main with a named close control', () => {
     expect(managerModal).toContain("document.querySelector<HTMLElement>('#manager-main')");
     expect(managerModal).toContain(
@@ -154,6 +170,12 @@ describe('project UI accessibility markup', () => {
     );
     expect(managerCss).toContain(
       ":root[data-mantine-color-scheme='dark'] .manager-window-glyph",
+    );
+    expect(managerCss).toContain(
+      ":root[data-mantine-color-scheme='light'] .manager-window-label",
+    );
+    expect(managerCss).toContain(
+      ":root[data-mantine-color-scheme='dark'] .manager-window-label",
     );
     expect(optionsCss).toContain(
       ":root[data-mantine-color-scheme='light'] .options-theme-control",
@@ -195,6 +217,10 @@ describe('project UI accessibility markup', () => {
       resolve(root, 'src/manager/components/sidebar/OpenTabsPanel.tsx'),
       'utf8',
     );
+    const openTabsWindowBar = readFileSync(
+      resolve(root, 'src/manager/components/sidebar/OpenTabsWindowBar.tsx'),
+      'utf8',
+    );
 
     expect(importModal).not.toContain(
       "transition: 'border-color 0.2s ease, background-color 0.2s ease'",
@@ -202,11 +228,11 @@ describe('project UI accessibility markup', () => {
     expect(openTabsPanel).not.toContain(
       "style={{ transform: sidebarPinned ? undefined : 'rotate(180deg)' }}",
     );
-    expect(openTabsPanel).toContain(
+    expect(openTabsWindowBar).toContain(
       '<span className={loading ? \'manager-refresh-icon--loading\' : undefined} aria-hidden="true">',
     );
-    expect(openTabsPanel).toContain('<IconRefresh size={20} aria-hidden="true" />');
-    expect(openTabsPanel).not.toContain(
+    expect(openTabsWindowBar).toContain('<IconRefresh size={20} aria-hidden="true" />');
+    expect(openTabsWindowBar).not.toContain(
       '<IconRefresh className={loading ? \'manager-refresh-icon--loading\' : undefined}',
     );
   });
@@ -216,7 +242,7 @@ describe('project UI accessibility markup', () => {
       'src/manager/components/bin/BinView.tsx',
       'src/manager/components/import-export/ImportModal.tsx',
       'src/manager/components/search/SearchBar.tsx',
-      'src/manager/components/shell/ManagerDndCoordinator.tsx',
+      'src/manager/components/shell/ManagerDragOverlay.tsx',
     ];
 
     for (const file of countOwners) {
@@ -231,8 +257,8 @@ describe('project UI accessibility markup', () => {
       'src/manager/components/bin/BinView.tsx',
       'src/manager/components/import-export/ImportModal.tsx',
       'src/manager/components/search/SearchBar.tsx',
-      'src/manager/components/sessions/SessionCard.tsx',
-      'src/manager/components/shell/ManagerDndCoordinator.tsx',
+      'src/manager/components/sessions/SessionCardMeta.tsx',
+      'src/manager/components/shell/ManagerDragOverlay.tsx',
       'src/manager/components/sidebar/OpenTabsPanel.tsx',
       'src/manager/components/workspace/CategoryManager.tsx',
       'src/manager/components/shell/useToastNotifications.ts',
@@ -269,5 +295,52 @@ describe('project UI accessibility markup', () => {
     expect(accessibilityCss).toContain('--button-bg: var(--mantine-color-red-8) !important');
     expect(accessibilityCss).toContain('.confirm-dialog__message');
     expect(accessibilityCss).toContain('background: var(--mantine-color-body)');
+  });
+
+  it('keeps secondary actions discoverable and provides coarse-pointer targets', () => {
+    const sessionCss = readFileSync(
+      resolve(root, 'src/manager/styles/session.css'),
+      'utf8',
+    );
+    const sidebarCss = readFileSync(
+      resolve(root, 'src/manager/styles/sidebar.css'),
+      'utf8',
+    );
+
+    expect(sessionCss).toMatch(
+      /\.tab-item-row__select,[\s\S]*?\.session-card__actions\s*\{\s*opacity:\s*0\.45;/,
+    );
+    expect(sessionCss).toMatch(
+      /\.session-card__drag-handle\s*\{[\s\S]*?opacity:\s*0\.45;/,
+    );
+    expect(sidebarCss).toMatch(
+      /\.manager-open-tab-drag-handle,[\s\S]*?\.manager-open-tab-close\s*\{[\s\S]*?opacity:\s*0\.45;/,
+    );
+    expect(accessibilityCss).toContain('@media (hover: none), (pointer: coarse)');
+    expect(accessibilityCss).toContain('min-width: 44px');
+    expect(accessibilityCss).toContain('min-height: 44px');
+    expect(accessibilityCss).toContain('gap: 8px');
+    expect(sidebarCss).toMatch(
+      /@media \(hover: none\), \(pointer: coarse\)[\s\S]*?\.manager-open-tab-row\s*\{[\s\S]*?gap: 8px;[\s\S]*?\.manager-open-tab-close\s*\{[\s\S]*?display: none;/,
+    );
+    expect(sidebarCss).toMatch(
+      /@media \(max-width: 760px\)[\s\S]*?\.manager-open-tab-row\s*\{[\s\S]*?gap: 8px;[\s\S]*?\.manager-open-tab-close\s*\{[\s\S]*?display: none;/,
+    );
+    const productionActions = [
+      'src/manager/components/sidebar/OpenTabsWindowBar.tsx',
+      'src/popup/PopupApp.tsx',
+    ].map((file) => readFileSync(resolve(root, file), 'utf8')).join('\n');
+    expect(productionActions).toContain('<AccessibleIconAction');
+  });
+
+  it('keeps functional session metadata at or above 12px', () => {
+    const sessionCss = readFileSync(
+      resolve(root, 'src/manager/styles/session.css'),
+      'utf8',
+    );
+    expect(sessionCss).toMatch(
+      /\.session-card__meta\s*\{[\s\S]*?font-size:\s*12px;[\s\S]*?line-height:\s*16px;/,
+    );
+    expect(sessionCss).not.toMatch(/font-size:\s*(?:10|11)px/);
   });
 });

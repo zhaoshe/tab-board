@@ -1234,6 +1234,38 @@ Status:
 
 Accepted。
 
+## D049: Dense workbench actions use explicit ownership and adaptive density
+
+Context:
+
+`ui-ux-pro-max`复审发现当前Manager仍有几类交互冲突：collapsed sidebar hover会推动board；category label同时是导航和DnD activator；Open Tab把selection、drag、single/double click、preview和close堆在同一行；compact rail虽视觉裁剪，离屏按钮仍可进入焦点序列。与此同时，OpenTabsPanel、SessionCard和ManagerDndCoordinator仍混合多个交互owner，增加视觉迭代的回归范围。
+
+Decision:
+
+- 保留dense、flat、low-motion productivity workbench，不采用生成的portfolio/exaggerated-minimalism/orange设计系统。
+- Navigation、selection、drag和secondary actions使用独立control。Category label只导航，Open Tab title单击/Enter Focus，drag handle只拖拽，checkbox只选择，More只打开详情动作。
+- Fine pointer使用32px compact action并允许直接Close；coarse pointer和760px以下使用44px target、8px spacing，Close收进More。
+- Collapsed rail只保留当前window、row Focus和Expand Sidebar；完整window/selection/drag/filter动作只在overlay drawer可达。Drawer覆盖期间topbar和main surface使用`inert`。
+- Open Tabs、Session Card和Manager DnD分别拆为composition owner加window/list/filter、header/meta/editor/list、geometry/sensors/overlay模块。
+- Full DOM + `content-visibility`继续保留；没有性能证据时不引入virtualization runtime dependency。
+
+Rationale:
+
+- 独立control让accessible name、键盘动作和pointer行为一致，避免Enter启动错误DnD或double-click-only主流程。
+- Compact模式不能只靠`overflow:hidden`隐藏可聚焦入口；焦点序列必须与视觉可见性一致。
+- Touch target尺寸与间距是interaction contract，不应由共享CSS和后加载owner CSS偶然竞争。
+- 明确owner让source contract绑定真实责任模块，避免为了通过测试把rendering重新塞回coordinator。
+
+Trade-offs:
+
+- Compact用户需要先Expand Sidebar或打开More执行部分低频动作。
+- Open Tabs row在coarse pointer下显示的直接动作更少，但每个动作更稳定、可发现。
+- 模块数量增加，但public coordinator保持不变，schema、storage protocol、mutation wire和DropIntent不变。
+
+Status:
+
+Accepted。
+
 ```md
 ## D00X: Title
 

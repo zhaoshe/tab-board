@@ -3,6 +3,8 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PopupApp } from './PopupApp';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -51,7 +53,7 @@ vi.mock('../shared/store/useTabBoardStore', () => ({
 
 function getSaveButton(): HTMLButtonElement {
   const button = document.querySelector<HTMLButtonElement>(
-    '[aria-label="Save Selected Tabs as a Session"], [aria-label="Saving Selected Tabs…"]',
+    '[data-popup-save]',
   );
   if (!button) throw new Error('Missing save button.');
   return button;
@@ -117,6 +119,22 @@ afterEach(async () => {
 });
 
 describe('PopupApp save response protocol', () => {
+  it('defines compact touch targets in the Popup style owner', () => {
+    const css = readFileSync(
+      resolve(process.cwd(), 'src/popup/popup.css'),
+      'utf8',
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 760px\)[\s\S]*?\.popup-app__save[\s\S]*?min-height: 44px/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 760px\)[\s\S]*?\.popup-app__footer \.mantine-ActionIcon-root[\s\S]*?width: 44px[\s\S]*?height: 44px/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 760px\)[\s\S]*?\.popup-app__filters \.mantine-Checkbox-root[\s\S]*?min-height: 44px/,
+    );
+  });
+
   it('renders a main landmark, page heading, and visible hydration status', async () => {
     hydrationState.hydrated = false;
     await mountPopupWithoutWaiting();
@@ -145,6 +163,45 @@ describe('PopupApp save response protocol', () => {
       .not.toBeNull();
     expect(document.querySelector<HTMLInputElement>('input[name="include-tab-groups"]'))
       .not.toBeNull();
+  });
+
+  it('shows the actual selected result and keeps button copy in sync with filters', async () => {
+    queryTabs.mockResolvedValue([
+      { ...tabs[0], pinned: true, groupId: 7 },
+      { ...tabs[0], id: 8, active: false, pinned: false, groupId: 7 },
+      { ...tabs[0], id: 9, active: false, pinned: false, groupId: -1 },
+    ]);
+    await mountPopup('Save 3 Tabs');
+
+    expect(document.querySelector('[data-popup-selection-summary]')?.textContent)
+      .toContain('3 of 3 tabs selected');
+    expect(getSaveButton().getAttribute('aria-label'))
+      .toBe('Save 3 Tabs as a Session');
+
+    const pinned = document.querySelector<HTMLInputElement>(
+      'input[name="include-pinned-tabs"]',
+    );
+    await act(async () => pinned?.click());
+
+    expect(getSaveButton().textContent).toContain('Save 2 Tabs');
+    expect(document.querySelector('[data-popup-selection-summary]')?.textContent)
+      .toContain('2 of 3 tabs selected');
+  });
+
+  it('explains when capture filters exclude every tab', async () => {
+    queryTabs.mockResolvedValue([
+      { ...tabs[0], pinned: true, groupId: 7 },
+    ]);
+    await mountPopup('Save 1 Tab');
+
+    const pinned = document.querySelector<HTMLInputElement>(
+      'input[name="include-pinned-tabs"]',
+    );
+    await act(async () => pinned?.click());
+
+    expect(getSaveButton().disabled).toBe(true);
+    expect(document.querySelector('[data-popup-selection-summary]')?.textContent)
+      .toContain('No tabs selected. Include pinned tabs or tab groups to save this window.');
   });
 
   it('uses contrast-safe duplicate text and action variants', async () => {
@@ -190,6 +247,21 @@ describe('PopupApp save response protocol', () => {
     await act(async () => confirm?.click());
     await waitForDom(() => expect(sendMessage).toHaveBeenCalledWith({ action: 'dedupe-window' }));
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores focus to Dedupe after cancelling its confirmation', async () => {
+    queryTabs.mockResolvedValue([...tabs, { ...tabs[0], id: 8, active: false }]);
+    await mountPopup('Save');
+    const dedupe = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Remove Duplicate Tabs from This Window"]',
+    );
+    await act(async () => dedupe?.click());
+
+    const cancel = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === 'Cancel');
+    await act(async () => cancel?.click());
+
+    await waitForDom(() => expect(document.activeElement).toBe(dedupe));
   });
 
   it('treats a successful worker envelope as saved and closes after the existing delay', async () => {

@@ -47,7 +47,59 @@
 - Final browser review after those fixes: Manager light/dark/default/390px/menu/search/Import/Export/reduced-motion/Tooltip states, Popup light/dark/Dedupe dialog, and Options light/dark/Advanced/Reset open/closed states all report axe 0 violations / 0 incomplete; focus, URL, overflow, theme-color, and modal overscroll probes pass.
 - Fresh final verification: `npm run check` passed; `npm test` passed 75 files / 979 tests; `npm run test:e2e` passed 19/19; `git diff --check` passed. No runtime dependency or generated-artifact diff was introduced.
 - Prompt-to-artifact completion audit maps every explicit objective, all 13 P0/P1/P2 recommendations, all named commands/gates, every changed-file group, and all product constraints to concrete evidence in `findings.md`.
+- Started the separate `$ui-ux-pro-max` review/refactor loop requested after the
+  Web Interface Guidelines work.
+- Recorded 12 UI/UX Pro Max findings and a three-stage implementation plan in
+  `docs/reviews/2026-07-27-ui-ux-pro-max-review.md` and
+  `docs/superpowers/plans/2026-07-27-ui-ux-pro-max-refactor.md`.
+- Implemented all P0/P1/P2 findings across Manager, Popup, and Options,
+  including stable collapsed-sidebar geometry, separate category navigation and
+  DnD handles, Save Window, single-click Open Tab focus, touch target policy,
+  Popup result prediction, Options draft saves/status, navigation counts, and
+  conditional overflow cues.
+- Completed the final ownership extraction for Open Tabs, Session Card, and
+  Manager DnD. The public coordinators now compose explicit list/header/editor/
+  geometry/sensor/overlay owners.
+- Updated six stale source-contract assertions to read the new owners without
+  removing any behavior checks. Fresh focused evidence: 4 test files / 98 tests
+  passed; `npm run build` passed with 7,024 transformed modules;
+  `git diff --check` passed.
+- Re-ran the UI/UX Pro Max design-system, UX, and React searches. The generated
+  portfolio/exaggerated-minimalism/orange system remains a domain
+  misclassification and is rejected. The applicable high-priority results are
+  keyboard navigation, 44px touch targets, 8px target spacing, predictable
+  overflow, stable list keys, and selective memoization.
+- Rendered review round 1 used one clean Vite 5173 server after diagnosing the
+  repository's fixed HMR port. Manager, Popup, and Options default states each
+  reached axe 0 violations / 0 incomplete with no browser page errors.
+- Rendered review round 2 found and fixed three compact Open Tabs defects with
+  RED/GREEN Playwright evidence: clipped Drag/More row controls in the collapsed
+  rail, offscreen/overlapping window-bar focus targets, and 2px-spaced duplicate
+  direct Close in the expanded touch drawer.
+- Compact behavior now exposes only current Window plus row Focus while
+  collapsed, restores the full workflow after Expand Sidebar, and uses
+  Select/Drag/Focus/More at 44px with 8px spacing. Focused verification: 4
+  Vitest files / 83 tests and the compact E2E scenario pass.
+- Rendered review round 3 fixed explicit focus return for Popup Dedupe and
+  Options Reset, then corrected Open Tab info actions from unnamed menuitems to
+  named ordinary buttons while preserving overlay lifecycle/focus restoration.
+- Final browser matrix: Manager desktop/compact/drawer/menu/details/import/
+  export/dark/reduced-motion, Popup light/dark/Dedupe, and Options
+  light/dark/Advanced/Reset all report axe 0 violations / 0 incomplete.
+- Independent completion audit ran fresh gates: `npm run check` passed with 187
+  source files free of forbidden edges/cycles and 111 production files passing
+  architecture checks; `npm test` passed 76 files / 1,006 tests; `npm run
+  test:e2e` passed 26/26.
+- Repeated critical gates: `session-dnd.e2e.ts` passed 15/15 over three runs,
+  category handle isolation passed 5/5, and compact sidebar geometry passed
+  3/3. `git diff --check` passed.
+- Fresh browser state-level acceptance passed all 5 AGENTS.md DnD paths:
+  same-category session reorder, cross-category move, one saved tab into an
+  existing session, multi-selected Open Tabs into an existing session, and
+  multi-selected Open Tabs into a new insertion position.
+- Dependency/artifact audit found no package, manifest, schema, storage,
+  background, generated archive, or tracked browser-artifact diff.
 
 ## Next
 
-- Complete. No unresolved review finding or verification gate remains.
+- Complete. No unresolved UI/UX Pro Max finding or verification gate remains.

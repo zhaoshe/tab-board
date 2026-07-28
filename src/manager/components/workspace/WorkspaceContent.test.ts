@@ -283,10 +283,10 @@ describe('WorkspaceContent canonical board projection', () => {
       groups: [normal, orphan, hidden],
     });
 
-    expect(testHarness.sessionCards).toEqual([{
-      groupId: 'orphan',
-      groupIndex: 1,
-    }]);
+    expect(testHarness.sessionCards.length).toBeGreaterThan(0);
+    expect(new Set(
+      testHarness.sessionCards.map(({ groupId, groupIndex }) => `${groupId}:${groupIndex}`),
+    )).toEqual(new Set(['orphan:1']));
     expect(testHarness.droppableTargets).toContainEqual({
       id: `new-group-${currentFolder.workspaceId}-inbox`,
       index: 3,

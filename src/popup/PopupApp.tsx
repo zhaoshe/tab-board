@@ -28,6 +28,7 @@ import { useStoreHydration } from '../shared/hooks/useStoreHydration';
 import { useColorScheme } from '../shared/hooks/useColorScheme';
 import { usePageTheme } from '../shared/hooks/usePageTheme';
 import { ConfirmDialog } from '../shared/components/ConfirmDialog';
+import { AccessibleIconAction } from '../shared/components/AccessibleIconAction';
 import { formatNumber } from '../shared/utils/formatters';
 import './popup.css';
 
@@ -60,6 +61,7 @@ export function PopupApp() {
   const [includeGroups, setIncludeGroups] = useState(true);
   const [dedupeConfirmOpen, setDedupeConfirmOpen] = useState(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dedupeActionRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (hydrated) {
@@ -196,6 +198,25 @@ export function PopupApp() {
   const feedbackError = loadError || saveError;
   const pinnedTabCount = filteredTabs.filter((tab) => tab.pinned).length;
   const hasCaptureOptions = pinnedTabCount > 0 || groupedTabCount > 0;
+  const selectedCount = selectedTabs.length;
+  const selectedCountLabel = `${formatNumber(selectedCount)} ${selectedCount === 1 ? 'Tab' : 'Tabs'}`;
+  const saveButtonText = savingTabs
+    ? 'Saving…'
+    : saved
+      ? 'Saved'
+      : selectedCount
+        ? `Save ${selectedCountLabel}`
+        : 'No Tabs Selected';
+  const saveButtonLabel = savingTabs
+    ? 'Saving Selected Tabs…'
+    : selectedCount
+      ? `Save ${selectedCountLabel} as a Session`
+      : 'No Tabs Selected to Save';
+  const selectionSummary = selectedCount
+    ? `${formatNumber(selectedCount)} of ${formatNumber(filteredTabs.length)} tabs selected`
+    : filteredTabs.length > 0
+      ? 'No tabs selected. Include pinned tabs or tab groups to save this window.'
+      : 'No savable tabs in this window.';
 
   return (
     <MantineProvider theme={theme} forceColorScheme={colorScheme}>
@@ -214,6 +235,7 @@ export function PopupApp() {
           </Text>
           <Button
             className="popup-app__save"
+            data-popup-save
             fullWidth
             leftSection={saved
               ? <IconCheck size={14} aria-hidden="true" />
@@ -223,17 +245,25 @@ export function PopupApp() {
             loading={savingTabs}
             disabled={selectedTabs.length === 0}
             color={saved ? 'green' : 'blue'}
-            aria-label={savingTabs ? 'Saving Selected Tabs…' : 'Save Selected Tabs as a Session'}
+            aria-label={saveButtonLabel}
           >
-            {savingTabs ? 'Saving…' : saved ? 'Saved' : selectedTabs.length ? 'Save' : 'No Tabs'}
+            {saveButtonText}
           </Button>
           <span className="visually-hidden" role="status" aria-live="polite">
             {saved ? 'Tabs saved. Closing popup…' : ''}
           </span>
 
-          {filteredTabs.length === 0 ? (
-            <Text className="popup-app__empty" size="xs" c="dimmed">No savable tabs in this window.</Text>
-          ) : hasCaptureOptions && (
+          <Text
+            className="popup-app__selection-summary"
+            data-popup-selection-summary
+            size="xs"
+            c="dimmed"
+            aria-live="polite"
+          >
+            {selectionSummary}
+          </Text>
+
+          {filteredTabs.length > 0 && hasCaptureOptions && (
             <Group className="popup-app__filters" gap="sm">
               {pinnedTabCount > 0 && (
                 <Checkbox
@@ -263,6 +293,7 @@ export function PopupApp() {
                 {formatNumber(duplicateCount)} Duplicate{duplicateCount === 1 ? '' : 's'}
               </Text>
               <Button
+                ref={dedupeActionRef}
                 className="popup-app__dedupe"
                 fullWidth
                 variant="default"
@@ -280,16 +311,12 @@ export function PopupApp() {
         </div>
 
         <Group className="popup-app__footer" justify="flex-end" gap={4}>
-          <Tooltip label="Open Manager">
-            <ActionIcon variant="subtle" aria-label="Open Manager" onClick={openManager}>
-              <IconLayoutGrid size={18} aria-hidden="true" />
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label="Open Settings">
-            <ActionIcon variant="subtle" aria-label="Open Settings" onClick={openOptions}>
-              <IconSettings size={18} aria-hidden="true" />
-            </ActionIcon>
-          </Tooltip>
+          <AccessibleIconAction label="Open Manager" variant="subtle" onClick={openManager}>
+            <IconLayoutGrid size={18} aria-hidden="true" />
+          </AccessibleIconAction>
+          <AccessibleIconAction label="Open Settings" variant="subtle" onClick={openOptions}>
+            <IconSettings size={18} aria-hidden="true" />
+          </AccessibleIconAction>
         </Group>
 
         {feedbackError && (
@@ -304,6 +331,7 @@ export function PopupApp() {
           confirmLabel={duplicateCount === 1 ? 'Remove Duplicate Tab' : 'Remove Duplicate Tabs'}
           loadingLabel="Removing Duplicate Tabs…"
           loading={deduping}
+          finalFocusRef={dedupeActionRef}
           onCancel={() => setDedupeConfirmOpen(false)}
           onConfirm={async () => {
             await handleDedupe();

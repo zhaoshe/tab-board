@@ -47,9 +47,11 @@ export function Sidebar({
   };
   const categorySnapshotRef = useRef(currentCategorySnapshot);
   categorySnapshotRef.current = currentCategorySnapshot;
-  const captureSelectedTabs = () => {
+  const capture = (
+    operation: OpenTabsWorkflow['commands']['captureSelection'],
+  ) => {
     const categorySnapshot = { ...categorySnapshotRef.current };
-    return openTabs.commands.captureSelection(
+    return operation(
       categorySnapshot,
       () => ({ ...categorySnapshotRef.current }),
     ).then((completion) => {
@@ -57,6 +59,8 @@ export function Sidebar({
       return completion;
     });
   };
+  const captureSelectedWindow = () => capture(openTabs.commands.captureWindow);
+  const captureSelectedTabs = () => capture(openTabs.commands.captureSelection);
   return (
     <div className="manager-sidebar__overlay">
         <Stack gap={0} className="manager-sidebar-content">
@@ -65,6 +69,7 @@ export function Sidebar({
               workspaceId={workspaceId}
               workflow={openTabs}
               sidebarPinned={sidebarExpanded}
+              onCaptureSelectedWindow={captureSelectedWindow}
               onCaptureSelectedTabs={captureSelectedTabs}
               sidebarToggleRef={sidebarToggleRef}
               sidebarCompactToggleRef={sidebarRailToggleRef}

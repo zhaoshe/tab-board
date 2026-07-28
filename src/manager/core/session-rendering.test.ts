@@ -8,9 +8,15 @@ const workspace = readFileSync(resolve(managerRoot, 'components/workspace/Worksp
 const layout = [
   'components/shell/ManagerLayout.tsx',
   'components/shell/ManagerDndCoordinator.tsx',
+  'components/shell/managerDndGeometry.ts',
+  'components/shell/ManagerDragOverlay.tsx',
+  'components/shell/useManagerDndSensors.ts',
   'hooks/useCaptureReveal.ts',
 ].map((file) => readFileSync(resolve(managerRoot, file), 'utf8')).join('\n');
 const card = readFileSync(resolve(managerRoot, 'components/sessions/SessionCard.tsx'), 'utf8');
+const cardHeader = readFileSync(resolve(managerRoot, 'components/sessions/SessionCardHeader.tsx'), 'utf8');
+const cardMeta = readFileSync(resolve(managerRoot, 'components/sessions/SessionCardMeta.tsx'), 'utf8');
+const tabList = readFileSync(resolve(managerRoot, 'components/sessions/SessionTabList.tsx'), 'utf8');
 const row = readFileSync(resolve(managerRoot, 'components/sessions/TabItemRow.tsx'), 'utf8');
 const composer = readFileSync(resolve(managerRoot, 'components/sessions/SessionItemComposer.tsx'), 'utf8');
 const placeholder = readFileSync(resolve(managerRoot, 'components/sessions/SessionPlaceholder.tsx'), 'utf8');
@@ -106,11 +112,11 @@ describe('Task108 session rendering contracts', () => {
   });
 
   it('keeps title opening exclusive to Restore', () => {
-    expect(card).toMatch(/<button\s+type="button"\s+className="session-card__title"/);
+    expect(cardHeader).toMatch(/<button\s+type="button"\s+className="session-card__title"/);
     expect(card).not.toContain('handleTitleClick');
     expect(card).not.toContain('openSavedTabs(restorableTabs');
-    expect(card).toContain('onDoubleClick={isDragOverlay ? undefined : handleTitleDoubleClick}');
-    const titleControl = card.match(/<button type="button" className="session-card__title"[\s\S]*?<\/button>/)?.[0] || '';
+    expect(cardHeader).toContain('onDoubleClick={isDragOverlay ? undefined : onTitleDoubleClick}');
+    const titleControl = cardHeader.match(/<button type="button" className="session-card__title"[\s\S]*?<\/button>/)?.[0] || '';
     expect(titleControl).not.toContain('<button');
   });
 
@@ -122,7 +128,8 @@ describe('Task108 session rendering contracts', () => {
     expect(card).toContain('selectedRefs');
     expect(card).toContain('linkCount');
     expect(card).toContain('noteCount');
-    expect(card).toContain('tabIndex={tabMetadata.canonicalIndexByTabId.get(tab.id) ?? 0}');
+    expect(card).toContain('canonicalIndexByTabId={tabMetadata.canonicalIndexByTabId}');
+    expect(tabList).toContain('tabIndex={canonicalIndexByTabId.get(tab.id) ?? 0}');
     expect(card).not.toContain('group.tabs.findIndex');
     const title = cssBlock('.tab-item-row__title');
     expect(title).toContain('white-space: nowrap');
@@ -141,10 +148,11 @@ describe('Task108 session rendering contracts', () => {
   });
 
   it('keeps session metadata directly beneath the session title', () => {
-    expect(card).toContain('className="session-card__heading"');
-    expect(card).toContain('className="session-card__meta"');
-    expect(card).toContain('role="group"');
-    expect(card).toContain('aria-label="Session Details"');
+    expect(cardHeader).toContain('className="session-card__heading"');
+    expect(cardHeader).toContain('<SessionCardMeta');
+    expect(cardMeta).toContain('className="session-card__meta"');
+    expect(cardMeta).toContain('role="group"');
+    expect(cardMeta).toContain('aria-label="Session Details"');
     expect(card).not.toContain('session-card__footer');
     expect(cssBlock('.session-card__meta')).toContain('flex-wrap: wrap');
   });
@@ -172,8 +180,8 @@ describe('Task108 session rendering contracts', () => {
     expect(getTabDropMarkerPlacement(marker, 'group-a', 'tab-a')).toBe('after');
     expect(getTabDropMarkerPlacement(marker, 'group-a', 'other-tab')).toBeNull();
     expect(row).toContain('tab-item-row__drop-marker');
-    expect(card).toContain('session-card__drop-marker');
-    expect(card).toContain("dragMarker?.placement === 'body'");
+    expect(tabList).toContain('session-card__drop-marker');
+    expect(tabList).toContain("dragMarker.placement === 'body'");
   });
 
   it('memoizes session cards and scopes drag markers before passing props', () => {
@@ -200,7 +208,7 @@ describe('Task108 session rendering contracts', () => {
       expect(card).toContain(label);
     }
     expect(card).not.toContain('<ManagerMenuItem onClick={handleEditNote}>Edit note</ManagerMenuItem>');
-    expect(card).toContain('disabled={isSessionMenuOpen}');
+    expect(cardHeader).toContain('disabled={isMenuOpen}');
     for (const label of ['Copy URL', 'Copy text', 'Delete']) {
       expect(row).toContain(label);
     }
@@ -223,7 +231,7 @@ describe('Task108 session rendering contracts', () => {
   it('keeps Restore as an external action instead of repeating it in More', () => {
     const moreMenu = card.match(/const menuItems = [\s\S]*?\n\n  if \(isDragging/)?.[0] || '';
     expect(moreMenu).not.toContain('Restore');
-    expect(card).toContain('aria-label="Restore"');
+    expect(cardHeader).toContain('aria-label="Restore"');
   });
 
   it('guards destructive tab actions for locked groups', () => {
@@ -265,13 +273,14 @@ describe('Task108 session rendering contracts', () => {
     // The activator lives on a focusable button (not the non-focusable header),
     // so @dnd-kit's KeyboardSensor can pick up and reorder sessions. Spreading
     // attributes provides role/tabindex/aria-roledescription for AT.
-    expect(card).toContain('ref={setActivatorNodeRef}');
-    expect(card).toContain('className="session-card__drag-handle"');
-    expect(card).toContain('aria-label={`Drag ${group.title} to reorder`}');
-    expect(card).toContain('{...attributes}');
+    expect(card).toContain('dragHandleRef={setActivatorNodeRef}');
+    expect(cardHeader).toContain('ref={dragHandleRef}');
+    expect(cardHeader).toContain('className="session-card__drag-handle"');
+    expect(cardHeader).toContain('aria-label={`Drag ${title} to reorder`}');
+    expect(cardHeader).toContain('{...attributes}');
     expect(card).toContain('setActivatorNodeRef');
     // The header no longer owns the activator ref or keyboard listeners.
-    expect(card).not.toContain('ref={isDragOverlay ? undefined : setActivatorNodeRef}');
+    expect(cardHeader).not.toContain('ref={isDragOverlay ? undefined : dragHandleRef}');
     // The keyboard sensor uses sortable coordinates so arrows traverse columns.
     expect(layout).toContain('sortableKeyboardCoordinates');
     expect(layout).toContain('coordinateGetter: keyboardCoordinates');

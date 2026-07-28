@@ -249,6 +249,9 @@ describe('Task107 source contracts', () => {
 
   it('keeps OpenTabsPanel presentational and wires runtime concerns into the hook', () => {
     const panel = read('manager/components/sidebar/OpenTabsPanel.tsx');
+    const list = read('manager/components/sidebar/OpenTabsList.tsx');
+    const row = read('manager/components/sidebar/OpenTabRow.tsx');
+    const windowBar = read('manager/components/sidebar/OpenTabsWindowBar.tsx');
     const hook = read('manager/hooks/useOpenTabsRuntime.ts');
     const core = read('manager/core/open-tabs.ts');
     const policy = read('shared/model/capture-policy.ts');
@@ -260,10 +263,13 @@ describe('Task107 source contracts', () => {
     expect(panel).not.toContain('chrome.');
     expect(panel).not.toContain("sendMessage");
     expect(panel).not.toContain('role="button"');
-    expect(panel).toContain('UnstyledButton');
-    expect(panel).toContain('visibleWindows');
-    expect(panel).toContain('manager-refresh-icon--loading');
-    expect(panel).toContain('aria-busy={loading || undefined}');
+    expect(panel).toContain('<OpenTabsList');
+    expect(list).toContain('<OpenTabRow');
+    expect(panel).toContain('<OpenTabsWindowBar');
+    expect(row).toContain('UnstyledButton');
+    expect(windowBar).toContain('visibleWindows');
+    expect(windowBar).toContain('manager-refresh-icon--loading');
+    expect(windowBar).toContain('aria-busy={loading || undefined}');
     expect(panel).not.toContain('Loading open tabs…');
     expect(hook).toContain('closingTabIds');
     expect(panel).toContain('No selected browser window');
@@ -358,9 +364,8 @@ describe('Task107 source contracts', () => {
 
   it('consumes workflow selection projection instead of deriving selection inside the panel', () => {
     const panel = read('manager/components/sidebar/OpenTabsPanel.tsx');
-    const triggerStart = panel.indexOf('function OpenTabContentTrigger');
-    const triggerEnd = panel.indexOf('export function OpenTabsPanel', triggerStart);
-    const triggerSource = panel.slice(triggerStart, triggerEnd);
+    const list = read('manager/components/sidebar/OpenTabsList.tsx');
+    const row = read('manager/components/sidebar/OpenTabRow.tsx');
 
     expect(panel).toContain('workflow: OpenTabsWorkflow');
     expect(panel).toContain('const selectedStorableRecords = selection.records');
@@ -368,11 +373,11 @@ describe('Task107 source contracts', () => {
     expect(panel).not.toContain('deriveSelectedStorableRecords');
     expect(panel).not.toContain('deriveSelectedStorableTabIds');
     expect(panel).toContain('closingTabIdSet');
-    expect(panel).toContain('const isClosing = isValidTabId(tab.id) && closingTabIdSet.has(tab.id);');
-    expect(panel).toContain('disabled={!isValidTabId(tab.id) || isClosing}');
-    expect(triggerSource).toContain('selectedTabIdSet.has');
-    expect(triggerSource).not.toContain('selectedTabIds.includes');
-    expect(triggerSource).not.toContain('availableTabs.filter');
-    expect(triggerSource).not.toContain('new Set(');
+    expect(list).toContain('isClosing={isValidTabId(tab.id) && closingTabIdSet.has(tab.id)}');
+    expect(row).toContain('disabled={!isValidTabId(tab.id) || isClosing}');
+    expect(row).toContain('selectedTabIdSet.has');
+    expect(row).not.toContain('selectedTabIds.includes');
+    expect(row).not.toContain('availableTabs.filter');
+    expect(row).not.toContain('new Set(');
   });
 });

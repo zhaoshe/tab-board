@@ -17,11 +17,22 @@ const hook = readFileSync(resolve(managerRoot, 'hooks/useManagerOverlays.ts'), '
 const layout = [
   'components/shell/ManagerLayout.tsx',
   'components/shell/ManagerDndCoordinator.tsx',
+  'components/shell/managerDndGeometry.ts',
+  'components/shell/ManagerDragOverlay.tsx',
   'components/shell/ManagerFrame.tsx',
 ].map((file) => readFileSync(resolve(managerRoot, file), 'utf8')).join('\n');
-const card = readFileSync(resolve(managerRoot, 'components/sessions/SessionCard.tsx'), 'utf8');
+const card = [
+  'components/sessions/SessionCard.tsx',
+  'components/sessions/SessionCardHeader.tsx',
+  'components/sessions/SessionCardMeta.tsx',
+].map((file) => readFileSync(resolve(managerRoot, file), 'utf8')).join('\n');
 const row = readFileSync(resolve(managerRoot, 'components/sessions/TabItemRow.tsx'), 'utf8');
-const openTabs = readFileSync(resolve(managerRoot, 'components/sidebar/OpenTabsPanel.tsx'), 'utf8');
+const openTabs = [
+  'components/sidebar/OpenTabsPanel.tsx',
+  'components/sidebar/OpenTabRow.tsx',
+  'components/sidebar/OpenTabsList.tsx',
+  'components/sidebar/OpenTabsWindowBar.tsx',
+].map((file) => readFileSync(resolve(managerRoot, file), 'utf8')).join('\n');
 const header = [
   'components/workspace/WorkspaceHeader.tsx',
   'components/workspace/CategoryNav.tsx',
@@ -385,10 +396,11 @@ describe('centralized manager overlay contracts', () => {
     expect(closeOverlays).toContain('setMenu(null);');
   });
 
-  it('keeps Open Tab single-click preview-only while double-click activates the tab', () => {
-    expect(openTabs).not.toContain('onClick={() => void onFocusTab(tab.id, tab.windowId)}');
-    expect(openTabs).toContain('onDoubleClick={() => {');
-    expect(openTabs).toContain('void onFocusTab(tab.id, tab.windowId);');
+  it('focuses Open Tabs with one click and keeps details on an explicit action', () => {
+    expect(openTabs).toContain('onClick={() => void onFocusTab(tab.id, tab.windowId)}');
+    expect(openTabs).not.toContain('onDoubleClick');
+    expect(openTabs).toContain('aria-label={`More Actions for ${title}`}');
+    expect(openTabs).toContain('data-info-popover="open"');
     expect(openTabs).toMatch(/isValidTabId\(tab\.id\) && \([\s\S]*Close tab/);
   });
 
@@ -407,6 +419,10 @@ describe('centralized manager overlay contracts', () => {
     expect(openTabs).not.toContain('onContextMenu');
     expect(openTabs).toContain('Pin tab');
     expect(openTabs).toContain('onPinTab(tab.id)');
+    expect(openTabs).toContain('semanticRole="button"');
+    expect(openTabs).toContain('ariaLabel={`Pin ${tab.title || \'untitled tab\'}`}');
+    expect(openTabs).toContain('ariaLabel={`Close ${tab.title || \'untitled tab\'}`}');
+    expect(hook).toContain("role: semanticRole === 'menuitem' ? 'menuitem' : undefined");
   });
 
   it('keeps saved-tab focus selectors exact first and scoped to the session', () => {
@@ -448,7 +464,7 @@ describe('centralized manager overlay contracts', () => {
     expect(hook).toContain('data-open-window-id');
     expect(openTabs).toContain('lifecycleAllowance="open-tab-removal"');
     expect(openTabs).toContain('const hasValidTabId = isValidTabId(tab.id);');
-    expect(openTabs).toContain('data-open-window-id={hasValidTabId ? selectedWindow.id : undefined}');
+    expect(openTabs).toContain('data-open-window-id={hasValidTabId ? tab.windowId : undefined}');
   });
 
   it('limits saved-session lifecycle restoration to explicit expected removals', () => {

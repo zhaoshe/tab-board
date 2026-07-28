@@ -1,5 +1,6 @@
 import {
   cloneElement,
+  forwardRef,
   type ComponentPropsWithoutRef,
   type ReactElement,
 } from 'react';
@@ -18,15 +19,19 @@ export interface AccessibleIconActionProps
   extends ActionIconProps, NativeButtonProps {
   label: string;
   tooltip?: string;
+  density?: 'compact' | 'touch';
   children: ReactElement;
 }
 
-export function AccessibleIconAction({
+export const AccessibleIconAction = forwardRef<HTMLButtonElement, AccessibleIconActionProps>(
+function AccessibleIconAction({
   label,
   tooltip = label,
+  density = 'compact',
+  className,
   children,
   ...props
-}: AccessibleIconActionProps) {
+}, ref) {
   const icon = cloneElement(children, {
     'aria-hidden': true,
     focusable: false,
@@ -34,9 +39,16 @@ export function AccessibleIconAction({
 
   return (
     <Tooltip label={tooltip}>
-      <ActionIcon {...props} aria-label={label} title={label}>
+      <ActionIcon
+        {...props}
+        ref={ref}
+        className={['accessible-icon-action', className].filter(Boolean).join(' ')}
+        data-density={density}
+        aria-label={label}
+        title={label}
+      >
         {icon}
       </ActionIcon>
     </Tooltip>
   );
-}
+});
