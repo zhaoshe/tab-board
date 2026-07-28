@@ -93,6 +93,13 @@ export const SessionCard = memo(function SessionCard({
   const confirmBeforeDestructive = useTabBoardStore(
     (state) => state.settings.confirmBeforeDestructive,
   );
+  const updateTab = useTabBoardStore((state) => state.updateTab);
+  const deleteTab = useTabBoardStore((state) => state.deleteTab);
+  const tabCommands = useMemo(() => ({
+    confirmBeforeDestructive,
+    deleteTab,
+    updateTab,
+  }), [confirmBeforeDestructive, deleteTab, updateTab]);
 
   const normalizedQuery = normalizeSearch(searchQuery);
   const titleMatches = normalizedQuery.length > 0 && group.title.toLowerCase().includes(normalizedQuery);
@@ -406,6 +413,7 @@ export const SessionCard = memo(function SessionCard({
 
       <SessionTabList
         canonicalIndexByTabId={tabMetadata.canonicalIndexByTabId}
+        commands={tabCommands}
         dragMarker={dragMarker}
         groupId={group.id}
         isDragOverlay={isDragOverlay}

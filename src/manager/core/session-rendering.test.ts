@@ -254,6 +254,15 @@ describe('Task108 session rendering contracts', () => {
     expect(row).toContain('Delete Saved Note');
   });
 
+  it('keeps event-only store commands at SessionCard ownership', () => {
+    expect(card).toContain('const tabCommands');
+    expect(tabList).toContain('commands={commands}');
+    expect(row).not.toContain('useTabBoardStore');
+    expect(row).not.toContain('(state) => state.updateTab');
+    expect(row).not.toContain('(state) => state.deleteTab');
+    expect(row).not.toContain('(state) => state.settings');
+  });
+
   it('replaces saved drag sources and disables text selection during drag', () => {
     expect(slot).toContain('if (isDragging)');
     expect(slot).toContain('className="session-card__placeholder-slot"');

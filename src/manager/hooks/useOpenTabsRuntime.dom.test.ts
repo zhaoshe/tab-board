@@ -46,10 +46,32 @@ vi.mock('../../shared/store/stateStructuralSharing', () => ({
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const chromeEvent = () => ({
-  addListener: vi.fn(),
-  removeListener: vi.fn(),
-});
+function chromeEvent() {
+  let listener: ((...args: any[]) => void) | null = null;
+  return {
+    addListener: vi.fn((next: (...args: any[]) => void) => {
+      listener = next;
+    }),
+    removeListener: vi.fn((current: (...args: any[]) => void) => {
+      if (listener === current) listener = null;
+    }),
+    getListener: () => listener,
+  };
+}
+
+let chromeEvents: {
+  onActivated: ReturnType<typeof chromeEvent>;
+  onCreated: ReturnType<typeof chromeEvent>;
+  onRemoved: ReturnType<typeof chromeEvent>;
+  onMoved: ReturnType<typeof chromeEvent>;
+  onAttached: ReturnType<typeof chromeEvent>;
+  onDetached: ReturnType<typeof chromeEvent>;
+  onReplaced: ReturnType<typeof chromeEvent>;
+  onUpdated: ReturnType<typeof chromeEvent>;
+  onWindowCreated: ReturnType<typeof chromeEvent>;
+  onWindowRemoved: ReturnType<typeof chromeEvent>;
+  onWindowFocusChanged: ReturnType<typeof chromeEvent>;
+};
 
 function createWindow(tabs: OpenWindowInfo['tabs']): OpenWindowInfo[] {
   return [{
@@ -101,23 +123,39 @@ beforeEach(() => {
     testHarness.savedSearchQuery = value;
   });
   testHarness.useStore.mockClear();
+  chromeEvents = {
+    onActivated: chromeEvent(),
+    onCreated: chromeEvent(),
+    onRemoved: chromeEvent(),
+    onMoved: chromeEvent(),
+    onAttached: chromeEvent(),
+    onDetached: chromeEvent(),
+    onReplaced: chromeEvent(),
+    onUpdated: chromeEvent(),
+    onWindowCreated: chromeEvent(),
+    onWindowRemoved: chromeEvent(),
+    onWindowFocusChanged: chromeEvent(),
+  };
 
   vi.stubGlobal('chrome', {
-    runtime: { sendMessage: testHarness.sendMessage },
+    runtime: {
+      getURL: (path: string) => `chrome-extension://tabboard/${path}`,
+      sendMessage: testHarness.sendMessage,
+    },
     tabs: {
-      onActivated: chromeEvent(),
-      onCreated: chromeEvent(),
-      onRemoved: chromeEvent(),
-      onMoved: chromeEvent(),
-      onAttached: chromeEvent(),
-      onDetached: chromeEvent(),
-      onReplaced: chromeEvent(),
-      onUpdated: chromeEvent(),
+      onActivated: chromeEvents.onActivated,
+      onCreated: chromeEvents.onCreated,
+      onRemoved: chromeEvents.onRemoved,
+      onMoved: chromeEvents.onMoved,
+      onAttached: chromeEvents.onAttached,
+      onDetached: chromeEvents.onDetached,
+      onReplaced: chromeEvents.onReplaced,
+      onUpdated: chromeEvents.onUpdated,
     },
     windows: {
-      onCreated: chromeEvent(),
-      onRemoved: chromeEvent(),
-      onFocusChanged: chromeEvent(),
+      onCreated: chromeEvents.onWindowCreated,
+      onRemoved: chromeEvents.onWindowRemoved,
+      onFocusChanged: chromeEvents.onWindowFocusChanged,
     },
   });
 });
@@ -144,6 +182,45 @@ async function mountRuntime(windows: OpenWindowInfo[]): Promise<void> {
 }
 
 describe('Open Tabs runtime refresh', () => {
+  it('coalesces a startup event burst into one trailing list request', async () => {
+    vi.useFakeTimers();
+    let resolveInitial!: (value: unknown) => void;
+    const initial = new Promise((resolve) => {
+      resolveInitial = resolve;
+    });
+    testHarness.sendMessage
+      .mockReturnValueOnce(initial)
+      .mockResolvedValue({
+        ok: true,
+        result: { windows: createWindow([createTab()]) },
+      });
+    root = createRoot(container!);
+    await act(async () => {
+      root?.render(createElement(RuntimeProbe));
+      await Promise.resolve();
+    });
+    expect(testHarness.sendMessage).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      chromeEvents.onActivated.getListener()?.({ tabId: 1, windowId: 1 });
+      chromeEvents.onRemoved.getListener()?.(2, { windowId: 1, isWindowClosing: false });
+      chromeEvents.onWindowFocusChanged.getListener()?.(1);
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(testHarness.sendMessage).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveInitial({
+        ok: true,
+        result: { windows: createWindow([createTab()]) },
+      });
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(75);
+    });
+    expect(testHarness.sendMessage).toHaveBeenCalledTimes(2);
+  });
+
   it('exits selection mode when refresh removes every selected tab', async () => {
     await mountRuntime(createWindow([createTab()]));
 

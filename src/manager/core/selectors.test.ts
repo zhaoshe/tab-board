@@ -3,6 +3,7 @@ import {
   filterGroupsByQuery,
   getActiveWorkspaceState,
   getBoardProjection,
+  getCanonicalGroupIndexById,
   getCategoryStrip,
   getVisibleGroups,
 } from './selectors';
@@ -270,6 +271,22 @@ describe('getVisibleGroups', () => {
     expect(getVisibleGroups(makeState({ groups }), 'saved', 'needle')).toEqual([
       groups[1],
       groups[2],
+    ]);
+  });
+});
+
+describe('getCanonicalGroupIndexById', () => {
+  it('maps canonical group ids to their original category indexes', () => {
+    const groups = [
+      makeGroup('alpha', 'workspace-1'),
+      makeGroup('beta', 'workspace-1'),
+      makeGroup('gamma', 'workspace-1'),
+    ];
+
+    expect([...getCanonicalGroupIndexById(groups)]).toEqual([
+      ['alpha', 0],
+      ['beta', 1],
+      ['gamma', 2],
     ]);
   });
 });

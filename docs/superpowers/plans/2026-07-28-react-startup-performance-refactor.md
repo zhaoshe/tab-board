@@ -318,23 +318,23 @@ Commit as `perf(manager): activate session content near the viewport`, ending in
 - Methods: `request()`, `dispose()`
 - Contract: one active run and at most one trailing run while dirty
 
-- [ ] **Step 1: Write failing coalescer tests**
+- [x] **Step 1: Write failing coalescer tests**
 
 Use fake timers to assert event bursts collapse, in-flight requests create one trailing run, and disposal cancels pending work.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run new test; expected missing module.
 
-- [ ] **Step 3: Implement and integrate**
+- [x] **Step 3: Implement and integrate**
 
 Route startup/focus/visibility/tab/window events through the coalescer. Keep explicit user Refresh immediate. Ignore created/updated extension-page URLs.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run coalescer and Open Tabs hook suites. Add a DOM test that emits startup events and observes at most two real list requests.
 
-- [ ] **Step 5: Benchmark request count**
+- [x] **Step 5: Benchmark request count**
 
 Startup benchmark must report no more than one initial plus one trailing call.
 
@@ -365,19 +365,19 @@ Commit as `perf(open-tabs): coalesce startup refresh events`, ending in the requ
 - Category strip counts use one workspace-group pass
 - DnD replacement snapshot consumes revision/source identity rather than joined tab IDs
 
-- [ ] **Step 1: Write failing selector and row contract tests**
+- [x] **Step 1: Write failing selector and row contract tests**
 
 Assert literal category counts, canonical indexes, row commands without store subscriptions, and replacement invalidation on relevant revisions.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run focused tests; expected new-contract failures.
 
-- [ ] **Step 3: Implement command ports and single-pass derivations**
+- [x] **Step 3: Implement command ports and single-pass derivations**
 
 Read event-only actions at SessionCard ownership. Build maps/counts once. Remove joined all-tab strings from render-time keys.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run selector, session rendering, overlay, DnD, ManagerLayout, and UI ownership suites.
 

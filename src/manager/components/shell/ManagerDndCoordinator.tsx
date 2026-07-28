@@ -61,7 +61,7 @@ export interface DragReplacementSnapshot {
   workspaceId: string;
   category: CategoryFilter;
   view: string;
-  groups: string;
+  groups: Group[];
 }
 
 export function getDragReplacementSnapshot(
@@ -74,9 +74,7 @@ export function getDragReplacementSnapshot(
     workspaceId,
     category,
     view: showBin ? 'bin' : 'workspace',
-    groups: groups.map((group) =>
-      `${group.id}:${group.updatedAt}:${group.tabs.map((tab) =>
-        `${tab.id}:${tab.updatedAt}`).join(',')}`).join('|'),
+    groups,
   };
 }
 

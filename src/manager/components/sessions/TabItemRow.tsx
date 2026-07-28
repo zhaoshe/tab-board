@@ -21,7 +21,6 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { TabItem } from '../../../shared/model';
 import { ITEM_LINK } from '../../../shared/model';
-import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
 import {
   getDragPlaceholderStyle,
@@ -65,6 +64,17 @@ interface TabItemRowProps {
   onToggleSelection?: () => void;
   sourceRect?: DragSourceRect | null;
   isDragOverlay?: boolean;
+  commands?: SessionTabCommands;
+}
+
+export interface SessionTabCommands {
+  confirmBeforeDestructive: boolean;
+  deleteTab: (groupId: string, tabId: string) => void;
+  updateTab: (
+    groupId: string,
+    tabId: string,
+    updates: Partial<TabItem>,
+  ) => void;
 }
 
 export function TabItemRow({
@@ -82,6 +92,7 @@ export function TabItemRow({
   onToggleSelection,
   sourceRect = null,
   isDragOverlay = false,
+  commands,
 }: TabItemRowProps) {
   const [isEditingNote, setIsEditingNote] = useState(false);
   const [noteValue, setNoteValue] = useState(tab.note);
@@ -91,9 +102,6 @@ export function TabItemRow({
   const isPreviewOpen = useManagerPreviewOpen(infoKey);
   const { showError, showSuccess } = useToast();
   const confirmDestructive = useDestructiveConfirmation();
-  const updateTab = useTabBoardStore((state) => state.updateTab);
-  const deleteTab = useTabBoardStore((state) => state.deleteTab);
-  const settings = useTabBoardStore((state) => state.settings);
 
   const {
     listeners,
@@ -149,7 +157,7 @@ export function TabItemRow({
 
   const handleDelete = async () => {
     if (locked) return;
-    if (settings.confirmBeforeDestructive) {
+    if (commands?.confirmBeforeDestructive) {
       const confirmed = await confirmDestructive({
         title: tab.itemType === ITEM_LINK ? 'Delete Saved Tab' : 'Delete Saved Note',
         message: `Move “${tab.title}” to Trash?`,
@@ -158,7 +166,7 @@ export function TabItemRow({
       if (!confirmed) return;
     }
     closeOverlays();
-    deleteTab(groupId, tab.id);
+    commands?.deleteTab(groupId, tab.id);
   };
 
   const handleEditNote = () => {
@@ -168,7 +176,7 @@ export function TabItemRow({
   };
 
   const handleNoteSubmit = () => {
-    updateTab(groupId, tab.id, { note: noteValue.trim() });
+    commands?.updateTab(groupId, tab.id, { note: noteValue.trim() });
     setIsEditingNote(false);
   };
 
@@ -178,7 +186,7 @@ export function TabItemRow({
   };
 
   const handleNoteDelete = async () => {
-    if (settings.confirmBeforeDestructive) {
+    if (commands?.confirmBeforeDestructive) {
       const confirmed = await confirmDestructive({
         title: 'Delete Note',
         message: `Delete the note attached to “${tab.title}”?`,
@@ -186,7 +194,7 @@ export function TabItemRow({
       });
       if (!confirmed) return;
     }
-    updateTab(groupId, tab.id, { note: '' });
+    commands?.updateTab(groupId, tab.id, { note: '' });
     setIsEditingNote(false);
   };
 

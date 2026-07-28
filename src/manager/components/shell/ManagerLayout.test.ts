@@ -308,10 +308,11 @@ describe('drag end lifecycle', () => {
 
   it('invalidates only replaced or disappeared drag sources', () => {
     const payload = { kind: 'group', groupId: 'group-a', workspaceId: 'workspace_default' } as const;
-    const snapshot = { workspaceId: 'workspace_default', category: 'inbox' as const, view: 'workspace', groups: 'group-a' };
+    const groups = [] as never[];
+    const snapshot = { workspaceId: 'workspace_default', category: 'inbox' as const, view: 'workspace', groups };
     expect(shouldInvalidateDragReplacement(null, payload, snapshot, snapshot, true)).toBe(false);
     expect(shouldInvalidateDragReplacement('group-a', payload, snapshot, snapshot, true)).toBe(false);
-    expect(shouldInvalidateDragReplacement('group-a', payload, snapshot, { ...snapshot, groups: 'group-b' }, true)).toBe(true);
+    expect(shouldInvalidateDragReplacement('group-a', payload, snapshot, { ...snapshot, groups: [] }, true)).toBe(true);
     expect(shouldInvalidateDragReplacement('group-a', payload, snapshot, snapshot, false)).toBe(true);
   });
 

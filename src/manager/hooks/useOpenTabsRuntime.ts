@@ -41,6 +41,10 @@ import { groupMatchesQuery, normalizeState, type TabBoardState } from '../../sha
 import { getState as getPersistedState } from '../../shared/store/chromeStorage';
 import { structurallyShareState } from '../../shared/store/stateStructuralSharing';
 import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
+import {
+  createRefreshCoalescer,
+  type RefreshCoalescer,
+} from '../core/refreshCoalescer';
 
 export interface CaptureCompletion {
   sourceWorkspaceId: string;
@@ -156,8 +160,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
   const currentWorkspaceId = useTabBoardStore((state) => state.activeWorkspaceId);
   const previousWorkspaceIdRef = useRef(currentWorkspaceId);
   const refreshFailureRef = useRef<unknown | null>(null);
-  const refreshInFlight = useRef<Promise<void> | null>(null);
-  const refreshQueued = useRef<Promise<void> | null>(null);
+  const refreshCoalescerRef = useRef<RefreshCoalescer | null>(null);
   const closingTabIdsRef = useRef<Set<number>>(new Set());
   const savedSearchQuery = useSearchQuery();
   const setSavedSearchQuery = useSetSearchQuery();
@@ -193,64 +196,64 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     }
   }, [currentWorkspaceId, dispatch, setSavedSearchQuery]);
 
-  const refresh = useCallback((): Promise<void> => {
-    if (refreshInFlight.current) {
-      if (!refreshQueued.current) {
-        refreshQueued.current = refreshInFlight.current.then(() => {
-          refreshInFlight.current = null;
-          const latest = refresh();
-          return latest.finally(() => {
-            refreshQueued.current = null;
-          });
-        });
-      }
-      return refreshQueued.current;
+  const performRefresh = useCallback(async (): Promise<void> => {
+    dispatch({ type: 'refresh-started' });
+    refreshFailureRef.current = null;
+    try {
+      const result = await sendWorkerMessage<OpenTabsListResult>({ type: 'list-open-tabs' });
+      const rawWindows = Array.isArray(result.windows) ? result.windows : [];
+      const nextWindows = rawWindows.map((window) => {
+        const visibleTabs = window.tabs.filter((tab) => !isNewTabUrl(tab.url));
+        return { ...window, tabs: visibleTabs, tabCount: visibleTabs.length };
+      });
+      dispatch({ type: 'refresh-succeeded', windows: nextWindows });
+    } catch (error: unknown) {
+      refreshFailureRef.current = error;
+      dispatch({ type: 'refresh-failed', error: errorMessage(error) });
     }
-
-    const run = (async () => {
-      dispatch({ type: 'refresh-started' });
-      refreshFailureRef.current = null;
-      try {
-        const result = await sendWorkerMessage<OpenTabsListResult>({ type: 'list-open-tabs' });
-        const rawWindows = Array.isArray(result.windows) ? result.windows : [];
-        const nextWindows = rawWindows.map((window) => {
-          const visibleTabs = window.tabs.filter((tab) => !isNewTabUrl(tab.url));
-          return { ...window, tabs: visibleTabs, tabCount: visibleTabs.length };
-        });
-        dispatch({ type: 'refresh-succeeded', windows: nextWindows });
-      } catch (error: unknown) {
-        refreshFailureRef.current = error;
-        dispatch({ type: 'refresh-failed', error: errorMessage(error) });
-      }
-    })();
-
-    refreshInFlight.current = run;
-    void run.finally(() => {
-      if (refreshInFlight.current === run) {
-        refreshInFlight.current = null;
-      }
-    });
-    return run;
   }, [dispatch]);
 
+  const refresh = useCallback(
+    (): Promise<void> => refreshCoalescerRef.current?.request({ immediate: true })
+      ?? performRefresh(),
+    [performRefresh],
+  );
+
   useEffect(() => {
-    void refresh();
+    const coalescer = createRefreshCoalescer(performRefresh, { delay: 75 });
+    refreshCoalescerRef.current = coalescer;
+    void coalescer.request({ immediate: true });
 
     const refreshIfVisible = () => {
-      if (document.visibilityState === 'visible') void refresh();
+      if (document.visibilityState === 'visible') void coalescer.request();
     };
-    const refreshOnFocus = () => void refresh();
-    const refreshOnTabEvent = () => void refresh();
-    const refreshOnUpdated = (_tabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+    const refreshOnFocus = () => void coalescer.request();
+    const refreshOnTabEvent = () => void coalescer.request();
+    const extensionBaseUrl = typeof chrome.runtime.getURL === 'function'
+      ? chrome.runtime.getURL('')
+      : '';
+    const isOwnExtensionUrl = (url: string | undefined) =>
+      Boolean(extensionBaseUrl && url?.startsWith(extensionBaseUrl));
+    const refreshOnCreated = (tab: chrome.tabs.Tab) => {
+      if (!isOwnExtensionUrl(tab.url || tab.pendingUrl)) {
+        void coalescer.request();
+      }
+    };
+    const refreshOnUpdated = (
+      _tabId: number,
+      changeInfo: chrome.tabs.TabChangeInfo,
+      tab: chrome.tabs.Tab,
+    ) => {
+      if (isOwnExtensionUrl(changeInfo.url || tab.url || tab.pendingUrl)) return;
       if (Object.keys(changeInfo).some((key) => REFRESHABLE_TAB_CHANGES.has(key))) {
-        void refresh();
+        void coalescer.request();
       }
     };
 
     document.addEventListener('visibilitychange', refreshIfVisible);
     window.addEventListener('focus', refreshOnFocus);
     chrome.tabs.onActivated.addListener(refreshOnTabEvent);
-    chrome.tabs.onCreated.addListener(refreshOnTabEvent);
+    chrome.tabs.onCreated.addListener(refreshOnCreated);
     chrome.tabs.onRemoved.addListener(refreshOnTabEvent);
     chrome.tabs.onMoved.addListener(refreshOnTabEvent);
     chrome.tabs.onAttached.addListener(refreshOnTabEvent);
@@ -262,10 +265,14 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     chrome.windows.onFocusChanged.addListener(refreshOnTabEvent);
 
     return () => {
+      if (refreshCoalescerRef.current === coalescer) {
+        refreshCoalescerRef.current = null;
+      }
+      coalescer.dispose();
       document.removeEventListener('visibilitychange', refreshIfVisible);
       window.removeEventListener('focus', refreshOnFocus);
       chrome.tabs.onActivated.removeListener(refreshOnTabEvent);
-      chrome.tabs.onCreated.removeListener(refreshOnTabEvent);
+      chrome.tabs.onCreated.removeListener(refreshOnCreated);
       chrome.tabs.onRemoved.removeListener(refreshOnTabEvent);
       chrome.tabs.onMoved.removeListener(refreshOnTabEvent);
       chrome.tabs.onAttached.removeListener(refreshOnTabEvent);
@@ -276,7 +283,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
       chrome.windows.onRemoved.removeListener(refreshOnTabEvent);
       chrome.windows.onFocusChanged.removeListener(refreshOnTabEvent);
     };
-  }, [refresh]);
+  }, [performRefresh]);
 
   const exitSelectionMode = useCallback(() => {
     dispatch({ type: 'selection-cleared' });

@@ -223,3 +223,24 @@
   CRXJS dev loader. The benchmark now rejects dev-mode dist and must run after a
   production build. Seeding uses the projection-only Options page so heavy
   Manager rendering cannot contaminate pre-measurement setup.
+- Task 6 RED/GREEN added a framework-neutral refresh coalescer. Idle event
+  bursts collapse after 75ms, an in-flight burst creates at most one trailing
+  request, and disposal cancels pending work; core tests pass 3/3.
+- Open Tabs initial/manual refreshes are immediate; focus, visibility, tab, and
+  window lifecycle events use the coalescer. Own extension page creation/update
+  events are ignored.
+- Added a real hook event-burst test with a suspended initial worker request.
+  Focus/tab/window events produce no parallel request and exactly one trailing
+  request after completion. Open Tabs focused verification passes 30/30 and
+  production build passes. The production heavy benchmark records one startup
+  `list-open-tabs` call.
+- Task 7 RED added canonical group-index and SessionCard command-port
+  contracts. `getCanonicalGroupIndexById` now replaces per-visible-group
+  `findIndex`, category counts use one workspace-group pass, and DnD replacement
+  snapshots use structurally stable group-array references instead of joining
+  every group/tab id and timestamp.
+- TabItemRow no longer imports or subscribes to the Zustand application store.
+  SessionCard owns stable update/delete/confirmation command ports and passes
+  them through SessionTabList.
+- Combined Task 6-7 verification: 8 focused files / 177 tests passed and the
+  production build passed.

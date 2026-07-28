@@ -43,30 +43,30 @@ export function getCategoryStrip(state: CategoryStripState): CategoryStripItem[]
     orderedFolders.push(folder);
   }
 
-  const inboxCount = workspaceGroups.filter(
-    (group) => categoryForGroup(state, group) === 'inbox',
-  ).length;
-  const savedCount = workspaceGroups.filter(
-    (group) => categoryForGroup(state, group) === 'saved',
-  ).length;
-  const archiveCount = workspaceGroups.filter(
-    (group) => categoryForGroup(state, group) === 'archive',
-  ).length;
+  const counts = new Map<CategoryFilter, number>();
+  for (const group of workspaceGroups) {
+    const category = categoryForGroup(state, group);
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
 
   return [
-    { id: 'inbox', label: 'Inbox', count: inboxCount, kind: 'inbox' },
-    { id: 'saved', label: 'Saved', count: savedCount, kind: 'saved' },
-    { id: 'archive', label: 'Archive', count: archiveCount, kind: 'archive' },
+    { id: 'inbox', label: 'Inbox', count: counts.get('inbox') ?? 0, kind: 'inbox' },
+    { id: 'saved', label: 'Saved', count: counts.get('saved') ?? 0, kind: 'saved' },
+    { id: 'archive', label: 'Archive', count: counts.get('archive') ?? 0, kind: 'archive' },
     ...orderedFolders.map((folder) => ({
       id: `folder:${folder.id}` as const,
       label: folder.name,
-      count: workspaceGroups.filter(
-        (group) => categoryForGroup(state, group) === `folder:${folder.id}`,
-      ).length,
+      count: counts.get(`folder:${folder.id}`) ?? 0,
       kind: 'folder' as const,
       folderId: folder.id,
     })),
   ];
+}
+
+export function getCanonicalGroupIndexById(
+  groups: readonly Group[],
+): Map<string, number> {
+  return new Map(groups.map((group, index) => [group.id, index]));
 }
 
 export function getActiveWorkspaceState(

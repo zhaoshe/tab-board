@@ -286,8 +286,9 @@ describe('Task107 source contracts', () => {
     expect(hook).toContain('close-open-tabs');
     expect(hook).toContain('focus-open-tab');
     expect(hook).toContain('sameOpenTabSelection');
-    expect(hook).toContain('refreshQueued.current');
-    expect(hook).toContain('return refreshQueued.current');
+    expect(hook).toContain('createRefreshCoalescer');
+    expect(hook).toContain("coalescer.request({ immediate: true })");
+    expect(hook).toContain('coalescer.request()');
     expect(hook).toMatch(/catch \(error: unknown\)/);
   });
 

@@ -12,9 +12,11 @@ import type {
 import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
 import type { OverflowCueState } from '../../hooks/useOverflowCues';
 import { TabItemRow } from './TabItemRow';
+import type { SessionTabCommands } from './TabItemRow';
 
 export function SessionTabList({
   canonicalIndexByTabId,
+  commands,
   dragMarker,
   groupId,
   isDragOverlay,
@@ -32,6 +34,7 @@ export function SessionTabList({
   onToggleSelection,
 }: {
   canonicalIndexByTabId: ReadonlyMap<string, number>;
+  commands: SessionTabCommands;
   dragMarker: DragMarker | null;
   groupId: string;
   isDragOverlay: boolean;
@@ -64,6 +67,7 @@ export function SessionTabList({
           <TabItemRow
             key={tab.id}
             tab={tab}
+            commands={commands}
             groupId={groupId}
             workspaceId={workspaceId}
             tabIndex={canonicalIndexByTabId.get(tab.id) ?? 0}

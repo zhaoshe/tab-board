@@ -8,6 +8,7 @@ import { useBoardProjection } from '../../hooks/useBoardProjection';
 import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import type { CategoryFilter } from '../../core/selectors';
+import { getCanonicalGroupIndexById } from '../../core/selectors';
 import type { DndData, DragMarker, DragSourceRect } from '../../core/dnd';
 import { SessionSlot } from '../sessions/SessionSlot';
 import { useOverflowCues } from '../../hooks/useOverflowCues';
@@ -99,6 +100,10 @@ export function WorkspaceContent({
   const groupIds = useMemo(
     () => visibleGroups.map((group) => group.id),
     [visibleGroups],
+  );
+  const canonicalIndexByGroupId = useMemo(
+    () => getCanonicalGroupIndexById(categoryGroups),
+    [categoryGroups],
   );
   const forcedIds = highlightedGroupId ? [highlightedGroupId] : [];
   const sessionActivation = useSessionActivation({
@@ -206,7 +211,7 @@ export function WorkspaceContent({
         <SortableContext items={visibleGroups.map((group) => `group-${group.id}`)} strategy={rectSortingStrategy}>
           <div className="session-board" tabIndex={-1}>
             {visibleGroups.map((group) => {
-              const groupIndex = Math.max(0, categoryGroups.findIndex((item) => item.id === group.id));
+              const groupIndex = canonicalIndexByGroupId.get(group.id) ?? 0;
               return (
                 <div key={group.id} className="session-board__group-slot">
                   <GroupInsertionTarget
