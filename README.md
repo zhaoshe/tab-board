@@ -1,5 +1,7 @@
 # TabBoard
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 TabBoard is a local-first Chrome tab manager inspired by the OneTab and tabExtend workflows. It saves open tabs into searchable sessions, restores them later, supports workspaces, categories, notes, drag and drop, import/export, right-click capture actions, keyboard commands, and omnibox search.
 
 TabBoard is a React 18 + TypeScript app built with Vite and packaged with `@crxjs/vite-plugin`. The UI uses Mantine v7 and Lucide icons, state is managed with Zustand, and drag and drop uses `@dnd-kit`. Data is stored in `chrome.storage.local` by default or in a user-selected local folder as a substitute backend.
@@ -65,3 +67,7 @@ npm test
 npm run check
 git diff --check
 ```
+
+## License
+
+TabBoard is released under the [MIT License](LICENSE).
