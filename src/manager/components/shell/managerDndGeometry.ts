@@ -1,12 +1,9 @@
-import type { MutableRefObject } from 'react';
 import {
   type ClientRect,
   type CollisionDetection,
   type DroppableContainer,
-  type KeyboardCoordinateGetter,
   type Over,
 } from '@dnd-kit/core';
-import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import {
   DROP_TARGET_RELEASE_MARGIN,
   getTabDropPlacement,
@@ -25,76 +22,6 @@ export function getPayload(data: unknown): DragPayload | null {
 export function getTargets(data: unknown): DropTarget[] {
   if (!data || typeof data !== 'object') return [];
   return (data as { dnd?: DndData }).dnd?.targets ?? [];
-}
-
-interface GroupKeyboardTarget {
-  target: DropTarget;
-  rect: ClientRect;
-}
-
-interface KeyboardCoordinates {
-  x: number;
-  y: number;
-}
-
-interface GroupKeyboardCoordinateResult {
-  coordinates: KeyboardCoordinates;
-  index: number;
-}
-
-export function getGroupKeyboardCoordinates(
-  code: string,
-  currentIndex: number,
-  collisionRect: ClientRect,
-  targets: readonly GroupKeyboardTarget[],
-): GroupKeyboardCoordinateResult | null {
-  if (code !== 'ArrowLeft' && code !== 'ArrowRight') return null;
-  const direction = code === 'ArrowRight' ? 1 : -1;
-  const nextIndex = currentIndex + direction;
-  const candidate = targets.find(({ target }) => (
-    (target.kind === 'group-insert' || target.kind === 'new-group')
-    && target.index === nextIndex
-  ));
-  if (!candidate) return null;
-  return {
-    coordinates: {
-      x: candidate.rect.left + candidate.rect.width / 2 - collisionRect.width / 2,
-      y: candidate.rect.top + candidate.rect.height / 2 - collisionRect.height / 2,
-    },
-    index: nextIndex,
-  };
-}
-
-export function createManagerKeyboardCoordinates(
-  groupIndexRef: MutableRefObject<number | null>,
-): KeyboardCoordinateGetter {
-  return (event, args) => {
-    const payload = getPayload(args.context.active?.data.current);
-    if (
-      payload?.kind !== 'group'
-      || groupIndexRef.current === null
-      || (event.code !== 'ArrowLeft' && event.code !== 'ArrowRight')
-      || !args.context.collisionRect
-    ) {
-      return sortableKeyboardCoordinates(event, args);
-    }
-    event.preventDefault();
-    const targets = args.context.droppableContainers.getEnabled().flatMap((container) => {
-      const rect = args.context.droppableRects.get(container.id);
-      const target = getTargets(container.data.current)
-        .find((candidate) => candidate.kind === 'group-insert' || candidate.kind === 'new-group');
-      return rect && target ? [{ rect, target }] : [];
-    });
-    const result = getGroupKeyboardCoordinates(
-      event.code,
-      groupIndexRef.current,
-      args.context.collisionRect,
-      targets,
-    );
-    if (!result) return undefined;
-    groupIndexRef.current = result.index;
-    return result.coordinates;
-  };
 }
 
 function targetEquals(left: DropTarget | null, right: DropTarget | null): boolean {
@@ -144,7 +71,20 @@ export function getDragEndTarget(
   dragUiTarget: DropTarget | null = null,
 ): DropTarget | null {
   if (!over) return null;
-  return lockedTarget ?? dragUiTarget ?? getTargets(over.data.current)[0] ?? null;
+  const overTarget = getTargets(over.data.current)[0] ?? null;
+  if (overTarget?.kind === 'new-session-insert') {
+    return dragUiTarget?.kind === 'new-session-insert'
+      && targetEquals(overTarget, dragUiTarget)
+      ? dragUiTarget
+      : null;
+  }
+  const ordinaryLockedTarget = lockedTarget?.kind === 'new-session-insert'
+    ? null
+    : lockedTarget;
+  if (overTarget) return ordinaryLockedTarget ?? overTarget;
+  return dragUiTarget?.kind === 'new-session-insert'
+    ? null
+    : ordinaryLockedTarget ?? dragUiTarget;
 }
 
 function distanceToRect(point: { x: number; y: number }, rect: ClientRect): number {
@@ -166,9 +106,9 @@ export function isPointWithinRect(
   rect: ClientRect,
 ): boolean {
   return point.x >= rect.left
-    && point.x <= rect.right
+    && point.x < rect.right
     && point.y >= rect.top
-    && point.y <= rect.bottom;
+    && point.y < rect.bottom;
 }
 
 function isCompatibleTarget(payload: DragPayload, target: DropTarget): boolean {
@@ -178,9 +118,7 @@ function isCompatibleTarget(payload: DragPayload, target: DropTarget): boolean {
   if (payload.kind === 'category') return target.kind === 'category-reorder';
   return target.kind === 'group-body'
     || target.kind === 'tab-before'
-    || target.kind === 'new-group'
-    || target.kind === 'group-insert'
-    || target.kind === 'category-column';
+    || target.kind === 'new-session-insert';
 }
 
 function resolveTabEdgeTarget(
@@ -202,7 +140,7 @@ function resolveTabEdgeTarget(
 
 export function markerForTarget(target: DropTarget | null): DragUiState['marker'] {
   if (!target) return null;
-  if (target.kind === 'group-insert' || target.kind === 'new-group') {
+  if (target.kind === 'group-insert' || target.kind === 'new-session-insert') {
     return { kind: 'group', index: target.index };
   }
   if (target.kind === 'tab-before' || target.kind === 'group-body') {
@@ -241,6 +179,7 @@ export function createGeometryCollisionDetection(
     if (!payload) return [];
     let nearestCandidate: GeometryCandidate | null = null;
     let categoryCandidate: GeometryCandidate | null = null;
+    let exactCandidate: GeometryCandidate | null = null;
     let lockedCandidate: GeometryCandidate | null = null;
     const lockedTarget = lockedTargetRef.current;
 
@@ -250,6 +189,16 @@ export function createGeometryCollisionDetection(
       const target = getTargets(container.data.current)
         .find((candidate) => isCompatibleTarget(payload, candidate));
       if (!target) continue;
+      if (target.kind === 'new-session-insert') {
+        if (pointerCoordinates && isPointWithinRect(pointerCoordinates, rect)) {
+          exactCandidate = {
+            container,
+            target,
+            distance: 0,
+          };
+        }
+        continue;
+      }
       if (target.kind === 'category-column' && !isPointWithinRect(pointer, rect)) {
         continue;
       }
@@ -272,6 +221,16 @@ export function createGeometryCollisionDetection(
       ) {
         lockedCandidate = candidate;
       }
+    }
+    if (exactCandidate) {
+      lockedTargetRef.current = null;
+      return [{
+        id: exactCandidate.container.id,
+        data: {
+          droppableContainer: exactCandidate.container,
+          value: 0,
+        },
+      }];
     }
     const selection = getCollisionSelection({
       nearestCandidate,

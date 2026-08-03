@@ -28,7 +28,7 @@ export type OpenTabsWorkflowAction =
   | { type: 'query-changed'; query: string }
   | { type: 'tab-filter-changed'; url: string | null }
   | { type: 'selection-toggled'; tabId: number }
-  | { type: 'selection-all' }
+  | { type: 'selection-visible'; tabIds: number[] }
   | { type: 'selection-cleared' }
   | { type: 'drop-completed' }
   | { type: 'closing-changed'; tabIds: number[] }
@@ -38,7 +38,6 @@ export type OpenTabsWorkflowAction =
   | { type: 'error-cleared' };
 
 export interface OpenTabsSelectionProjection {
-  active: boolean;
   ids: number[];
   count: number;
   records: OpenTabInfo[];
@@ -110,7 +109,6 @@ function sameOpenTab(left: OpenTabInfo, right: OpenTabInfo): boolean {
     && left.title === right.title
     && left.url === right.url
     && left.favIconUrl === right.favIconUrl
-    && left.active === right.active
     && left.pinned === right.pinned
     && left.index === right.index
     && sameBrowserGroup(left.browserGroup, right.browserGroup)
@@ -203,9 +201,15 @@ export function reduceOpenTabsWorkflow(
         : canonicalSelection(state, [...state.selectedTabIds, action.tabId]);
       return { ...state, selectedTabIds };
     }
-    case 'selection-all': {
-      const selectedTabIds = getSelectableOpenTabIds(selectedWindow(state));
-      if (!selectedTabIds.length) return state;
+    case 'selection-visible': {
+      const visibleIds = canonicalSelection(state, action.tabIds);
+      if (!visibleIds.length) return state;
+      const visibleSet = new Set(visibleIds);
+      const allVisibleSelected = visibleIds.every((id) =>
+        state.selectedTabIds.includes(id));
+      const selectedTabIds = allVisibleSelected
+        ? state.selectedTabIds.filter((id) => !visibleSet.has(id))
+        : canonicalSelection(state, [...state.selectedTabIds, ...visibleIds]);
       return { ...state, selectedTabIds };
     }
     case 'selection-cleared':
@@ -246,7 +250,6 @@ export function projectOpenTabsWorkflow(
     query: state.query,
     tabFilterUrl: state.tabFilterUrl,
     selection: {
-      active: selectedIds.length > 0,
       ids: selectedIds,
       count: selectedIds.length,
       records,

@@ -15,9 +15,18 @@ import {
   normalizeBinEntry,
   normalizeBrowserGroup,
   getCaptureCandidateReason,
+  classifyWindowDuplicates,
   isExtensionPageUrl,
+  isWindowDedupeUrl,
   matchesCustomUrlFilter,
+  failedRefOutcome,
+  parseRestoreRefs,
+  restoreRefKey,
+  restoredRefOutcome,
   type CaptureCandidateReason,
+  type RestoreRef,
+  type RestoreRefsResult,
+  type RestoreRefOutcome,
   type TabItem,
   type Group,
   type TabBoardState,
@@ -32,11 +41,14 @@ import type {
   OpenWindowInfo,
 } from '../shared/openTabs';
 import {
+  _setActiveAdapterModuleLoadersForWorker,
   ensureActiveState as ensureState,
   getActiveState as getState,
   resetActiveAdapter,
   setActiveState as setState,
 } from '../shared/store/activeAdapter';
+import * as fileStorageModule from '../shared/store/fileStorage';
+import * as fsDirectoryModule from '../shared/store/fsDirectory';
 import { createStatePersistence, type StatePersistence } from './statePersistence';
 import {
   applyStateMutation,
@@ -52,6 +64,11 @@ import {
   isDropIntentAlreadyApplied,
 } from '../shared/model/drop-operations';
 import { readSettingsProjection } from '../shared/store/settingsProjection';
+
+_setActiveAdapterModuleLoadersForWorker({
+  loadFileStorageModule: async () => fileStorageModule,
+  loadFsDirectoryModule: async () => fsDirectoryModule,
+});
 
 const MANAGER_PAGE = 'manager.html';
 const POPUP_PAGE = 'popup.html';
@@ -257,7 +274,6 @@ async function getVerifiedLiveOpenTabs(
       title: String(tab.title || url || 'Untitled'),
       url,
       favIconUrl: String(tab.favIconUrl || ''),
-      active: Boolean(tab.active),
       pinned: Boolean(tab.pinned),
       index: Number.isSafeInteger(tab.index) ? tab.index : 0,
       browserGroup: await readBrowserGroup(tab),
@@ -495,7 +511,7 @@ async function handleMessage(message: { type?: string; action?: string; [key: st
     case 'restore-group':
       return restoreGroup(message.groupId as string);
     case 'restore-refs':
-      return restoreRefs((message.refs as TabRef[]) || []);
+      return restoreRefs(message.refs);
     case 'restore-all':
       return restoreAll();
     default:
@@ -745,20 +761,14 @@ async function captureTabs(
   const tabsToClose = [
     ...duplicateTabs,
     ...(settings.closeTabsAfterSave ? storableTabs.filter((tab) => persistedSourceTabIds.has(tab.id ?? -1)) : []),
-  ].filter((tab) => tab.id !== managerTab?.id);
+  ].filter((tab) => !tab.pinned && tab.id !== managerTab?.id);
   await removeCapturedTabs(tabsToClose);
 
   return result;
 }
 
-const BLANK_URL_PATTERN = /^about:blank$/i;
-
 function resolveTabUrl(tab: chrome.tabs.Tab): string {
   return String(tab?.pendingUrl || tab?.url || '').trim();
-}
-
-function isBlankTab(tab: chrome.tabs.Tab): boolean {
-  return BLANK_URL_PATTERN.test(resolveTabUrl(tab));
 }
 
 function dedupeSourceTabs(tabs: chrome.tabs.Tab[], settings: Settings) {
@@ -783,27 +793,15 @@ function dedupeSourceTabs(tabs: chrome.tabs.Tab[], settings: Settings) {
 
 function canDedupeTab(tab: chrome.tabs.Tab): boolean {
   const url = resolveTabUrl(tab);
-  if (!tab?.id || !url) {
-    return false;
-  }
-  const ownBase = chrome.runtime.getURL('');
-  if (url.startsWith(ownBase)) {
-    return false;
-  }
-  return !/^devtools:/i.test(url) && !isBlankTab(tab);
+  return Boolean(tab?.id && isWindowDedupeUrl(url, chrome.runtime.getURL('')));
 }
 
 function collectWindowDuplicates(tabs: chrome.tabs.Tab[]): chrome.tabs.Tab[] {
-  const byUrl = new Map<string, chrome.tabs.Tab[]>();
-  for (const tab of tabs.filter(canDedupeTab)) {
-    const url = resolveTabUrl(tab);
-    byUrl.set(url, [...(byUrl.get(url) || []), tab]);
-  }
-  return [...byUrl.values()].flatMap((matches) => matches
-    .sort((left, right) => Number(right.active) - Number(left.active)
-      || (right.lastAccessed || 0) - (left.lastAccessed || 0)
-      || (left.index || 0) - (right.index || 0))
-    .slice(1));
+  return classifyWindowDuplicates(
+    tabs
+      .filter(canDedupeTab)
+      .map((tab) => ({ ...tab, url: resolveTabUrl(tab) })),
+  ).removable;
 }
 
 async function getTabsForMode(
@@ -980,21 +978,50 @@ async function restoreGroupInternal(groupId: string) {
   return { restoredTabs: created.length };
 }
 
-async function restoreRefsInternal(refs: TabRef[]) {
+async function restoreRefsInternal(rawRefs: unknown): Promise<RestoreRefsResult> {
+  const refs = parseRestoreRefs(rawRefs);
   const state = await getState();
   const settings = state.settings;
-  const found = refs.map((ref) => findTabRef(state, ref)).filter(Boolean) as FoundTabRef[];
-  const restorable = found.filter((item) => isRestorableTab(item.tab));
-  const tabs = restorable.map((item) => item.tab);
-  const created = await createChromeTabs(tabs, { newWindow: false, settings });
-  if (settings.deleteRestoredTabs && created.length) {
-    const createdIds = new Set(created.map(({ record }) => record.id));
-    const removableRefs = restorable
-      .filter((item) => createdIds.has(item.tab.id) && !item.group?.locked)
-      .map((item) => ({ source: item.source, groupId: item.group?.id || '', tabId: item.tab.id }));
+  const resolved = refs.map((ref) => {
+    const found = findTabRef(state, ref);
+    if (!found) {
+      return { ref, found: null, error: 'missing' as const };
+    }
+    if (!isRestorableTab(found.tab)) {
+      return { ref, found, error: 'not-restorable' as const };
+    }
+    return { ref, found, error: null };
+  });
+  const restorable = resolved.filter((item): item is {
+    ref: RestoreRef;
+    found: FoundTabRef;
+    error: null;
+  } => item.found !== null && item.error === null);
+  const created = await createChromeTabs(
+    restorable.map(({ found }) => found.tab),
+    { newWindow: false, settings },
+  );
+  const createdRecords = new Set(created.map(({ record }) => record));
+  const outcomes: RestoreRefOutcome[] = resolved.map(({ ref, found, error }) => {
+    if (error) return failedRefOutcome(ref, error);
+    return found && createdRecords.has(found.tab)
+      ? restoredRefOutcome(ref)
+      : failedRefOutcome(ref, 'create-failed');
+  });
+  const restoredKeys = new Set(outcomes.flatMap((outcome) =>
+    outcome.status === 'restored' ? [outcome.key] : []));
+  const removableRefs = restorable
+    .filter(({ ref, found }) =>
+      restoredKeys.has(restoreRefKey(ref)) && !found.group.locked)
+    .map(({ ref }) => ref);
+  if (settings.deleteRestoredTabs && removableRefs.length) {
     await removeRestoredRefs(removableRefs);
   }
-  return { restoredTabs: created.length };
+  return {
+    restoredTabs: outcomes.filter(({ status }) =>
+      status === 'restored').length,
+    outcomes,
+  };
 }
 
 async function restoreAllInternal() {
@@ -1024,7 +1051,7 @@ function restoreGroup(groupId: string) {
   return enqueueRestore(() => restoreGroupInternal(groupId));
 }
 
-function restoreRefs(refs: TabRef[]) {
+function restoreRefs(refs: unknown) {
   return enqueueRestore(() => restoreRefsInternal(refs));
 }
 
@@ -1406,7 +1433,6 @@ async function listOpenTabs(): Promise<OpenTabsListResult> {
         title: tab.title || url || 'Untitled',
         url,
         favIconUrl: tab.favIconUrl || '',
-        active: Boolean(tab.active),
         pinned: Boolean(tab.pinned),
         index: tab.index || 0,
         browserGroup: await getBrowserGroup(tab),

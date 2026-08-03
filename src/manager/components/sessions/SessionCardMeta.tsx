@@ -1,5 +1,9 @@
 import { Text } from '@mantine/core';
-import { IconFileText, IconLink, IconLock } from '@tabler/icons-react';
+import {
+  FileText as IconFileText,
+  Link as IconLink,
+  Lock as IconLock,
+} from 'lucide-react';
 import { formatDate, formatNumber } from '../../../shared/utils/formatters';
 
 export function SessionCardMeta({

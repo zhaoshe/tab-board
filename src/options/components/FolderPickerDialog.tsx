@@ -11,10 +11,10 @@ import {
   Center,
 } from '@mantine/core';
 import {
-  IconFolder,
-  IconAlertTriangle,
-  IconCheck,
-} from '@tabler/icons-react';
+  Check as IconCheck,
+  FolderOpen as IconFolder,
+  TriangleAlert as IconAlertTriangle,
+} from 'lucide-react';
 import {
   clone,
   normalizeState,

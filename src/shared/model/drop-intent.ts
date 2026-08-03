@@ -19,6 +19,7 @@ export type DropIntent =
       targetCategoryId: string;
       placement: 'before' | 'after';
       workspaceId: string;
+      expectedCategoryOrder: string[];
     }
   | {
       kind: 'move-tabs';

@@ -11,7 +11,7 @@ body,
   width: 320px;
   overflow: hidden;
   border-radius: 0;
-  background: var(--mantine-color-default);
+  background: var(--tabboard-surface);
 }
 
 .popup-app--loading {
@@ -23,18 +23,23 @@ body,
 }
 
 .popup-app__header {
-  min-height: 40px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--mantine-color-default-border);
+  min-height: 52px;
+  padding: 0 16px;
+}
+
+.popup-app__brand-icon {
+  display: block;
+  width: 22px;
+  height: 22px;
 }
 
 .popup-app__capture {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 128px;
+  grid-template-columns: minmax(0, 1fr) 80px;
   align-items: center;
   column-gap: 12px;
   row-gap: 10px;
-  padding: 12px;
+  padding: 16px;
 }
 
 .popup-app__save {
@@ -42,112 +47,103 @@ body,
   grid-row: 1;
 }
 
+.popup-app__save-copy {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+
 .popup-app__count,
-.popup-app__stat {
-  display: flex;
-  align-items: center;
-  min-height: 32px;
-  letter-spacing: 0.02em;
+.popup-app__duplicate {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
-.popup-app__filters,
-.popup-app__selection-summary {
-  grid-column: 1;
+.popup-app__save-helper {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
-.popup-app__selection-summary {
-  min-height: 18px;
+.popup-app__pinned-helper {
+  font-size: 12px;
+  line-height: 16px;
 }
 
-.popup-app__separator {
+.popup-app__pinned {
+  display: grid;
   grid-column: 1 / -1;
-  height: 1px;
-  background: var(--mantine-color-default-border);
+  min-width: 0;
+  gap: 4px;
 }
 
-.popup-app__duplicate--contrast {
-  color: var(--mantine-color-text);
+.popup-app__duplicate-row {
+  grid-column: 1 / -1;
+  min-width: 0;
+  min-height: 40px;
 }
 
-.popup-app__dedupe {
-  grid-column: 2;
+.popup-app__duplicate-copy {
+  min-width: 0;
 }
 
-.popup-app__save.mantine-Button-root,
-.popup-app__dedupe.mantine-Button-root {
+.popup-app__duplicate-helper {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popup-app__save.mantine-Button-root {
+  width: 80px;
+  height: 32px;
   min-height: 32px;
   border-radius: var(--mantine-radius-sm);
   font-weight: 600;
 }
 
-.popup-app__save.mantine-Button-root {
-  background: var(--mantine-color-blue-8);
+.popup-app__dedupe.mantine-Button-root {
+  width: 80px;
+  height: 32px;
+  min-height: 32px;
+  border-radius: var(--mantine-radius-sm);
+  font-weight: 500;
 }
 
-.popup-app__save.mantine-Button-root:hover {
-  background: var(--mantine-color-blue-9);
-}
-
-.popup-app__filters .mantine-Checkbox-root {
+.popup-app__pinned .mantine-Checkbox-root {
+  --checkbox-size: 16px;
   flex: 0 0 auto;
-  min-height: 24px;
+  min-height: 20px;
 }
 
-.popup-app__filters .mantine-Checkbox-body {
+.popup-app__pinned .mantine-Checkbox-body {
   align-items: center;
 }
 
-.popup-app__filters .mantine-Checkbox-inner {
-  width: 24px;
-  height: 24px;
+.popup-app__pinned .mantine-Checkbox-inner {
+  width: 16px;
+  height: 16px;
 }
 
-.popup-app__filters .mantine-Checkbox-label {
-  font-size: var(--mantine-font-size-xs);
-  line-height: 24px;
+.popup-app__pinned .mantine-Checkbox-input {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+.popup-app__pinned .mantine-Checkbox-label {
+  font-size: 13px;
+  line-height: 20px;
   padding-inline-start: 8px;
 }
 
-.popup-app__footer {
-  padding: 10px 12px;
-  border-top: 1px solid var(--mantine-color-default-border);
-}
-
-.popup-app__footer .mantine-ActionIcon-root {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--mantine-radius-sm);
-}
-
 @media (max-width: 760px) {
-  .popup-app__save.mantine-Button-root,
-  .popup-app__dedupe.mantine-Button-root {
-    min-height: 44px;
-  }
-
-  .popup-app__filters {
-    gap: 8px;
-  }
-
-  .popup-app__filters .mantine-Checkbox-root {
-    min-height: 44px;
-  }
-
-  .popup-app__filters .mantine-Checkbox-inner {
-    width: 24px;
-    height: 24px;
-  }
-
-  .popup-app__filters .mantine-Checkbox-label {
-    line-height: 44px;
-  }
-
-  .popup-app__footer {
-    gap: 8px;
-  }
-
-  .popup-app__footer .mantine-ActionIcon-root {
+  .popup-app__header .mantine-ActionIcon-root {
     width: 44px;
     height: 44px;
   }

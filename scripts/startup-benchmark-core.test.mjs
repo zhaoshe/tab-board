@@ -1,11 +1,30 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  benchmarkPageStorage,
+  benchmarkPagePath,
   createBenchmarkSchedule,
   createBenchmarkState,
   median,
   summarizeRuns,
 } from './startup-benchmark-core.mjs';
+
+test('benchmarkPageStorage pins automatic new-tab startup to Inbox', () => {
+  assert.deepEqual(benchmarkPageStorage(), {
+    'tabboard.managerCategoryPreference': JSON.stringify({
+      version: 1,
+      byWorkspace: { workspace_default: 'inbox' },
+    }),
+  });
+});
+
+test('benchmarkPagePath pins Manager measurements to the heavy Inbox view', () => {
+  assert.equal(
+    benchmarkPagePath('manager'),
+    'manager.html?workspace=workspace_default&category=inbox&view=board',
+  );
+  assert.equal(benchmarkPagePath('options'), 'options.html');
+});
 
 test('createBenchmarkSchedule interleaves pages and rotates every round', () => {
   const selected = [

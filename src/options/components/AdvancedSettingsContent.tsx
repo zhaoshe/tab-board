@@ -1,14 +1,16 @@
 import { useRef, useState } from 'react';
 import {
   Button,
-  Card,
   Group,
   Stack,
   Switch,
   Text,
   Title,
 } from '@mantine/core';
-import { IconKeyboard, IconRefresh } from '@tabler/icons-react';
+import {
+  Keyboard as IconKeyboard,
+  RotateCcw as IconRefresh,
+} from 'lucide-react';
 import type { Settings } from '../../shared/model';
 import { DEFAULT_SETTINGS } from '../../shared/model';
 import { ConfirmDialog } from '../../shared/components/ConfirmDialog';
@@ -34,62 +36,68 @@ export function AdvancedSettingsContent({
 
   return (
     <>
-      <Stack gap="md" mt="md">
+      <Stack className="options-advanced-sections" gap={0}>
         <DataStorageCard />
 
-        <Card withBorder shadow="sm" padding="lg">
-          <Stack gap="md">
-            <div>
+        <section className="options-advanced-row">
+          <Group justify="space-between" align="flex-start" wrap="nowrap">
+            <div className="options-advanced-row__copy">
               <Title order={2} size="h5">
-                Safety
+                Confirm before deleting saved items
               </Title>
               <Text size="sm" c="dimmed">
-                Confirmation for saved-item deletion
+                Session and saved-item deletion can skip confirmation. Closing browser tabs and permanent deletion always require confirmation.
               </Text>
             </div>
             <Switch
               name="confirm-before-destructive"
-              label="Confirm before deleting saved items"
-              description="Session and saved-item deletion can skip confirmation. Closing browser tabs and permanent deletion always require confirmation."
+              aria-label="Confirm before deleting saved items"
               checked={settings.confirmBeforeDestructive}
               onChange={(event) => updateSettings({
                 confirmBeforeDestructive: event.currentTarget.checked,
               })}
             />
-          </Stack>
-        </Card>
+          </Group>
+        </section>
 
-        <Card withBorder shadow="sm" padding="lg">
-          <Stack gap="md">
-            <div>
-              <Title order={2} size="h5">
-                Keyboard & Reset
-              </Title>
+        <section className="options-advanced-row">
+          <Group justify="space-between" align="center" wrap="nowrap">
+            <div className="options-advanced-row__copy">
+              <Title order={2} size="h5">Keyboard shortcuts</Title>
               <Text size="sm" c="dimmed">
-                Chrome shortcuts and settings recovery
+                Configure Save and Open Manager commands in Chrome.
               </Text>
             </div>
-            <Group className="options-advanced-actions" grow>
-              <Button
-                variant="default"
-                leftSection={<IconKeyboard size={16} aria-hidden="true" />}
-                onClick={handleOpenShortcuts}
-              >
-                Open Keyboard Shortcuts
-              </Button>
-              <Button
-                ref={resetActionRef}
-                className="options-action-danger"
-                variant="outline"
-                color="red"
-                leftSection={<IconRefresh size={16} aria-hidden="true" />}
-                onClick={() => setResetConfirmOpen(true)}
-              >
-                Reset to Defaults
-              </Button>
-            </Group>
-          </Stack>
-        </Card>
+            <Button
+              variant="default"
+              leftSection={<IconKeyboard size={16} aria-hidden="true" />}
+              onClick={handleOpenShortcuts}
+            >
+              Open Keyboard Shortcuts
+            </Button>
+          </Group>
+        </section>
+
+        <section className="options-advanced-row">
+          <Group justify="space-between" align="center" wrap="nowrap">
+            <div className="options-advanced-row__copy">
+              <Title order={2} size="h5">Reset settings</Title>
+              <Text size="sm" c="dimmed">
+                Restore defaults. Saved sessions and local folder files remain unchanged.
+              </Text>
+            </div>
+            <Button
+              ref={resetActionRef}
+              className="options-action-danger"
+              variant="outline"
+              color="red"
+              leftSection={<IconRefresh size={16} aria-hidden="true" />}
+              onClick={() => setResetConfirmOpen(true)}
+            >
+              Reset to Defaults
+            </Button>
+          </Group>
+        </section>
       </Stack>
       <ConfirmDialog
         opened={resetConfirmOpen}

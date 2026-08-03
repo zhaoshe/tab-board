@@ -30,6 +30,16 @@ export {
   utf8ByteLength,
 } from '../validation';
 
+export function normalizeWorkspaceName(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.normalize('NFC').trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+export function workspaceNameKey(value: string): string {
+  return value.normalize('NFC').trim().toLocaleLowerCase('en-US');
+}
+
 export function isDropMutationCandidate(value: unknown): boolean {
   return Boolean(value)
     && typeof value === 'object'

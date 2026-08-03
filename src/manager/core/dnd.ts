@@ -12,7 +12,7 @@ import type {
   DropIntent,
   SavedTabRef,
 } from '../../shared/model/drop-intent';
-import type { Group, TabBoardState } from '../../shared/model/types';
+import type { Group, TabBoardState, TabItem } from '../../shared/model/types';
 import type { OpenTabInfo } from '../../shared/openTabs';
 export type { DropIntent, SavedTabRef } from '../../shared/model/drop-intent';
 
@@ -33,7 +33,7 @@ export type DropTarget =
       placement?: 'before' | 'after';
       workspaceId: string;
     }
-  | { kind: 'new-group'; category: CategoryFilter; index: number; workspaceId: string }
+  | { kind: 'new-session-insert'; category: CategoryFilter; index: number; workspaceId: string }
   | { kind: 'group-insert'; category: CategoryFilter; index: number; workspaceId: string }
   | { kind: 'category-column'; category: CategoryFilter; workspaceId: string }
   | { kind: 'category-reorder'; categoryId: string; placement: 'before' | 'after'; workspaceId: string };
@@ -48,6 +48,29 @@ export interface DragSourceRect {
 export interface DragPlaceholderStyle {
   width?: number;
   height?: number;
+}
+
+export interface DragPreviewBounds {
+  width: number;
+  height: number;
+}
+
+export interface DragPreviewLayout {
+  columns: number;
+  mode: 'details' | 'identity';
+  rows: number;
+}
+
+export interface DragPreviewGeometry {
+  previewRect: DragSourceRect;
+  previewLayout: DragPreviewLayout;
+}
+
+export interface DragPreviewItem {
+  id: string;
+  title: string;
+  domain?: string;
+  itemType: 'link' | 'note';
 }
 
 export function getDragPlaceholderStyle(sourceRect: DragSourceRect | null): DragPlaceholderStyle {
@@ -67,15 +90,21 @@ export interface DragUiState {
   payload: DragPayload | null;
   target: DropTarget | null;
   sourceRect: DragSourceRect | null;
+  previewRect: DragSourceRect | null;
+  previewLayout: DragPreviewLayout | null;
   marker: DragMarker | null;
+  previewItems: readonly DragPreviewItem[];
 }
 
 export const IDLE_DRAG_STATE = {
   payload: null,
   target: null,
   sourceRect: null,
+  previewRect: null,
+  previewLayout: null,
   marker: null,
-} as const;
+  previewItems: Object.freeze([]) as readonly DragPreviewItem[],
+} satisfies DragUiState;
 
 const TAB_DROP_EDGE_RATIO = 0.25;
 const DEFAULT_DROP_TARGET_RELEASE_MARGIN = 12;
@@ -85,8 +114,224 @@ export function clearDragState(_state?: DragUiState): DragUiState {
     payload: null,
     target: null,
     sourceRect: null,
+    previewRect: null,
+    previewLayout: null,
     marker: null,
+    previewItems: Object.freeze([]) as readonly DragPreviewItem[],
   };
+}
+
+const DETAIL_CELL_WIDTH = 136;
+const DETAIL_ROW_HEIGHT = 28;
+const IDENTITY_CELL_WIDTH = 34;
+const IDENTITY_ROW_HEIGHT = 16;
+
+export function createDragPreviewGeometry(
+  sourceRect: DragSourceRect,
+  itemCount: number,
+  bounds: DragPreviewBounds,
+): DragPreviewGeometry {
+  const count = Math.max(1, Math.floor(itemCount));
+  const maxWidth = Math.max(1, Math.floor(bounds.width));
+  const maxHeight = Math.max(1, Math.floor(bounds.height));
+  if (
+    count === 1
+    && sourceRect.width >= DETAIL_CELL_WIDTH
+    && sourceRect.height >= DETAIL_ROW_HEIGHT
+    && maxWidth >= DETAIL_CELL_WIDTH
+    && maxHeight >= DETAIL_ROW_HEIGHT
+  ) {
+    return {
+      previewRect: sourceRect,
+      previewLayout: { columns: 1, mode: 'details', rows: 1 },
+    };
+  }
+
+  const detailRows = Math.max(1, Math.floor(maxHeight / DETAIL_ROW_HEIGHT));
+  const detailColumns = Math.ceil(count / detailRows);
+  const maxDetailColumns = Math.floor(maxWidth / DETAIL_CELL_WIDTH);
+
+  if (maxDetailColumns > 0 && detailColumns <= maxDetailColumns) {
+    const rows = Math.ceil(count / detailColumns);
+    return {
+      previewRect: {
+        ...sourceRect,
+        width: Math.min(
+          maxWidth,
+          Math.max(sourceRect.width, detailColumns * DETAIL_CELL_WIDTH),
+        ),
+        height: Math.min(
+          maxHeight,
+          Math.max(sourceRect.height, rows * DETAIL_ROW_HEIGHT),
+        ),
+      },
+      previewLayout: {
+        columns: detailColumns,
+        mode: 'details',
+        rows,
+      },
+    };
+  }
+
+  const identity = chooseIdentityGrid(
+    count,
+    sourceRect,
+    { width: maxWidth, height: maxHeight },
+  );
+  return {
+    previewRect: {
+      ...sourceRect,
+      width: identity.width,
+      height: identity.height,
+    },
+    previewLayout: {
+      columns: identity.columns,
+      mode: 'identity',
+      rows: identity.rows,
+    },
+  };
+}
+
+function chooseIdentityGrid(
+  count: number,
+  sourceRect: DragSourceRect,
+  bounds: DragPreviewBounds,
+): {
+  columns: number;
+  rows: number;
+  width: number;
+  height: number;
+} {
+  const sourceWidth = sourceRect.width <= bounds.width ? sourceRect.width : 0;
+  const sourceHeight = sourceRect.height <= bounds.height ? sourceRect.height : 0;
+  let best: {
+    columns: number;
+    rows: number;
+    width: number;
+    height: number;
+    overflowAxes: number;
+    totalOverflow: number;
+    worstOverflow: number;
+  } | null = null;
+
+  for (let columns = 1; columns <= count; columns += 1) {
+    const rows = Math.ceil(count / columns);
+    const width = Math.max(sourceWidth, columns * IDENTITY_CELL_WIDTH);
+    const height = Math.max(sourceHeight, rows * IDENTITY_ROW_HEIGHT);
+    const overflowX = Math.max(0, width - bounds.width);
+    const overflowY = Math.max(0, height - bounds.height);
+    const candidate = {
+      columns,
+      rows,
+      width,
+      height,
+      overflowAxes: Number(overflowX > 0) + Number(overflowY > 0),
+      totalOverflow: overflowX + overflowY,
+      worstOverflow: Math.max(overflowX, overflowY),
+    };
+    if (
+      !best
+      || candidate.overflowAxes < best.overflowAxes
+      || (
+        candidate.overflowAxes === best.overflowAxes
+        && candidate.totalOverflow < best.totalOverflow
+      )
+      || (
+        candidate.overflowAxes === best.overflowAxes
+        && candidate.totalOverflow === best.totalOverflow
+        && candidate.worstOverflow < best.worstOverflow
+      )
+      || (
+        candidate.overflowAxes === best.overflowAxes
+        && candidate.totalOverflow === best.totalOverflow
+        && candidate.worstOverflow === best.worstOverflow
+        && candidate.columns < best.columns
+      )
+    ) {
+      best = candidate;
+    }
+  }
+
+  return best!;
+}
+
+export function createDragPreviewItems(
+  payload: DragPayload | null,
+  groups: readonly Group[],
+  openTabs: readonly OpenTabInfo[],
+): readonly DragPreviewItem[] {
+  if (!payload) return Object.freeze([]);
+
+  const items: DragPreviewItem[] = [];
+  if (payload.kind === 'tab') {
+    const item = getSavedPreviewItem(
+      groups,
+      payload.groupId,
+      payload.tabId,
+      payload.workspaceId,
+    );
+    if (item) items.push(item);
+  } else if (payload.kind === 'tabs') {
+    for (const ref of payload.refs) {
+      const item = getSavedPreviewItem(
+        groups,
+        ref.groupId,
+        ref.tabId,
+        payload.workspaceId,
+      );
+      if (item) items.push(item);
+    }
+  } else if (payload.kind === 'open-tabs') {
+    for (const tabId of payload.tabIds) {
+      const record = openTabs.find((candidate) =>
+        candidate.id === tabId && candidate.windowId === payload.windowId);
+      if (!record) continue;
+      items.push({
+        id: String(tabId),
+        title: record.title || 'Untitled',
+        domain: getUrlHost(record.url),
+        itemType: 'link',
+      });
+    }
+  }
+
+  return Object.freeze(items.map((item) => Object.freeze(item)));
+}
+
+function getSavedPreviewItem(
+  groups: readonly Group[],
+  groupId: string,
+  tabId: string,
+  workspaceId: string,
+): DragPreviewItem | null {
+  const group = groups.find((candidate) =>
+    candidate.id === groupId && candidate.workspaceId === workspaceId);
+  const tab = group?.tabs.find((candidate) => candidate.id === tabId);
+  return tab ? previewItemFromSavedTab(tab) : null;
+}
+
+function previewItemFromSavedTab(tab: TabItem): DragPreviewItem {
+  if (tab.itemType === 'note') {
+    return {
+      id: tab.id,
+      title: tab.note || tab.title,
+      itemType: 'note',
+    };
+  }
+  return {
+    id: tab.id,
+    title: tab.title,
+    domain: getUrlHost(tab.url),
+    itemType: 'link',
+  };
+}
+
+function getUrlHost(url: string): string | undefined {
+  try {
+    return new URL(url).host || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function lockDropTarget(
@@ -142,6 +387,36 @@ export function isDragSourceStillRendered(
   }
   return payload.refs.length > 0 && payload.refs.every((ref) => groups.some((group) => group.id === ref.groupId
     && group.tabs.some((tab) => tab.id === ref.tabId)));
+}
+
+export function isAllSourceTabs(
+  payload: Extract<DragPayload, { kind: 'tabs' }>,
+  groups: readonly Group[],
+): boolean {
+  if (!Array.isArray(payload.refs) || payload.refs.length === 0) return false;
+  const sourceGroupId = payload.refs[0]?.groupId;
+  if (!sourceGroupId
+    || payload.refs.some(({ groupId }) => groupId !== sourceGroupId)) {
+    return false;
+  }
+  const sourceGroup = groups.find(({ id }) => id === sourceGroupId);
+  if (!sourceGroup
+    || sourceGroup.workspaceId !== payload.workspaceId
+    || payload.refs.length !== sourceGroup.tabs.length) {
+    return false;
+  }
+  const canonicalTabIds = new Set(sourceGroup.tabs.map(({ id }) => id));
+  if (canonicalTabIds.size !== sourceGroup.tabs.length) return false;
+  const selectedTabIds = new Set<string>();
+  for (const ref of payload.refs) {
+    if (!ref.tabId
+      || selectedTabIds.has(ref.tabId)
+      || !canonicalTabIds.has(ref.tabId)) {
+      return false;
+    }
+    selectedTabIds.add(ref.tabId);
+  }
+  return sourceGroup.tabs.every(({ id }) => selectedTabIds.has(id));
 }
 
 export function resolveDrop({
@@ -258,6 +533,7 @@ function resolveCategoryDrop(
     targetCategoryId: target.categoryId,
     placement: target.placement,
     workspaceId: payload.workspaceId,
+    expectedCategoryOrder: [...order],
   };
 }
 
@@ -316,20 +592,19 @@ function resolveSavedTabsDrop(
     };
   }
 
-  if (target.kind === 'new-group' || target.kind === 'group-insert' || target.kind === 'category-column') {
+  if (target.kind === 'new-session-insert') {
     if (!isOwnedCategory(state, target.category, payload.workspaceId)) {
       return null;
     }
     const categoryGroups = groupsForCategory(state, target.category, payload.workspaceId);
-    const index = target.kind === 'category-column' ? categoryGroups.length : target.index;
-    if (!isValidInsertionIndex(index, categoryGroups.length)) {
+    if (!isValidInsertionIndex(target.index, categoryGroups.length)) {
       return null;
     }
     return {
       kind: 'create-session',
       source: { kind: 'saved-tabs', refs },
       category: target.category,
-      index,
+      index: target.index,
       workspaceId: payload.workspaceId,
     };
   }
@@ -388,20 +663,19 @@ function resolveOpenTabsDrop(
     };
   }
 
-  if (target.kind === 'new-group' || target.kind === 'group-insert' || target.kind === 'category-column') {
+  if (target.kind === 'new-session-insert') {
     if (!isOwnedCategory(state, target.category, payload.workspaceId)) {
       return null;
     }
     const categoryGroups = groupsForCategory(state, target.category, payload.workspaceId);
-    const index = target.kind === 'category-column' ? categoryGroups.length : target.index;
-    if (!isValidInsertionIndex(index, categoryGroups.length)) {
+    if (!isValidInsertionIndex(target.index, categoryGroups.length)) {
       return null;
     }
     return {
       kind: 'create-session',
       source: { kind: 'open-tabs', tabIds, windowId: payload.windowId },
       category: target.category,
-      index,
+      index: target.index,
       workspaceId: payload.workspaceId,
     };
   }

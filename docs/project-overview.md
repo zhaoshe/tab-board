@@ -55,10 +55,10 @@ TabBoard 的第一阶段从 OneTab 复刻开始，后来吸收 tabExtend 的组�
 
 TabBoard 是 Manifest V3 Chrome extension，安装后会提供这些入口：
 
-- Toolbar action：默认保存当前窗口；也可在 Options 中切换为打开 popup。
+- Toolbar action：新安装和 Reset 默认打开 popup；也可在 Options 中切换为直接保存当前窗口。
 - New tab override：新标签页打开 TabBoard manager。
 - Manager page：主要工作台，包含 open tabs、categories、workspace、search 和 saved sessions。
-- Popup：轻量入口，支持保存当前窗口、打开 manager、搜索 recent sessions。
+- Popup：轻量入口，支持按 pinned scope 保存当前窗口、清理非 pinned 重复 tabs、打开 manager 和 settings。
 - Context menu：页面/扩展按钮右键保存当前 tab、窗口、左右 tabs、其它 tabs、全部窗口等。
 - Omnibox：输入 `tb` 搜索 saved tabs。
 - Commands：快捷键保存当前窗口或打开 TabBoard。
@@ -92,7 +92,7 @@ Bin：
 ## 产品原则
 
 1. Local-first
-数据留在 `chrome.storage.local`，不引入账号和后端。
+数据默认留在 `chrome.storage.local`，也可完整切换到用户选择的本地文件夹；不引入账号或远端后端。
 
 2. Save fast, organize later
 保存窗口必须轻，整理能力不能阻碍主流程。
@@ -104,7 +104,7 @@ Bin：
 主界面偏信息工作台，强调扫描、比较和重复操作，不做营销式 landing page。
 
 5. Direct manipulation first
-重命名、排序、移动、补充链接等操作尽量贴近对象本身。
+重命名、排序、移动、补充链接等操作尽量贴近对象本身。Pointer/touch 使用对象 surface；键盘通过可命名、可预览、可取消的 Hybrid Commands 达到同一结果。
 
 6. Dangerous actions recoverable or confirmed
 删除走 bin；永久清理、删除等 destructive action 默认需要确认。
@@ -123,12 +123,12 @@ Bin：
 
 当前不做：
 
-- 多设备同步。
+- TabBoard 自建的多设备同步。
 - 用户账号、云端备份、协作。
 - 任务管理系统。
 - 类 Notion 的复杂数据库。
 - 自动摘要或 AI 分类。
-- 完整键盘无鼠标拖拽替代方案。
+- 模拟鼠标空间操作的全键盘 direct drag。当前通过 Manage Move Up/Down、Session Before/After 和 target picker 提供结果等价的 Hybrid Commands。
 
 ## 当前状态
 
@@ -136,7 +136,7 @@ Bin：
 
 代码规模：
 
-- 技术栈：React 18 + TypeScript + Vite；UI 使用 Mantine v7，状态用 Zustand 持久化到 `chrome.storage.local`，拖拽用 `@dnd-kit`，图标用 `@tabler/icons-react`。
+- 技术栈：React 18 + TypeScript + Vite；UI 使用 Mantine v7 + Lucide，状态通过 Zustand facade 与 browser/file Storage Authority 持久化，拖拽用 `@dnd-kit`。
 - 核心 extension 页面入口：`manager.html`、`popup.html`、`options.html`。
 - 核心模块目录：`src/background/`（Chrome API 边界与 service worker）、`src/shared/model/`（纯数据）、`src/shared/store/`（持久化与 Zustand）、`src/manager/`（Manager UI + core 纯逻辑 + hooks）。
 - 构建与测试：`npm run build`（`tsc --noEmit` + `vite build`）、`npm test`（Vitest）、`npm run check`（build + `scripts/check-extension.mjs`）和 `git diff --check`。
@@ -144,10 +144,10 @@ Bin：
 主要风险：
 
 - Manager UI 逻辑较多，后续新增行为要注意维持 components / core / hooks 的边界。
-- 拖拽交互基于 `@dnd-kit`（pointer/touch/keyboard sensors + 自定义 collision detection），视觉反馈和落点几何仍是最易出边界 bug 的区域。
+- 拖拽交互基于 `@dnd-kit` Pointer/Touch sensors + 自定义 collision detection；键盘结果由 Manage commands 和 Session target picker 提供。视觉反馈、Gap Anchor 和 auto-scroll 几何仍是最易出边界 bug 的区域。
 - session 数量继续增长后，所有 horizontal slots 和 DnD insertion geometry 仍保持挂载，但只有首批与近视口 session 挂载完整 tab 交互树；远端使用轻量 shell 并在接近视口时升级。若单 category 达到数百 session 后 stable-slot activation 仍有压力，再评估更深的虚拟化及其与 `@dnd-kit` measurement 的兼容性。
 - 右键菜单触发筛选、icon-only 操作的可发现性仍需观察。
-- Session 拖拽通过 `.session-card__drag-handle`（携带 `@dnd-kit` activator + attributes）支持 pointer 与键盘两条路径；handle 默认低调，hover/focus 时才显现，其可发现性仍需观察。
+- Session/Open/Saved/Category 不显示可见或隐藏 drag handle。Session title、metadata、只读 note 与空白是 pointer/touch activator；Restore、More、inputs、links 和 tab list 明确排除。
 
 ## 成功标准
 

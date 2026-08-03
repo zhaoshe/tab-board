@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useRef, type RefObject } from 'react';
 import { Box, Stack } from '@mantine/core';
 import { OpenTabsPanel } from './OpenTabsPanel';
 import {
@@ -7,18 +7,23 @@ import {
 } from '../../hooks/useOpenTabsRuntime';
 import type { CaptureCategorySnapshot } from '../../core/capture';
 import type { CategoryFilter } from '../../core/selectors';
+import type { ManagerSelectionScope } from '../../hooks/useManagerSelectionScope';
+import type { OpenSessionTargetPickerInput } from '../shell/SessionTargetPicker';
+import type { SidebarDisclosureState } from '../../hooks/useSidebarDisclosure';
 
 interface SidebarProps {
   workspaceId: string;
   category: CategoryFilter;
   showBin: boolean;
-  sidebarCollapsed: boolean;
-  sidebarExpanded: boolean;
+  sidebarState: SidebarDisclosureState;
   sidebarToggleRef: RefObject<HTMLButtonElement>;
   sidebarRailToggleRef: RefObject<HTMLButtonElement>;
   onToggleSidebar: (expanded: boolean) => void;
-  onSelectionModeChange?: (selectionMode: boolean) => void;
+  onPinSidebar: () => void;
+  onPromoteSidebar: () => void;
   onOpenTabsSourceKeyChange?: (key: unknown) => void;
+  selectionScope: ManagerSelectionScope;
+  onOpenSessionTargetPicker: (input: OpenSessionTargetPickerInput) => void;
   workflow: OpenTabsWorkflow;
   onCaptureCompleted: (completion: CaptureCompletion | null) => void;
 }
@@ -27,20 +32,18 @@ export function Sidebar({
   workspaceId,
   category,
   showBin,
-  sidebarCollapsed,
-  sidebarExpanded,
+  sidebarState,
   sidebarToggleRef,
   sidebarRailToggleRef,
   onToggleSidebar,
-  onSelectionModeChange,
+  onPinSidebar,
+  onPromoteSidebar,
   onOpenTabsSourceKeyChange,
+  selectionScope,
+  onOpenSessionTargetPicker,
   workflow: openTabs,
   onCaptureCompleted,
 }: SidebarProps) {
-  useEffect(() => {
-    onSelectionModeChange?.(openTabs.model.selection.active);
-    return () => onSelectionModeChange?.(false);
-  }, [onSelectionModeChange, openTabs.model.selection.active]);
   const currentCategorySnapshot: CaptureCategorySnapshot = {
     showBin,
     category,
@@ -68,13 +71,17 @@ export function Sidebar({
             <OpenTabsPanel
               workspaceId={workspaceId}
               workflow={openTabs}
-              sidebarPinned={sidebarExpanded}
+              sidebarState={sidebarState}
               onCaptureSelectedWindow={captureSelectedWindow}
               onCaptureSelectedTabs={captureSelectedTabs}
               sidebarToggleRef={sidebarToggleRef}
               sidebarCompactToggleRef={sidebarRailToggleRef}
               onToggleSidebar={onToggleSidebar}
+              onPinSidebar={onPinSidebar}
+              onPromoteSidebar={onPromoteSidebar}
               onSourceKeyChange={onOpenTabsSourceKeyChange}
+              selectionScope={selectionScope}
+              onOpenSessionTargetPicker={onOpenSessionTargetPicker}
             />
           </Box>
         </Stack>

@@ -38,17 +38,17 @@ for deterministic session seeds.
 
 - Pure drop resolution (ownership, indices, no-op detection, workspace
   boundaries): `src/manager/core/dnd.test.ts` (Vitest) — the primary regression.
-- Browser drag lifecycle (overlay appears/tears down, Escape cancel), keyboard
-  reorder, boot, and reload recovery: this directory.
+- Browser drag lifecycle (overlay appears/tears down, Escape cancel), Hybrid
+  Command keyboard results, boot, and reload recovery: this directory.
 
 ## Drag and drop coverage
 
-Both drag paths are exercised here:
+Both input paths are exercised here:
 
-- **Pointer**: press-and-move on the session header activates a drag; the suite
-  checks the overlay appears and tears down, and that Escape cancels cleanly.
-- **Keyboard**: each session card exposes a focusable `.session-card__drag-handle`
-  (carrying `@dnd-kit`'s `setActivatorNodeRef` + `attributes` + `listeners`), and
-  the `KeyboardSensor` uses `sortableKeyboardCoordinates` so arrow keys traverse
-  whole session columns. `reorders sessions using only the keyboard` proves an
-  end-to-end keyboard-only reorder.
+- **Pointer/touch DnD**: press-and-move on a non-interactive session surface
+  activates a drag; the suite checks the overlay appears and tears down, and
+  that Escape cancels cleanly. No resting or hidden drag handle is rendered.
+- **Keyboard Hybrid Commands**: Session menus expose named Before/After and
+  cross-category choices. The whole-session command scenarios prove reorder,
+  category moves, cancellation, announcements, and focus restoration without a
+  hidden keyboard drag activator.

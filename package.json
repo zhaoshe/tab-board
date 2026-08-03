@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
+    "dev": "vite --config vite.config.ts",
+    "build": "tsc --noEmit && vite build --config vite.config.ts",
+    "preview": "vite preview --config vite.config.ts",
     "check": "npm run build && node scripts/check-extension.mjs && npm run check:cycles && npm run check:architecture",
     "check:cycles": "node --test scripts/check-import-cycles.test.mjs && node scripts/check-import-cycles.mjs --deny-imports src/shared/store/authoritativePublication.ts,zustand,react,src/manager/components,src/shared/store/chromeStorage.ts,src/shared/store/activeAdapter.ts --deny-imports src/shared/model/drop-operations.ts,src/manager --deny-imports src/shared/store/stateMutations.ts,src/manager --deny-imports src/background/statePersistence.ts,src/manager --deny-imports src/manager/core/searchQueryStore.ts,react,zustand,src/shared/store --deny-imports src/shared/applicationFeedback.ts,react,zustand,src/shared/store,src/manager",
     "check:architecture": "node --test scripts/check-search-architecture.test.mjs && node scripts/check-search-architecture.mjs",
@@ -25,7 +25,7 @@
     "@mantine/core": "^7.13.0",
     "@mantine/form": "^7.13.0",
     "@mantine/hooks": "^7.13.0",
-    "@tabler/icons-react": "^3.19.0",
+    "lucide-react": "^1.27.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^4.5.5"

@@ -9,21 +9,20 @@ import {
   ScrollArea,
   Divider,
   Badge,
-  Tooltip,
   Box,
   Paper,
 } from '@mantine/core';
 import {
-  IconTrash,
-  IconRestore,
-  IconFile,
-  IconFolder,
-  IconTrashX,
-} from '@tabler/icons-react';
+  File as IconFile,
+  Folder as IconFolder,
+  SquareArrowOutUpRight as IconRestore,
+  Trash as IconTrash,
+} from 'lucide-react';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import type { BinEntry } from '../../../shared/model';
 import { BIN_LIMIT } from '../../../shared/model';
 import { formatNumber, formatRelativeTime } from '../../../shared/utils/formatters';
+import { TabBoardTooltip } from '../../../shared/components/TabBoardTooltip';
 import { ManagerModal } from '../shell/ManagerModal';
 
 function formatDeletedAt(deletedAt: string): string {
@@ -75,7 +74,7 @@ function BinEntryItem({ entry, onRestore, onDelete }: BinEntryItemProps) {
                 placeItems: 'center',
                 borderRadius: 'var(--mantine-radius-sm)',
                 color: entry.kind === 'group'
-                  ? 'var(--mantine-color-blue-6)'
+                  ? 'var(--tabboard-accent)'
                   : 'var(--mantine-color-dimmed)',
               }}
             >
@@ -107,18 +106,17 @@ function BinEntryItem({ entry, onRestore, onDelete }: BinEntryItemProps) {
             </Stack>
           </MantineGroup>
           <MantineGroup gap={4}>
-            <Tooltip label="Restore">
+            <TabBoardTooltip label="Restore">
               <ActionIcon
                 size="sm"
                 variant="subtle"
-                color="blue"
                 aria-label={`Restore ${entry.label}`}
                 onClick={() => onRestore(entry.id)}
               >
                 <IconRestore size={16} aria-hidden="true" />
               </ActionIcon>
-            </Tooltip>
-            <Tooltip label="Delete Permanently">
+            </TabBoardTooltip>
+            <TabBoardTooltip label="Delete Permanently">
               <ActionIcon
                 size="sm"
                 variant="subtle"
@@ -126,9 +124,9 @@ function BinEntryItem({ entry, onRestore, onDelete }: BinEntryItemProps) {
                 aria-label={`Delete ${entry.label} Permanently`}
                 onClick={handleDelete}
               >
-                <IconTrashX size={16} aria-hidden="true" />
+                <IconTrash size={16} aria-hidden="true" />
               </ActionIcon>
-            </Tooltip>
+            </TabBoardTooltip>
           </MantineGroup>
         </MantineGroup>
       </Paper>

@@ -13,7 +13,6 @@ const openTab: OpenTabInfo = {
   title: 'Example',
   url: 'https://example.test',
   favIconUrl: 'https://example.test/favicon.ico',
-  active: true,
   pinned: false,
   index: 0,
   browserGroup: null,
@@ -35,6 +34,7 @@ const intents = {
     targetCategoryId: 'saved',
     placement: 'after',
     workspaceId: 'workspace-a',
+    expectedCategoryOrder: ['inbox', 'saved', 'archive'],
   },
   moveTabs: {
     kind: 'move-tabs',
@@ -90,6 +90,21 @@ describe('shared drop validation', () => {
       ...intents.reorderCategory,
       placement: 'middle',
     })).toBe(false);
+    const {
+      expectedCategoryOrder: _expectedCategoryOrder,
+      ...missingExpectedOrder
+    } = intents.reorderCategory;
+    expect(isDropIntentShape(missingExpectedOrder)).toBe(false);
+    expect(isDropIntentShape({
+      ...intents.reorderCategory,
+      expectedCategoryOrder: ['inbox', 'inbox', 'archive'],
+    })).toBe(false);
+    const sparseOrder: unknown[] = [];
+    sparseOrder[1] = 'inbox';
+    expect(isDropIntentShape({
+      ...intents.reorderCategory,
+      expectedCategoryOrder: sparseOrder,
+    })).toBe(false);
   });
 
   it('rejects sparse, duplicate, negative, and empty reference arrays', () => {
@@ -124,6 +139,7 @@ describe('shared drop validation', () => {
     expect(isOpenTabInfoShape(openTab)).toBe(true);
     expect(isOpenTabInfoShape({ ...openTab, storable: 'yes' })).toBe(false);
     expect(isOpenTabInfoShape({ ...openTab, unexpected: true })).toBe(false);
+    expect(isOpenTabInfoShape({ ...openTab, active: true })).toBe(false);
     expect(isOpenTabInfoShape({
       ...openTab,
       browserGroup: {

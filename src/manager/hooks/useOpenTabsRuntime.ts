@@ -27,10 +27,10 @@ import {
 import type {
   OpenTabInfo,
   OpenTabsCaptureResult,
-  OpenTabsListResult,
   OpenWindowInfo,
   RuntimeResponse,
 } from '../../shared/openTabs';
+import { parseOpenTabsListResult } from '../../shared/openTabs';
 import {
   createOpenTabsWorkflowState,
   projectOpenTabsWorkflow,
@@ -72,7 +72,6 @@ export interface OpenTabsWorkflowModel {
   tabFilterUrl: string | null;
   isTabFilterActive: boolean;
   selection: {
-    active: boolean;
     ids: number[];
     count: number;
     records: OpenTabInfo[];
@@ -92,7 +91,7 @@ export interface OpenTabsWorkflowCommands {
   selectWindow: (windowId: number) => void;
   clearSelection: () => void;
   toggleSelection: (tabId: number | undefined) => void;
-  selectAll: () => void;
+  selectAll: (tabIds?: readonly number[]) => void;
   completeDrop: () => void;
   focusTab: (tabId: number | undefined, windowId: number | undefined) => Promise<void>;
   closeTab: (tabId: number | undefined) => Promise<void>;
@@ -200,9 +199,9 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     dispatch({ type: 'refresh-started' });
     refreshFailureRef.current = null;
     try {
-      const result = await sendWorkerMessage<OpenTabsListResult>({ type: 'list-open-tabs' });
-      const rawWindows = Array.isArray(result.windows) ? result.windows : [];
-      const nextWindows = rawWindows.map((window) => {
+      const response = await sendWorkerMessage<unknown>({ type: 'list-open-tabs' });
+      const result = parseOpenTabsListResult(response);
+      const nextWindows = result.windows.map((window) => {
         const visibleTabs = window.tabs.filter((tab) => !isNewTabUrl(tab.url));
         return { ...window, tabs: visibleTabs, tabCount: visibleTabs.length };
       });
@@ -285,7 +284,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     };
   }, [performRefresh]);
 
-  const exitSelectionMode = useCallback(() => {
+  const clearSelection = useCallback(() => {
     dispatch({ type: 'selection-cleared' });
   }, [dispatch]);
   const completeDrop = useCallback(() => {
@@ -309,8 +308,12 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     dispatch({ type: 'selection-toggled', tabId });
   }, [dispatch]);
 
-  const selectAllTabs = useCallback(() => {
-    dispatch({ type: 'selection-all' });
+  const selectAllTabs = useCallback((tabIds?: readonly number[]) => {
+    const visibleIds = tabIds ?? getSelectableOpenTabIds(
+      workflowStateRef.current.windows.find((window) =>
+        window.id === workflowStateRef.current.selectedWindowId) ?? null,
+    );
+    dispatch({ type: 'selection-visible', tabIds: [...visibleIds] });
   }, [dispatch]);
 
   const focusTab = useCallback(async (tabId: number | undefined, windowId: number | undefined) => {
@@ -368,7 +371,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     try {
       await sendWorkerMessage({ type: 'close-open-tabs', tabIds: selectedStorableTabIds });
       await refresh();
-      exitSelectionMode();
+      clearSelection();
     } catch (error: unknown) {
       dispatch({ type: 'operation-failed', error: errorMessage(error) });
     } finally {
@@ -379,7 +382,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
       dispatch({ type: 'closing-changed', tabIds: [...remainingTabIds] });
       dispatch({ type: 'selection-update-changed', updating: false });
     }
-  }, [dispatch, exitSelectionMode, refresh, selectedStorableTabIds]);
+  }, [clearSelection, dispatch, refresh, selectedStorableTabIds]);
 
   const pinSelectedTabs = useCallback(async () => {
     if (!selectedStorableTabIds.length || workflowStateRef.current.updatingSelection) return;
@@ -387,13 +390,13 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     try {
       await sendWorkerMessage({ type: 'pin-open-tabs', tabIds: selectedStorableTabIds });
       await refresh();
-      exitSelectionMode();
+      clearSelection();
     } catch (error: unknown) {
       dispatch({ type: 'operation-failed', error: errorMessage(error) });
     } finally {
       dispatch({ type: 'selection-update-changed', updating: false });
     }
-  }, [dispatch, exitSelectionMode, refresh, selectedStorableTabIds]);
+  }, [clearSelection, dispatch, refresh, selectedStorableTabIds]);
 
   const filterSessionsByTab = useCallback((tab: OpenTabInfo) => {
     if (tab.storable !== true || !tab.url.trim()) return;
@@ -507,7 +510,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
         selectedTabIds: currentProjection.selection.ids,
         selectedWindowId: currentProjection.selectedWindowId,
         workspaceId: activeWorkspaceId,
-        isSelectionMode: currentProjection.selection.active,
+        isSelectionMode: isSelectionMode,
       });
       const selectionCurrent = !captureSnapshot.isSelectionMode || (
         sameOpenTabSelection(
@@ -594,7 +597,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     const captureProjection = projectOpenTabsWorkflow(workflowStateRef.current);
     return captureTabs(
       captureProjection.selection.recordIds,
-      captureProjection.selection.active,
+      true,
       categorySnapshot,
       getCurrentCategorySnapshot,
     );
@@ -622,7 +625,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
     commands: {
       setQuery,
       selectWindow,
-      clearSelection: exitSelectionMode,
+      clearSelection,
       toggleSelection: toggleTabSelection,
       selectAll: selectAllTabs,
       completeDrop,

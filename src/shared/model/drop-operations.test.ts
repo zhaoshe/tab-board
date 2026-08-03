@@ -22,7 +22,7 @@ import {
 const timestamp = '2026-01-01T00:00:00.000Z';
 
 function workspace(id: string): Workspace {
-  return { id, name: id, createdAt: timestamp, updatedAt: timestamp };
+  return { id, name: id, emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
 }
 
 function folder(id: string, workspaceId: string): Folder {
@@ -117,7 +117,6 @@ function openTab(id: number): OpenTabInfo {
     title: `Open ${id}`,
     url: `https://open-${id}.test`,
     favIconUrl: '',
-    active: false,
     pinned: false,
     index: id,
     browserGroup: null,
@@ -160,6 +159,12 @@ describe('shared drop operations', () => {
         targetCategoryId: 'saved',
         placement: 'before',
         workspaceId: 'workspace-a',
+        expectedCategoryOrder: [
+          'inbox',
+          'saved',
+          'archive',
+          'folder:folder-a',
+        ],
       },
       {
         kind: 'move-tabs',

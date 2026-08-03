@@ -1,11 +1,14 @@
 import { create } from 'zustand';
-import type { TabBoardState, Workspace, Folder, Group, TabItem, Settings, BinEntry } from '../model';
+import type { TabBoardState, Folder, Group, TabItem, Settings, BinEntry } from '../model';
 import {
+  createWorkspace,
   createEmptyState,
   nowIso,
   createId,
   exportToJson,
   createNoteRecord,
+  clone,
+  reorderCategoryIds,
 } from '../model';
 import { sendStateMutations } from './chromeStorage';
 import {
@@ -16,17 +19,22 @@ import {
 } from './activeAdapter';
 import type { StateMutation } from './stateMutations';
 import {
+  DELETE_TABS_LIMIT,
   resolveRestoreWorkspaceId,
 } from './stateMutations';
 import {
   importText,
   restoreGroupFromBin,
 } from '../model/session-operations';
-import type { DropIntent } from '../model/drop-intent';
+import type { DropIntent, SavedTabRef } from '../model/drop-intent';
 import type { OpenTabInfo } from '../openTabs';
 import { applicationFeedbackChannel } from '../applicationFeedback';
 import { createAuthoritativePublication } from './authoritativePublication';
 import { feedbackForCommittedMutation } from './stateMutationFeedback';
+
+export interface ApplyDropIntentOptions {
+  authority?: 'optimistic' | 'checked';
+}
 
 // Subscribe to file-storage fallback events so that a degraded backend (file
 // mode failed, dropped back to browser storage) surfaces as a persistenceError
@@ -51,11 +59,17 @@ interface TabBoardStore extends TabBoardState {
   hydrate: () => Promise<void>;
   releaseHydration: () => void;
   setActiveWorkspace: (workspaceId: string) => void;
-  addWorkspace: (name: string) => void;
-  renameWorkspace: (id: string, name: string) => void;
-  deleteWorkspace: (id: string) => void;
+  addWorkspace: (name: string, emoji?: string) => string;
+  updateWorkspace: (id: string, updates: { name: string; emoji: string }) => Promise<void>;
+  updateWorkspaceOrder: (orderedWorkspaceIds: readonly string[]) => Promise<void>;
+  deleteWorkspace: (id: string) => Promise<void>;
   addFolder: (workspaceId: string, name: string, color?: string) => Promise<void>;
   renameFolder: (id: string, name: string) => Promise<void>;
+  updateFolder: (
+    id: string,
+    updates: { name: string; color: string },
+    expected: { name: string; color: string },
+  ) => Promise<void>;
   deleteFolder: (id: string) => Promise<void>;
   addGroup: (group: Omit<Group, 'id' | 'createdAt' | 'updatedAt'>) => void;
   updateGroup: (id: string, updates: Partial<Group>) => void;
@@ -64,19 +78,28 @@ interface TabBoardStore extends TabBoardState {
   addTabToGroup: (groupId: string, tab: Omit<TabItem, 'id' | 'createdAt' | 'updatedAt'>) => void;
   updateTab: (groupId: string, tabId: string, updates: Partial<TabItem>) => void;
   deleteTab: (groupId: string, tabId: string) => void;
+  deleteTabs: (refs: readonly SavedTabRef[]) => Promise<void>;
   restoreFromBin: (binEntryId: string) => void;
   deleteBinEntry: (binEntryId: string) => void;
   clearBin: () => void;
   updateSettings: (updates: Partial<Settings>) => void;
   moveTab: (groupId: string, tabId: string, targetGroupId: string, targetIndex: number) => void;
-  applyDropIntent: (intent: DropIntent, openTabs?: readonly OpenTabInfo[]) => Promise<void>;
+  applyDropIntent: (
+    intent: DropIntent,
+    openTabs?: readonly OpenTabInfo[],
+    options?: ApplyDropIntentOptions,
+  ) => Promise<void>;
   reorderGroupsInFolder: (workspaceId: string, folderId: string | null, starred: boolean, archived: boolean, orderedGroupIds: string[]) => void;
   starGroup: (groupId: string) => void;
   lockGroup: (groupId: string) => void;
   collapseGroup: (groupId: string) => void;
   addNoteToGroup: (groupId: string, text: string) => void;
   addTabNote: (groupId: string, tabId: string, text: string) => void;
-  updateCategoryOrder: (workspaceId: string, categoryOrder: string[]) => Promise<void>;
+  updateCategoryOrder: (
+    workspaceId: string,
+    categoryOrder: readonly string[],
+    options: { expectedCategoryOrder: readonly string[] },
+  ) => Promise<void>;
   importGroups: (text: string, options?: { workspaceId?: string; folderId?: string | null }) => void;
   exportAll: () => string;
   toggleFolderCollapsed: (folderId: string) => void;
@@ -180,20 +203,36 @@ function commitMutation(mutation: StateMutation): void {
   publication.commit(mutation);
 }
 
+function enqueueOptimisticMutation(
+  mutation: StateMutation,
+  notify = true,
+): Promise<void> {
+  try {
+    publication.commit(mutation);
+    return Promise.resolve();
+  } catch (error: unknown) {
+    reportPersistenceError(error, notify);
+    return Promise.reject(error);
+  }
+}
+
 function commitRestoreMutation(mutation: Extract<StateMutation, { type: 'restore-group' | 'restore-tab' }>): void {
   publication.commitRestore(mutation);
 }
 
 function commitDropMutation(
   mutation: Extract<StateMutation, { type: 'drop-intent' }>,
+  authority: NonNullable<ApplyDropIntentOptions['authority']> = 'optimistic',
 ): Promise<void> {
-  return publication.commitDrop(mutation);
+  return authority === 'checked'
+    ? publication.commitChecked(mutation)
+    : publication.commitDrop(mutation);
 }
 
 function commitCategoryMutation(
   mutation: Extract<
     StateMutation,
-    { type: 'add-folder' | 'rename-folder' | 'delete-folder' | 'set-category-order' }
+    { type: 'add-folder' | 'rename-folder' | 'update-folder' | 'delete-folder' | 'set-category-order' }
   >,
 ): Promise<void> {
   return publication.commitCategory(mutation);
@@ -211,27 +250,42 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
     commitMutation({ type: 'set-active-workspace', workspaceId, updatedAt: nowIso() });
   },
 
-  addWorkspace: (name) => {
-    const timestamp = nowIso();
-    const workspace: Workspace = {
-      id: createId('workspace'),
-      name,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
+  addWorkspace: (name, emoji) => {
+    const workspace = createWorkspace(name, emoji);
     commitMutation({ type: 'add-workspace', workspace });
+    return workspace.id;
   },
 
-  renameWorkspace: (id, name) => {
-    commitMutation({ type: 'rename-workspace', id, name, updatedAt: nowIso() });
+  updateWorkspace: async (id, updates) => {
+    commitMutation({
+      type: 'update-workspace',
+      id,
+      name: updates.name,
+      emoji: updates.emoji,
+      updatedAt: nowIso(),
+    });
+  },
+
+  updateWorkspaceOrder: async (orderedWorkspaceIds) => {
+    commitMutation({
+      type: 'set-workspace-order',
+      orderedWorkspaceIds: [...orderedWorkspaceIds],
+      updatedAt: nowIso(),
+    });
   },
 
   deleteWorkspace: (id) => {
     const state = get();
-    if (state.workspaces.length <= 1) return;
     const remaining = state.workspaces.filter((w) => w.id !== id);
-    const newActiveId = state.activeWorkspaceId === id ? remaining[0].id : state.activeWorkspaceId;
-    commitMutation({ type: 'delete-workspace', id, newActiveWorkspaceId: newActiveId, updatedAt: nowIso() });
+    const newActiveId = state.activeWorkspaceId === id
+      ? remaining[0]?.id ?? state.activeWorkspaceId
+      : state.activeWorkspaceId;
+    return enqueueOptimisticMutation({
+      type: 'delete-workspace',
+      id,
+      newActiveWorkspaceId: newActiveId,
+      updatedAt: nowIso(),
+    }, false);
   },
 
   addFolder: async (workspaceId, name, color = 'slate') => {
@@ -250,6 +304,20 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
 
   renameFolder: async (id, name) => {
     await commitCategoryMutation({ type: 'rename-folder', id, name, updatedAt: nowIso() });
+  },
+
+  updateFolder: async (id, updates, expected) => {
+    await commitCategoryMutation({
+      type: 'update-folder',
+      id,
+      name: updates.name,
+      color: updates.color,
+      expected: {
+        name: expected.name,
+        color: expected.color,
+      },
+      updatedAt: nowIso(),
+    });
   },
 
   deleteFolder: async (id) => {
@@ -364,6 +432,57 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
     commitMutation({ type: 'delete-tab', groupId, tabId, binEntry, updatedAt: timestamp });
   },
 
+  deleteTabs: async (refs) => {
+    const state = get();
+    if (!refs.length) {
+      return Promise.reject(new Error('Select at least one saved item.'));
+    }
+    if (refs.length > DELETE_TABS_LIMIT) {
+      return Promise.reject(new Error(
+        `Delete up to ${DELETE_TABS_LIMIT} selected items at a time.`,
+      ));
+    }
+    const seen = new Set<string>();
+    const timestamp = nowIso();
+    const deletions = refs.map(({ groupId, tabId }) => {
+      const key = `${groupId}:${tabId}`;
+      if (seen.has(key)) throw new Error('Saved item references must be unique.');
+      seen.add(key);
+      const group = state.groups.find((item) => item.id === groupId);
+      const tab = group?.tabs.find((item) => item.id === tabId);
+      if (!group || !tab) throw new Error('A selected saved item no longer exists.');
+      if (group.locked) throw new Error('Cannot modify a locked group.');
+      const tabIndex = group.tabs.findIndex((item) => item.id === tabId);
+      const workspace = state.workspaces.find((item) =>
+        item.id === group.workspaceId);
+      const folder = group.folderId
+        ? state.folders.find((item) => item.id === group.folderId)
+        : null;
+      const binEntry: BinEntry = {
+        id: createId('bin'),
+        kind: 'tab',
+        label: tab.title,
+        groupId: group.id,
+        groupTitle: group.title,
+        source: 'group',
+        item: clone(tab),
+        deletedAt: timestamp,
+        originalGroupId: group.id,
+        originalIndex: tabIndex,
+        originalWorkspaceId: group.workspaceId,
+        originalFolderId: group.folderId,
+        originalWorkspaceName: workspace?.name,
+        originalFolderName: folder?.name,
+      };
+      return { groupId, tabId, binEntry };
+    });
+    return publication.commitChecked({
+      type: 'delete-tabs',
+      deletions,
+      updatedAt: timestamp,
+    });
+  },
+
   restoreFromBin: (binEntryId) => {
     const state = get();
     const entry = state.bin.find((item) => item.id === binEntryId);
@@ -426,14 +545,32 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
     commitMutation({ type: 'move-tab', groupId, tabId, targetGroupId, targetIndex, updatedAt: timestamp });
   },
 
-  applyDropIntent: (intent, openTabs = []) => commitDropMutation({
-    type: 'drop-intent',
-    operationId: createId('drop-operation'),
-    intent,
-    openTabs: [...openTabs],
-    expectedRevision: get().mutationRevision,
-    updatedAt: nowIso(),
-  }),
+  applyDropIntent: (intent, openTabs = [], options = {}) => {
+    if (intent.kind === 'reorder-category') {
+      const expectedCategoryOrder = [...intent.expectedCategoryOrder];
+      const nextOrder = reorderCategoryIds(
+        expectedCategoryOrder,
+        intent.categoryId,
+        intent.targetCategoryId,
+        intent.placement,
+      );
+      return commitCategoryMutation({
+        type: 'set-category-order',
+        workspaceId: intent.workspaceId,
+        expectedCategoryOrder: [...expectedCategoryOrder],
+        categoryOrder: [...nextOrder],
+        updatedAt: nowIso(),
+      });
+    }
+    return commitDropMutation({
+      type: 'drop-intent',
+      operationId: createId('drop-operation'),
+      intent: clone(intent),
+      openTabs: openTabs.map((record) => clone(record)),
+      expectedRevision: get().mutationRevision,
+      updatedAt: nowIso(),
+    }, options.authority ?? 'optimistic');
+  },
 
   reorderGroupsInFolder: (workspaceId, folderId, starred, archived, orderedGroupIds) => {
     commitMutation({ type: 'reorder-groups', workspaceId, folderId, starred, archived, orderedGroupIds, updatedAt: nowIso() });
@@ -469,8 +606,16 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
     commitMutation({ type: 'set-tab-note', groupId, tabId, text, updatedAt: nowIso() });
   },
 
-  updateCategoryOrder: async (workspaceId, categoryOrder) => {
-    await commitCategoryMutation({ type: 'set-category-order', workspaceId, categoryOrder, updatedAt: nowIso() });
+  updateCategoryOrder: async (workspaceId, categoryOrder, options) => {
+    const expectedCategoryOrder = [...options.expectedCategoryOrder];
+    const requested = [...categoryOrder];
+    await commitCategoryMutation({
+      type: 'set-category-order',
+      workspaceId,
+      expectedCategoryOrder,
+      categoryOrder: requested,
+      updatedAt: nowIso(),
+    });
   },
 
   importGroups: (text, options = {}) => {

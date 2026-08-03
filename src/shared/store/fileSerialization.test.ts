@@ -77,6 +77,7 @@ describe('splitState', () => {
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
       fileLayoutVersion: FILE_LAYOUT_VERSION,
+      sessionOrder: state.groups.map(({ id }) => id),
     });
   });
 
@@ -115,6 +116,17 @@ describe('splitState <-> assembleState round-trip', () => {
     expect(restored).toEqual(state);
   });
 
+  it('preserves workspace emoji through file serialization', () => {
+    const state = createEmptyState();
+    state.workspaces.push(createWorkspace('Research', '🧪'));
+    const parts = splitState(state);
+    const parsedWorkspaces = JSON.parse(serializeJson(parts.workspaces)) as FileParts['workspaces'];
+
+    const restored = assembleState({ ...parts, workspaces: parsedWorkspaces });
+
+    expect(restored.workspaces[1].emoji).toBe('🧪');
+  });
+
   it('round-trips a populated state (workspaces, folders, sessions, bin, ledger, settings)', () => {
     const { state } = populateState();
     const parts = splitState(state);
@@ -136,6 +148,17 @@ describe('splitState <-> assembleState round-trip', () => {
     const restored = assembleState(rebuilt);
     expect(restored.groups.find((g) => g.id === g1.id)).toEqual(g1);
     expect(restored.groups.find((g) => g.id === g2.id)).toEqual(g2);
+  });
+
+  it('uses persisted session order instead of sessions map insertion order', () => {
+    const { state } = populateState();
+    const parts = splitState(state);
+    const reversedSessions = new Map([...parts.sessions].reverse());
+
+    const restored = assembleState({ ...parts, sessions: reversedSessions });
+
+    expect(restored.groups.map(({ id }) => id))
+      .toEqual(state.groups.map(({ id }) => id));
   });
 });
 

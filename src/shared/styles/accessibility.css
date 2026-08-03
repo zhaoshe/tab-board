@@ -1,3 +1,67 @@
+:root {
+  letter-spacing: 0;
+}
+
+:root[data-mantine-color-scheme='light'] {
+  --tabboard-canvas: #f3f5f8;
+  --tabboard-surface: #ffffff;
+  --tabboard-sidebar: #f8f9fb;
+  --tabboard-toolbar: #fcfcfd;
+  --tabboard-surface-hover: #f1f3f6;
+  --tabboard-border: #e1e5eb;
+  --tabboard-border-strong: #d3d9e2;
+  --tabboard-text: #202a3b;
+  --tabboard-secondary: #5f6c80;
+  --tabboard-muted: #7b8799;
+  --tabboard-accent: #315ec9;
+  --tabboard-accent-soft: #eaf0fc;
+  --tabboard-accent-text: #234da8;
+  --tabboard-danger: #a43e4d;
+  --tabboard-session-shadow: 0 1px 3px rgba(31, 42, 62, 0.07);
+  --mantine-color-body: var(--tabboard-canvas);
+  --mantine-color-text: var(--tabboard-text);
+  --mantine-color-dimmed: var(--tabboard-secondary);
+  --mantine-color-default: var(--tabboard-surface);
+  --mantine-color-default-hover: var(--tabboard-surface-hover);
+  --mantine-color-default-color: var(--tabboard-text);
+  --mantine-color-default-border: var(--tabboard-border);
+  --mantine-primary-color-filled: var(--tabboard-accent);
+  --mantine-primary-color-filled-hover: #294fac;
+  --mantine-primary-color-light: var(--tabboard-accent-soft);
+  --mantine-primary-color-light-hover: #dce6fa;
+  --mantine-primary-color-light-color: var(--tabboard-accent-text);
+}
+
+:root[data-mantine-color-scheme='dark'] {
+  --tabboard-canvas: #1a1e24;
+  --tabboard-sidebar: #20252c;
+  --tabboard-toolbar: #242930;
+  --tabboard-surface: #282e36;
+  --tabboard-surface-hover: #303741;
+  --tabboard-border: #3a424d;
+  --tabboard-border-strong: #444d59;
+  --tabboard-text: #eef2f7;
+  --tabboard-secondary: #c1c9d4;
+  --tabboard-muted: #919cab;
+  --tabboard-accent: #5a80dd;
+  --tabboard-accent-soft: #2b3a61;
+  --tabboard-accent-text: #b6c8fa;
+  --tabboard-danger: #e48795;
+  --tabboard-session-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+  --mantine-color-body: var(--tabboard-canvas);
+  --mantine-color-text: var(--tabboard-text);
+  --mantine-color-dimmed: var(--tabboard-secondary);
+  --mantine-color-default: var(--tabboard-surface);
+  --mantine-color-default-hover: var(--tabboard-surface-hover);
+  --mantine-color-default-color: var(--tabboard-text);
+  --mantine-color-default-border: var(--tabboard-border);
+  --mantine-primary-color-filled: var(--tabboard-accent);
+  --mantine-primary-color-filled-hover: #6c8de1;
+  --mantine-primary-color-light: var(--tabboard-accent-soft);
+  --mantine-primary-color-light-hover: #344774;
+  --mantine-primary-color-light-color: var(--tabboard-accent-text);
+}
+
 .skip-link {
   position: fixed;
   inset-block-start: 8px;
@@ -5,7 +69,7 @@
   z-index: 10000;
   padding: 8px 12px;
   border-radius: var(--mantine-radius-sm);
-  background: var(--mantine-color-blue-8);
+  background: var(--tabboard-accent);
   color: white;
   font-weight: 600;
   transform: translateY(calc(-100% - 16px));
@@ -44,14 +108,81 @@
   font-variant-numeric: tabular-nums;
 }
 
-.accessible-icon-action[data-density='compact'] {
-  min-width: 32px;
-  min-height: 32px;
+.tabboard-modal__header-action {
+  display: inline-flex;
+  margin-inline-start: auto;
+}
+
+.tabboard-modal__header-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.tabboard-modal__header-subtitle {
+  overflow: hidden;
+  color: var(--mantine-color-dimmed);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabboard-favicon {
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 auto;
+  overflow: hidden;
+  place-items: center;
+  color: var(--mantine-color-dimmed);
+  pointer-events: none;
+}
+
+.tabboard-favicon img,
+.tabboard-favicon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.tabboard-favicon img {
+  object-fit: cover;
+}
+
+.tabboard-icon,
+.tabboard-leading-icon {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.lucide {
+  stroke-width: 1.75;
+}
+
+.accessible-icon-action {
+  width: var(--tabboard-action-size);
+  min-width: var(--tabboard-action-size);
+  max-width: var(--tabboard-action-size);
+  height: var(--tabboard-action-size);
+  min-height: var(--tabboard-action-size);
+  max-height: var(--tabboard-action-size);
 }
 
 .accessible-icon-action[data-density='touch'] {
-  min-width: 44px;
-  min-height: 44px;
+  --tabboard-action-size: var(--tabboard-action-touch-size) !important;
+}
+
+.accessible-icon-action--selected {
+  color: var(--tabboard-action-selected-color);
+  background: var(--tabboard-action-selected-background);
+}
+
+.accessible-icon-action--danger {
+  color: var(--tabboard-action-danger-color);
+}
+
+.accessible-icon-action--disabled {
+  opacity: var(--tabboard-action-disabled-opacity);
 }
 
 .destructive-confirm-action {
@@ -61,15 +192,14 @@
 }
 
 .confirm-dialog__message {
-  background: var(--mantine-color-body);
+  background: var(--tabboard-surface);
 }
 
-:root[data-mantine-color-scheme='light'] {
-  --mantine-color-dimmed: #5f6873;
-}
-
-:root[data-mantine-color-scheme='dark'] {
-  --mantine-color-dimmed: #b2b8bf;
+.mantine-Modal-content,
+.mantine-Drawer-content,
+.mantine-Popover-dropdown,
+.mantine-Menu-dropdown {
+  background: var(--tabboard-surface);
 }
 
 .mantine-Modal-content,
@@ -81,6 +211,17 @@
 }
 
 @media (hover: none), (pointer: coarse) {
+  .mantine-Modal-content[data-has-header-action='true'] .tabboard-modal__header-action .mantine-Button-root,
+  .mantine-Modal-content[data-has-header-action='true'] .manager-management-footer .mantine-Button-root,
+  .mantine-Modal-content[data-has-header-action='true'] .mantine-Modal-close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .accessible-icon-action {
+    --tabboard-action-size: var(--tabboard-action-touch-size) !important;
+  }
+
   .manager-category-control,
   .manager-header-actions,
   .manager-sidebar-utilities,
@@ -90,23 +231,23 @@
   }
 
   .accessible-icon-action,
-  .manager-category-drag-handle,
   .manager-search-toggle,
   .manager-header-actions .mantine-ActionIcon-root,
   .manager-sidebar-header-action,
   .manager-sidebar-utility-action,
-  .manager-sidebar-compact-toggle,
   .manager-open-tab-select,
-  .manager-open-tab-drag-handle,
   .manager-open-tab-more,
   .manager-open-tab-close,
-  .session-card__drag-handle,
   .session-card__actions .mantine-ActionIcon-root,
   .tab-item-row__select,
   .tab-item-row__more {
     min-width: 44px;
     min-height: 44px;
     opacity: 1;
+  }
+
+  .accessible-icon-action--disabled {
+    opacity: var(--tabboard-action-disabled-opacity);
   }
 }
 
@@ -120,19 +261,15 @@
   }
 
   .manager-workspace-trigger,
-  .manager-category-drag-handle,
   .manager-category-item [data-category-trigger='label'],
   .manager-search-toggle,
   .manager-header-actions .mantine-ActionIcon-root,
   .manager-sidebar-header-action,
   .manager-sidebar-utility-action,
-  .manager-sidebar-compact-toggle,
   .manager-open-tab-select,
-  .manager-open-tab-drag-handle,
   .manager-open-tab-content,
   .manager-open-tab-more,
   .manager-open-tab-close,
-  .session-card__drag-handle,
   .session-card__actions .mantine-ActionIcon-root,
   .tab-item-row__select,
   .tab-item-row__more {

@@ -19,7 +19,7 @@ type PublicationStatus = Partial<
 
 export type CategoryStateMutation = Extract<
   StateMutation,
-  { type: 'add-folder' | 'rename-folder' | 'delete-folder' | 'set-category-order' }
+  { type: 'add-folder' | 'rename-folder' | 'update-folder' | 'delete-folder' | 'set-category-order' }
 >;
 
 type RestoreStateMutation = Extract<
@@ -43,6 +43,7 @@ export interface AuthoritativePublicationDependencies {
 
 export interface AuthoritativePublication {
   commit(mutation: StateMutation): void;
+  commitChecked(mutation: StateMutation): Promise<void>;
   commitRestore(mutation: RestoreStateMutation): void;
   commitDrop(mutation: DropStateMutation): Promise<void>;
   commitCategory(mutation: CategoryStateMutation): Promise<void>;
@@ -71,6 +72,7 @@ function sameMutation(left: StateMutation, right: StateMutation): boolean {
 function isCategoryMutation(mutation: StateMutation): boolean {
   return mutation.type === 'add-folder'
     || mutation.type === 'rename-folder'
+    || mutation.type === 'update-folder'
     || mutation.type === 'delete-folder'
     || mutation.type === 'set-category-order';
 }
@@ -967,6 +969,22 @@ export function createAuthoritativePublication(
     scheduleSave();
   };
 
+  const commitChecked = (mutation: StateMutation): Promise<void> => {
+    if (disposed) {
+      return Promise.reject(new Error('Authoritative publication is disposed.'));
+    }
+    syncPersistenceContext();
+    const persistence = new Promise<void>((resolve, reject) => {
+      pendingPersistenceWaiters = [
+        ...pendingPersistenceWaiters,
+        { mutation, resolve, reject },
+      ];
+      void sendPendingBatch([mutation]).catch(() => undefined);
+    });
+    persistence.catch(() => undefined);
+    return persistence;
+  };
+
   const commitDrop = (mutation: DropStateMutation): Promise<void> => {
     if (disposed) {
       return Promise.reject(new Error('Authoritative publication is disposed.'));
@@ -1011,6 +1029,7 @@ export function createAuthoritativePublication(
 
   return {
     commit,
+    commitChecked,
     commitRestore,
     commitDrop,
     commitCategory,

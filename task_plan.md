@@ -10,8 +10,8 @@ produce an evidence-ranked React performance refactor plan.
 
 ## Current Phase
 
-Phase 12 - execute the approved startup performance refactor with TDD and
-production-extension benchmarks.
+Phase 20 complete - the confirmed C1 Hybrid Rail motion is restored and
+verified across preview and unpacked production.
 
 ## Phases
 
@@ -133,6 +133,155 @@ Status: complete
 - Coalesce startup runtime work and defer non-critical modules/diagnostics.
 - Re-run full correctness, browser, accessibility, DnD, and performance gates.
 
+### Phase 13 - Design taste review
+
+Status: complete
+
+- Applied the relevant `design-taste-frontend` redesign principles without
+  treating the productivity workbench as a landing page.
+- Re-read the current product, architecture, prior UI/UX review, component
+  owners, and style system at `bfe49eb`.
+- Reviewed rendered Manager default/populated states, Popup, and Options
+  geometry; Manager and Popup axe checks remain 0/0.
+- Recorded evidence-ranked P0/P1/P2 recommendations, owner boundaries, three
+  implementation stages, preserved constraints, and acceptance gates in
+  `docs/reviews/2026-07-28-design-taste-review.md`.
+- Kept this phase review-only; no product implementation was changed.
+
+### Phase 14 - Design taste implementation and iterative review
+
+Status: complete
+
+- Implemented all 10 P0/P1/P2 findings with RED/GREEN tests.
+- Preserved schema, mutation wire, DropIntent, stable session geometry,
+  cross-category droppables, and runtime dependency set.
+- Ran 4 post-implementation taste review rounds.
+- Closed new compact-reorder, copy, letter-spacing, duplicate-label, Retry
+  target, and queued stale-error findings.
+- The final complete static + rendered taste pass produced zero new findings.
+- Completed check/unit/E2E/benchmark/browser/axe and prompt-to-artifact audits.
+
+### Phase 15 - Crisp Utility gap previews
+
+Status: complete
+
+- Confirm selection-mode ownership, filtered counts, Select All, Save Selected,
+  and Save All behavior.
+- Confirm collapsed / peek / pinned / compact drawer sidebar states and motion.
+- Confirm pointer and keyboard session/Open Tab DnD affordances without visible
+  drag icons.
+- Confirm the read-only tooltip and separate More/context action surfaces.
+- Confirm window selected/focused/count semantics and filtered rail indicator.
+- Confirm Popup pinned/mixed/dedupe copy and Options storage status semantics.
+- Confirm the remaining Lucide mappings, theme state matrix, and rendered
+  dimensions before updating the written specification.
+- Confirm B2 menus with C3 item tips and row-level X/checkbox disclosure.
+- Confirm Workspace creation and management with persisted emoji.
+- Confirm Category management plus direct-drag reorder behavior.
+- Confirm Session-local Saved Tab selection toolbar and cross-list ownership.
+- Review every draggable surface together after icon confirmation, using one
+  feedback grammar while preserving reorder, move, and copy outcomes.
+
+### Phase 16 - Crisp Utility implementation planning
+
+Status: complete
+
+- Consolidated every confirmed Preview 1-14 and DnD decision into matching
+  Chinese and English specifications.
+- Split implementation into ordered Foundation, Manager, DnD, and
+  Options/Popup/Acceptance plans plus one index.
+- Defined cross-plan interfaces for Workspace emoji/order, explicit
+  `new-session-insert`, and Hybrid Session target choices.
+- Added focused RED/GREEN commands, serial browser/DnD gates, documentation
+  updates, and final acceptance matrices.
+- Self-reviewed paths, placeholders, type names, spec coverage, and dependency
+  ordering.
+
+### Phase 17 - Crisp Utility production implementation
+
+Status: complete
+
+- Foundations, Manager interactions, and DnD plans are complete.
+- Options Basic/storage/Advanced semantics are complete.
+- Popup compact action rows and pinned-tab closure guarantees are complete.
+- Lucide migration, A1/D1 tokens, and current documentation are complete.
+- Automated, rendered, accessibility, DnD, and startup performance gates are
+  complete through the final B2/C3 menu audit.
+- Final full regression and source/diff audit are complete. Native
+  `showDirectoryPicker()` permission UI remains explicitly manual-only.
+
+### Phase 18 - Preview-to-production parity repair
+
+Status: complete
+
+- Reconstructed the approved visual and interaction contracts from the confirmed
+  preview, bilingual spec, findings, and implementation plans.
+- Audited production Manager, Popup, and Options in rendered light/dark,
+  desktop/compact, resting/hover/focus/selection/menu states.
+- Recorded every visual, state, geometry, and copy mismatch rather than limiting
+  the repair to the three screenshot callouts.
+- Added RED regressions for each confirmed mismatch, then repaired the owning
+  component/style without changing persistence or DnD result semantics.
+- Repeated browser screenshots, geometry, accessibility, full unit/check/E2E,
+  and production-extension acceptance.
+
+### Phase 19 - Compound-control collision audit
+
+Status: complete
+
+- Reproduce and measure the reported Workspace emoji/name overlap with the real
+  default `🗂️` glyph rather than a generic icon approximation.
+- Add a rendered regression that checks sibling visual boxes for overlap across
+  default, multi-code-point, long-label, dark, and compact states.
+- Audit Manager, Popup, and Options rows where an icon, emoji, favicon,
+  checkbox, badge, label, count, chevron, or trailing action share one line.
+- Repair confirmed ownership or spacing defects without changing product
+  behavior, persistence, DnD semantics, or the approved density direction.
+- Re-run focused tests, full unit/check/E2E, screenshots, accessibility, and
+  production-extension verification before making another global UI claim.
+
+### Phase 20 - Sidebar disclosure motion parity
+
+Status: complete
+
+- Reproduce the current pinned/collapsed and peek/collapsed transitions with
+  frame-by-frame geometry rather than checking only endpoints.
+- Restore the approved C1 motion contract: 180ms shell/sidebar geometry,
+  delayed 75ms / 80ms expanded-content reveal, overlay-only Peek, and
+  reduced-motion suppression.
+- Keep collapsed controls mounted only where required for a continuous fade,
+  while preserving inert, aria-hidden, and keyboard-tab-order contracts.
+- Verify pinned expand/collapse, hover Peek open/close, Peek-to-Pinned promote,
+  compact Drawer, rapid reversal, and reduced motion in the rendered Manager.
+- Re-run focused/full unit, check, serial E2E, accessibility, screenshots, and
+  rebuilt unpacked-extension acceptance.
+
+### Phase 21 - Forensic preview-to-production parity audit
+
+Status: complete
+
+- Reconstruct every user-confirmed Preview 1-14 contract plus the final Gap
+  Anchor, auto-scroll, and keyboard/cancel drag contracts from the actual HTML
+  previews, bilingual design spec, implementation plans, and decision log.
+- Maintain a persistent contract matrix that maps each approved surface to its
+  production owner and records separate evidence for structure, visible pixel
+  geometry, temporal motion, interaction/focus lifecycle, and accessibility /
+  tab order. Missing evidence means unresolved, never implicitly accepted.
+- Audit the real rendered Manager, Popup, and Options in light/dark,
+  desktop/compact, fine/coarse pointer, and relevant empty/populated,
+  selected, filtered, pinned, locked, long-name, emoji/ZWJ, and drag states.
+- Record and explicitly whitelist intentional overlaps only: checkbox over
+  favicon, pinned badge over favicon, Peek/Drawer over Board, and drag ghost
+  over insertion anchors. Treat every other overlap, clipping, jump, or
+  mismatch as a defect until disproved with rendered evidence.
+- For every confirmed mismatch, add the narrowest failing regression first,
+  then repair the owning component/style without changing persistence schema,
+  DropIntent semantics, selection ownership, or storage protocol.
+- Re-run focused and full automated gates, rebuilt unpacked-extension checks,
+  screenshots, frame measurements, keyboard/focus paths, and accessibility
+  audits. Report any browser-native or manual-only boundary explicitly instead
+  of claiming total UI acceptance.
+
 ## Decisions
 
 | Decision | Reason |
@@ -148,6 +297,10 @@ Status: complete
 | Diagnose startup before optimizing | The reported delay can come from local bundle execution, storage initialization, state normalization, or first render; each needs separate evidence. |
 | Reopen D033 only with profiler evidence | Hundreds of sessions and thousands of tab rows now reproduce a multi-second initial mount, satisfying the prior decision's threshold for reconsidering full interactive DOM. |
 | Prefer stable references over serialized lifecycle keys | Structural sharing now drives DnD, overlay, Open Tabs, and activation invalidation without joining every group/tab ID during render. |
+| Treat the taste skill as contextual guidance | Its landing-page defaults do not fit this dense productivity tool; use only redesign, hierarchy, material, and state principles that match the product. |
+| Preserve cross-category drop targets in normal navigation | Explicit category reorder mode may remove category draggable/reorder targets from normal mode, but session-to-category droppables must remain active. |
+| Pin benchmark Manager samples to Inbox | Bare-entry product preference may select a lighter category; production performance evidence must seed Inbox preference and record final active board. |
+| Use serial full E2E as final DnD evidence | Five-worker runs can compete on pointer/overlay timing; full `--workers=1` still covers all 33 scenarios deterministically. |
 
 ## Errors Encountered
 
@@ -165,8 +318,31 @@ Status: complete
 | Playwright benchmark waited for an inactive MV3 worker | 1 | Identified that extension activation must precede worker discovery; discarded the run. |
 | Direct Playwright extension activation returned `ERR_INVALID_URL` / `ERR_ABORTED` in the prototype | 2 | Stopped iterating on the temporary benchmark and retained the already-valid agent-browser production measurements; the plan requires a repository-owned stable benchmark harness before implementation claims. |
 | CPU profiler relaunched the browser onto `about:blank` | 1 | Restarted profiling before navigating to the known extension URL; used profile shape only because profiler overhead distorted absolute startup time. |
+| Manager browser wait used the wrong visible workspace text | 1 | Switched to stable `.manager-shell`, category controls, card counts, and accessibility-tree checks. |
+| Combined Manager screenshot/eval command stalled after the page became ready | 1 | Split browser probes, retained successful axe/snapshot evidence, and did not treat the automation stall as a product defect. |
+| Initial production benchmark measured only 12 slots | 1 | Instrumented initial/final URL and active board; Chromium auto-opened bare new-tab Manager before `page.goto`. Seeded page-local Inbox preference and restored 196-slot coverage. |
+| Compact reorder nav collapsed to 0px | 1 | Added rendered 390px regression; gave reorder mode an exclusive toolbar lane and 44×44 Done action. |
+| Full E2E with 5 workers had 2 timing failures | 1 | Both passed independently; final complete serial run passed 33/33 without increasing timeouts. |
+| Preview 8 agent-browser session could not start its socket | 1 | Reuse the already-healthy Visual Companion browser session instead of retrying a new daemon. |
+| Preview 8 full-page and viewport screenshots stalled | 2 | Interrupted both stuck captures and stopped retrying the same path; the page remained responsive and geometry, computed-state, and axe probes completed. |
+| Visual Companion URL stopped responding after idle timeout | 1 | Restarted from the same project directory, preserving port/token, restored the latest Menu Review page, and increased timeout to 8 hours. |
+| Preview 10 verification read the closed Workspace menu after switching preview state | 1 | Split Workspace and Tab-row geometry probes so each reads its target before the state transition closes the menu. |
+| Preview 11 focus probe read a stale emoji trigger after picker rerender | 1 | Re-query the current trigger after each render; add explicit Escape/focus-return behavior before the final comparison. |
+| Preview 11 Escape verification script contained a stray diff marker | 1 | Removed the invalid `+` from the probe and reran the corrected browser evaluation. |
+| Preview 12 patch contained an unrelated trailing context fragment | 1 | The patch was rejected atomically; split emoji semantics and row-action focus policy into two valid patches. |
+| Phase 21 evidence append guessed a non-existent `findings.md` heading | 1 | The patch was rejected atomically. Read the actual file tail and append under a new Phase 21 heading instead of guessing an anchor. |
+| Parallel hover probes in one browser session overwrote each other's pointer state | 1 | Discarded the concurrent samples and reran Session, Saved, and Open hover states serially with pointer reset between each. |
+| Session selection script clicked Global `More Actions` through fuzzy role matching | 1 | Read the live snapshot, then use the exact Session `.session-card__actions [aria-label="More"]` trigger. |
+| Popup no-pinned probe mutated Chrome tabs after mount but Popup does not subscribe to tab removal | 1 | Move the scenario to an isolated startup seed; verify layout from the first render. |
+| Options ready-folder reload lacked an IndexedDB directory handle and correctly fell back | 1 | Exercise ready/fallback projection through the real storage subscription; keep native handle/picker lifecycle as a manual unpacked-Chrome boundary. |
+| Vitest rejected Jest-only `--runInBand` | 1 | Use the repository's supported `npx vitest run <file>` form; no product test ran under the rejected command. |
+| Agent-browser Session probe opened a restricted `about:blank` page | 1 | Discard the sample and use deterministic Playwright preview fixtures for Session/Popup timing and geometry. |
+| First Saved Note E2E selector matched the second Saved Link | 1 | Seed a dedicated Note record and locate it by its exact title button before asserting its metadata. |
+| Progressive checkbox click was intercepted by the resting favicon | 1 | Hover the row first, matching the confirmed disclosure interaction, then click the revealed checkbox. |
 
 ## Next Step
 
-Run the interleaved five-run production benchmark, then complete full
-check/unit/E2E/browser/a11y/DnD acceptance and commit the final evidence.
+Phase 21 is complete. Keep native touch long-press and real
+`showDirectoryPicker()` permission/persisted-handle behavior as explicit
+manual acceptance boundaries; do not convert overlay-related axe incomplete
+results into automatic 0/0 claims.

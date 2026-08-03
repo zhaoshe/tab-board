@@ -5,6 +5,7 @@ export const TASK_NONE = 'none';
 export const ITEM_LINK = 'link' as const;
 export const ITEM_NOTE = 'note' as const;
 export const DEFAULT_WORKSPACE_ID = 'workspace_default';
+export const DEFAULT_WORKSPACE_EMOJI = '🗂️';
 export const BIN_LIMIT = 80;
 export const DROP_OPERATION_LEDGER_LIMIT = 128;
 export const LEGACY_ITEM_TODO = 'todo';
@@ -23,7 +24,7 @@ export const FILE_STORE_HANDLE_KEY = 'root';
 import type { Settings } from './types';
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = {
-  actionClick: 'store',
+  actionClick: 'popup',
   closeTabsAfterSave: true,
   dedupeOnSave: true,
   deleteRestoredTabs: true,

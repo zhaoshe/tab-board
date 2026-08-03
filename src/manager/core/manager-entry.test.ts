@@ -3,7 +3,12 @@ import { readFileSync } from 'node:fs';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
-import { build as viteBuild, createServer, type Plugin } from 'vite';
+import {
+  build as viteBuild,
+  createServer,
+  resolveConfig,
+  type Plugin,
+} from 'vite';
 import { describe, expect, it, vi } from 'vitest';
 
 const projectRoot = resolve(process.cwd());
@@ -24,6 +29,7 @@ const previewRootCapturePlugin: Plugin = {
     if (![
       resolve(projectRoot, 'src/manager/main.tsx'),
       resolve(projectRoot, 'src/popup/main.tsx'),
+      resolve(projectRoot, 'src/options/main.tsx'),
     ].includes(sourceId)) {
       return undefined;
     }
@@ -67,6 +73,43 @@ async function listOutputFiles(root: string, current = root): Promise<string[]> 
 }
 
 describe('Manager production entry', () => {
+  it('keeps worker file preloads filtered after every CRX config hook resolves', async () => {
+    const explicitConfig = await resolveConfig(
+      { configFile: resolve(projectRoot, 'vite.config.ts') },
+      'build',
+    );
+    const defaultConfig = await resolveConfig({}, 'build');
+
+    expect(explicitConfig.build.modulePreload).not.toBe(false);
+    expect(defaultConfig.build.modulePreload).not.toBe(false);
+    if (
+      explicitConfig.build.modulePreload === false
+      || defaultConfig.build.modulePreload === false
+    ) {
+      throw new Error('Module preload must stay enabled for page entries.');
+    }
+    const workerContext = {
+      hostId: 'assets/activeAdapter-test.js',
+      hostType: 'js' as const,
+    };
+    expect(explicitConfig.build.modulePreload.resolveDependencies?.(
+      'assets/fileStorage-test.js',
+      ['assets/fileStorage-test.js', 'assets/settingsProjection-test.js'],
+      workerContext,
+    )).toEqual([]);
+    expect(defaultConfig.build.modulePreload.resolveDependencies?.(
+      'assets/fsDirectory-test.js',
+      ['assets/fsDirectory-test.js', 'assets/settingsProjection-test.js'],
+      workerContext,
+    )).toEqual([]);
+    expect(explicitConfig.build.modulePreload.resolveDependencies?.(
+      'assets/manager-test.js',
+      ['assets/shared-test.js'],
+      { hostId: 'manager.html', hostType: 'html' },
+    )).toEqual(['assets/shared-test.js']);
+    expect(defaultConfig.configFile).toBe(resolve(projectRoot, 'vite.config.js'));
+  });
+
   it('ships React Manager as the only production Manager entry', () => {
     const managerHtml = readProjectFile('manager.html');
     const scriptTags = [...managerHtml.matchAll(/<script\b([^>]*)>/g)];
@@ -92,6 +135,7 @@ describe('Manager production entry', () => {
   it.each([
     ['/dev/manager-preview.html', '/src/manager/main.tsx'],
     ['/dev/popup-preview.html', '/src/popup/main.tsx'],
+    ['/dev/options-preview.html', '/src/options/main.tsx'],
   ] as const)('boots %s through Vite module graph before first render', async (path, entry) => {
     const moduleSource = readInlineModule(path);
     const installImport = moduleSource.indexOf("import { installPreviewChrome } from '/src/dev/previewChrome.ts';");
@@ -158,6 +202,9 @@ describe('Manager production entry', () => {
 
   it('keeps production entries and Vite inputs free of dev previews', () => {
     const popupHtml = readProjectFile('popup.html');
+    const packageJson = JSON.parse(readProjectFile('package.json')) as {
+      scripts?: Record<string, string>;
+    };
     const popupScriptTags = [...popupHtml.matchAll(/<script\b([^>]*)>/g)];
     const popupScriptSources = popupScriptTags
       .map((match) => match[1].match(/\bsrc=["']([^"']+)["']/)?.[1])
@@ -174,11 +221,15 @@ describe('Manager production entry', () => {
     expect(popupHtml).not.toContain('/dev/');
     expect(manifest.chrome_url_overrides?.newtab).toBe('manager.html');
 
-    for (const configPath of ['vite.config.ts', 'vite.config.js']) {
-      const config = readProjectFile(configPath);
-      expect(config).not.toContain('dev/manager-preview.html');
-      expect(config).not.toContain('dev/popup-preview.html');
-      for (const input of productionInputs) expect(config).toContain(`'${input}'`);
+    const config = readProjectFile('vite.config.ts');
+    expect(config).not.toContain('dev/manager-preview.html');
+    expect(config).not.toContain('dev/popup-preview.html');
+    expect(config).not.toContain('dev/options-preview.html');
+    for (const input of productionInputs) expect(config).toContain(`'${input}'`);
+    expect(readProjectFile('vite.config.js').trim())
+      .toBe("export { default } from './vite.config.ts';");
+    for (const command of ['dev', 'build', 'preview']) {
+      expect(packageJson.scripts?.[command]).toContain('--config vite.config.ts');
     }
   });
 
@@ -200,17 +251,48 @@ describe('Manager production entry', () => {
       ]);
       expect(files).not.toContain('dev/manager-preview.html');
       expect(files).not.toContain('dev/popup-preview.html');
+      expect(files).not.toContain('dev/options-preview.html');
 
       const outputText = (await Promise.all(
         files
           .filter((file) => /\.(?:html|js|json|css)$/.test(file))
           .map((file) => readFile(join(outputDir, file), 'utf8')),
       )).join('\n');
-      expect(outputText).not.toMatch(/(?:manager|popup)-preview\.html|src\/dev\/|previewChrome/);
+      expect(outputText).not.toMatch(/(?:manager|popup|options)-preview\.html|src\/dev\/|previewChrome/);
+      const activeAdapterAsset = files.find((file) =>
+        /^assets\/activeAdapter-[^/]+\.js$/.test(file));
+      expect(activeAdapterAsset).toBeDefined();
+      const activeAdapterSource = await readFile(
+        join(outputDir, activeAdapterAsset!),
+        'utf8',
+      );
+      expect(activeAdapterSource).toMatch(
+        /import\("\.\/fileStorage-[^"]+\.js"\)[\s\S]{0,80},\[\]\)/,
+      );
+      expect(activeAdapterSource).toMatch(
+        /import\("\.\/fsDirectory-[^"]+\.js"\)[\s\S]{0,80},\[\]\)/,
+      );
+      const serviceWorkerAsset = files.find((file) =>
+        /^assets\/service-worker\.ts-[^/]+\.js$/.test(file));
+      expect(serviceWorkerAsset).toBeDefined();
+      const serviceWorkerSource = await readFile(
+        join(outputDir, serviceWorkerAsset!),
+        'utf8',
+      );
+      expect(serviceWorkerSource).toMatch(
+        /from"\.\/fileStorage-[^"]+\.js"/,
+      );
+      expect(serviceWorkerSource).toMatch(
+        /from"\.\/fsDirectory-[^"]+\.js"/,
+      );
+      expect(serviceWorkerSource).not.toMatch(
+        /import\("\.\/(?:fileStorage|fsDirectory)-/,
+      );
 
       const managerHtml = await readFile(join(outputDir, 'manager.html'), 'utf8');
       const popupHtml = await readFile(join(outputDir, 'popup.html'), 'utf8');
       expect(managerHtml).toMatch(/<script type="module" crossorigin src="\/assets\/manager-[^"]+\.js"><\/script>/);
+      expect(managerHtml).toContain('rel="modulepreload"');
       expect(popupHtml).toMatch(/<script type="module" crossorigin src="\/assets\/popup-[^"]+\.js"><\/script>/);
 
       const manifest = JSON.parse(await readFile(join(outputDir, 'manifest.json'), 'utf8')) as {

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement } from 'react';
+import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TabBoardState } from '../../shared/model';
@@ -14,11 +14,29 @@ import {
 const validationState = {
   activeWorkspaceId: 'workspace-a',
   workspaces: [
-    { id: 'workspace-a', name: 'A', createdAt: '', updatedAt: '' },
-    { id: 'workspace-b', name: 'B', createdAt: '', updatedAt: '' },
+    { id: 'workspace-a', name: 'A', emoji: '🗂️', createdAt: '', updatedAt: '' },
+    { id: 'workspace-b', name: 'B', emoji: '🗂️', createdAt: '', updatedAt: '' },
   ],
   folders: [],
-} as Pick<TabBoardState, 'activeWorkspaceId' | 'workspaces' | 'folders'>;
+  groups: [{
+    id: 'saved-a',
+    title: 'Saved A',
+    note: '',
+    workspaceId: 'workspace-a',
+    folderId: null,
+    locked: false,
+    starred: true,
+    archived: false,
+    collapsed: false,
+    tabs: [],
+    createdAt: '',
+    updatedAt: '',
+  }],
+  categoryOrderByWorkspace: {},
+} as Pick<
+  TabBoardState,
+  'activeWorkspaceId' | 'workspaces' | 'folders' | 'groups' | 'categoryOrderByWorkspace'
+>;
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -32,6 +50,7 @@ function Probe({ onValue }: { onValue: (value: ManagerPageStateController) => vo
 beforeEach(() => {
   history.replaceState(null, '', '/manager.html?workspace=workspace-b&category=saved&view=bin&q=url-query');
   sessionStorage.clear();
+  localStorage.clear();
   savedSearchQueryStore.set('');
   container = document.createElement('div');
   document.body.append(container);
@@ -74,6 +93,34 @@ describe('useManagerPageState', () => {
     expect(location.search).toContain('q=updated');
   });
 
+  it('pushes exactly one history entry for one atomic navigation under StrictMode', async () => {
+    const observed: { current: ManagerPageStateController | null } = { current: null };
+    const push = vi.spyOn(history, 'pushState');
+    root = createRoot(container!);
+    await act(async () => {
+      root?.render(createElement(
+        StrictMode,
+        null,
+        createElement(Probe, {
+          onValue: (value) => {
+            observed.current = value;
+          },
+        }),
+      ));
+    });
+    push.mockClear();
+
+    await act(async () => observed.current?.navigate({
+      workspaceId: 'workspace-a',
+      category: 'inbox',
+      view: 'board',
+    }));
+
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(location.search).toContain('workspace=workspace-a');
+    expect(location.search).toContain('category=inbox');
+  });
+
   it('restores state on popstate without pushing a new entry', async () => {
     const observed: { current: ManagerPageStateController | null } = { current: null };
     const push = vi.spyOn(history, 'pushState');
@@ -94,5 +141,28 @@ describe('useManagerPageState', () => {
     });
     expect(savedSearchQueryStore.getSnapshot()).toBe('back');
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it('uses the workspace preference for a bare URL but preserves explicit Inbox', async () => {
+    localStorage.setItem('tabboard.managerCategoryPreference', JSON.stringify({
+      version: 1,
+      byWorkspace: { 'workspace-a': 'saved' },
+    }));
+    history.replaceState(null, '', '/manager.html');
+    const observed: { current: ManagerPageStateController | null } = { current: null };
+    root = createRoot(container!);
+    await act(async () => {
+      root?.render(createElement(Probe, { onValue: (value) => { observed.current = value; } }));
+    });
+    expect(observed.current?.state.category).toBe('saved');
+
+    await act(async () => root?.unmount());
+    root = null;
+    history.replaceState(null, '', '/manager.html?category=inbox');
+    root = createRoot(container!);
+    await act(async () => {
+      root?.render(createElement(Probe, { onValue: (value) => { observed.current = value; } }));
+    });
+    expect(observed.current?.state.category).toBe('inbox');
   });
 });

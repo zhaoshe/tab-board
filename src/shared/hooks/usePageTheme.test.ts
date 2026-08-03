@@ -34,13 +34,13 @@ describe('usePageTheme', () => {
     });
 
     expect(document.documentElement.style.colorScheme).toBe('dark');
-    expect(document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.content).toBe('#242424');
+    expect(document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.content).toBe('#1a1e24');
 
     await act(async () => {
       root?.render(createElement(ThemeProbe, { scheme: 'light' }));
     });
 
     expect(document.documentElement.style.colorScheme).toBe('light');
-    expect(document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.content).toBe('#ffffff');
+    expect(document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.content).toBe('#f3f5f8');
   });
 });

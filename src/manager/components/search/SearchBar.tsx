@@ -1,11 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
-import { TextInput, ActionIcon, Tooltip, Badge } from '@mantine/core';
-import { IconSearch, IconX, IconKeyboard } from '@tabler/icons-react';
+import { TextInput, ActionIcon, Badge } from '@mantine/core';
+import {
+  Keyboard as IconKeyboard,
+  Search as IconSearch,
+  X as IconX,
+} from 'lucide-react';
 import { useBoardProjection } from '../../hooks/useBoardProjection';
 import { useSearchQuery, useSetSearchQuery } from '../../hooks/useSearchQuery';
 import { filterGroupsByQuery, type CategoryFilter } from '../../core/selectors';
 import { normalizeSearch } from '../../../shared/model';
 import { formatNumber } from '../../../shared/utils/formatters';
+import { TabBoardTooltip } from '../../../shared/components/TabBoardTooltip';
 
 interface SearchBarProps {
   autoFocus?: boolean;
@@ -57,6 +62,7 @@ export function SearchBar({ autoFocus = false, inputId, category = 'inbox', full
   return (
     <div style={{ position: 'relative', maxWidth: fullWidth ? undefined : 500, width: '100%' }}>
       <TextInput
+        className="manager-search-input"
         id={inputId}
         ref={inputRef}
         name="saved-session-search"
@@ -67,21 +73,23 @@ export function SearchBar({ autoFocus = false, inputId, category = 'inbox', full
         rightSectionPointerEvents="all"
         rightSection={
           onEscape ? (
-            <Tooltip label="Close Search" position="left">
+            <TabBoardTooltip label="Close Search" position="left">
               <ActionIcon variant="subtle" onClick={handleClose} aria-label="Close Search">
                 <IconX size={16} aria-hidden="true" />
               </ActionIcon>
-            </Tooltip>
+            </TabBoardTooltip>
           ) : localValue ? (
-            <ActionIcon variant="subtle" onClick={handleClear} title="Clear (Esc)" aria-label="Clear Search">
-              <IconX size={16} aria-hidden="true" />
-            </ActionIcon>
+            <TabBoardTooltip label="Clear Search" position="left">
+              <ActionIcon variant="subtle" onClick={handleClear} aria-label="Clear Search">
+                <IconX size={16} aria-hidden="true" />
+              </ActionIcon>
+            </TabBoardTooltip>
           ) : (
-            <Tooltip label="/ or Ctrl/Cmd + K" position="left">
+            <TabBoardTooltip label="/ or Ctrl/Cmd + K" position="left">
               <span aria-hidden="true">
                 <IconKeyboard size={14} aria-hidden="true" />
               </span>
-            </Tooltip>
+            </TabBoardTooltip>
           )
         }
         value={localValue}

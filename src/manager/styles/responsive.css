@@ -1,31 +1,7 @@
 @media (max-width: 900px) {
   .manager-shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto minmax(0, 1fr);
-  }
-
-  .manager-shell:not(.manager-shell--sidebar-collapsed) {
-    grid-template-columns: 1fr;
-  }
-
-  .manager-shell:not(.manager-shell--sidebar-collapsed) .manager-topbar {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .manager-shell:not(.manager-shell--sidebar-collapsed) .manager-sidebar {
-    grid-column: 1;
-    grid-row: 2;
-    height: min(45dvh, 360px);
-  }
-
-  .manager-shell:not(.manager-shell--sidebar-collapsed) .manager-main {
-    grid-column: 1;
-    grid-row: 3;
-  }
-
-  .manager-shell:not(.manager-shell--sidebar-collapsed) .manager-open-tabs {
-    height: 180px;
+    grid-template-columns: var(--manager-sidebar-rail-width) minmax(0, 1fr);
+    grid-template-rows: 48px minmax(0, 1fr);
   }
 
   .manager-shell--sidebar-collapsed {
@@ -35,8 +11,48 @@
 }
 
 @media (max-width: 760px) {
-  .manager-header-actions-desktop { display: none; }
-  .manager-header-actions-compact { display: flex; }
+  .manager-workspace-trigger {
+    width: 44px;
+    min-width: 44px;
+    padding-inline: 0;
+  }
+
+  .manager-workspace-trigger .mantine-Button-inner {
+    justify-content: center;
+  }
+
+  .manager-workspace-trigger .mantine-Button-label {
+    display: none;
+  }
+
+  .manager-workspace-trigger .mantine-Button-section[data-position='left'] {
+    margin-inline-end: 0;
+  }
+
+  .manager-workspace-trigger .mantine-Button-section[data-position='right'] {
+    display: none;
+  }
+
+  .manager-workspace-trigger__label {
+    display: none;
+  }
+
+  .manager-category-actions {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .manager-category-nav {
+    max-width: calc(100% - 44px);
+  }
+
+  .manager-category-item [data-category-trigger='label'] {
+    padding-inline: 4px;
+  }
+
+  .manager-category-item [data-category-trigger='label'] .mantine-Button-label {
+    gap: 4px;
+  }
 
   .workspace-header--search-expanded .manager-workspace-switcher,
   .workspace-header--search-expanded .manager-category-strip,
@@ -51,9 +67,13 @@
   }
 
   .session-board {
-    grid-auto-columns: minmax(
-      min(320px, calc(100vw - var(--manager-sidebar-rail-width) - 32px)),
-      min(360px, calc(100vw - var(--manager-sidebar-rail-width) - 32px))
-    );
+    grid-auto-columns: min(340px, calc(100vw - var(--manager-sidebar-rail-width) - 32px));
+    min-width: min(340px, calc(100vw - var(--manager-sidebar-rail-width) - 32px));
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .new-session-gap-target {
+    display: none;
   }
 }

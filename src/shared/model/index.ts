@@ -7,6 +7,7 @@ export {
   createEmptyState,
   normalizeState,
   createDefaultWorkspace,
+  normalizeWorkspaceEmoji,
   normalizeWorkspace,
   normalizeFolder,
   normalizeGroup,
@@ -34,8 +35,11 @@ export type { FindTabRefResult } from './schema';
 export * from './search';
 export * from './import-export';
 export * from './capture-policy';
+export * from './window-dedupe';
+export * from './category-colors';
 export * from './categories';
 export * from './drop-intent';
 export * from './drop-operations';
 export * from './drop-validation';
+export * from './restore-refs';
 export * from './session-operations';

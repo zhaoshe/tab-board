@@ -18,6 +18,7 @@ export interface FileParts {
     createdAt: string;
     updatedAt: string;
     fileLayoutVersion: number;
+    sessionOrder: string[];
   };
   settings: Settings;
   workspaces: Workspace[];
@@ -48,6 +49,7 @@ export function splitState(state: TabBoardState): FileParts {
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
       fileLayoutVersion: FILE_LAYOUT_VERSION,
+      sessionOrder: state.groups.map(({ id }) => id),
     },
     settings: state.settings,
     workspaces: state.workspaces,
@@ -65,7 +67,18 @@ export function splitState(state: TabBoardState): FileParts {
  * are repaired/filtered, and version is pinned to SCHEMA_VERSION.
  */
 export function assembleState(parts: FileParts): TabBoardState {
-  const groups: Group[] = [...parts.sessions.values()];
+  const seenSessionIds = new Set<string>();
+  const groups: Group[] = [];
+  for (const sessionId of [
+    ...parts.meta.sessionOrder,
+    ...parts.sessions.keys(),
+  ]) {
+    if (seenSessionIds.has(sessionId)) continue;
+    const group = parts.sessions.get(sessionId);
+    if (!group) continue;
+    seenSessionIds.add(sessionId);
+    groups.push(group);
+  }
   const assembled: TabBoardState = {
     version: parts.meta.version,
     mutationRevision: parts.meta.mutationRevision,

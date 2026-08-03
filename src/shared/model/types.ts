@@ -23,6 +23,7 @@ export interface Settings {
 export interface Workspace {
   id: string;
   name: string;
+  emoji: string;
   createdAt: string;
   updatedAt: string;
 }

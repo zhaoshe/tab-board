@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  BOOTSTRAP_KEY,
   FILE_PING_KEY,
   SETTINGS_PROJECTION_KEY,
 } from '../model/constants';
@@ -227,6 +228,58 @@ describe('createFileStorageAdapter', () => {
     }
   });
 
+  it('preserves session order after rewriting one session file', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const adapter = await createFileStorageAdapter(root);
+    await adapter.ensureState();
+
+    const state = knownState();
+    await adapter.setState(state);
+    const updatedAt = '2026-07-23T10:01:00.000Z';
+    await adapter.setState({
+      ...state,
+      mutationRevision: state.mutationRevision + 1,
+      groups: state.groups.map((group, index) => index === 0
+        ? { ...group, title: 'Session One Updated', updatedAt }
+        : group),
+      updatedAt,
+    });
+
+    const reloaded = await createFileStorageAdapter(root);
+    expect((await reloaded.getState()).groups.map(({ id }) => id))
+      .toEqual(state.groups.map(({ id }) => id));
+  });
+
+  it('loads legacy meta without sessionOrder and backfills it on the next write', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const adapter = await createFileStorageAdapter(root);
+    await adapter.ensureState();
+    await adapter.setState(knownState());
+
+    const metaFile = await root.getFileHandle('meta.json');
+    const legacyMeta = JSON.parse(await (await metaFile.getFile()).text());
+    delete legacyMeta.sessionOrder;
+    await atomicWriteFile(root, 'meta.json', JSON.stringify(legacyMeta, null, 2));
+
+    const legacyAdapter = await createFileStorageAdapter(root);
+    const legacyState = await legacyAdapter.getState();
+    expect(legacyState.groups).toHaveLength(2);
+
+    const updatedAt = '2026-07-23T10:02:00.000Z';
+    await legacyAdapter.setState({
+      ...legacyState,
+      mutationRevision: legacyState.mutationRevision + 1,
+      updatedAt,
+    });
+    const backfilledMeta = JSON.parse(
+      await (await (await root.getFileHandle('meta.json')).getFile()).text(),
+    );
+    expect(backfilledMeta.sessionOrder)
+      .toEqual(legacyState.groups.map(({ id }) => id));
+  });
+
   it('recovery: meta.writeInProgress=true + orphan tmp files loads last good state and cleans tmps', async () => {
     const root = createMemoryDirectory('root');
     withPermission(root);
@@ -392,5 +445,12 @@ describe('createFileStorageAdapter', () => {
     expect(ping?.mutationRevision).toBe(state.mutationRevision);
     expect(ping?.updatedAt).toBe(state.updatedAt);
     expect(lastCall?.[SETTINGS_PROJECTION_KEY]).toEqual(projectionFromState(state));
+    expect(lastCall?.[BOOTSTRAP_KEY]).toEqual({
+      configuredTarget: 'file',
+      activeBackend: 'file',
+      folderName: 'root',
+      fallbackReason: null,
+      fileUpdatedAt: state.updatedAt,
+    });
   });
 });

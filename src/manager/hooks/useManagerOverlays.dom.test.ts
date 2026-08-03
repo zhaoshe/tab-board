@@ -10,15 +10,27 @@ import {
 } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DndContext } from '@dnd-kit/core';
+import { MantineProvider } from '@mantine/core';
 import {
+  getTabHoverTooltipPosition,
   MANAGER_HOVER_SUPPRESSED_ATTRIBUTE,
+  ManagerMenuItem,
   ManagerOverlayPortal,
   ManagerOverlaysProvider,
+  renderTabHoverTooltipContent,
+  TAB_HOVER_TOOLTIP_CONTRACT,
   useManagerInfoTrigger,
   useManagerOverlayCommands,
   useManagerOverlayController,
   type ManagerOverlaysController,
 } from './useManagerOverlays';
+import * as tabItemRowModule from '../components/sessions/TabItemRow';
+import { TabItemRow } from '../components/sessions/TabItemRow';
+import { ToastProvider } from './useToast';
+import { DestructiveConfirmationProvider } from '../../shared/components/DestructiveConfirmation';
+import { ITEM_NOTE, type TabItem } from '../../shared/model';
+import type { ManagerRuntime } from './useManagerRuntime';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -116,8 +128,9 @@ function OverlayHarness({
     kind: 'open',
     model: {
       title: 'Preview',
-      url: 'https://example.test/page',
-      actions: createElement('button', { type: 'button' }, 'Preview action'),
+      domain: 'example.test',
+      link: 'https://example.test/page',
+      savedAt: '2026-07-31T12:00:00.000Z',
     },
   });
 
@@ -139,6 +152,183 @@ function OverlayHarness({
         }, 'Preview')
       : null,
     onCommandRender ? createElement(OverlayCommandRenderProbe, { onRender: onCommandRender }) : null,
+    createElement(ManagerOverlayPortal),
+  );
+}
+
+function MenuItemHarness(): ReactNode {
+  const controller = useManagerOverlayController();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  return createElement(
+    Fragment,
+    null,
+    createElement('button', {
+      ref: triggerRef,
+      type: 'button',
+      onClick: () => {
+        if (!triggerRef.current) return;
+        controller.openMenu({
+          id: 'described-menu',
+          kind: 'session',
+          anchor: { x: 10, y: 10 },
+          content: createElement(ManagerMenuItem, {
+            label: 'Import',
+            description: 'Import a TabBoard backup',
+            onClick: vi.fn(),
+          }),
+          trigger: triggerRef.current,
+        });
+      },
+    }, 'Open menu'),
+    createElement(ManagerOverlayPortal),
+  );
+}
+
+function InvokerMenuHarness(): ReactNode {
+  const controller = useManagerOverlayController();
+  const titleRef = useRef<HTMLButtonElement | null>(null);
+  const openFromEvent = (
+    event: React.MouseEvent<HTMLDivElement> | React.KeyboardEvent<HTMLDivElement>,
+  ): void => {
+    if (!titleRef.current) return;
+    const getSavedTabMenuTrigger = (
+      tabItemRowModule as typeof tabItemRowModule & {
+        getSavedTabMenuTrigger?: (
+          target: EventTarget | null,
+          row: HTMLElement,
+          fallback: HTMLElement,
+        ) => HTMLElement;
+      }
+    ).getSavedTabMenuTrigger;
+    const trigger = getSavedTabMenuTrigger
+      ? getSavedTabMenuTrigger(event.target, event.currentTarget, titleRef.current)
+      : titleRef.current;
+    event.preventDefault();
+    controller.openMenu({
+      id: 'saved-tab-invoker-menu',
+      kind: 'saved-tab',
+      anchor: { x: 10, y: 10 },
+      content: createElement(ManagerMenuItem, {
+        label: 'Copy Text',
+        onClick: vi.fn(),
+      }),
+      trigger,
+      openedByKeyboard: true,
+      restoreFocusOnClose: true,
+    });
+  };
+
+  return createElement(
+    Fragment,
+    null,
+    createElement(
+      'div',
+      {
+        className: 'tab-item-row__content',
+        tabIndex: -1,
+        onContextMenu: openFromEvent,
+        onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => {
+          if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+            openFromEvent(event);
+          }
+        },
+      },
+      createElement('input', {
+        type: 'checkbox',
+        'aria-label': 'Select saved item',
+      }),
+      createElement('button', {
+        ref: titleRef,
+        type: 'button',
+      }, 'Saved title'),
+      createElement('button', {
+        type: 'button',
+        'aria-label': 'Delete',
+      }, 'Delete'),
+    ),
+    createElement(ManagerOverlayPortal),
+  );
+}
+
+const savedNote: TabItem = {
+  id: 'saved-note',
+  itemType: ITEM_NOTE,
+  title: 'Fallback note title',
+  url: '',
+  favIconUrl: '',
+  note: 'Saved note text',
+  pinned: false,
+  incognito: false,
+  starred: false,
+  taskStatus: 'none',
+  browserGroup: null,
+  sourceWindowId: null,
+  sourceTabId: null,
+  createdAt: '2026-07-31T12:00:00.000Z',
+  updatedAt: '2026-07-31T12:00:00.000Z',
+};
+
+const runtimeStub: ManagerRuntime = {
+  openSavedTab: vi.fn(async () => undefined),
+  openSavedTabs: vi.fn(async () => undefined),
+  restoreGroup: vi.fn(async () => undefined),
+  restoreTab: vi.fn(async () => undefined),
+  restoreTabs: vi.fn(async () => ({ restoredTabs: 0, outcomes: [] })),
+};
+
+function SavedRowParentOverwriteHarness({
+  parentContextMenu,
+  parentKeyDown,
+}: {
+  parentContextMenu: () => void;
+  parentKeyDown: (key: string) => void;
+}): ReactNode {
+  const controller = useManagerOverlayController();
+  const openParentMenu = (trigger: HTMLElement): void => {
+    controller.openMenu({
+      id: 'parent-session-menu',
+      kind: 'session',
+      anchor: { x: 0, y: 0 },
+      content: createElement(ManagerMenuItem, {
+        label: 'Add Link',
+        onClick: vi.fn(),
+      }),
+      trigger,
+      ariaLabel: 'Actions',
+    });
+  };
+
+  return createElement(
+    'div',
+    {
+      className: 'session-card',
+      onContextMenu: (event: React.MouseEvent<HTMLDivElement>) => {
+        parentContextMenu();
+        event.preventDefault();
+        openParentMenu(event.currentTarget);
+      },
+      onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => {
+        parentKeyDown(event.key);
+        if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+          event.preventDefault();
+          openParentMenu(event.currentTarget);
+        }
+      },
+    },
+    createElement(TabItemRow, {
+      tab: savedNote,
+      groupId: 'group-a',
+      workspaceId: 'workspace-a',
+      tabIndex: 0,
+      selectedRefs: [],
+      runtime: runtimeStub,
+      commands: {
+        confirmBeforeDestructive: false,
+        deleteTab: vi.fn(),
+        updateTab: vi.fn(),
+      },
+    }),
     createElement(ManagerOverlayPortal),
   );
 }
@@ -192,7 +382,280 @@ afterEach(async () => {
 });
 
 describe('mounted manager overlay behavior', () => {
-  it('moves focus into preview actions when Tab is pressed on the trigger', async () => {
+  it('exports the saved-tab invoker resolver used by pointer and keyboard menus', () => {
+    expect((
+      tabItemRowModule as typeof tabItemRowModule & {
+        getSavedTabMenuTrigger?: unknown;
+      }
+    ).getSavedTabMenuTrigger).toBeTypeOf('function');
+  });
+
+  it('exposes the read-only tooltip clamp contract', () => {
+    expect(TAB_HOVER_TOOLTIP_CONTRACT.titleLines).toBe(2);
+    expect(TAB_HOVER_TOOLTIP_CONTRACT.linkLines).toBe(4);
+    expect(TAB_HOVER_TOOLTIP_CONTRACT.pointerEvents).toBe('none');
+  });
+
+  it('renders one read-only tab tooltip with only title, domain, link, and timestamp', () => {
+    const content = renderTabHoverTooltipContent({
+      title: 'Preview',
+      domain: 'example.test',
+      link: 'https://example.test/page',
+      savedAt: 'Saved Jul 31, 2026',
+    });
+    const container = document.createElement('div');
+    const root = createRoot(container);
+
+    act(() => root.render(content));
+
+    expect(container.querySelector('.manager-tab-tooltip__title')?.textContent).toBe('Preview');
+    expect(container.querySelector('.manager-tab-tooltip__domain')?.textContent).toBe('example.test');
+    expect(container.querySelector('.manager-tab-tooltip__link')?.textContent)
+      .toBe('https://example.test/page');
+    expect(container.querySelector('time')?.textContent).toBe('Saved Jul 31, 2026, 12:00 AM');
+    expect(container.querySelector('img, button, [role="button"]')).toBeNull();
+
+    act(() => root.unmount());
+  });
+
+  it('uses detailed tooltip text as the aria-describedby content without overriding labels', async () => {
+    const mounted = await mountOverlay();
+
+    await act(async () => mounted.trigger.focus());
+    const tooltip = document.querySelector<HTMLElement>('.manager-info-popover[role="tooltip"]');
+
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hasAttribute('aria-label')).toBe(false);
+    expect(tooltip?.querySelector('.manager-tab-tooltip')?.hasAttribute('aria-label')).toBe(false);
+    expect(mounted.trigger.getAttribute('aria-describedby')).toBe(tooltip?.id);
+    expect(tooltip?.textContent).toContain('Preview');
+    expect(tooltip?.textContent).toContain('example.test');
+    expect(tooltip?.textContent).toContain('https://example.test/page');
+    expect(tooltip?.textContent).toContain('Saved');
+  });
+
+  it.each([
+    ['right-clicked nested checkbox', '[aria-label="Select saved item"]', 'contextmenu'],
+    ['keyboard-invoked nested Delete', '[aria-label="Delete"]', 'keyboard'],
+    ['keyboard-invoked title', 'button:not([aria-label])', 'keyboard'],
+    ['row background fallback', '.tab-item-row__content', 'contextmenu'],
+  ])('restores the %s on Escape', async (_label, selector, eventKind) => {
+    const raf = installRafController();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(
+        ManagerOverlaysProvider,
+        null,
+        createElement(InvokerMenuHarness),
+      ));
+    });
+
+    try {
+      const target = container.querySelector<HTMLElement>(selector);
+      const title = container.querySelector<HTMLButtonElement>('button:not([aria-label])');
+      const expectedTrigger = selector === '.tab-item-row__content' ? title : target;
+      expect(target).not.toBeNull();
+      expect(expectedTrigger).not.toBeNull();
+
+      await act(async () => {
+        target?.focus();
+        target?.dispatchEvent(eventKind === 'contextmenu'
+          ? new MouseEvent('contextmenu', {
+              bubbles: true,
+              cancelable: true,
+              clientX: 12,
+              clientY: 18,
+            })
+          : new KeyboardEvent('keydown', {
+              bubbles: true,
+              cancelable: true,
+              key: 'ContextMenu',
+            }));
+      });
+      expect(document.querySelector('.manager-overlay-menu')).not.toBeNull();
+
+      await act(async () => dispatchEscape());
+      expect(document.querySelector('.manager-overlay-menu')).toBeNull();
+      await raf.flush();
+      expect(document.activeElement).toBe(expectedTrigger);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it.each([
+    ['right-click', 'contextmenu'],
+    ['Shift+F10', 'keyboard'],
+  ])(
+    'keeps the Saved Tab Actions menu after %s instead of bubbling to the Session menu',
+    async (_label, eventKind) => {
+      const raf = installRafController();
+      const parentContextMenu = vi.fn();
+      const parentKeyDown = vi.fn();
+      const container = document.createElement('div');
+      document.body.append(container);
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(createElement(
+          MantineProvider,
+          null,
+          createElement(
+            DndContext,
+            null,
+            createElement(
+              ToastProvider,
+              null,
+              createElement(
+                DestructiveConfirmationProvider,
+                null,
+                createElement(
+                  ManagerOverlaysProvider,
+                  null,
+                  createElement(SavedRowParentOverwriteHarness, {
+                    parentContextMenu,
+                    parentKeyDown,
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ));
+      });
+
+      try {
+        const title = container.querySelector<HTMLButtonElement>('.tab-item-row__title');
+        expect(title).not.toBeNull();
+
+        await act(async () => {
+          title?.focus();
+          title?.dispatchEvent(eventKind === 'contextmenu'
+            ? new MouseEvent('contextmenu', {
+                bubbles: true,
+                cancelable: true,
+                clientX: 12,
+                clientY: 18,
+              })
+            : new KeyboardEvent('keydown', {
+                bubbles: true,
+                cancelable: true,
+                key: 'F10',
+                shiftKey: true,
+              }));
+        });
+
+        const menu = document.querySelector<HTMLElement>('.manager-overlay-menu');
+        expect(menu?.getAttribute('aria-label')).toBe('Saved Tab Actions');
+        expect(menu?.textContent).toContain('Edit Note');
+        expect(menu?.textContent).toContain('Copy Text');
+        expect(menu?.textContent).toContain('Delete');
+        expect(menu?.textContent).not.toContain('Add Link');
+        if (eventKind === 'contextmenu') {
+          expect(parentContextMenu).not.toHaveBeenCalled();
+        } else {
+          expect(parentKeyDown).not.toHaveBeenCalled();
+        }
+
+        await act(async () => dispatchEscape());
+        await raf.flush();
+        expect(document.activeElement).toBe(title);
+
+        await act(async () => {
+          title?.dispatchEvent(new KeyboardEvent('keydown', {
+            bubbles: true,
+            cancelable: true,
+            key: 'ArrowRight',
+          }));
+        });
+        expect(parentKeyDown).toHaveBeenCalledWith('ArrowRight');
+      } finally {
+        await act(async () => root.unmount());
+        container.remove();
+      }
+    },
+  );
+
+  it('places the tooltip 6px above its trigger and flips below near the viewport top', () => {
+    expect(getTabHoverTooltipPosition(
+      { left: 40, right: 240, top: 120, bottom: 150 },
+      { width: 180, height: 60 },
+      { width: 320, height: 240 },
+    )).toEqual({ left: 40, top: 54, placement: 'top' });
+    expect(getTabHoverTooltipPosition(
+      { left: 40, right: 240, top: 20, bottom: 50 },
+      { width: 180, height: 60 },
+      { width: 320, height: 240 },
+    )).toEqual({ left: 40, top: 56, placement: 'bottom' });
+  });
+
+  it('shows menu descriptions after pointer dwell and immediately on keyboard focus', async () => {
+    const managerMain = document.createElement('main');
+    managerMain.id = 'manager-main';
+    const container = document.createElement('div');
+    managerMain.append(container);
+    document.body.append(managerMain);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(
+        ManagerOverlaysProvider,
+        null,
+        createElement(MenuItemHarness),
+      ));
+    });
+
+    try {
+      const trigger = container.querySelector<HTMLButtonElement>('button');
+      await act(async () => trigger?.click());
+      const menu = document.querySelector<HTMLElement>('.manager-overlay-menu');
+      const item = document.querySelector<HTMLButtonElement>('[role="menuitem"]');
+      expect(menu?.closest('#manager-main')).toBe(managerMain);
+      expect(menu?.style.width).toBe('190px');
+      expect(menu?.style.minWidth).toBe('');
+      expect(item?.textContent).toContain('Import');
+      expect(item?.textContent).not.toContain('Import a TabBoard backup');
+      expect(document.querySelector('[role="tooltip"]')).toBeNull();
+
+      await act(async () => {
+        item?.dispatchEvent(new MouseEvent('mouseover', {
+          bubbles: true,
+          relatedTarget: document.body,
+        }));
+        vi.advanceTimersByTime(549);
+      });
+      expect(document.querySelector('[role="tooltip"]')).toBeNull();
+
+      await act(async () => vi.advanceTimersByTime(1));
+      const pointerTip = document.querySelector<HTMLElement>('[role="tooltip"]');
+      expect(pointerTip?.textContent).toBe('Import a TabBoard backup');
+      expect(item?.getAttribute('aria-describedby')).toBe(pointerTip?.id);
+
+      await act(async () => {
+        item?.dispatchEvent(new MouseEvent('mouseout', {
+          bubbles: true,
+          relatedTarget: document.body,
+        }));
+        item?.blur();
+        menu?.setAttribute('data-tip-keyboard-armed', '');
+        item?.focus();
+      });
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Import a TabBoard backup');
+
+      const focusTip = document.querySelector<HTMLElement>('[role="tooltip"]');
+      expect(focusTip?.textContent).toBe('Import a TabBoard backup');
+      expect(item?.getAttribute('aria-describedby')).toBe(focusTip?.id);
+
+      await act(async () => item?.blur());
+      expect(document.querySelector('[role="tooltip"]')).toBeNull();
+      expect(item?.hasAttribute('aria-describedby')).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      managerMain.remove();
+    }
+  });
+
+  it('keeps the tab tooltip read-only when Tab is pressed on the trigger', async () => {
     const mounted = await mountOverlay();
 
     await act(async () => mounted.trigger.focus());
@@ -206,10 +669,8 @@ describe('mounted manager overlay behavior', () => {
       }));
     });
 
-    expect(document.activeElement).toBe(
-      document.querySelector<HTMLButtonElement>('.manager-info-popover button'),
-    );
-    expect(document.querySelector('.manager-info-popover')).not.toBeNull();
+    expect(document.activeElement).toBe(mounted.trigger);
+    expect(document.querySelector('.manager-info-popover button')).toBeNull();
   });
 
   it('binds global listeners once across menu and preview state changes', async () => {
@@ -266,43 +727,29 @@ describe('mounted manager overlay behavior', () => {
     await unmountOverlay(mounted);
   });
 
-  it('restores trigger focus after focusin, keyboard click, and Escape only after preview unmounts', async () => {
+  it('closes a focused tab tooltip on Escape without creating an interactive focus stop', async () => {
     const raf = installRafController();
     const mounted = await mountOverlay();
 
     await act(async () => mounted.trigger.focus());
     expect(document.querySelector('.manager-info-popover')).not.toBeNull();
-
-    await act(async () => {
-      mounted.trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
-    });
-    expect(document.querySelector('.manager-info-popover')).not.toBeNull();
-    await act(async () => {
-      document.querySelector<HTMLButtonElement>('.manager-info-popover button')?.focus();
-    });
-    expect(document.activeElement).not.toBe(mounted.trigger);
+    expect(document.querySelector('.manager-info-popover button')).toBeNull();
 
     await act(async () => dispatchEscape());
     expect(document.querySelector('.manager-info-popover')).toBeNull();
-    expect(document.activeElement).not.toBe(mounted.trigger);
-    expect(raf.pending()).toBe(1);
-
-    await raf.flush();
     expect(document.activeElement).toBe(mounted.trigger);
+    expect(raf.pending()).toBe(1);
+    await raf.flush();
 
     await unmountOverlay(mounted);
   });
 
-  it('does not restore focus after pointer click or hover preview close', async () => {
+  it('ignores pointer clicks and does not restore focus after hover tooltip close', async () => {
     const raf = installRafController();
     const mounted = await mountOverlay();
 
     await act(async () => {
       mounted.trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
-    });
-    expect(document.querySelector('.manager-info-popover')).not.toBeNull();
-    await act(async () => {
-      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
     });
     expect(document.querySelector('.manager-info-popover')).toBeNull();
     expect(raf.pending()).toBe(0);
@@ -320,6 +767,54 @@ describe('mounted manager overlay behavior', () => {
     expect(document.querySelector('.manager-info-popover')).toBeNull();
     expect(raf.pending()).toBe(0);
     expect(document.activeElement).not.toBe(mounted.trigger);
+
+    await unmountOverlay(mounted);
+  });
+
+  it('dismisses a tab tooltip on pointer activation until the pointer actually moves', async () => {
+    const mounted = await mountOverlay();
+
+    await act(async () => {
+      mounted.trigger.dispatchEvent(new MouseEvent('mouseover', {
+        bubbles: true,
+        relatedTarget: document.body,
+      }));
+      vi.advanceTimersByTime(180);
+    });
+    expect(document.querySelector('.manager-info-popover')).not.toBeNull();
+
+    await act(async () => {
+      mounted.trigger.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true,
+      }));
+      mounted.trigger.focus();
+      mounted.trigger.dispatchEvent(new MouseEvent('mouseover', {
+        bubbles: true,
+        relatedTarget: document.body,
+      }));
+      vi.advanceTimersByTime(180);
+    });
+    expect(document.querySelector('.manager-info-popover')).toBeNull();
+
+    await act(async () => {
+      mounted.trigger.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true,
+        movementX: 0,
+        movementY: 0,
+      }));
+      vi.advanceTimersByTime(180);
+    });
+    expect(document.querySelector('.manager-info-popover')).toBeNull();
+
+    await act(async () => {
+      mounted.trigger.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true,
+        movementX: 1,
+        movementY: 0,
+      }));
+      vi.advanceTimersByTime(180);
+    });
+    expect(document.querySelector('.manager-info-popover')).not.toBeNull();
 
     await unmountOverlay(mounted);
   });

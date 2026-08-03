@@ -1,5 +1,6 @@
 import { groupMatchesQuery, normalizeSearch } from '../../shared/model/search';
 import {
+  categoryOrder,
   categoryForGroup,
   groupsForCategory,
   type CategoryFilter,
@@ -23,25 +24,6 @@ export type CategoryStripState = Pick<
 export function getCategoryStrip(state: CategoryStripState): CategoryStripItem[] {
   const { workspaceId, folders } = getActiveWorkspaceState(state);
   const workspaceGroups = state.groups.filter((group) => group.workspaceId === workspaceId);
-  const folderById = new Map(folders.map((folder) => [folder.id, folder]));
-  const orderedFolderIds = state.categoryOrderByWorkspace[workspaceId] ?? [];
-  const orderedFolders: Folder[] = [];
-  const includedFolderIds = new Set<string>();
-
-  for (const rawId of orderedFolderIds) {
-    if (typeof rawId !== 'string') continue;
-    const folderId = rawId.startsWith('folder:') ? rawId.slice('folder:'.length) : rawId;
-    const folder = folderById.get(folderId);
-    if (!folder || includedFolderIds.has(folder.id)) continue;
-    includedFolderIds.add(folder.id);
-    orderedFolders.push(folder);
-  }
-
-  for (const folder of folders) {
-    if (includedFolderIds.has(folder.id)) continue;
-    includedFolderIds.add(folder.id);
-    orderedFolders.push(folder);
-  }
 
   const counts = new Map<CategoryFilter, number>();
   for (const group of workspaceGroups) {
@@ -49,11 +31,11 @@ export function getCategoryStrip(state: CategoryStripState): CategoryStripItem[]
     counts.set(category, (counts.get(category) ?? 0) + 1);
   }
 
-  return [
+  const items: CategoryStripItem[] = [
     { id: 'inbox', label: 'Inbox', count: counts.get('inbox') ?? 0, kind: 'inbox' },
     { id: 'saved', label: 'Saved', count: counts.get('saved') ?? 0, kind: 'saved' },
     { id: 'archive', label: 'Archive', count: counts.get('archive') ?? 0, kind: 'archive' },
-    ...orderedFolders.map((folder) => ({
+    ...folders.map((folder) => ({
       id: `folder:${folder.id}` as const,
       label: folder.name,
       count: counts.get(`folder:${folder.id}`) ?? 0,
@@ -61,6 +43,10 @@ export function getCategoryStrip(state: CategoryStripState): CategoryStripItem[]
       folderId: folder.id,
     })),
   ];
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  return categoryOrder(state, workspaceId)
+    .map((categoryId) => itemById.get(categoryId as CategoryFilter))
+    .filter((item): item is CategoryStripItem => Boolean(item));
 }
 
 export function getCanonicalGroupIndexById(

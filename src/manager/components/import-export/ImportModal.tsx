@@ -11,7 +11,12 @@ import {
   Paper,
   Divider,
 } from '@mantine/core';
-import { IconUpload, IconFileImport, IconAlertCircle, IconCheck } from '@tabler/icons-react';
+import {
+  Check as IconCheck,
+  CircleAlert as IconAlertCircle,
+  Download as IconUpload,
+  FileInput as IconFileImport,
+} from 'lucide-react';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import { parseImportedText } from '../../../shared/model/session-operations';
 import { formatNumber } from '../../../shared/utils/formatters';
@@ -135,11 +140,11 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           style={{
-            border: `2px dashed ${isDragging ? 'var(--mantine-color-blue-5)' : 'var(--mantine-color-gray-4)'}`,
+            border: `2px dashed ${isDragging ? 'var(--tabboard-accent)' : 'var(--mantine-color-gray-4)'}`,
             borderRadius: 'var(--mantine-radius-md)',
             padding: 'var(--mantine-spacing-xl)',
             textAlign: 'center',
-            backgroundColor: isDragging ? 'var(--mantine-color-blue-0)' : 'transparent',
+            backgroundColor: isDragging ? 'var(--tabboard-accent-soft)' : 'transparent',
           }}
         >
           <Stack gap="xs" align="center">

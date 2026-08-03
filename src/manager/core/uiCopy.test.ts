@@ -9,6 +9,18 @@ function read(path: string): string {
 }
 
 describe('Web Interface Guidelines copy contracts', () => {
+  it('keeps shipped UI copy free of em-dash separators', () => {
+    const sources = [
+      'src/manager/ManagerApp.tsx',
+      'src/manager/components/sidebar/OpenTabsWindowBar.tsx',
+      'src/options/components/DataStorageCard.tsx',
+      'src/options/OptionsApp.tsx',
+      'src/popup/PopupApp.tsx',
+    ].map(read).join('\n');
+
+    expect(sources).not.toMatch(/[—–]/);
+  });
+
   it('uses Title Case for visible action and dialog labels', () => {
     const sources = [
       'src/manager/components/sessions/SessionCard.tsx',
@@ -78,12 +90,16 @@ describe('Web Interface Guidelines copy contracts', () => {
   it('uses Title Case and progress copy for action accessibility names', () => {
     const actions = [
       read('src/manager/components/search/SearchBar.tsx'),
+      read('src/manager/components/sessions/SessionSelectionToolbar.tsx'),
+      read('src/manager/components/shell/SessionTargetPicker.tsx'),
       read('src/manager/components/sidebar/OpenTabsPanel.tsx'),
       read('src/manager/components/sidebar/OpenTabsSelectionBar.tsx'),
       read('src/manager/components/workspace/CategoryManager.tsx'),
       read('src/manager/components/workspace/ManagerGlobalActions.tsx'),
       read('src/manager/components/workspace/ManagerSearchCommand.tsx'),
       read('src/manager/components/workspace/WorkspaceMenu.tsx'),
+      read('src/manager/components/workspace/WorkspaceEditorModal.tsx'),
+      read('src/manager/components/workspace/WorkspaceManagerModal.tsx'),
       read('src/options/components/DataStorageCard.tsx'),
       read('src/popup/PopupApp.tsx'),
     ].join('\n');
@@ -91,15 +107,25 @@ describe('Web Interface Guidelines copy contracts', () => {
     for (const expected of [
       'aria-label="Close Search"',
       'aria-label="Clear Search"',
-      'aria-label="Category Options"',
-      'aria-label="More Actions"',
+      'label="Category Options"',
+      'label="More Actions"',
       'aria-label="Show Search"',
-      'aria-label="Rename Workspace"',
+      'label="Edit Workspace"',
+      'title="Manage Workspaces"',
+      'title={title}',
       'label="Open Manager"',
       'label="Open Settings"',
       'Saving Selected Tabs…',
       'Creating Session…',
-      'Closing Selected Tabs…',
+      'Restore Selected Links',
+      'Copy Selected URLs',
+      'Move Selected Items',
+      'Delete Selected Items',
+      'Save Selected Tabs To',
+      'Move Session',
+      'Move Session To',
+      'Select All Visible Items',
+      'Unselect All Visible Items',
       'Reconnecting…',
     ]) {
       expect(actions).toContain(expected);
@@ -110,7 +136,10 @@ describe('Web Interface Guidelines copy contracts', () => {
     const options = read('src/options/OptionsApp.tsx');
 
     expect(options).toContain(
-      'Remove duplicate URLs within the tabs being saved. Keep one copy in the new session and close duplicate source tabs.',
+      'Close regular source tabs after they are stored; pinned tabs stay open.',
+    );
+    expect(options).toContain(
+      'Keep one copy of repeated URLs; pinned source tabs stay open.',
     );
     expect(options).not.toContain(
       'Skip tabs whose URL is already saved somewhere',

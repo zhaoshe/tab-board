@@ -1,19 +1,15 @@
 import { useEffect, useMemo, type MouseEvent, type RefObject } from 'react';
 import {
-  ActionIcon,
   Alert,
   Stack,
   Text,
-  Tooltip,
 } from '@mantine/core';
-import {
-  IconLayoutSidebarLeftExpand,
-} from '@tabler/icons-react';
 import {
   useManagerOverlayCommands,
   useManagerOverlayLifecycle,
 } from '../../hooks/useManagerOverlays';
 import type { OpenTabsWorkflow } from '../../hooks/useOpenTabsRuntime';
+import type { ManagerSelectionScope } from '../../hooks/useManagerSelectionScope';
 import { useDestructiveConfirmation } from '../../../shared/components/DestructiveConfirmation';
 import { formatNumber } from '../../../shared/utils/formatters';
 import { OpenTabsWindowBar } from './OpenTabsWindowBar';
@@ -21,19 +17,26 @@ import { useOverflowCues } from '../../hooks/useOverflowCues';
 import { OpenTabsSelectionBar } from './OpenTabsSelectionBar';
 import { OpenTabsList } from './OpenTabsList';
 import { OpenTabsFilterFooter } from './OpenTabsFilterFooter';
+import type { OpenSessionTargetPickerInput } from '../shell/SessionTargetPicker';
+import type { SidebarDisclosureState } from '../../hooks/useSidebarDisclosure';
+import { getSelectableOpenTabIds } from '../../core/open-tabs';
 
 export const OPEN_TABS_FILTER_INPUT_ID = 'open-tabs-filter-input';
 
 export interface OpenTabsPanelProps {
   workspaceId: string;
   workflow: OpenTabsWorkflow;
-  sidebarPinned: boolean;
+  sidebarState: SidebarDisclosureState;
   onCaptureSelectedWindow: () => Promise<unknown>;
   onCaptureSelectedTabs: () => Promise<unknown>;
   sidebarToggleRef: RefObject<HTMLButtonElement>;
   sidebarCompactToggleRef: RefObject<HTMLButtonElement>;
   onToggleSidebar: (expanded: boolean) => void;
+  onPinSidebar: () => void;
+  onPromoteSidebar: () => void;
   onSourceKeyChange?: (key: unknown) => void;
+  selectionScope: ManagerSelectionScope;
+  onOpenSessionTargetPicker: (input: OpenSessionTargetPickerInput) => void;
 }
 
 function isValidTabId(id: number | undefined): id is number {
@@ -43,13 +46,17 @@ function isValidTabId(id: number | undefined): id is number {
 export function OpenTabsPanel({
   workspaceId,
   workflow,
-  sidebarPinned,
+  sidebarState,
   onCaptureSelectedWindow,
   onCaptureSelectedTabs,
   sidebarToggleRef,
   sidebarCompactToggleRef,
   onToggleSidebar,
+  onPinSidebar,
+  onPromoteSidebar,
   onSourceKeyChange,
+  selectionScope,
+  onOpenSessionTargetPicker,
 }: OpenTabsPanelProps) {
   const { model, commands } = workflow;
   const {
@@ -62,13 +69,13 @@ export function OpenTabsPanel({
     status,
   } = model;
   const {
-    loading,
     capturing,
     updatingSelection,
     closingTabIds,
     error,
   } = status;
-  const selectionMode = selection.active;
+  const selectionMode = selectionScope.scope?.kind === 'open-tabs'
+    && selectionScope.scope.windowId === selectedWindowId;
   const selectedTabIds = selection.ids;
   const selectedCount = selection.count;
   const {
@@ -87,10 +94,24 @@ export function OpenTabsPanel({
   const closingTabIdSet = useMemo(() => new Set(closingTabIds), [closingTabIds]);
   const selectedStorableRecords = selection.records;
   const selectedStorableTabIds = selection.recordIds;
+  const visibleSelectableTabIds = useMemo(
+    () => filteredTabs.flatMap((tab) =>
+      tab.storable && isValidTabId(tab.id) ? [tab.id] : []),
+    [filteredTabs],
+  );
+  const allVisibleSelected = visibleSelectableTabIds.length > 0
+    && visibleSelectableTabIds.every((id) => selectedTabIdSet.has(id));
+  const openTabCount = selectedWindow?.tabs.length ?? 0;
+  const saveAllCount = getSelectableOpenTabIds(selectedWindow).length;
 
   useEffect(() => {
     onSourceKeyChange?.(sourceSnapshot);
   }, [onSourceKeyChange, sourceSnapshot]);
+
+  useEffect(
+    () => selectionScope.registerOpenTabsClear(commands.clearSelection),
+    [commands.clearSelection, selectionScope.registerOpenTabsClear],
+  );
 
   const closeTabFromAction = async (event: MouseEvent<HTMLButtonElement>, tabId: number | undefined) => {
     if (!isValidTabId(tabId)) return;
@@ -122,28 +143,6 @@ export function OpenTabsPanel({
     }
   };
 
-  const closeTabFromPreview = async (tabId: number | undefined) => {
-    if (!isValidTabId(tabId)) return;
-    const confirmed = await confirmDestructive({
-      title: 'Close Browser Tab',
-      message: 'Close this browser tab? This action cannot be undone from TabBoard.',
-      confirmLabel: 'Close Tab',
-    });
-    if (!confirmed) return;
-    await commands.closeTab(tabId);
-  };
-
-  const closeSelectedTabs = async () => {
-    if (!selectedCount) return;
-    const confirmed = await confirmDestructive({
-      title: 'Close Browser Tabs',
-      message: `Close ${formatNumber(selectedCount)} selected browser tabs? This action cannot be undone from TabBoard.`,
-      confirmLabel: `Close ${formatNumber(selectedCount)} Tabs`,
-    });
-    if (!confirmed) return;
-    await commands.closeSelection();
-  };
-
   const scrollSelectedWindowIntoView = (
     behavior: ScrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches
       ? 'auto'
@@ -166,26 +165,51 @@ export function OpenTabsPanel({
       <OpenTabsWindowBar
         windows={windows}
         selectedWindow={selectedWindow}
-        loading={loading}
-        capturing={capturing}
-        sidebarPinned={sidebarPinned}
+        sidebarState={sidebarState}
         sidebarToggleRef={sidebarToggleRef}
         onSelectWindow={commands.selectWindow}
-        onRefresh={() => void commands.refresh()}
-        onSaveWindow={() => void onCaptureSelectedWindow()}
         onToggleSidebar={onToggleSidebar}
+        onPinSidebar={onPinSidebar}
       />
 
       <OpenTabsSelectionBar
         capturing={capturing}
+        openTabCount={openTabCount}
+        filteredTabCount={filteredTabs.length}
+        filterActive={query.trim().length > 0}
+        saveAllCount={saveAllCount}
         selectedCount={selectedCount}
         selectionMode={selectionMode}
+        sidebarCollapsed={sidebarState === 'collapsed'}
+        allVisibleSelected={allVisibleSelected}
         updatingSelection={updatingSelection}
+        onEnterSelection={() => {
+          if (selectedWindowId === null) return;
+          commands.clearSelection();
+          selectionScope.commands.enterOpenTabs(selectedWindowId);
+          if (sidebarState === 'peek') onPromoteSidebar();
+        }}
+        onExpand={() => onToggleSidebar(true)}
+        onSaveAll={() => void onCaptureSelectedWindow()}
+        expandRef={sidebarCompactToggleRef}
         onCapture={() => void onCaptureSelectedTabs()}
-        onClear={commands.clearSelection}
-        onClose={() => void closeSelectedTabs()}
-        onPin={() => void commands.pinSelection()}
-        onSelectAll={commands.selectAll}
+        onClear={selectionScope.commands.exit}
+        onSaveTo={(trigger) => {
+          if (selectedWindowId === null || selectedStorableTabIds.length === 0) {
+            return;
+          }
+          onOpenSessionTargetPicker({
+            mode: 'save-open-tabs',
+            source: {
+              kind: 'open-tabs',
+              tabIds: selectedStorableTabIds,
+              windowId: selectedWindowId,
+              records: selectedStorableRecords,
+            },
+            trigger,
+          });
+        }}
+        onSelectAll={() => commands.selectAll(visibleSelectableTabIds)}
       />
 
       {error && (
@@ -209,36 +233,29 @@ export function OpenTabsPanel({
         selectedTabIdSet={selectedTabIdSet}
         selectedWindow={selectedWindow}
         selectionMode={selectionMode}
+        sidebarCollapsed={sidebarState === 'collapsed'}
         windows={windows}
         workspaceId={workspaceId}
         onClearQuery={commands.clearQuery}
-        onCloseTab={closeTabFromPreview}
         onCloseTabAction={(event, tabId) => void closeTabFromAction(event, tabId)}
         onFocusTab={commands.focusTab}
-        onPinTab={commands.pinTab}
-        onToggleSelection={commands.toggleSelection}
+        onToggleSelection={(tabId) => {
+          if (selectedWindowId === null) return;
+          selectionScope.commands.enterOpenTabs(selectedWindowId);
+          if (sidebarState === 'peek') onPromoteSidebar();
+          commands.toggleSelection(tabId);
+        }}
       />
-
-      {!sidebarPinned && (
-        <Tooltip label="Expand Sidebar" position="right" openDelay={500}>
-          <ActionIcon
-            ref={sidebarCompactToggleRef}
-            className="manager-sidebar-compact-toggle"
-            variant="subtle"
-            aria-label="Expand Sidebar"
-            aria-controls="manager-sidebar"
-            onClick={() => onToggleSidebar(true)}
-          >
-            <IconLayoutSidebarLeftExpand size={18} aria-hidden="true" />
-          </ActionIcon>
-        </Tooltip>
-      )}
 
       <OpenTabsFilterFooter
         inputId={OPEN_TABS_FILTER_INPUT_ID}
         query={query}
+        collapsed={sidebarState === 'collapsed'}
         onChange={commands.setQuery}
         onClear={commands.clearQuery}
+        onFocus={() => {
+          if (sidebarState === 'peek') onPromoteSidebar();
+        }}
       />
 
     </Stack>

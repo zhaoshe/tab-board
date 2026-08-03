@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createEmptyState,
+  restoreRefKey,
   SETTINGS_PROJECTION_KEY,
   type BrowserGroup,
   type Group,
@@ -8,8 +9,24 @@ import {
 } from '../shared/model';
 import { projectionFromState } from '../shared/store/settingsProjection';
 import type { StateMutation } from '../shared/store/stateMutations';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const TRUSTED_EXTENSION_ID = 'test-extension-id';
+
+describe('service worker file-storage module ownership', () => {
+  it('installs static file modules before the first Storage Authority operation', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/background/service-worker.ts'),
+      'utf8',
+    );
+    const loaderInstall = source.indexOf('_setActiveAdapterModuleLoadersForWorker({');
+    const firstAuthorityCall = source.indexOf('chrome.runtime.onInstalled.addListener');
+
+    expect(loaderInstall).toBeGreaterThanOrEqual(0);
+    expect(loaderInstall).toBeLessThan(firstAuthorityCall);
+  });
+});
 
 interface EventHarness {
   addListener: ReturnType<typeof vi.fn>;
@@ -68,8 +85,8 @@ function createState(): TabBoardState {
   return {
     ...state,
     workspaces: [
-      { id: 'workspace-a', name: 'A', createdAt: state.createdAt, updatedAt: state.updatedAt },
-      { id: 'workspace-b', name: 'B', createdAt: state.createdAt, updatedAt: state.updatedAt },
+      { id: 'workspace-a', name: 'A', emoji: '🗂️', createdAt: state.createdAt, updatedAt: state.updatedAt },
+      { id: 'workspace-b', name: 'B', emoji: '🗂️', createdAt: state.createdAt, updatedAt: state.updatedAt },
     ],
     activeWorkspaceId: 'workspace-a',
   };
@@ -307,6 +324,7 @@ describe('Chrome action settings synchronization', () => {
 
   it('updates the action when actionClick changes', async () => {
     const state = createState();
+    state.settings.actionClick = 'store';
     const harness = createChromeHarness(state);
     vi.stubGlobal('chrome', harness.chromeMock);
     await import('./service-worker');
@@ -407,6 +425,162 @@ describe('tabboard-storage-switched message', () => {
       }],
     });
     expect(harness.state.current.activeWorkspaceId).toBe('workspace-a');
+  });
+});
+
+describe('restore-refs outcomes', () => {
+  it('keeps successful source refs when deleteRestoredTabs is disabled', async () => {
+    const success = createSavedTab('restore-keep-success');
+    const source = createSavedGroup('restore-keep-source', {
+      tabs: [success],
+      workspaceId: 'workspace-a',
+    });
+    const state: TabBoardState = {
+      ...createState(),
+      groups: [source],
+      settings: {
+        ...createState().settings,
+        deleteRestoredTabs: false,
+      },
+    };
+    const harness = createChromeHarness(state);
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+    const ref = {
+      source: 'group',
+      groupId: source.id,
+      tabId: success.id,
+    };
+
+    const response = await sendMessage(harness.runtimeMessage.getListener(), {
+      type: 'restore-refs',
+      refs: [ref],
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      result: {
+        restoredTabs: 1,
+        outcomes: [{
+          key: restoreRefKey(ref),
+          groupId: source.id,
+          tabId: success.id,
+          status: 'restored',
+        }],
+      },
+    });
+    expect(harness.state.current.groups.find(({ id }) => id === source.id)?.tabs)
+      .toContainEqual(expect.objectContaining({ id: success.id }));
+    expect(harness.writes).toEqual([]);
+  });
+
+  it('reports ordered success/missing/create-failed outcomes and removes only successes', async () => {
+    const success = createSavedTab('restore-success');
+    const restricted = {
+      ...createSavedTab('restore-restricted'),
+      url: 'chrome://settings/',
+    };
+    const source = createSavedGroup('restore-source', {
+      tabs: [success, restricted],
+      workspaceId: 'workspace-a',
+    });
+    const state: TabBoardState = {
+      ...createState(),
+      groups: [source],
+      settings: {
+        ...createState().settings,
+        deleteRestoredTabs: true,
+      },
+    };
+    const harness = createChromeHarness(state);
+    harness.chromeMock.tabs.create.mockImplementation(
+      async (properties: chrome.tabs.CreateProperties) => {
+        if (properties.url === restricted.url) {
+          throw new Error('Restricted URL');
+        }
+        return { ...harness.tabs[0], ...properties };
+      },
+    );
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+    const listener = harness.runtimeMessage.getListener();
+    const refs = [
+      { source: 'group', groupId: source.id, tabId: success.id },
+      { source: 'group', groupId: source.id, tabId: 'restore-missing' },
+      { source: 'group', groupId: source.id, tabId: restricted.id },
+    ];
+
+    const response = await sendMessage(listener, {
+      type: 'restore-refs',
+      refs,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      result: {
+        restoredTabs: 1,
+        outcomes: [
+          {
+            key: restoreRefKey(refs[0]),
+            groupId: refs[0].groupId,
+            tabId: refs[0].tabId,
+            status: 'restored',
+          },
+          {
+            key: restoreRefKey(refs[1]),
+            groupId: refs[1].groupId,
+            tabId: refs[1].tabId,
+            status: 'failed',
+            error: 'missing',
+          },
+          {
+            key: restoreRefKey(refs[2]),
+            groupId: refs[2].groupId,
+            tabId: refs[2].tabId,
+            status: 'failed',
+            error: 'create-failed',
+          },
+        ],
+      },
+    });
+    await vi.waitFor(() => {
+      const remaining = harness.state.current.groups.find(
+        ({ id }) => id === source.id,
+      )?.tabs;
+      expect(remaining).not.toContainEqual(expect.objectContaining({
+        id: success.id,
+      }));
+      expect(remaining).toContainEqual(expect.objectContaining({
+        id: restricted.id,
+      }));
+    });
+  });
+
+  it('rejects duplicate restore refs before creating any browser tab', async () => {
+    const success = createSavedTab('restore-duplicate');
+    const source = createSavedGroup('restore-duplicate-source', {
+      tabs: [success],
+      workspaceId: 'workspace-a',
+    });
+    const state = { ...createState(), groups: [source] };
+    const harness = createChromeHarness(state);
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+    const listener = harness.runtimeMessage.getListener();
+    const ref = { source: 'group', groupId: source.id, tabId: success.id };
+
+    for (const invalidRefs of [
+      [ref, ref],
+      [ref, { source: 'group', groupId: '', tabId: 'malformed' }],
+    ]) {
+      const response = await sendMessage(listener, {
+        type: 'restore-refs',
+        refs: invalidRefs,
+      }) as { ok: boolean; error?: string };
+      expect(response.ok).toBe(false);
+      expect(response.error).toMatch(/unique|valid/);
+    }
+    expect(harness.chromeMock.tabs.create).not.toHaveBeenCalled();
   });
 });
 
@@ -681,6 +855,65 @@ describe('window dedupe', () => {
     expect(harness.chromeMock.tabs.remove).toHaveBeenNthCalledWith(1, 2);
     expect(harness.chromeMock.tabs.remove).toHaveBeenNthCalledWith(2, 3);
   });
+
+  it('counts and removes only non-pinned duplicates when a pinned copy exists', async () => {
+    const pinned = createTab(1, 'Pinned copy', {
+      url: 'https://same.example/', active: false, pinned: true, lastAccessed: 1,
+    });
+    const regular = createTab(2, 'Regular copy', {
+      url: 'https://same.example/', active: true, pinned: false, lastAccessed: 3,
+    });
+    const harness = createChromeHarness(createState(), {
+      tabs: [pinned, regular],
+      windows: [{ id: 1, type: 'normal', incognito: false, focused: true, alwaysOnTop: false, tabs: [pinned, regular] }],
+    });
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+    const listener = harness.runtimeMessage.getListener();
+
+    const count = await sendMessage(listener, { type: 'count-window-duplicates' }) as {
+      ok: boolean;
+      result?: { duplicateTabCount: number };
+    };
+    const dedupe = await sendMessage(listener, { type: 'dedupe-window' }) as {
+      ok: boolean;
+      result?: { removedTabs: number };
+    };
+
+    expect(count).toMatchObject({ ok: true, result: { duplicateTabCount: 1 } });
+    expect(dedupe).toMatchObject({ ok: true, result: { removedTabs: 1 } });
+    expect(harness.chromeMock.tabs.remove).toHaveBeenCalledOnce();
+    expect(harness.chromeMock.tabs.remove).toHaveBeenCalledWith(2);
+  });
+
+  it('does not count or remove duplicates when every copy is pinned', async () => {
+    const first = createTab(1, 'First pinned copy', {
+      url: 'https://same.example/', active: true, pinned: true,
+    });
+    const second = createTab(2, 'Second pinned copy', {
+      url: 'https://same.example/', active: false, pinned: true,
+    });
+    const harness = createChromeHarness(createState(), {
+      tabs: [first, second],
+      windows: [{ id: 1, type: 'normal', incognito: false, focused: true, alwaysOnTop: false, tabs: [first, second] }],
+    });
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+    const listener = harness.runtimeMessage.getListener();
+
+    const count = await sendMessage(listener, { type: 'count-window-duplicates' }) as {
+      ok: boolean;
+      result?: { duplicateTabCount: number };
+    };
+    const dedupe = await sendMessage(listener, { type: 'dedupe-window' }) as {
+      ok: boolean;
+      result?: { removedTabs: number };
+    };
+
+    expect(count).toMatchObject({ ok: true, result: { duplicateTabCount: 0 } });
+    expect(dedupe).toMatchObject({ ok: true, result: { removedTabs: 0 } });
+    expect(harness.chromeMock.tabs.remove).not.toHaveBeenCalled();
+  });
 });
 
 describe('Task112 live Open Tabs validation', () => {
@@ -715,7 +948,6 @@ describe('Task112 live Open Tabs validation', () => {
           title: 'Forged title',
           url: 'https://forged.test',
           favIconUrl: '',
-          active: false,
           pinned: false,
           index: 99,
           browserGroup: null,
@@ -808,7 +1040,6 @@ describe('Task112 live Open Tabs validation', () => {
           title: 'Forged',
           url: 'https://forged.test',
           favIconUrl: '',
-          active: false,
           pinned: false,
           index: 0,
           browserGroup: null,
@@ -1799,6 +2030,41 @@ describe('Task107 capture request validation', () => {
     expect(response).toMatchObject({ ok: true, result: { storedTabs: 3 } });
     expect(harness.chromeMock.tabs.remove).toHaveBeenCalledTimes(1);
     expect(harness.chromeMock.tabs.remove).toHaveBeenCalledWith(3);
+  });
+
+  it('stores pinned tabs but never closes them after capture', async () => {
+    const pinned = createTab(1, 'Pinned', {
+      windowId: 1,
+      active: true,
+      pinned: true,
+    });
+    const regular = createTab(2, 'Regular', {
+      windowId: 1,
+      active: false,
+      pinned: false,
+    });
+    const state = createState();
+    state.settings = {
+      ...state.settings,
+      closeTabsAfterSave: true,
+      openManagerAfterSave: false,
+    };
+    const harness = createChromeHarness(state, {
+      tabs: [pinned, regular],
+      windows: [{ id: 1, type: 'normal', incognito: false, focused: true, alwaysOnTop: false, tabs: [pinned, regular] }],
+    });
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    const response = await sendMessage(harness.runtimeMessage.getListener(), {
+      type: 'saveSelectedTabs',
+      selectedWindowId: 1,
+      tabIds: [1, 2],
+    }) as { ok: boolean; result?: { storedTabs: number } };
+
+    expect(response).toMatchObject({ ok: true, result: { storedTabs: 2 } });
+    expect(harness.chromeMock.tabs.remove).toHaveBeenCalledOnce();
+    expect(harness.chromeMock.tabs.remove).toHaveBeenCalledWith(2);
   });
 
   it('does not close a tab while its pending URL changes', async () => {

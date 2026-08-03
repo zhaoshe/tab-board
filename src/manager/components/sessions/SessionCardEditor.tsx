@@ -1,6 +1,6 @@
 import type { KeyboardEvent, RefObject } from 'react';
 import { Text, Textarea } from '@mantine/core';
-import { IconFileText } from '@tabler/icons-react';
+import { FileText as IconFileText } from 'lucide-react';
 
 export function SessionCardEditor({
   editing,

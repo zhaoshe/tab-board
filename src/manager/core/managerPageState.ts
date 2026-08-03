@@ -33,6 +33,12 @@ export function parseManagerPageState(search: string): ManagerPageState {
   };
 }
 
+export function hasExplicitManagerPageState(search: string): boolean {
+  const params = new URLSearchParams(search);
+  return ['workspace', 'category', 'view', 'q']
+    .some((key) => params.has(key));
+}
+
 export function validateManagerPageState(
   candidate: ManagerPageState,
   state: ValidationState,

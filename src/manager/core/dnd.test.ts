@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { createEmptyState, type Folder, type Group, type TabBoardState, type TabItem, type Workspace } from '../../shared/model';
 import type { OpenTabInfo } from './open-tabs';
 import { executeDropIntent } from '../../shared/model/drop-operations';
+import * as dndCore from './dnd';
 import {
   clearDragState,
+  createDragPreviewGeometry,
+  createDragPreviewItems,
   getDragPlaceholderStyle,
   getTabDropPlacement,
   isDragSourceStillRendered,
@@ -30,8 +33,115 @@ describe('drag placeholder geometry', () => {
   });
 });
 
+describe('readable drag preview geometry', () => {
+  const sourceRect = { left: 10, top: 20, width: 314, height: 48 };
+  const desktopBounds = { width: 960, height: 560 };
+  const expectFiniteMinimumCells = (
+    geometry: ReturnType<typeof createDragPreviewGeometry>,
+    minimum: { width: number; height: number },
+  ) => {
+    expect(Number.isFinite(geometry.previewRect.width)).toBe(true);
+    expect(Number.isFinite(geometry.previewRect.height)).toBe(true);
+    expect(Number.isFinite(geometry.previewLayout.columns)).toBe(true);
+    expect(Number.isFinite(geometry.previewLayout.rows)).toBe(true);
+    expect(geometry.previewRect.width / geometry.previewLayout.columns)
+      .toBeGreaterThanOrEqual(minimum.width);
+    expect(geometry.previewRect.height / geometry.previewLayout.rows)
+      .toBeGreaterThanOrEqual(minimum.height);
+  };
+
+  it('keeps one item at source size and expands five items to readable rows', () => {
+    expect(createDragPreviewGeometry(sourceRect, 1, desktopBounds)).toEqual({
+      previewRect: sourceRect,
+      previewLayout: { columns: 1, mode: 'details', rows: 1 },
+    });
+    expect(createDragPreviewGeometry(sourceRect, 5, desktopBounds)).toEqual({
+      previewRect: { ...sourceRect, height: 140 },
+      previewLayout: { columns: 1, mode: 'details', rows: 5 },
+    });
+  });
+
+  it('fits all 128 legal items in a finite readable desktop envelope', () => {
+    expect(createDragPreviewGeometry(sourceRect, 128, desktopBounds)).toEqual({
+      previewRect: { ...sourceRect, width: 952, height: 532 },
+      previewLayout: { columns: 7, mode: 'details', rows: 19 },
+    });
+  });
+
+  it('uses finite identity tiles when full title/domain rows cannot fit', () => {
+    const geometry = createDragPreviewGeometry(
+      sourceRect,
+      128,
+      { width: 314, height: 240 },
+    );
+    expect(geometry).toEqual({
+      previewRect: { ...sourceRect, height: 240 },
+      previewLayout: { columns: 9, mode: 'identity', rows: 15 },
+    });
+    expectFiniteMinimumCells(geometry, { width: 34, height: 16 });
+  });
+
+  it('overflows only as needed while preserving identity minima at 288x36', () => {
+    const first = createDragPreviewGeometry(
+      sourceRect,
+      128,
+      { width: 288, height: 36 },
+    );
+    const second = createDragPreviewGeometry(
+      sourceRect,
+      128,
+      { width: 288, height: 36 },
+    );
+
+    expect(first).toEqual({
+      previewRect: { ...sourceRect, width: 272, height: 256 },
+      previewLayout: { columns: 8, mode: 'identity', rows: 16 },
+    });
+    expect(second).toEqual(first);
+    expectFiniteMinimumCells(first, { width: 34, height: 16 });
+  });
+
+  it('keeps finite minimum identity cells for 1x1 source and bounds', () => {
+    const geometry = createDragPreviewGeometry(
+      { left: 0, top: 0, width: 1, height: 1 },
+      128,
+      { width: 1, height: 1 },
+    );
+
+    expect(geometry).toEqual({
+      previewRect: {
+        left: 0,
+        top: 0,
+        width: 272,
+        height: 256,
+      },
+      previewLayout: { columns: 8, mode: 'identity', rows: 16 },
+    });
+    expectFiniteMinimumCells(geometry, { width: 34, height: 16 });
+  });
+
+  it('does not label a sub-cell single item as detail mode', () => {
+    const geometry = createDragPreviewGeometry(
+      { left: 0, top: 0, width: 1, height: 1 },
+      1,
+      { width: 1, height: 1 },
+    );
+
+    expect(geometry).toEqual({
+      previewRect: {
+        left: 0,
+        top: 0,
+        width: 34,
+        height: 16,
+      },
+      previewLayout: { columns: 1, mode: 'identity', rows: 1 },
+    });
+    expectFiniteMinimumCells(geometry, { width: 34, height: 16 });
+  });
+});
+
 function workspace(id: string): Workspace {
-  return { id, name: id, createdAt: timestamp, updatedAt: timestamp };
+  return { id, name: id, emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
 }
 
 function folder(id: string, workspaceId: string): Folder {
@@ -63,6 +173,15 @@ function tab(id: string, title = id): TabItem {
     sourceTabId: Number(id.replace(/\D/g, '')) || null,
     createdAt: timestamp,
     updatedAt: timestamp,
+  };
+}
+
+function note(id: string, title: string, noteText = ''): TabItem {
+  return {
+    ...tab(id, title),
+    itemType: 'note',
+    url: '',
+    note: noteText,
   };
 }
 
@@ -107,6 +226,90 @@ function fixtureState(): TabBoardState {
   };
 }
 
+function testIsAllSourceTabs(
+  dragPayload: Extract<DragPayload, { kind: 'tabs' }>,
+  groups: readonly Group[],
+): boolean {
+  return (
+    dndCore as typeof dndCore & {
+      isAllSourceTabs?: (
+        payload: Extract<DragPayload, { kind: 'tabs' }>,
+        groups: readonly Group[],
+      ) => boolean;
+    }
+  ).isAllSourceTabs?.(dragPayload, groups) ?? false;
+}
+
+describe('Saved All Source Tabs detection', () => {
+  const exactPayload: Extract<DragPayload, { kind: 'tabs' }> = {
+    kind: 'tabs',
+    refs: [
+      { groupId: 'source', tabId: 'a' },
+      { groupId: 'source', tabId: 'b' },
+      { groupId: 'source', tabId: 'c' },
+      { groupId: 'source', tabId: 'd' },
+    ],
+    workspaceId: 'workspace-a',
+  };
+
+  it('accepts one unique valid ref for every canonical tab in one source Session', () => {
+    expect(testIsAllSourceTabs(exactPayload, fixtureState().groups)).toBe(true);
+  });
+
+  it('rejects partial and multiple-source selections', () => {
+    const groups = fixtureState().groups;
+
+    expect(testIsAllSourceTabs({
+      ...exactPayload,
+      refs: exactPayload.refs.slice(0, 3),
+    }, groups)).toBe(false);
+    expect(testIsAllSourceTabs({
+      ...exactPayload,
+      refs: [
+        { groupId: 'source', tabId: 'a' },
+        { groupId: 'target', tabId: 'target-1' },
+      ],
+    }, groups)).toBe(false);
+  });
+
+  it('rejects duplicate, stale, and missing source refs', () => {
+    const groups = fixtureState().groups;
+
+    expect(testIsAllSourceTabs({
+      ...exactPayload,
+      refs: [
+        { groupId: 'source', tabId: 'a' },
+        { groupId: 'source', tabId: 'b' },
+        { groupId: 'source', tabId: 'c' },
+        { groupId: 'source', tabId: 'c' },
+      ],
+    }, groups)).toBe(false);
+    expect(testIsAllSourceTabs({
+      ...exactPayload,
+      refs: [
+        { groupId: 'source', tabId: 'a' },
+        { groupId: 'source', tabId: 'b' },
+        { groupId: 'source', tabId: 'c' },
+        { groupId: 'source', tabId: 'stale' },
+      ],
+    }, groups)).toBe(false);
+    expect(testIsAllSourceTabs({
+      ...exactPayload,
+      refs: exactPayload.refs.map((ref) => ({
+        ...ref,
+        groupId: 'missing-source',
+      })),
+    }, groups)).toBe(false);
+  });
+
+  it('rejects a source Session outside the payload workspace', () => {
+    expect(testIsAllSourceTabs({
+      ...exactPayload,
+      refs: [{ groupId: 'other-workspace', tabId: 'other-tab' }],
+    }, fixtureState().groups)).toBe(false);
+  });
+});
+
 function payload(kind: DragPayload['kind']): DragPayload;
 function payload(kind: 'group'): Extract<DragPayload, { kind: 'group' }>;
 function payload(kind: 'category'): Extract<DragPayload, { kind: 'category' }>;
@@ -135,7 +338,7 @@ function payload(kind: DragPayload['kind']): DragPayload {
 function target(kind: DropTarget['kind']): DropTarget;
 function target(kind: 'group-body'): Extract<DropTarget, { kind: 'group-body' }>;
 function target(kind: 'tab-before'): Extract<DropTarget, { kind: 'tab-before' }>;
-function target(kind: 'new-group'): Extract<DropTarget, { kind: 'new-group' }>;
+function target(kind: 'new-session-insert'): Extract<DropTarget, { kind: 'new-session-insert' }>;
 function target(kind: 'group-insert'): Extract<DropTarget, { kind: 'group-insert' }>;
 function target(kind: 'category-column'): Extract<DropTarget, { kind: 'category-column' }>;
 function target(kind: 'category-reorder'): Extract<DropTarget, { kind: 'category-reorder' }>;
@@ -145,7 +348,7 @@ function target(kind: DropTarget['kind']): DropTarget {
       return { kind, groupId: 'target', workspaceId: 'workspace-a' };
     case 'tab-before':
       return { kind, groupId: 'target', tabId: 'target-2', index: 1, workspaceId: 'workspace-a' };
-    case 'new-group':
+    case 'new-session-insert':
       return { kind, category: 'folder:folder-a', index: 1, workspaceId: 'workspace-a' };
     case 'group-insert':
       return { kind, category: 'folder:folder-a', index: 1, workspaceId: 'workspace-a' };
@@ -163,7 +366,6 @@ function openTab(id: number, title = `Open ${id}`): OpenTabInfo {
     title,
     url: `https://open-${id}.test`,
     favIconUrl: '',
-    active: false,
     pinned: false,
     index: id,
     browserGroup: null,
@@ -171,6 +373,100 @@ function openTab(id: number, title = `Open ${id}`): OpenTabInfo {
     reason: null,
   };
 }
+
+describe('drag preview snapshots', () => {
+  it('copies canonical saved rows in payload order with saved link and note copy', () => {
+    const state = fixtureState();
+    state.groups[0] = group('source', 'workspace-a', {
+      tabs: [
+        tab('link', 'Saved Link'),
+        note('note-with-body', 'Note title', 'Saved note body'),
+        note('note-title-only', 'Fallback note title'),
+      ],
+    });
+    const payload: Extract<DragPayload, { kind: 'tabs' }> = {
+      kind: 'tabs',
+      refs: [
+        { groupId: 'source', tabId: 'note-with-body' },
+        { groupId: 'missing', tabId: 'missing' },
+        { groupId: 'source', tabId: 'link' },
+        { groupId: 'source', tabId: 'note-title-only' },
+        { groupId: 'source', tabId: 'link' },
+      ],
+      workspaceId: 'workspace-a',
+    };
+
+    expect(createDragPreviewItems(payload, state.groups, [])).toEqual([
+      {
+        id: 'note-with-body',
+        title: 'Saved note body',
+        itemType: 'note',
+      },
+      {
+        id: 'link',
+        title: 'Saved Link',
+        domain: 'link.test',
+        itemType: 'link',
+      },
+      {
+        id: 'note-title-only',
+        title: 'Fallback note title',
+        itemType: 'note',
+      },
+      {
+        id: 'link',
+        title: 'Saved Link',
+        domain: 'link.test',
+        itemType: 'link',
+      },
+    ]);
+  });
+
+  it('copies one canonical saved row for a single-tab payload and parses bad URLs safely', () => {
+    const state = fixtureState();
+    state.groups[0] = group('source', 'workspace-a', {
+      tabs: [{ ...tab('b', 'Broken Link'), url: 'not a URL' }],
+    });
+
+    expect(createDragPreviewItems(payload('tab'), state.groups, [])).toEqual([
+      {
+        id: 'b',
+        title: 'Broken Link',
+        itemType: 'link',
+      },
+    ]);
+  });
+
+  it('orders real Open Tabs records by payload IDs and uses the row title fallback', () => {
+    const source = payload('open-tabs');
+    source.tabIds = [102, 999, 101, 102];
+    const records = [
+      { ...openTab(101), title: '' },
+      { ...openTab(102, 'Open Two'), url: 'https://docs.example.test/two' },
+    ];
+
+    expect(createDragPreviewItems(source, [], records)).toEqual([
+      {
+        id: '102',
+        title: 'Open Two',
+        domain: 'docs.example.test',
+        itemType: 'link',
+      },
+      {
+        id: '101',
+        title: 'Untitled',
+        domain: 'open-101.test',
+        itemType: 'link',
+      },
+      {
+        id: '102',
+        title: 'Open Two',
+        domain: 'docs.example.test',
+        itemType: 'link',
+      },
+    ]);
+  });
+});
 
 describe('resolveDrop', () => {
   it('moves a session to the end of its current category using the pre-removal boundary', () => {
@@ -200,7 +496,7 @@ describe('resolveDrop', () => {
     const openTabs = [openTab(101), openTab(102)];
     const input = {
       payload: payload('open-tabs'),
-      target: target('new-group'),
+      target: target('new-session-insert'),
       state,
       openTabs,
     };
@@ -226,7 +522,7 @@ describe('resolveDrop', () => {
 
     expect(resolveDrop({
       payload: { ...payload('open-tabs'), tabIds: [101] },
-      target: target('new-group'),
+      target: target('new-session-insert'),
       state,
       openTabs: forged,
     })).toBeNull();
@@ -263,9 +559,14 @@ describe('resolveDrop', () => {
     ['group', 'category-column', 'move-session'],
     ['category', 'category-reorder', 'reorder-category'],
     ['tab', 'group-body', 'move-tabs'],
+    ['tab', 'tab-before', 'move-tabs'],
+    ['tab', 'new-session-insert', 'create-session'],
+    ['tabs', 'group-body', 'move-tabs'],
     ['tabs', 'tab-before', 'move-tabs'],
+    ['tabs', 'new-session-insert', 'create-session'],
     ['open-tabs', 'group-body', 'copy-open-tabs'],
-    ['open-tabs', 'new-group', 'create-session'],
+    ['open-tabs', 'tab-before', 'copy-open-tabs'],
+    ['open-tabs', 'new-session-insert', 'create-session'],
   ] as const)('resolves %s onto %s as %s', (sourceKind, targetKind, intentKind) => {
     const result = resolveDrop({
       payload: payload(sourceKind),
@@ -278,22 +579,19 @@ describe('resolveDrop', () => {
   });
 
   it.each([
-    ['tab', 'new-group'],
-    ['tabs', 'new-group'],
     ['tab', 'group-insert'],
     ['tabs', 'group-insert'],
     ['tab', 'category-column'],
     ['tabs', 'category-column'],
-    ['open-tabs', 'tab-before'],
     ['open-tabs', 'group-insert'],
     ['open-tabs', 'category-column'],
-  ] as const)('accepts %s onto %s', (sourceKind, targetKind) => {
+  ] as const)('rejects %s onto session-only %s', (sourceKind, targetKind) => {
     expect(resolveDrop({
       payload: payload(sourceKind),
       target: target(targetKind),
       state: fixtureState(),
       openTabs: sourceKind === 'open-tabs' ? [openTab(101), openTab(102)] : undefined,
-    })).not.toBeNull();
+    })).toBeNull();
   });
 
   it('rejects a session onto a session body instead of merging sessions', () => {
@@ -342,7 +640,7 @@ describe('resolveDrop', () => {
     })).toBeNull();
     expect(resolveDrop({
       payload: payload('tab'),
-      target: { ...target('new-group'), index: -1 },
+      target: { ...target('new-session-insert'), index: -1 },
       state,
     })).toBeNull();
     expect(resolveDrop({
@@ -355,10 +653,10 @@ describe('resolveDrop', () => {
   it('rejects empty, unsafe, and duplicate Open Tabs payloads', () => {
     const state = fixtureState();
     const base = payload('open-tabs');
-    expect(resolveDrop({ payload: { ...base, tabIds: [] }, target: target('new-group'), state })).toBeNull();
-    expect(resolveDrop({ payload: { ...base, tabIds: [101, 101] }, target: target('new-group'), state })).toBeNull();
-    expect(resolveDrop({ payload: { ...base, tabIds: [101, Number.MAX_SAFE_INTEGER + 1] }, target: target('new-group'), state })).toBeNull();
-    expect(resolveDrop({ payload: { ...base, windowId: Number.NaN }, target: target('new-group'), state })).toBeNull();
+    expect(resolveDrop({ payload: { ...base, tabIds: [] }, target: target('new-session-insert'), state })).toBeNull();
+    expect(resolveDrop({ payload: { ...base, tabIds: [101, 101] }, target: target('new-session-insert'), state })).toBeNull();
+    expect(resolveDrop({ payload: { ...base, tabIds: [101, Number.MAX_SAFE_INTEGER + 1] }, target: target('new-session-insert'), state })).toBeNull();
+    expect(resolveDrop({ payload: { ...base, windowId: Number.NaN }, target: target('new-session-insert'), state })).toBeNull();
   });
 
   it('returns null for malformed runtime payload boundaries', () => {
@@ -395,7 +693,7 @@ describe('resolveDrop', () => {
     })).toBeNull();
     expect(resolveDrop({
       payload: payload('tab'),
-      target: { kind: 'category-column', category: 42, workspaceId: 'workspace-a' } as unknown as DropTarget,
+      target: { kind: 'new-session-insert', category: 42, index: 0, workspaceId: 'workspace-a' } as unknown as DropTarget,
       state,
     })).toBeNull();
     expect(resolveDrop({
@@ -533,8 +831,26 @@ describe('resolveDrop', () => {
 
     expect(beforeNoOp).toBeNull();
     expect(afterNoOp).toBeNull();
-    expect(beforeReorder).toMatchObject({ kind: 'reorder-category', placement: 'before' });
-    expect(afterReorder).toMatchObject({ kind: 'reorder-category', placement: 'after' });
+    expect(beforeReorder).toMatchObject({
+      kind: 'reorder-category',
+      placement: 'before',
+      expectedCategoryOrder: [
+        'inbox',
+        'saved',
+        'archive',
+        'folder:folder-a',
+      ],
+    });
+    expect(afterReorder).toMatchObject({
+      kind: 'reorder-category',
+      placement: 'after',
+      expectedCategoryOrder: [
+        'inbox',
+        'saved',
+        'archive',
+        'folder:folder-a',
+      ],
+    });
   });
 
   it('preserves raw folder category order while resolving a reorder', () => {
@@ -672,6 +988,7 @@ describe('executeDropIntent', () => {
         targetCategoryId: 'saved',
         placement: 'before',
         workspaceId: 'workspace-b',
+        expectedCategoryOrder: ['inbox', 'saved', 'archive'],
       },
       {
         kind: 'copy-open-tabs',
@@ -706,8 +1023,8 @@ describe('executeDropIntent', () => {
     });
     const openTabRecords = [openTab(101), openTab(102)];
     const copyOpenTabs = resolveDrop({ payload: payload('open-tabs'), target: target('group-body'), state: before, openTabs: openTabRecords });
-    const createOpenSession = resolveDrop({ payload: payload('open-tabs'), target: target('new-group'), state: before, openTabs: openTabRecords });
-    const createSavedSession = resolveDrop({ payload: payload('tab'), target: target('new-group'), state: before });
+    const createOpenSession = resolveDrop({ payload: payload('open-tabs'), target: target('new-session-insert'), state: before, openTabs: openTabRecords });
+    const createSavedSession = resolveDrop({ payload: payload('tab'), target: target('new-session-insert'), state: before });
     if (!moveSession || !reorderCategory || !moveSavedTabs || !copyOpenTabs || !createOpenSession || !createSavedSession) {
       throw new Error('Expected all command intents to resolve.');
     }
@@ -776,11 +1093,34 @@ describe('drag UI geometry and cleanup', () => {
       payload: { kind: 'group', groupId: 'source', workspaceId: 'workspace-a' },
       target: { kind: 'group-insert', category: 'inbox', index: 0, workspaceId: 'workspace-a' },
       sourceRect: { width: 100, height: 60, top: 10, left: 20 },
+      previewRect: { width: 320, height: 280, top: 10, left: 20 },
+      previewLayout: { columns: 2, mode: 'details', rows: 2 },
       marker: { kind: 'group', index: 0 },
+      previewItems: [{
+        id: 'b',
+        title: 'Saved Link',
+        domain: 'b.test',
+        itemType: 'link',
+      }],
     };
 
-    expect(clearDragState(activeDragState)).toEqual(IDLE_DRAG_STATE);
+    const first = clearDragState(activeDragState);
+    const second = clearDragState(activeDragState);
+
+    expect(first).toEqual(IDLE_DRAG_STATE);
+    expect(first.previewItems).toEqual([]);
+    expect(first.previewRect).toBeNull();
+    expect(first.previewLayout).toBeNull();
+    expect(Object.isFrozen(first.previewItems)).toBe(true);
+    expect(first.previewItems).not.toBe(second.previewItems);
+    expect(Object.keys(first)).toContain('previewItems');
+    expect(Object.getOwnPropertyDescriptor(first, 'previewItems')).toMatchObject({
+      configurable: true,
+      enumerable: true,
+      writable: true,
+    });
     expect(activeDragState.payload).not.toBeNull();
+    expect(activeDragState.previewItems).toHaveLength(1);
   });
 
   it.each([

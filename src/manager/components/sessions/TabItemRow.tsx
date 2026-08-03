@@ -1,22 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActionIcon,
   Button,
   Checkbox,
   Group as MantineGroup,
   Text,
   Textarea,
-  Tooltip,
 } from '@mantine/core';
 import {
-  IconCheck,
-  IconCopy,
-  IconFileText,
-  IconLink,
-  IconNotes,
-  IconTrash,
-  IconX,
-} from '@tabler/icons-react';
+  Check as IconCheck,
+  Copy,
+  FilePenLine,
+  FileText as IconFileText,
+  Link as IconLink,
+  Trash,
+  Trash as IconTrash,
+  X,
+  X as IconX,
+} from 'lucide-react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { TabItem } from '../../../shared/model';
@@ -30,11 +30,16 @@ import {
 } from '../../core/dnd';
 import { useToast } from '../../hooks/useToast';
 import {
+  getTabHoverDomain,
+  isContextMenuKey,
+  ManagerMenuItem,
   useManagerInfoTrigger,
   useManagerOverlayCommands,
-  useManagerPreviewOpen,
 } from '../../hooks/useManagerOverlays';
 import { useDestructiveConfirmation } from '../../../shared/components/DestructiveConfirmation';
+import { AccessibleIconAction } from '../../../shared/components/AccessibleIconAction';
+import { Favicon } from '../../../shared/components/Favicon';
+import { TabBoardIcon } from '../../../shared/components/TabBoardIcon';
 
 export function getTabDropMarkerPlacement(
   marker: DragMarker | null | undefined,
@@ -47,6 +52,26 @@ export function getTabDropMarkerPlacement(
     && marker.placement !== 'body'
     ? marker.placement
     : null;
+}
+
+const SAVED_TAB_MENU_INVOKER_SELECTOR = [
+  'button:not(:disabled)',
+  'input:not(:disabled)',
+  'textarea:not(:disabled)',
+  'select:not(:disabled)',
+  'a[href]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
+export function getSavedTabMenuTrigger(
+  target: EventTarget | null,
+  row: HTMLElement,
+  fallback: HTMLElement,
+): HTMLElement {
+  const element = target instanceof Element
+    ? target.closest<HTMLElement>(SAVED_TAB_MENU_INVOKER_SELECTOR)
+    : null;
+  return element && row.contains(element) ? element : fallback;
 }
 
 interface TabItemRowProps {
@@ -97,11 +122,12 @@ export function TabItemRow({
   const [isEditingNote, setIsEditingNote] = useState(false);
   const [noteValue, setNoteValue] = useState(tab.note);
   const noteTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const { closeOverlays } = useManagerOverlayCommands();
+  const titleTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const { closeOverlays, openMenu } = useManagerOverlayCommands();
   const infoKey = `saved:${groupId}:${tab.id}`;
-  const isPreviewOpen = useManagerPreviewOpen(infoKey);
   const { showError, showSuccess } = useToast();
   const confirmDestructive = useDestructiveConfirmation();
+  const displayText = tab.note || tab.title;
 
   const {
     listeners,
@@ -207,39 +233,81 @@ export function TabItemRow({
   const handleCopy = async () => {
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard is unavailable. Copy the text manually.');
-      await navigator.clipboard.writeText(tab.itemType === ITEM_LINK ? tab.url : tab.note || tab.title);
+      await navigator.clipboard.writeText(tab.itemType === ITEM_LINK ? tab.url : displayText);
       showSuccess('Copied');
     } catch (error: unknown) {
       showError(error instanceof Error ? error.message : String(error));
     }
   };
 
-  const infoActions = (
-    <>
-      <Tooltip label={tab.itemType === ITEM_LINK ? 'Add Note' : 'Edit Note'}>
-        <ActionIcon className="manager-info-card-action" variant="subtle" aria-label={tab.itemType === ITEM_LINK ? 'Add Note' : 'Edit Note'} onClick={handleEditNote}>
-          <IconNotes size={16} aria-hidden="true" />
-        </ActionIcon>
-      </Tooltip>
-      <Tooltip label={tab.itemType === ITEM_LINK ? 'Copy URL' : 'Copy text'}>
-        <ActionIcon className="manager-info-card-action" variant="subtle" aria-label={tab.itemType === ITEM_LINK ? 'Copy URL' : 'Copy text'} onClick={() => void handleCopy()}>
-          <IconCopy size={16} aria-hidden="true" />
-        </ActionIcon>
-      </Tooltip>
-    </>
-  );
-
-  const infoTriggerRef = useManagerInfoTrigger(infoKey, {
+  const registerInfoTrigger = useManagerInfoTrigger(infoKey, {
     kind: 'saved',
     model: {
-      title: tab.title,
-      url: tab.url,
-      favIconUrl: tab.favIconUrl,
-      note: tab.note || (tab.itemType === ITEM_LINK ? '' : tab.title),
+      title: tab.itemType === ITEM_LINK ? tab.title : displayText,
+      domain: getTabHoverDomain(tab.url),
+      link: tab.itemType === ITEM_LINK ? tab.url : '',
       savedAt: tab.createdAt,
-      actions: infoActions,
     },
   });
+  const setTitleTrigger = useCallback((element: HTMLButtonElement | null) => {
+    titleTriggerRef.current = element;
+    registerInfoTrigger(element);
+  }, [registerInfoTrigger]);
+  const menuItems = (
+    <>
+      <ManagerMenuItem
+        description={tab.itemType === ITEM_LINK && !tab.note
+          ? 'Attach context to this saved tab'
+          : 'Edit saved tab context'}
+        icon={FilePenLine}
+        label={tab.itemType === ITEM_LINK && !tab.note ? 'Add Note' : 'Edit Note'}
+        onClick={handleEditNote}
+      />
+      {tab.itemType === ITEM_LINK ? (
+        <ManagerMenuItem
+          description="Copy the saved address"
+          icon={Copy}
+          label="Copy URL"
+          onClick={handleCopy}
+        />
+      ) : (
+        <ManagerMenuItem
+          description="Copy the saved text"
+          icon={Copy}
+          label="Copy Text"
+          onClick={handleCopy}
+        />
+      )}
+      <ManagerMenuItem
+        description="Move this item to Bin"
+        icon={Trash}
+        label={tab.itemType === ITEM_LINK
+          ? 'Delete Saved Tab'
+          : 'Delete Saved Note'}
+        danger
+        disabled={locked}
+        lifecycleAllowance="saved-tab-removal"
+        onClick={handleDelete}
+      />
+    </>
+  );
+  const openSavedTabMenu = (
+    anchor: { x: number; y: number },
+    openedByKeyboard: boolean,
+    trigger: HTMLElement,
+  ) => {
+    closeOverlays();
+    openMenu({
+      id: `saved-tab-menu:${groupId}:${tab.id}`,
+      kind: 'saved-tab',
+      anchor,
+      content: menuItems,
+      trigger,
+      openedByKeyboard,
+      restoreFocusOnClose: true,
+      ariaLabel: 'Saved Tab Actions',
+    });
+  };
 
   if (isEditingNote) {
     return (
@@ -326,48 +394,101 @@ export function TabItemRow({
         className="tab-item-row__content"
         data-selection-mode={selectionMode || undefined}
         data-selected={selected || undefined}
-        {...(!isDragOverlay ? listeners : {})}
+        onContextMenu={isDragOverlay ? undefined : (event) => {
+          const fallback = titleTriggerRef.current;
+          if (!fallback) return;
+          event.preventDefault();
+          event.stopPropagation();
+          openSavedTabMenu(
+            { x: event.clientX, y: event.clientY },
+            false,
+            getSavedTabMenuTrigger(event.target, event.currentTarget, fallback),
+          );
+        }}
         onPointerDown={(event) => {
-          if (event.target instanceof Element && event.target.closest('button, input, textarea, a, [data-no-drag]')) {
+          if (
+            isDragOverlay
+            || event.pointerType === 'touch'
+            || (
+              event.target instanceof Element
+              && event.target.closest('button, input, textarea, a, [data-no-drag]')
+            )
+          ) {
             return;
           }
           listeners?.onPointerDown?.(event);
         }}
+        onTouchStart={(event) => {
+          if (
+            isDragOverlay
+            || (
+              event.target instanceof Element
+              && event.target.closest('button, input, textarea, a, [data-no-drag]')
+            )
+          ) {
+            return;
+          }
+          listeners?.onTouchStart?.(event);
+        }}
         onKeyDown={(event) => {
+          if (!isDragOverlay && isContextMenuKey(event)) {
+            const fallback = titleTriggerRef.current;
+            if (!fallback) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const trigger = getSavedTabMenuTrigger(
+              event.target,
+              event.currentTarget,
+              fallback,
+            );
+            const triggerRect = trigger.getBoundingClientRect();
+            openSavedTabMenu(
+              { x: triggerRect.left, y: triggerRect.bottom },
+              true,
+              trigger,
+            );
+            return;
+          }
           if (event.target instanceof Element && event.target.closest('button, input, textarea, a, [data-no-drag]')) {
             return;
           }
           listeners?.onKeyDown?.(event);
         }}
       >
-        <span className="tab-item-row__icon" aria-hidden="true">
+        <span className="manager-tab-owner-slot tab-item-row__owner-slot">
+          <span className="tab-item-row__icon" aria-hidden="true">
           {tab.itemType === ITEM_LINK
-            ? <IconLink size={14} aria-hidden="true" />
-            : <IconFileText size={14} aria-hidden="true" />}
+            ? (
+              <Favicon
+                src={tab.favIconUrl}
+                size={16}
+                fallback={<IconLink aria-hidden="true" />}
+              />
+            )
+            : <IconFileText size={16} aria-hidden="true" />}
+          </span>
+          {!isDragOverlay && (
+            <Checkbox
+              size="sm"
+              name="saved-tab-selection"
+              checked={selected}
+              aria-label={`Select ${tab.title}`}
+              className="tab-item-row__select"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+              onChange={() => (selectionMode ? onToggleSelection : onStartSelection)?.()}
+            />
+          )}
         </span>
-        {!isDragOverlay && (
-          <Checkbox
-            size="sm"
-             name="saved-tab-selection"
-            checked={selected}
-            aria-label={`Select ${tab.title}`}
-            className="tab-item-row__select"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => event.stopPropagation()}
-            onChange={() => (selectionMode ? onToggleSelection : onStartSelection)?.()}
-          />
-        )}
         <div className="tab-item-row__details">
           {tab.itemType === ITEM_LINK ? (
             <button
-              ref={isDragOverlay ? undefined : infoTriggerRef}
+              ref={isDragOverlay ? undefined : setTitleTrigger}
               type="button"
               className="tab-item-row__title"
               data-no-drag
               data-info-popover={isDragOverlay ? undefined : 'saved'}
               data-info-key={isDragOverlay ? undefined : infoKey}
-              aria-haspopup={isDragOverlay ? undefined : 'dialog'}
-              aria-expanded={isDragOverlay ? undefined : isPreviewOpen}
               onClick={isDragOverlay ? undefined : handleClick}
               disabled={isDragOverlay}
               tabIndex={isDragOverlay ? -1 : undefined}
@@ -376,22 +497,25 @@ export function TabItemRow({
             </button>
           ) : (
             <button
-              ref={isDragOverlay ? undefined : infoTriggerRef}
+              ref={isDragOverlay ? undefined : setTitleTrigger}
               type="button"
               className="tab-item-row__title"
               data-info-popover={isDragOverlay ? undefined : 'saved'}
               data-info-key={isDragOverlay ? undefined : infoKey}
-              aria-haspopup={isDragOverlay ? undefined : 'dialog'}
-              aria-expanded={isDragOverlay ? undefined : isPreviewOpen}
               disabled={isDragOverlay}
               tabIndex={isDragOverlay ? -1 : 0}
             >
-              {tab.note || tab.title}
+              {displayText}
             </button>
           )}
           {tab.itemType === ITEM_LINK && tab.url && (
             <Text className="tab-item-row__url" component="span" size="xs" c="dimmed">
               {tab.url}
+            </Text>
+          )}
+          {tab.itemType !== ITEM_LINK && (
+            <Text className="tab-item-row__type" component="span" c="dimmed">
+              note
             </Text>
           )}
           {tab.itemType === ITEM_LINK && tab.note && (
@@ -400,20 +524,16 @@ export function TabItemRow({
             </Text>
           )}
         </div>
-        {!isDragOverlay && !selectionMode ? (
-          <Tooltip label="Delete">
-            <ActionIcon
-              size="xs"
-              variant="subtle"
-              color="red"
-              className="tab-item-row__more"
-              aria-label="Delete"
-              disabled={locked}
-              onClick={handleDelete}
-            >
-              <IconX size={14} aria-hidden="true" />
-            </ActionIcon>
-          </Tooltip>
+        {!isDragOverlay ? (
+          <AccessibleIconAction
+            label="Delete"
+            danger
+            className="tab-item-row__delete"
+            disabled={locked}
+            onClick={handleDelete}
+          >
+            <TabBoardIcon icon={X} />
+          </AccessibleIconAction>
         ) : null}
       </MantineGroup>
         {showsAfterMarker && <span className="tab-item-row__drop-marker tab-item-row__drop-marker--after" aria-hidden="true" />}

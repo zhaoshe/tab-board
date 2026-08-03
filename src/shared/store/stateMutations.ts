@@ -1,7 +1,10 @@
 import {
+  BIN_LIMIT,
   compactBin,
   clone,
   nowIso,
+  normalizeCategoryColor,
+  normalizeWorkspaceEmoji,
   resolveRestoreGroupPlacement,
   validateFolderName,
   dedupeTabItems,
@@ -24,6 +27,7 @@ import {
   isDropIntentAlreadyApplied,
 } from '../model/drop-operations';
 import {
+  categoryOrder as getCanonicalCategoryOrder,
   moveSessionToCategory,
   type CategoryFilter,
 } from '../model/categories';
@@ -45,15 +49,29 @@ import {
   MAX_REFS,
   MAX_TITLE_BYTES,
   MAX_URL_BYTES,
+  normalizeWorkspaceName,
+  workspaceNameKey,
 } from './mutationValidation';
+
+export const DELETE_TABS_LIMIT = BIN_LIMIT;
 
 export type StateMutation =
   | { type: 'set-active-workspace'; workspaceId: string; updatedAt: string }
   | { type: 'add-workspace'; workspace: Workspace }
   | { type: 'rename-workspace'; id: string; name: string; updatedAt: string }
+  | { type: 'update-workspace'; id: string; name: string; emoji: string; updatedAt: string }
+  | { type: 'set-workspace-order'; orderedWorkspaceIds: string[]; updatedAt: string }
   | { type: 'delete-workspace'; id: string; newActiveWorkspaceId: string; updatedAt: string }
   | { type: 'add-folder'; folder: Folder }
   | { type: 'rename-folder'; id: string; name: string; updatedAt: string }
+  | {
+      type: 'update-folder';
+      id: string;
+      name: string;
+      color: string;
+      expected: { name: string; color: string };
+      updatedAt: string;
+    }
   | { type: 'delete-folder'; id: string; updatedAt: string }
   | { type: 'set-folder-collapsed'; id: string; collapsed: boolean; updatedAt: string }
   | { type: 'add-group'; group: Group; updatedAt: string }
@@ -72,6 +90,15 @@ export type StateMutation =
   | { type: 'add-tab'; groupId: string; tab: TabItem; updatedAt: string }
   | { type: 'update-tab'; groupId: string; tabId: string; updates: Partial<TabItem>; updatedAt: string }
   | { type: 'delete-tab'; groupId: string; tabId: string; binEntry: BinEntry; updatedAt: string }
+  | {
+      type: 'delete-tabs';
+      deletions: Array<{
+        groupId: string;
+        tabId: string;
+        binEntry: BinEntry;
+      }>;
+      updatedAt: string;
+    }
   | { type: 'restore-group'; entryId: string; group: Group; index: number; updatedAt: string }
   | {
       type: 'restore-tab';
@@ -107,6 +134,7 @@ export type StateMutation =
   | {
       type: 'set-category-order';
       workspaceId: string;
+      expectedCategoryOrder: string[];
       categoryOrder: string[];
       updatedAt: string;
     }
@@ -138,6 +166,22 @@ function isString(value: unknown): value is string {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && isDenseArray(value) && value.every(isString);
+}
+
+function isUniqueStringArray(value: unknown): value is string[] {
+  return isStringArray(value)
+    && value.length <= MAX_REFS
+    && new Set(value).size === value.length
+    && value.every(isEntityId);
+}
+
+function isExpectedFolder(value: unknown): value is { name: string; color: string } {
+  return isRecord(value)
+    && hasOnlyKeys(value, ['name', 'color'])
+    && isBoundedString(value.name, MAX_TITLE_BYTES)
+    && normalizedFolderName(value.name) === value.name
+    && value.name.length > 0
+    && normalizeCategoryColor(value.color) === value.color;
 }
 
 function isExpectedRevision(value: unknown): boolean {
@@ -211,7 +255,7 @@ function isGroup(value: unknown): value is Group {
 function isFolder(value: unknown): value is Folder {
   if (!isRecord(value)) return false;
   return isEntityId(value.id) && isBoundedString(value.name, MAX_TITLE_BYTES)
-    && isEntityId(value.workspaceId) && isBoundedString(value.color, MAX_TITLE_BYTES)
+    && isEntityId(value.workspaceId) && normalizeCategoryColor(value.color) !== null
     && typeof value.collapsed === 'boolean' && isTimestamp(value.createdAt)
     && isTimestamp(value.updatedAt);
 }
@@ -219,6 +263,8 @@ function isFolder(value: unknown): value is Folder {
 function isWorkspace(value: unknown): value is Workspace {
   if (!isRecord(value)) return false;
   return isEntityId(value.id) && isBoundedString(value.name, MAX_TITLE_BYTES)
+    && typeof value.emoji === 'string'
+    && normalizeWorkspaceEmoji(value.emoji) === value.emoji
     && isTimestamp(value.createdAt) && isTimestamp(value.updatedAt);
 }
 
@@ -327,12 +373,27 @@ export function isStateMutation(value: unknown): value is StateMutation {
       return isWorkspace(value.workspace);
     case 'rename-workspace':
       return isString(value.id) && isBoundedString(value.name, MAX_TITLE_BYTES) && isUpdated(value);
+    case 'update-workspace':
+      return isString(value.id)
+        && isBoundedString(value.name, MAX_TITLE_BYTES)
+        && typeof value.emoji === 'string'
+        && normalizeWorkspaceEmoji(value.emoji) === value.emoji
+        && isUpdated(value);
+    case 'set-workspace-order':
+      return isStringArray(value.orderedWorkspaceIds) && isUpdated(value);
     case 'delete-workspace':
       return isString(value.id) && isString(value.newActiveWorkspaceId) && isUpdated(value);
     case 'add-folder':
       return isFolder(value.folder);
     case 'rename-folder':
       return isString(value.id) && isBoundedString(value.name, MAX_TITLE_BYTES) && isUpdated(value);
+    case 'update-folder':
+      return hasOnlyKeys(value, ['type', 'id', 'name', 'color', 'expected', 'updatedAt'])
+        && isEntityId(value.id)
+        && isBoundedString(value.name, MAX_TITLE_BYTES)
+        && normalizeCategoryColor(value.color) !== null
+        && isExpectedFolder(value.expected)
+        && isUpdated(value);
     case 'delete-folder':
       return isString(value.id) && isUpdated(value);
     case 'set-folder-collapsed':
@@ -357,6 +418,25 @@ export function isStateMutation(value: unknown): value is StateMutation {
     case 'delete-tab':
       return isString(value.groupId) && isString(value.tabId)
         && isDeleteTabBinEntry(value.binEntry, value.groupId, value.tabId) && isUpdated(value);
+    case 'delete-tabs':
+      return hasOnlyKeys(value, ['type', 'deletions', 'updatedAt'])
+        && Array.isArray(value.deletions)
+        && value.deletions.length > 0
+        && value.deletions.length <= DELETE_TABS_LIMIT
+        && isDenseArray(value.deletions)
+        && value.deletions.every((deletion) =>
+          isRecord(deletion)
+          && hasOnlyKeys(deletion, ['groupId', 'tabId', 'binEntry'])
+          && isString(deletion.groupId)
+          && isString(deletion.tabId)
+          && isDeleteTabBinEntry(
+            deletion.binEntry,
+            deletion.groupId,
+            deletion.tabId,
+          ))
+        && new Set(value.deletions.map((deletion) =>
+          `${deletion.groupId}:${deletion.tabId}`)).size === value.deletions.length
+        && isUpdated(value);
     case 'restore-group':
       return isString(value.entryId) && isGroup(value.group) &&
         typeof value.index === 'number' && Number.isFinite(value.index) && isUpdated(value);
@@ -387,7 +467,17 @@ export function isStateMutation(value: unknown): value is StateMutation {
       return isString(value.groupId) && isString(value.tabId)
         && isBoundedString(value.text, MAX_TITLE_BYTES) && isUpdated(value);
     case 'set-category-order':
-      return isString(value.workspaceId) && isStringArray(value.categoryOrder) && isUpdated(value);
+      return hasOnlyKeys(value, [
+        'type',
+        'workspaceId',
+        'expectedCategoryOrder',
+        'categoryOrder',
+        'updatedAt',
+      ])
+        && isEntityId(value.workspaceId)
+        && isUniqueStringArray(value.expectedCategoryOrder)
+        && isUniqueStringArray(value.categoryOrder)
+        && isUpdated(value);
     case 'remove-restored-refs':
       return Array.isArray(value.refs) && isDenseArray(value.refs) && value.refs.every(isTabRef) && isUpdated(value);
     case 'drop-intent':
@@ -465,6 +555,13 @@ function mutationWithInvalidTabUrl(value: unknown): TabItem['itemType'] | undefi
     case 'delete-group':
     case 'delete-tab':
       return isRecord(value.binEntry) ? hasInvalidFullTabUrl(value.binEntry.item) : undefined;
+    case 'delete-tabs':
+      return Array.isArray(value.deletions)
+        ? hasInvalidFullTabUrl(value.deletions.map((deletion) =>
+            isRecord(deletion) && isRecord(deletion.binEntry)
+              ? deletion.binEntry.item
+              : deletion))
+        : undefined;
     case 'update-group': {
       const updates = isRecord(value.updates) ? value.updates : undefined;
       return updates && Object.prototype.hasOwnProperty.call(updates, 'tabs')
@@ -617,11 +714,13 @@ function restoreFolderId(state: TabBoardState, entry: BinEntry, workspaceId: str
 function groupPlacementPosition(
   state: TabBoardState,
   group: Group,
+  ignoredGroupIds: ReadonlySet<string> = new Set(),
 ): string {
   const index = state.groups
     .filter((candidate) => candidate.workspaceId === group.workspaceId
       && candidate.folderId === group.folderId
-      && candidate.starred === group.starred)
+      && candidate.starred === group.starred
+      && !ignoredGroupIds.has(candidate.id))
     .findIndex((candidate) => candidate.id === group.id);
   return `${group.workspaceId}:${group.folderId ?? 'inbox'}:${group.starred ? 'starred' : 'regular'}:${index}`;
 }
@@ -630,13 +729,33 @@ function lockedSiblingPlacementChanged(
   before: TabBoardState,
   after: TabBoardState,
   movedGroupId: string,
+  ignoredRemovedGroupIds: ReadonlySet<string> = new Set(),
 ): boolean {
   return before.groups
     .filter((group) => group.locked && group.id !== movedGroupId)
     .some((lockedGroup) => {
       const next = after.groups.find((group) => group.id === lockedGroup.id);
-      return !next || groupPlacementPosition(before, lockedGroup) !== groupPlacementPosition(after, next);
+      return !next
+        || groupPlacementPosition(
+          before,
+          lockedGroup,
+          ignoredRemovedGroupIds,
+        ) !== groupPlacementPosition(after, next);
     });
+}
+
+function removedUnlockedMoveTabSourceIds(
+  before: TabBoardState,
+  after: TabBoardState,
+  intent: Extract<DropIntent, { kind: 'move-tabs' }>,
+): Set<string> {
+  const sourceIds = new Set(intent.refs.map(({ groupId }) => groupId));
+  return new Set(before.groups.flatMap((group) =>
+    sourceIds.has(group.id)
+    && !group.locked
+    && !after.groups.some(({ id }) => id === group.id)
+      ? [group.id]
+      : []));
 }
 
 function simulateSessionMove(
@@ -688,10 +807,14 @@ function assertGroupPlacementMutationSafety(
 }
 
 function simulateDeleteFolder(state: TabBoardState, folderId: string): TabBoardState | undefined {
-  if (!state.folders.some((folder) => folder.id === folderId)) return undefined;
+  const folder = state.folders.find((item) => item.id === folderId);
+  if (!folder) return undefined;
   return {
     ...state,
-    groups: state.groups.map((group) => group.folderId === folderId ? { ...group, folderId: null } : group),
+    groups: state.groups.map((group) =>
+      group.workspaceId === folder.workspaceId && group.folderId === folderId
+        ? { ...group, folderId: null }
+        : group),
   };
 }
 
@@ -771,10 +894,14 @@ export function isLockedDropIntent(
   const after = intent.kind === 'move-session'
     ? simulateSessionMove(state, intent.groupId, intent.category, intent.index)
     : executeDropIntent(state, intent, openTabs, operationId);
+  const ignoredRemovedGroupIds = intent.kind === 'move-tabs' && after
+    ? removedUnlockedMoveTabSourceIds(state, after, intent)
+    : new Set<string>();
   return Boolean(after && lockedSiblingPlacementChanged(
     state,
     after,
     intent.kind === 'move-session' ? intent.groupId : '',
+    ignoredRemovedGroupIds,
   ));
 }
 
@@ -835,7 +962,10 @@ function assertOrdinaryMutationSafety(state: TabBoardState, mutation: StateMutat
       assertGroupsUnlocked(state.groups.filter((group) => group.workspaceId === mutation.id));
       return;
     case 'delete-folder': {
-      assertGroupsUnlocked(state.groups.filter((group) => group.folderId === mutation.id));
+      const folder = state.folders.find((item) => item.id === mutation.id);
+      assertGroupsUnlocked(state.groups.filter((group) =>
+        group.workspaceId === folder?.workspaceId
+        && group.folderId === mutation.id));
       assertLockedSiblingPlacementUnchanged(state, simulateDeleteFolder(state, mutation.id), '');
       return;
     }
@@ -950,6 +1080,10 @@ function assertOrdinaryMutationSafety(state: TabBoardState, mutation: StateMutat
     case 'delete-tab':
       assertGroupUnlocked(state.groups.find((group) => group.id === mutation.groupId));
       return;
+    case 'delete-tabs':
+      assertGroupsUnlocked(state.groups.filter((group) =>
+        mutation.deletions.some(({ groupId }) => groupId === group.id)));
+      return;
     case 'move-tab':
       assertGroupUnlocked(state.groups.find((group) => group.id === mutation.groupId));
       assertGroupUnlocked(state.groups.find((group) => group.id === mutation.targetGroupId));
@@ -1034,6 +1168,44 @@ function assertStateMutationSemantics(state: TabBoardState, mutation: StateMutat
         invalid(new StateMutationValidationError('WORKSPACE_NOT_FOUND', 'Workspace not found.'));
       }
       return;
+    case 'update-workspace': {
+      const workspace = state.workspaces.find((item) => item.id === mutation.id);
+      if (!workspace) {
+        invalid(new StateMutationValidationError('WORKSPACE_NOT_FOUND', 'Workspace not found.'));
+      }
+      const normalizedName = normalizeWorkspaceName(mutation.name);
+      if (!normalizedName) {
+        throw new StateMutationValidationError(
+          'WORKSPACE_NAME_INVALID',
+          'Workspace name is required.',
+        );
+      }
+      if (normalizeWorkspaceEmoji(mutation.emoji) !== mutation.emoji) {
+        invalid(new StateMutationValidationError('WORKSPACE_EMOJI_INVALID', 'Workspace emoji must be normalized.'));
+      }
+      const nameKey = workspaceNameKey(normalizedName);
+      if (state.workspaces.some((item) =>
+        item.id !== mutation.id && workspaceNameKey(item.name) === nameKey)) {
+        invalid(new StateMutationValidationError(
+          'WORKSPACE_NAME_DUPLICATE',
+          'A workspace with this name already exists.',
+        ));
+      }
+      return;
+    }
+    case 'set-workspace-order': {
+      const currentIds = new Set(state.workspaces.map(({ id }) => id));
+      const orderedIds = new Set(mutation.orderedWorkspaceIds);
+      if (mutation.orderedWorkspaceIds.length !== state.workspaces.length
+        || orderedIds.size !== mutation.orderedWorkspaceIds.length
+        || mutation.orderedWorkspaceIds.some((id) => !currentIds.has(id))) {
+        invalid(new StateMutationValidationError(
+          'WORKSPACE_ORDER_INVALID',
+          'Workspace order must contain every current workspace exactly once.',
+        ));
+      }
+      return;
+    }
     case 'delete-workspace': {
       const target = state.workspaces.find((workspace) => workspace.id === mutation.id);
       if (!target) invalid(new StateMutationValidationError('WORKSPACE_NOT_FOUND', 'Workspace not found.'));
@@ -1066,11 +1238,29 @@ function assertStateMutationSemantics(state: TabBoardState, mutation: StateMutat
         invalid(new StateMutationValidationError('FOLDER_NOT_FOUND', 'Folder not found.'));
       }
       return;
-    case 'set-category-order':
-      if (!state.workspaces.some((workspace) => workspace.id === mutation.workspaceId)) {
-        invalid(new StateMutationValidationError('WORKSPACE_NOT_FOUND', 'Workspace not found.'));
+    case 'update-folder': {
+      const folder = state.folders.find((item) => item.id === mutation.id);
+      if (!folder) {
+        invalid(new StateMutationValidationError('FOLDER_NOT_FOUND', 'Folder not found.'));
+      }
+      if (!sameFolderValue(folder!, mutation.expected)) {
+        invalid(new StateMutationValidationError(
+          'CATEGORY_MUTATION_CONFLICT',
+          'Category changed before the edit could be applied.',
+        ));
       }
       return;
+    }
+    case 'set-category-order': {
+      const currentOrder = getCanonicalCategoryOrder(state, mutation.workspaceId);
+      if (!sameStringOrder(currentOrder, mutation.expectedCategoryOrder)) {
+        invalid(new StateMutationValidationError(
+          'CATEGORY_MUTATION_CONFLICT',
+          'Category order changed before the reorder could be applied.',
+        ));
+      }
+      return;
+    }
     case 'add-tab': {
       if (!state.groups.some((group) => group.id === mutation.groupId)) {
         invalid(new StateMutationValidationError('GROUP_NOT_FOUND', 'Group not found.'));
@@ -1250,6 +1440,36 @@ function assertStateMutationSemantics(state: TabBoardState, mutation: StateMutat
       }
       return;
     }
+    case 'delete-tabs': {
+      const binEntryIds = new Set<string>();
+      for (const deletion of mutation.deletions) {
+        const group = state.groups.find((item) => item.id === deletion.groupId);
+        if (!group) {
+          throw new StateMutationValidationError(
+            'GROUP_NOT_FOUND',
+            'Group not found.',
+          );
+        }
+        const targetTab = group.tabs.find((tab) => tab.id === deletion.tabId);
+        if (!targetTab) {
+          invalid(new StateMutationValidationError(
+            'TAB_NOT_FOUND',
+            'Tab not found in group.',
+          ));
+          return;
+        }
+        if (binEntryIds.has(deletion.binEntry.id)
+          || hasBinEntryId(state, deletion.binEntry.id)
+          || !matchesDeleteTabSnapshot(deletion.binEntry, group, targetTab)) {
+          invalid(new StateMutationValidationError(
+            'DUPLICATE_ENTITY_ID',
+            'Tab snapshot does not match the live tab.',
+          ));
+        }
+        binEntryIds.add(deletion.binEntry.id);
+      }
+      return;
+    }
     case 'move-tab': {
       const source = state.groups.find((group) => group.id === mutation.groupId);
       const target = state.groups.find((group) => group.id === mutation.targetGroupId);
@@ -1426,6 +1646,16 @@ function hasUniqueDeleteBinEvidence(state: TabBoardState, binEntry: BinEntry): b
   return matchesDeleteBinEntrySnapshot(evidence, binEntry);
 }
 
+function isDeleteTabsAlreadyApplied(
+  state: TabBoardState,
+  mutation: Extract<StateMutation, { type: 'delete-tabs' }>,
+): boolean {
+  return mutation.deletions.every(({ tabId, binEntry }) =>
+    !state.groups.some((group) =>
+      group.tabs.some((tab) => tab.id === tabId))
+    && hasUniqueDeleteBinEvidence(state, binEntry));
+}
+
 function matchesDeleteGroupSnapshot(binEntry: BinEntry, group: Group): boolean {
   return binEntry.kind === 'group'
     && binEntry.source === 'group'
@@ -1452,9 +1682,14 @@ function matchesDeleteTabSnapshot(binEntry: BinEntry, group: Group, tab: TabItem
 export type StateMutationValidationCode =
   | 'WORKSPACE_NOT_FOUND'
   | 'WORKSPACE_ID_CONFLICT'
+  | 'WORKSPACE_NAME_INVALID'
+  | 'WORKSPACE_NAME_DUPLICATE'
+  | 'WORKSPACE_EMOJI_INVALID'
+  | 'WORKSPACE_ORDER_INVALID'
   | 'WORKSPACE_DELETE_INVALID'
   | 'FOLDER_ID_CONFLICT'
   | 'FOLDER_NOT_FOUND'
+  | 'CATEGORY_MUTATION_CONFLICT'
   | 'GROUP_NOT_FOUND'
   | 'TAB_NOT_FOUND'
   | 'GROUP_PLACEMENT_INVALID'
@@ -1736,6 +1971,7 @@ function isRestoreTabAlreadyApplied(
 
 function sameWorkspaceContent(source: Workspace, candidate: Workspace): boolean {
   return source.id === candidate.id && source.name === candidate.name
+    && source.emoji === candidate.emoji
     && source.createdAt === candidate.createdAt && source.updatedAt === candidate.updatedAt;
 }
 
@@ -1965,10 +2201,146 @@ function isExactTabNoteReplay(
   return Boolean(tab && tab.note === mutation.text && tab.updatedAt === mutation.updatedAt);
 }
 
+function isExactWorkspaceUpdateReplay(
+  state: TabBoardState,
+  mutation: Extract<StateMutation, { type: 'update-workspace' }>,
+): boolean {
+  const workspace = state.workspaces.find((item) => item.id === mutation.id);
+  const normalizedName = normalizeWorkspaceName(mutation.name);
+  return Boolean(
+    workspace
+    && normalizedName
+    && workspace.name === normalizedName
+    && workspace.emoji === mutation.emoji
+    && workspace.updatedAt === mutation.updatedAt,
+  );
+}
+
+function isExactWorkspaceOrderReplay(
+  state: TabBoardState,
+  mutation: Extract<StateMutation, { type: 'set-workspace-order' }>,
+): boolean {
+  return mutation.orderedWorkspaceIds.length === state.workspaces.length
+    && new Set(mutation.orderedWorkspaceIds).size === state.workspaces.length
+    && mutation.orderedWorkspaceIds.every((id, index) =>
+      id === state.workspaces[index]?.id);
+}
+
+function normalizedFolderName(value: string): string {
+  return value.normalize('NFC').trim();
+}
+
+function sameFolderValue(
+  folder: Pick<Folder, 'name' | 'color'>,
+  value: { name: string; color: string },
+): boolean {
+  return normalizedFolderName(folder.name) === normalizedFolderName(value.name)
+    && normalizeCategoryColor(folder.color) === normalizeCategoryColor(value.color);
+}
+
+function sameStringOrder(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index]);
+}
+
+function isExactFolderUpdateReplay(
+  state: TabBoardState,
+  mutation: Extract<StateMutation, { type: 'update-folder' }>,
+): boolean {
+  const folder = state.folders.find((item) => item.id === mutation.id);
+  return Boolean(
+    folder
+    && folder.updatedAt === mutation.updatedAt
+    && sameFolderValue(folder, mutation),
+  );
+}
+
+function isExactCategoryOrderReplay(
+  state: TabBoardState,
+  mutation: Extract<StateMutation, { type: 'set-category-order' }>,
+): boolean {
+  return state.updatedAt === mutation.updatedAt
+    && sameStringOrder(
+      getCanonicalCategoryOrder(state, mutation.workspaceId),
+      mutation.categoryOrder,
+    );
+}
+
+function assertCategoryCasPreconditions(
+  state: TabBoardState,
+  mutation: StateMutation,
+): void {
+  if (mutation.type === 'update-folder') {
+    const folder = state.folders.find((item) => item.id === mutation.id);
+    if (!folder) {
+      throw new StateMutationValidationError(
+        'FOLDER_NOT_FOUND',
+        'Folder not found.',
+      );
+    }
+    if (!state.workspaces.some(({ id }) => id === folder.workspaceId)) {
+      throw new StateMutationValidationError(
+        'WORKSPACE_NOT_FOUND',
+        'Workspace not found.',
+      );
+    }
+    const validation = validateFolderName(
+      state.folders,
+      folder.workspaceId,
+      mutation.name,
+      mutation.id,
+    );
+    if (!validation.ok) {
+      throw new CategoryValidationError(
+        validation.reason === 'empty'
+          ? 'Category name is required.'
+          : 'A category with this name already exists in this workspace.',
+      );
+    }
+    if (normalizeCategoryColor(mutation.color) === null) {
+      throw new CategoryValidationError('Category color is invalid.');
+    }
+    return;
+  }
+  if (mutation.type !== 'set-category-order') return;
+  if (!state.workspaces.some(({ id }) => id === mutation.workspaceId)) {
+    throw new StateMutationValidationError(
+      'WORKSPACE_NOT_FOUND',
+      'Workspace not found.',
+    );
+  }
+  const currentOrder = getCanonicalCategoryOrder(state, mutation.workspaceId);
+  const currentSet = new Set(currentOrder);
+  const isComplete = (order: readonly string[]) =>
+    order.length === currentOrder.length
+    && new Set(order).size === order.length
+    && order.every((id) => currentSet.has(id));
+  if (
+    !isComplete(mutation.expectedCategoryOrder)
+    || !isComplete(mutation.categoryOrder)
+  ) {
+    throw new StateMutationValidationError(
+      'REORDER_INVALID',
+      'Category order must contain every current category exactly once.',
+    );
+  }
+}
+
 function isAlreadyApplied(state: TabBoardState, mutation: StateMutation): boolean {
   switch (mutation.type) {
     case 'add-workspace':
       return state.workspaces.some((workspace) => sameWorkspaceContent(workspace, mutation.workspace));
+    case 'update-workspace':
+      return isExactWorkspaceUpdateReplay(state, mutation);
+    case 'set-workspace-order':
+      return isExactWorkspaceOrderReplay(state, mutation);
+    case 'update-folder':
+      return isExactFolderUpdateReplay(state, mutation);
+    case 'set-category-order':
+      return isExactCategoryOrderReplay(state, mutation);
     case 'add-folder':
       return state.folders.some((folder) => sameFolderContent(folder, mutation.folder));
     case 'add-group':
@@ -2031,6 +2403,8 @@ function isAlreadyApplied(state: TabBoardState, mutation: StateMutation): boolea
     case 'delete-tab':
       return !state.groups.some((group) => group.tabs.some((tab) => tab.id === mutation.tabId))
         && hasUniqueDeleteBinEvidence(state, mutation.binEntry);
+    case 'delete-tabs':
+      return isDeleteTabsAlreadyApplied(state, mutation);
     case 'restore-group':
       return isRestoreGroupAlreadyApplied(state, mutation);
     case 'restore-tab':
@@ -2072,7 +2446,6 @@ function applyStateMutationCore(state: TabBoardState, mutation: StateMutation): 
   if (mutation.type === 'drop-intent') {
     return applyDropIntentMutation(state, mutation, nowIso());
   }
-  if (isAlreadyApplied(state, mutation)) return clone(state);
   assertStateMutationSemantics(state, mutation);
   const next = clone(state);
   switch (mutation.type) {
@@ -2082,6 +2455,27 @@ function applyStateMutationCore(state: TabBoardState, mutation: StateMutation): 
       return { ...next, workspaces: [...next.workspaces, clone(mutation.workspace)], updatedAt: mutation.workspace.updatedAt };
     case 'rename-workspace':
       return { ...next, workspaces: next.workspaces.map((item) => item.id === mutation.id ? { ...item, name: mutation.name, updatedAt: mutation.updatedAt } : item), updatedAt: mutation.updatedAt };
+    case 'update-workspace': {
+      const name = normalizeWorkspaceName(mutation.name);
+      if (!name) {
+        throw new StateMutationValidationError('WORKSPACE_NAME_INVALID', 'Workspace name is required.');
+      }
+      return {
+        ...next,
+        workspaces: next.workspaces.map((item) => item.id === mutation.id
+          ? { ...item, name, emoji: mutation.emoji, updatedAt: mutation.updatedAt }
+          : item),
+        updatedAt: mutation.updatedAt,
+      };
+    }
+    case 'set-workspace-order': {
+      const workspaceById = new Map(next.workspaces.map((workspace) => [workspace.id, workspace]));
+      return {
+        ...next,
+        workspaces: mutation.orderedWorkspaceIds.map((id) => workspaceById.get(id) as Workspace),
+        updatedAt: mutation.updatedAt,
+      };
+    }
     case 'delete-workspace':
       return {
         ...next,
@@ -2109,13 +2503,38 @@ function applyStateMutationCore(state: TabBoardState, mutation: StateMutation): 
       if (!validation.ok) throw new CategoryValidationError(validation.reason === 'empty' ? 'Category name is required.' : 'A category with this name already exists in this workspace.');
       return { ...next, folders: next.folders.map((item) => item.id === mutation.id ? { ...item, name: validation.value, updatedAt: mutation.updatedAt } : item), updatedAt: mutation.updatedAt };
     }
+    case 'update-folder': {
+      const folder = next.folders.find((item) => item.id === mutation.id);
+      if (!folder) return next;
+      const validation = validateFolderName(next.folders, folder.workspaceId, mutation.name, mutation.id);
+      if (!validation.ok) throw new CategoryValidationError(validation.reason === 'empty' ? 'Category name is required.' : 'A category with this name already exists in this workspace.');
+      const color = normalizeCategoryColor(mutation.color);
+      if (!color) {
+        throw new CategoryValidationError('Category color is invalid.');
+      }
+      return {
+        ...next,
+        folders: next.folders.map((item) => item.id === mutation.id
+          ? {
+              ...item,
+              name: validation.value,
+              color,
+              updatedAt: mutation.updatedAt,
+            }
+          : item),
+        updatedAt: mutation.updatedAt,
+      };
+    }
     case 'delete-folder': {
       const folder = next.folders.find((item) => item.id === mutation.id);
       if (!folder) return next;
       return {
         ...next,
         folders: next.folders.filter((item) => item.id !== mutation.id),
-        groups: next.groups.map((group) => group.folderId === mutation.id ? { ...group, folderId: null, updatedAt: mutation.updatedAt } : group),
+        groups: next.groups.map((group) =>
+          group.workspaceId === folder.workspaceId && group.folderId === mutation.id
+            ? { ...group, folderId: null, updatedAt: mutation.updatedAt }
+            : group),
         categoryOrderByWorkspace: { ...next.categoryOrderByWorkspace, [folder.workspaceId]: (next.categoryOrderByWorkspace[folder.workspaceId] || []).filter((id) => id !== mutation.id && id !== `folder:${mutation.id}`) },
         updatedAt: mutation.updatedAt,
       };
@@ -2205,6 +2624,55 @@ function applyStateMutationCore(state: TabBoardState, mutation: StateMutation): 
         updatedAt: mutation.updatedAt,
       }));
       return { ...updated, bin: compactBin([binEntry, ...next.bin]), updatedAt: mutation.updatedAt };
+    }
+    case 'delete-tabs': {
+      const selected = new Set(mutation.deletions.map(
+        ({ groupId, tabId }) => `${groupId}:${tabId}`,
+      ));
+      const deletionsByKey = new Map(mutation.deletions.map((deletion) => [
+        `${deletion.groupId}:${deletion.tabId}`,
+        deletion,
+      ]));
+      const binEntries: BinEntry[] = [];
+      const groups = next.groups.map((group) => {
+        const removedTabs = group.tabs.filter((tab) =>
+          selected.has(`${group.id}:${tab.id}`));
+        if (!removedTabs.length) return group;
+        for (const tab of removedTabs) {
+          const deletion = deletionsByKey.get(`${group.id}:${tab.id}`)!;
+          const workspace = next.workspaces.find(
+            (item) => item.id === group.workspaceId,
+          );
+          const folder = group.folderId
+            ? next.folders.find((item) => item.id === group.folderId)
+            : undefined;
+          binEntries.push({
+            ...clone(deletion.binEntry),
+            label: tab.title,
+            groupId: group.id,
+            groupTitle: group.title,
+            item: clone(tab),
+            originalGroupId: group.id,
+            originalIndex: group.tabs.findIndex((item) => item.id === tab.id),
+            originalWorkspaceId: group.workspaceId,
+            originalFolderId: group.folderId,
+            originalWorkspaceName: workspace?.name,
+            originalFolderName: folder?.name,
+          });
+        }
+        return {
+          ...group,
+          tabs: group.tabs.filter((tab) =>
+            !selected.has(`${group.id}:${tab.id}`)),
+          updatedAt: mutation.updatedAt,
+        };
+      });
+      return {
+        ...next,
+        groups,
+        bin: compactBin([...binEntries, ...next.bin]),
+        updatedAt: mutation.updatedAt,
+      };
     }
     case 'restore-group': {
       const sourceIndex = next.bin.findIndex((entry) => entry.id === mutation.entryId && entry.kind === 'group');
@@ -2329,6 +2797,7 @@ export function applyStateMutation(
   if (mutation.type === 'drop-intent') {
     return applyDropIntentMutation(state, mutation, appliedAt);
   }
+  assertCategoryCasPreconditions(state, mutation);
   if (isAlreadyApplied(state, mutation)) return clone(state);
   assertOrdinaryMutationSafety(state, mutation);
   return advanceRevision(state, applyStateMutationCore(state, mutation));

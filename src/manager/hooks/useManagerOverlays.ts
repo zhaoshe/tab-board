@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -16,15 +17,22 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { IconBrowser } from '@tabler/icons-react';
+import type { LucideIcon } from 'lucide-react';
 import type { Group } from '../../shared/model';
+import { TabBoardIcon } from '../../shared/components/TabBoardIcon';
+import { claimTip, releaseTip } from '../../shared/components/tipLifecycle';
 import { formatDateTime } from '../../shared/utils/formatters';
 
 export const OPEN_DELAY_MS = 180;
 export const CLOSE_DELAY_MS = 120;
 export const MANAGER_HOVER_SUPPRESSED_ATTRIBUTE = 'data-tabboard-hover-suppressed';
-const PREVIEW_PLACEMENT = 'right-start';
-const PREVIEW_DISTANCE = 10;
+const TAB_HOVER_TOOLTIP_GAP = 6;
+
+export const TAB_HOVER_TOOLTIP_CONTRACT = {
+  titleLines: 2,
+  linkLines: 4,
+  pointerEvents: 'none',
+} as const;
 
 export interface ViewportPoint {
   x: number;
@@ -59,16 +67,34 @@ export function getViewportMenuPosition(
   };
 }
 
-export interface ManagerInfoPopoverModel {
-  title: string;
-  url: string;
-  favIconUrl?: string;
-  note?: string;
-  savedAt?: string;
-  actions?: ReactNode;
+export function getMenuDescriptionTipPosition(
+  anchor: Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom'>,
+  tip: MenuSize,
+  viewport: ViewportSize,
+  gap = 6,
+  padding = 8,
+): { left: number; top: number } {
+  const rightPlacement = anchor.right + gap;
+  const preferredLeft = rightPlacement + tip.width <= viewport.width - padding
+    ? rightPlacement
+    : anchor.left - gap - tip.width;
+  const maxLeft = Math.max(padding, viewport.width - tip.width - padding);
+  const maxTop = Math.max(padding, viewport.height - tip.height - padding);
+  const centeredTop = (anchor.top + anchor.bottom - tip.height) / 2;
+  return {
+    left: Math.min(Math.max(padding, preferredLeft), maxLeft),
+    top: Math.min(Math.max(padding, centeredTop), maxTop),
+  };
 }
 
-function getDomain(url: string): string {
+export interface TabHoverTooltipModel {
+  title: string;
+  domain: string;
+  link: string;
+  savedAt?: string;
+}
+
+export function getTabHoverDomain(url: string): string {
   try {
     return new URL(url).host;
   } catch {
@@ -82,45 +108,49 @@ export function formatSavedTime(value: string | undefined): string {
   return formatted ? `Saved ${formatted}` : '';
 }
 
-export function renderManagerInfoPopoverContent(model: ManagerInfoPopoverModel): ReactNode {
+export function renderTabHoverTooltipContent(model: TabHoverTooltipModel): ReactNode {
   const savedTime = formatSavedTime(model.savedAt);
   return createElement(
     'section',
-    { className: 'manager-info-card', 'aria-label': `Details for ${model.title}` },
-    createElement(
-      'div',
-      { className: 'manager-info-card-header' },
-      createElement(
-        'span',
-        { className: 'manager-open-tab-favicon manager-info-card-favicon', 'aria-hidden': true },
-        createElement(IconBrowser, { className: 'manager-open-tab-favicon__fallback', size: 14 }),
-        model.favIconUrl
-          ? createElement('img', {
-            src: model.favIconUrl,
-            alt: '',
-            width: 20,
-            height: 20,
-            onLoad: (event: React.SyntheticEvent<HTMLImageElement>) => {
-              event.currentTarget.dataset.loaded = 'true';
-            },
-            onError: (event: React.SyntheticEvent<HTMLImageElement>) => {
-              event.currentTarget.style.display = 'none';
-            },
-          })
-          : null,
-      ),
-      createElement(
-        'div',
-        { className: 'manager-info-card-heading' },
-        createElement('strong', null, model.title),
-        getDomain(model.url) ? createElement('span', { className: 'muted' }, getDomain(model.url)) : null,
-      ),
-    ),
-    model.url ? createElement('p', { className: 'manager-info-card-url' }, model.url) : null,
-    model.note ? createElement('p', { className: 'manager-info-card-note' }, model.note) : null,
-    savedTime ? createElement('time', { className: 'muted', dateTime: model.savedAt }, savedTime) : null,
-    model.actions ? createElement('div', { className: 'manager-info-card-actions' }, model.actions) : null,
+    { className: 'manager-tab-tooltip' },
+    createElement('strong', { className: 'manager-tab-tooltip__title' }, model.title),
+    model.domain
+      ? createElement('span', { className: 'manager-tab-tooltip__domain' }, model.domain)
+      : null,
+    model.link ? createElement('p', { className: 'manager-tab-tooltip__link' }, model.link) : null,
+    savedTime
+      ? createElement(
+          'time',
+          { className: 'manager-tab-tooltip__timestamp', dateTime: model.savedAt },
+          savedTime,
+        )
+      : null,
   );
+}
+
+export function getTabHoverTooltipPosition(
+  anchor: Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom'>,
+  tooltip: MenuSize,
+  viewport: ViewportSize,
+  gap = TAB_HOVER_TOOLTIP_GAP,
+  padding = 8,
+): { left: number; top: number; placement: 'top' | 'bottom' } {
+  const preferredTop = anchor.top - gap - tooltip.height;
+  const placement = preferredTop >= padding ? 'top' : 'bottom';
+  const rawTop = placement === 'top' ? preferredTop : anchor.bottom + gap;
+  const maxLeft = Math.max(padding, viewport.width - tooltip.width - padding);
+  const maxTop = Math.max(padding, viewport.height - tooltip.height - padding);
+  return {
+    left: Math.min(Math.max(padding, anchor.left), maxLeft),
+    top: Math.min(Math.max(padding, rawTop), maxTop),
+    placement,
+  };
+}
+
+export function getTabHoverTooltipAnchor(trigger: HTMLElement): HTMLElement {
+  return trigger.closest<HTMLElement>(
+    '.manager-open-tab-row, .tab-item-row__content',
+  ) ?? trigger;
 }
 
 export type OverlayKind = 'session' | 'saved-tab' | 'open-tab' | 'category';
@@ -133,6 +163,8 @@ export interface MenuState {
   content: ReactNode;
   trigger: HTMLElement | null;
   openedByKeyboard: boolean;
+  restoreFocusOnClose: boolean;
+  ariaLabel: string;
   position: { left: number; top: number } | null;
 }
 
@@ -152,6 +184,8 @@ export interface OpenMenuOptions {
   content: ReactNode;
   trigger?: HTMLElement | null;
   openedByKeyboard?: boolean;
+  restoreFocusOnClose?: boolean;
+  ariaLabel?: string;
 }
 
 export interface OpenPreviewOptions {
@@ -167,12 +201,15 @@ export function shouldRestorePreviewFocusOnClose(event: Pick<MouseEvent, 'detail
 }
 
 export function getOverlayFocusRestoreTarget(
-  menu: Pick<MenuState, 'trigger' | 'openedByKeyboard'> | null,
+  menu: (
+    Pick<MenuState, 'trigger'>
+    & Partial<Pick<MenuState, 'openedByKeyboard' | 'restoreFocusOnClose'>>
+  ) | null,
   preview: Pick<PreviewState, 'trigger' | 'restoreFocusOnClose'> | null,
   shouldRestore: boolean,
 ): HTMLElement | null {
   if (!shouldRestore) return null;
-  if (menu?.openedByKeyboard) return menu.trigger;
+  if (menu && (menu.restoreFocusOnClose ?? menu.openedByKeyboard)) return menu.trigger;
   return preview?.restoreFocusOnClose ? preview.trigger : null;
 }
 
@@ -199,7 +236,7 @@ export function advanceOverlayFocusEpoch(
 
 interface InfoTriggerEntry {
   kind: 'open' | 'saved';
-  model: ManagerInfoPopoverModel;
+  model: TabHoverTooltipModel;
   element: HTMLElement;
 }
 
@@ -377,6 +414,8 @@ export function useManagerOverlays({
   const previewElementRef = useRef<HTMLElement | null>(null);
   const restoredFocusRef = useRef<HTMLElement | null>(null);
   const infoTriggersRef = useRef(new Map<string, InfoTriggerEntry>());
+  const previewTipOwnerRef = useRef({});
+  const suppressedPreviewTriggerRef = useRef<HTMLElement | null>(null);
   const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingFocusRestoreFrameRef = useRef<number | null>(null);
@@ -439,23 +478,25 @@ export function useManagerOverlays({
   const closeMenu = useCallback(({ restoreFocus: shouldRestore = false }: { restoreFocus?: boolean } = {}) => {
     const currentMenu = menuRef.current;
     setMenu(null);
-    if (currentMenu && shouldRestore && currentMenu.openedByKeyboard) {
+    if (currentMenu && shouldRestore && currentMenu.restoreFocusOnClose) {
       deferFocusRestore(currentMenu.trigger, true);
     }
   }, [deferFocusRestore]);
 
   const closePreview = useCallback(({ restoreFocus: shouldRestore = false }: { restoreFocus?: boolean } = {}) => {
+    releaseTip(previewTipOwnerRef.current);
     clearOpenTimer();
     clearCloseTimer();
     const currentPreview = previewRef.current;
     setPreview(null);
     if (!currentPreview) return;
-    currentPreview.trigger.setAttribute('aria-expanded', 'false');
+    currentPreview.trigger.removeAttribute('aria-describedby');
     const focusTarget = getOverlayFocusRestoreTarget(null, currentPreview, shouldRestore);
     deferFocusRestore(focusTarget, focusTarget !== null);
   }, [clearCloseTimer, clearOpenTimer, deferFocusRestore]);
 
   const closeOverlays = useCallback(({ restoreFocus: shouldRestore = false }: { restoreFocus?: boolean } = {}) => {
+    releaseTip(previewTipOwnerRef.current);
     cancelPendingFocusRestore();
     clearOpenTimer();
     clearCloseTimer();
@@ -463,7 +504,7 @@ export function useManagerOverlays({
     const currentPreview = previewRef.current;
     setMenu(null);
     setPreview(null);
-    if (currentPreview) currentPreview.trigger.setAttribute('aria-expanded', 'false');
+    if (currentPreview) currentPreview.trigger.removeAttribute('aria-describedby');
     const focusTarget = getOverlayFocusRestoreTarget(currentMenu, currentPreview, shouldRestore);
     deferFocusRestore(focusTarget, focusTarget !== null);
   }, [cancelPendingFocusRestore, clearCloseTimer, clearOpenTimer, deferFocusRestore]);
@@ -536,7 +577,7 @@ export function useManagerOverlays({
     clearOpenTimer();
     clearCloseTimer();
     setPreview((current) => {
-      if (current) current.trigger.setAttribute('aria-expanded', 'false');
+      if (current) current.trigger.removeAttribute('aria-describedby');
       return null;
     });
     idRef.current += 1;
@@ -544,6 +585,9 @@ export function useManagerOverlays({
       ...options,
       trigger: options.trigger ?? null,
       openedByKeyboard: options.openedByKeyboard === true,
+      restoreFocusOnClose: options.restoreFocusOnClose
+        ?? options.openedByKeyboard === true,
+      ariaLabel: options.ariaLabel ?? 'Actions',
       position: null,
       itemKey: options.id,
       id: `${options.id}-${idRef.current}`,
@@ -551,14 +595,26 @@ export function useManagerOverlays({
   }, [cancelPendingFocusRestore, clearCloseTimer, clearOpenTimer]);
 
   const openPreview = useCallback((options: OpenPreviewOptions) => {
+    claimTip(
+      previewTipOwnerRef.current,
+      0,
+      () => undefined,
+      () => {
+        setPreview((current) => {
+          if (current) current.trigger.removeAttribute('aria-describedby');
+          return null;
+        });
+      },
+    );
     cancelPendingFocusRestore();
     clearOpenTimer();
     clearCloseTimer();
     setMenu(null);
     setPreview((current) => {
-      if (current && current.trigger !== options.trigger) current.trigger.setAttribute('aria-expanded', 'false');
-      options.trigger.setAttribute('aria-haspopup', 'dialog');
-      options.trigger.setAttribute('aria-expanded', 'true');
+      if (current && current.trigger !== options.trigger) {
+        current.trigger.removeAttribute('aria-describedby');
+      }
+      options.trigger.setAttribute('aria-describedby', options.id);
       return {
         ...options,
         restoreFocusOnClose: options.restoreFocusOnClose === true,
@@ -570,7 +626,18 @@ export function useManagerOverlays({
   const schedulePreview = useCallback((options: OpenPreviewOptions, delay = OPEN_DELAY_MS) => {
     clearOpenTimer();
     clearCloseTimer();
-    openTimerRef.current = setTimeout(() => openPreview(options), delay);
+    claimTip(
+      previewTipOwnerRef.current,
+      delay,
+      () => openPreview(options),
+      () => {
+        clearOpenTimer();
+        setPreview((current) => {
+          if (current) current.trigger.removeAttribute('aria-describedby');
+          return null;
+        });
+      },
+    );
   }, [clearCloseTimer, clearOpenTimer, openPreview]);
 
   const scheduleClosePreview = useCallback(() => {
@@ -623,16 +690,22 @@ export function useManagerOverlays({
       return {
         id,
         kind: entry.kind,
-        content: renderManagerInfoPopoverContent(entry.model),
+        content: renderTabHoverTooltipContent(entry.model),
         trigger,
       };
     };
     const handlePointerDown = (event: PointerEvent) => {
       document.documentElement.removeAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE);
       advanceFocusEpoch();
+      const infoTrigger = getTarget(event.target)?.closest<HTMLElement>('[data-info-popover]')
+        ?? null;
+      suppressedPreviewTriggerRef.current = infoTrigger;
+      if (infoTrigger) {
+        closePreview();
+        return;
+      }
       if (isInside(menuElementRef.current, event.target) || isInside(previewElementRef.current, event.target)) return;
       if (menuRef.current?.trigger && isInside(menuRef.current.trigger, event.target)) return;
-      if (previewRef.current?.trigger && isInside(previewRef.current.trigger, event.target)) return;
       closeOverlays();
     };
     const handleOutsideClick = (event: MouseEvent) => {
@@ -649,6 +722,7 @@ export function useManagerOverlays({
       if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
       const menuElement = menuElementRef.current;
       if (!menuElement) return;
+      menuElement.setAttribute('data-tip-keyboard-armed', '');
       const menuItems = Array.from(menuElement.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'));
       if (!menuItems.length) return;
       const currentItem = target?.closest<HTMLElement>('[role="menuitem"]');
@@ -657,17 +731,6 @@ export function useManagerOverlays({
       const nextIndex = (currentIndex + direction + menuItems.length) % menuItems.length;
       event.preventDefault();
       menuItems[nextIndex]?.focus();
-    };
-    const handlePreviewKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Tab' || event.shiftKey || !previewRef.current) return;
-      if (event.target !== previewRef.current.trigger) return;
-      const firstAction = previewElementRef.current?.querySelector<HTMLElement>(
-        'button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
-      );
-      if (!firstAction) return;
-      event.preventDefault();
-      cancelClosePreview();
-      firstAction.focus();
     };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape' || (!menuRef.current && !previewRef.current)) return;
@@ -679,6 +742,7 @@ export function useManagerOverlays({
     const handleDragStart = () => closeOverlays();
     const handleWindowBlur = () => {
       document.documentElement.setAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE, '');
+      suppressedPreviewTriggerRef.current = null;
       advanceFocusEpoch();
       closeOverlays();
     };
@@ -686,10 +750,18 @@ export function useManagerOverlays({
       if (document.visibilityState === 'hidden') handleWindowBlur();
     };
     const handlePointerMove = (event: PointerEvent) => {
+      const trigger = getTarget(event.target)?.closest<HTMLElement>('[data-info-popover]');
+      const suppressedTrigger = suppressedPreviewTriggerRef.current;
+      if (suppressedTrigger) {
+        if (event.movementX === 0 && event.movementY === 0) return;
+        suppressedPreviewTriggerRef.current = null;
+        const options = trigger ? getPreviewOptions(trigger) : null;
+        if (options) schedulePreview(options);
+        return;
+      }
       if (!isManagerHoverSuppressed()) return;
       if (event.movementX === 0 && event.movementY === 0) return;
       document.documentElement.removeAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE);
-      const trigger = getTarget(event.target)?.closest<HTMLElement>('[data-info-popover]');
       const options = trigger ? getPreviewOptions(trigger) : null;
       if (options) schedulePreview(options);
     };
@@ -700,6 +772,7 @@ export function useManagerOverlays({
       if (isManagerHoverSuppressed()) return;
       const trigger = getTarget(event.target)?.closest<HTMLElement>('[data-info-popover]');
       if (!trigger || trigger.contains(event.relatedTarget as Node | null)) return;
+      if (suppressedPreviewTriggerRef.current === trigger) return;
       const options = getPreviewOptions(trigger);
       if (options) {
         schedulePreview({
@@ -711,16 +784,16 @@ export function useManagerOverlays({
     };
     const handleMouseOut = (event: MouseEvent) => {
       const trigger = getTarget(event.target)?.closest<HTMLElement>('[data-info-popover]');
-      if (!trigger || trigger.contains(event.relatedTarget as Node | null) || isInside(previewElementRef.current, event.relatedTarget)) return;
+      if (!trigger || trigger.contains(event.relatedTarget as Node | null)) return;
+      if (suppressedPreviewTriggerRef.current === trigger) {
+        suppressedPreviewTriggerRef.current = null;
+      }
       scheduleClosePreview();
     };
     const handleFocusIn = (event: FocusEvent) => {
       if (isManagerHoverSuppressed()) return;
-      if (isInside(previewElementRef.current, event.target)) {
-        cancelClosePreview();
-        return;
-      }
       const trigger = getTarget(event.target)?.closest<HTMLElement>('[data-info-popover]');
+      if (suppressedPreviewTriggerRef.current === trigger) return;
       const wasRestoredFocus = restoredFocusRef.current === trigger;
       restoredFocusRef.current = null;
       if (wasRestoredFocus) return;
@@ -732,30 +805,18 @@ export function useManagerOverlays({
       const trigger = getTarget(event.target)?.closest<HTMLElement>('[data-info-popover]');
       const leavingTrigger = Boolean(
         trigger
-        && !trigger.contains(relatedTarget as Node | null)
-        && !isInside(previewElementRef.current, relatedTarget),
+        && !trigger.contains(relatedTarget as Node | null),
       );
-      const leavingPreview = isInside(previewElementRef.current, event.target)
-        && !isInside(previewElementRef.current, relatedTarget);
-      if (leavingTrigger || leavingPreview) scheduleClosePreview();
-    };
-    const handleClick = (event: MouseEvent) => {
-      const trigger = getTarget(event.target)?.closest<HTMLElement>('[data-info-popover]');
-      const options = trigger ? getPreviewOptions(trigger) : null;
-      if (options) {
-        openPreview({ ...options, restoreFocusOnClose: shouldRestorePreviewFocusOnClose(event) });
-      }
+      if (leavingTrigger) scheduleClosePreview();
     };
 
     document.addEventListener('pointerdown', handlePointerDown, true);
     document.addEventListener('keydown', handleMenuKeyDown);
-    document.addEventListener('keydown', handlePreviewKeyDown);
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('mouseover', handleMouseOver);
     document.addEventListener('mouseout', handleMouseOut);
     document.addEventListener('focusin', handleFocusIn);
     document.addEventListener('focusout', handleFocusOut);
-    document.addEventListener('click', handleClick);
     document.addEventListener('click', handleOutsideClick, true);
     document.addEventListener('scroll', handleViewportChange, true);
     document.addEventListener('dragstart', handleDragStart, true);
@@ -767,13 +828,11 @@ export function useManagerOverlays({
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown, true);
       document.removeEventListener('keydown', handleMenuKeyDown);
-      document.removeEventListener('keydown', handlePreviewKeyDown);
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('mouseover', handleMouseOver);
       document.removeEventListener('mouseout', handleMouseOut);
       document.removeEventListener('focusin', handleFocusIn);
       document.removeEventListener('focusout', handleFocusOut);
-      document.removeEventListener('click', handleClick);
       document.removeEventListener('click', handleOutsideClick, true);
       document.removeEventListener('scroll', handleViewportChange, true);
       document.removeEventListener('dragstart', handleDragStart, true);
@@ -792,6 +851,7 @@ export function useManagerOverlays({
     return () => {
       isProviderMountedRef.current = false;
       document.documentElement.removeAttribute(MANAGER_HOVER_SUPPRESSED_ATTRIBUTE);
+      suppressedPreviewTriggerRef.current = null;
       invalidateOverlayLifecycle();
       closeOverlays();
     };
@@ -974,7 +1034,11 @@ function getMenuItemLifecycleAllowance(
 }
 
 interface ManagerMenuItemProps {
-  children: ReactNode;
+  children?: ReactNode;
+  icon?: LucideIcon;
+  label?: string;
+  description?: string;
+  danger?: boolean;
   onClick: (focusIntent?: ManagerFocusRestoreIntent) => void | Promise<void>;
   disabled?: boolean;
   className?: string;
@@ -984,8 +1048,144 @@ interface ManagerMenuItemProps {
   lifecycleAllowance?: ManagerFocusRestoreLifecycleAllowance['kind'];
 }
 
+interface ManagerMenuDescriptionTargetProps {
+  description: string;
+  children: (props: ManagerMenuDescriptionTargetRenderProps) => ReactNode;
+}
+
+interface ManagerMenuDescriptionTargetRenderProps {
+    ref: (element: HTMLElement | null) => void;
+    'aria-describedby': string | undefined;
+    onMouseEnter: (event: ReactMouseEvent<HTMLElement>) => void;
+    onMouseLeave: () => void;
+    onFocus: () => void;
+    onBlur: () => void;
+    onPointerDown: () => void;
+    onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+}
+
+function useManagerMenuDescription(description: string | undefined) {
+  const descriptionId = useId();
+  const ownerRef = useRef({});
+  const [descriptionOpen, setDescriptionOpen] = useState(false);
+  const [descriptionPosition, setDescriptionPosition] = useState<{ left: number; top: number } | null>(null);
+  const itemRef = useRef<HTMLElement | null>(null);
+  const descriptionRef = useRef<HTMLDivElement | null>(null);
+  const dismissDescription = useCallback(() => {
+    releaseTip(ownerRef.current);
+  }, []);
+  useEffect(() => () => releaseTip(ownerRef.current), []);
+  useLayoutEffect(() => {
+    if (!descriptionOpen || !itemRef.current || !descriptionRef.current) return;
+    const tipRect = descriptionRef.current.getBoundingClientRect();
+    setDescriptionPosition(getMenuDescriptionTipPosition(
+      itemRef.current.getBoundingClientRect(),
+      { width: tipRect.width, height: tipRect.height },
+      { width: window.innerWidth, height: window.innerHeight },
+    ));
+  }, [descriptionOpen]);
+
+  const descriptionTargetProps = {
+    ref: (element: HTMLElement | null) => {
+      itemRef.current = element;
+    },
+    'aria-describedby': descriptionOpen ? descriptionId : undefined,
+    onMouseEnter: (event: ReactMouseEvent<HTMLElement>) => {
+      if (!description) return;
+      const target = event.currentTarget;
+      claimTip(
+        ownerRef.current,
+        550,
+        () => {
+          if (target.isConnected) setDescriptionOpen(true);
+        },
+        () => {
+          setDescriptionOpen(false);
+          setDescriptionPosition(null);
+        },
+      );
+    },
+    onMouseLeave: dismissDescription,
+    onFocus: () => {
+      const menu = itemRef.current?.closest<HTMLElement>('[role="menu"]');
+      if (!description || !menu?.hasAttribute('data-tip-keyboard-armed')) return;
+      claimTip(
+        ownerRef.current,
+        0,
+        () => setDescriptionOpen(true),
+        () => {
+          setDescriptionOpen(false);
+          setDescriptionPosition(null);
+        },
+      );
+    },
+    onBlur: dismissDescription,
+    onPointerDown: dismissDescription,
+    onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.currentTarget.closest<HTMLElement>('[role="menu"]')
+          ?.setAttribute('data-tip-keyboard-armed', '');
+      }
+    },
+  };
+  const descriptionTip = description && descriptionOpen && typeof document !== 'undefined'
+    ? createPortal(createElement(
+        'div',
+        {
+          ref: descriptionRef,
+          id: descriptionId,
+          className: 'manager-menu-item__description-tip',
+          role: 'tooltip',
+          style: {
+            left: descriptionPosition?.left ?? 0,
+            top: descriptionPosition?.top ?? 0,
+            pointerEvents: 'none',
+            visibility: descriptionPosition ? 'visible' : 'hidden',
+          },
+        },
+        description,
+      ), document.querySelector('#manager-main') ?? document.body)
+    : null;
+
+  return {
+    descriptionTargetProps,
+    descriptionTip,
+    dismissDescription,
+  };
+}
+
+export function ManagerMenuDescriptionTarget({
+  description,
+  children,
+}: ManagerMenuDescriptionTargetProps): ReactNode {
+  const {
+    descriptionTargetProps,
+    descriptionTip,
+  } = useManagerMenuDescription(description);
+  return createElement(
+    Fragment,
+    null,
+    children(descriptionTargetProps),
+    descriptionTip,
+  );
+}
+
+export function mergeManagerMenuDescriptionRef<T extends HTMLElement>(
+  descriptionRef: ManagerMenuDescriptionTargetRenderProps['ref'],
+  ownerRef: { current: T | null },
+): (element: T | null) => void {
+  return (element) => {
+    descriptionRef(element);
+    ownerRef.current = element;
+  };
+}
+
 export function ManagerMenuItem({
   children,
+  icon,
+  label,
+  description,
+  danger = false,
   onClick,
   disabled = false,
   className,
@@ -995,16 +1195,30 @@ export function ManagerMenuItem({
   lifecycleAllowance,
 }: ManagerMenuItemProps): ReactNode {
   const { closeOverlays, captureFocusRestoreIntent, restoreFocusAfterMutation } = useManagerOverlayCommands();
-  return createElement(
+  const {
+    descriptionTargetProps,
+    descriptionTip,
+    dismissDescription,
+  } = useManagerMenuDescription(description);
+
+  const content = label || children;
+  const item = createElement(
     'button',
     {
+      ...descriptionTargetProps,
       type: 'button',
       role: semanticRole === 'menuitem' ? 'menuitem' : undefined,
       'aria-label': ariaLabel,
-      className: `manager-overlay-menu__item${className ? ` ${className}` : ''}`,
+      className: [
+        'manager-overlay-menu__item',
+        icon ? 'manager-overlay-menu__item--with-icon' : '',
+        danger ? 'manager-overlay-menu__item--danger manager-overlay-menu__item--separated' : '',
+        className,
+      ].filter(Boolean).join(' '),
       disabled,
       onClick: async (event: ReactMouseEvent<HTMLButtonElement>) => {
         if (disabled) return;
+        dismissDescription();
         const focusIntent = event.detail === 0
           ? (() => {
               const capturedIntent = captureFocusRestoreIntent();
@@ -1032,17 +1246,25 @@ export function ManagerMenuItem({
         }
       },
     },
-    children,
+    icon ? createElement(TabBoardIcon, { icon, size: 'menu' }) : null,
+    createElement('span', { className: 'manager-overlay-menu__item-label' }, content),
+  );
+
+  return createElement(
+    Fragment,
+    null,
+    item,
+    descriptionTip,
   );
 }
 
 interface ManagerOverlayPortalProps {
-  menuMinWidth?: number;
+  menuWidth?: number;
   onOpenTabPreviewChange?: (open: boolean) => void;
 }
 
 export function ManagerOverlayPortal({
-  menuMinWidth = 190,
+  menuWidth = 190,
   onOpenTabPreviewChange,
 }: ManagerOverlayPortalProps = {}): ReactNode {
   const controller = useManagerOverlayController();
@@ -1089,16 +1311,16 @@ export function ManagerOverlayPortal({
     if (preview.position) return;
     const element = document.querySelector<HTMLElement>('.manager-info-popover');
     if (!element) return;
-    const triggerRect = preview.trigger.getBoundingClientRect();
-    const savedRowRect = preview.kind === 'saved'
-      ? preview.trigger.closest('.tab-item-row')?.getBoundingClientRect()
-      : null;
-    const position = getViewportMenuPosition(
-      { x: (savedRowRect?.right ?? triggerRect.right) + PREVIEW_DISTANCE, y: triggerRect.top },
+    const triggerRect = getTabHoverTooltipAnchor(
+      preview.trigger,
+    ).getBoundingClientRect();
+    const tooltipPosition = getTabHoverTooltipPosition(
+      triggerRect,
       { width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height },
       { width: window.innerWidth, height: window.innerHeight },
     );
-    setPreviewPosition(position);
+    element.dataset.placement = tooltipPosition.placement;
+    setPreviewPosition({ left: tooltipPosition.left, top: tooltipPosition.top });
   });
 
   if (typeof document === 'undefined' || (!menu && !preview)) return null;
@@ -1106,7 +1328,7 @@ export function ManagerOverlayPortal({
     position: 'fixed',
     left: menu?.position?.left ?? 0,
     top: menu?.position?.top ?? 0,
-    minWidth: menuMinWidth,
+    width: menuWidth,
     visibility: menu?.position ? 'visible' : 'hidden',
   };
   const previewStyle: CSSProperties = {
@@ -1124,7 +1346,7 @@ export function ManagerOverlayPortal({
             ref: controller.registerMenuElement,
             className: 'manager-overlay-menu',
             role: 'menu',
-            'aria-label': 'Actions',
+            'aria-label': menu.ariaLabel,
             style: menuStyle,
             onPointerDown: (event: React.PointerEvent) => event.stopPropagation(),
             onClick: (event: React.MouseEvent) => event.stopPropagation(),
@@ -1133,18 +1355,14 @@ export function ManagerOverlayPortal({
       preview
         ? createElement('div', {
             ref: controller.registerPreviewElement,
+            id: preview.id,
             className: 'manager-info-popover',
-            role: 'dialog',
-            'aria-label': 'Item details',
-            'data-placement': PREVIEW_PLACEMENT,
-            'data-distance': PREVIEW_DISTANCE,
+            role: 'tooltip',
+            'data-distance': TAB_HOVER_TOOLTIP_GAP,
             style: previewStyle,
-            onMouseEnter: controller.cancelClosePreview,
-            onMouseLeave: controller.scheduleClosePreview,
-            onPointerDown: (event: React.PointerEvent) => event.stopPropagation(),
           }, preview.content)
         : null,
     ),
-    document.body,
+    document.querySelector('#manager-main') ?? document.body,
   );
 }

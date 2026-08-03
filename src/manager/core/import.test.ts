@@ -1,7 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applicationFeedbackChannel } from '../../shared/applicationFeedback';
-import { createEmptyState, createNoteRecord, exportToText, type Folder, type Group, type TabBoardState, type Workspace } from '../../shared/model';
+import {
+  createEmptyState,
+  createNoteRecord,
+  DEFAULT_WORKSPACE_EMOJI,
+  exportToJson,
+  exportToText,
+  normalizeState,
+  type Folder,
+  type Group,
+  type TabBoardState,
+  type Workspace,
+} from '../../shared/model';
 import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
 import {
   importText,
@@ -11,7 +22,13 @@ import {
 const timestamp = '2026-01-01T00:00:00.000Z';
 
 function workspace(id: string): Workspace {
-  return { id, name: id, createdAt: timestamp, updatedAt: timestamp };
+  return {
+    id,
+    name: id,
+    emoji: DEFAULT_WORKSPACE_EMOJI,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
 }
 
 function folder(id: string, workspaceId: string): Folder {
@@ -80,6 +97,16 @@ afterEach(() => {
 });
 
 describe('import commands', () => {
+  it('preserves workspace emoji through the TabBoard JSON round trip', () => {
+    const before = state({
+      workspaces: [{ ...workspace('workspace-a'), emoji: '🧪' }],
+    });
+
+    const imported = normalizeState(JSON.parse(exportToJson(before)));
+
+    expect(imported.workspaces[0].emoji).toBe('🧪');
+  });
+
   it('uses the OneTab parser for markdown blocks and preserves expected titles', () => {
     const groups = parseImportedText(
       '# Project links\n[Alpha docs](https://alpha.example)\n[Beta docs](https://beta.example)\n\n# Reading\n[Article](https://article.example)',
@@ -224,16 +251,33 @@ describe('import commands', () => {
       new URL(`../components/workspace/${file}`, import.meta.url),
       'utf8',
     )).join('\n');
+    const editor = readFileSync(
+      new URL('../components/workspace/WorkspaceEditorModal.tsx', import.meta.url),
+      'utf8',
+    );
+    const manager = readFileSync(
+      new URL('../components/workspace/WorkspaceManagerModal.tsx', import.meta.url),
+      'utf8',
+    );
     const sidebar = readFileSync(new URL('../components/sidebar/Sidebar.tsx', import.meta.url), 'utf8');
 
-    expect(header).toContain("if (dialogMode === 'create') onCreate(validation.value)");
-    expect(header).toContain("if (dialogMode === 'rename' && workspace) onRename(workspace.id, validation.value)");
-    expect(header).not.toContain('handleDeleteWorkspace');
-    expect(header).toContain('state.updateCategoryOrder(workspace.id, order)');
+    expect(header).toContain('const workspaceId = state.addWorkspace(name, emoji)');
+    expect(header).toContain('onSelectWorkspace(workspaceId)');
+    expect(header).toContain('onUpdateWorkspace={state.updateWorkspace}');
+    expect(header).toContain('onUpdateWorkspaceOrder={state.updateWorkspaceOrder}');
+    expect(header).toContain('onDeleteWorkspace={state.deleteWorkspace}');
+    expect(header).toContain('<WorkspaceEditorModal');
+    expect(header).toContain('<WorkspaceManagerModal');
+    expect(editor).toContain('await onSubmit({');
+    expect(manager).toContain('await onDeleteWorkspace(deletedWorkspaceId)');
+    expect(header).toContain('onUpdateOrder={(order, { expectedCategoryOrder }) =>');
+    expect(header).toContain('{ expectedCategoryOrder }');
     expect(header).toContain('Manage Categories');
     expect(header).toContain('runValidatedCategoryMutation');
     expect(header).toContain('state.addFolder(workspace.id');
-    expect(header).toContain('onRenameFolder(editingFolderId, value)');
+    expect(header).toContain('editingFolderExpected');
+    expect(header).toContain('onUpdateFolder(');
+    expect(header).toContain('{ name: value, color: selectedColor },');
     expect(header).toContain('runCategoryMutation');
     expect(header).toContain('onDeleteFolder(deletedId)');
     expect(sidebar).not.toContain('addFolder');

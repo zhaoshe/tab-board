@@ -11,6 +11,90 @@ export interface SettingsProjection {
   updatedAt: string;
 }
 
+export interface StorageStatusProjection {
+  configuredTarget: 'browser' | 'file';
+  activeBackend: 'browser' | 'file';
+  folderName: string | null;
+  fallbackReason: string | null;
+  fileUpdatedAt: string | null;
+}
+
+export const BROWSER_STORAGE_STATUS: Readonly<StorageStatusProjection> = {
+  configuredTarget: 'browser',
+  activeBackend: 'browser',
+  folderName: null,
+  fallbackReason: null,
+  fileUpdatedAt: null,
+};
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string';
+}
+
+export function parseStorageStatusProjection(
+  value: unknown,
+): StorageStatusProjection | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.mode === 'browser' || candidate.mode === 'file') {
+    return candidate.mode === 'browser'
+      ? { ...BROWSER_STORAGE_STATUS }
+      : {
+          configuredTarget: 'file',
+          activeBackend: 'file',
+          folderName: null,
+          fallbackReason: null,
+          fileUpdatedAt: null,
+        };
+  }
+  const configuredTarget = candidate.configuredTarget;
+  const activeBackend = candidate.activeBackend;
+  if (
+    (configuredTarget !== 'browser' && configuredTarget !== 'file')
+    || (activeBackend !== 'browser' && activeBackend !== 'file')
+    || !isNullableString(candidate.folderName)
+    || !isNullableString(candidate.fallbackReason)
+    || !isNullableString(candidate.fileUpdatedAt)
+  ) {
+    return null;
+  }
+  if (configuredTarget === 'browser') {
+    if (
+      activeBackend !== 'browser'
+      || candidate.folderName !== null
+      || candidate.fallbackReason !== null
+      || candidate.fileUpdatedAt !== null
+    ) {
+      return null;
+    }
+  } else if (activeBackend === 'file' && candidate.fallbackReason !== null) {
+    return null;
+  }
+  return {
+    configuredTarget,
+    activeBackend,
+    folderName: candidate.folderName,
+    fallbackReason: candidate.fallbackReason,
+    fileUpdatedAt: candidate.fileUpdatedAt,
+  };
+}
+
+export function fileStorageStatus({
+  folderName,
+  fileUpdatedAt,
+}: {
+  folderName: string | null;
+  fileUpdatedAt: string | null;
+}): StorageStatusProjection {
+  return {
+    configuredTarget: 'file',
+    activeBackend: 'file',
+    folderName,
+    fallbackReason: null,
+    fileUpdatedAt,
+  };
+}
+
 function normalizeSettings(value: unknown): Settings | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Record<string, unknown>;

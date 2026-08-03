@@ -1,6 +1,22 @@
 const TIMESTAMP = '2026-01-01T00:00:00.000Z';
 const WORKSPACE_ID = 'workspace_default';
 
+export function benchmarkPageStorage() {
+  return {
+    'tabboard.managerCategoryPreference': JSON.stringify({
+      version: 1,
+      byWorkspace: { [WORKSPACE_ID]: 'inbox' },
+    }),
+  };
+}
+
+export function benchmarkPagePath(page) {
+  if (page === 'manager') {
+    return 'manager.html?workspace=workspace_default&category=inbox&view=board';
+  }
+  return `${page}.html`;
+}
+
 export function createBenchmarkSchedule(selected, runs) {
   const oneRound = selected.flatMap(([scenario, configuration]) =>
     configuration.pages.map((page) => ({

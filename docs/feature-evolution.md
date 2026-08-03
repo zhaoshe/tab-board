@@ -14,12 +14,383 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 - 通过有 URL open tab 的右键菜单筛选包含该 URL 的 saved sessions。
 - 用 sidebar footer Filter tabs 只过滤当前 selected browser window 的单一 Open Tabs 列表。
 - Open Tabs 保留 selected normal window 的非 extension tab rows；pinned、Chrome 和 file URLs 可正常多选和保存，自定义 URL 过滤规则与 extension pages 直接隐藏。
-- 勾选 open tabs 只用于批量创建 session 或批量拖入已有 session，拖拽完成后自动退出多选。
-- 拖动 open tab 到已有 session 中追加链接。
+- Open/saved selection scope 与 selected IDs 分离；提交成功后可保留 `0 selected` mode，显式 Exit 或 scope replacement 才退出。
+- 拖动 open tab 到已有 session 中追加链接，或精确命中 Gap Anchor 创建新 Session。
 - saved sessions 支持三档内置分类（Inbox/Saved/Archive）+ 自定义分类、搜索、恢复、拖拽排序、inline rename、笔记、导入导出、回收站。
-- Session card 展示 note，预览弹窗可添加/修改 note，点击打开链接后自动隐藏预览窗。
+- Session card 展示 note；tab hover 使用不可交互 tooltip，编辑与次级动作由独立菜单/弹窗承载。
 
 ## 变迁时间线
+
+### 2026-08-03: Open Tab 拖拽命中与 Popup P2 Checkbox 修复
+
+问题：
+
+- Open Tab title/link 由一个可点击 Focus button 承载，但 row 的 drag exclusion 把所有 button 和 `data-no-drag` 都排除，导致用户只能从狭窄空白处起拖。
+- Popup parity 测试只测量 Mantine Checkbox wrapper 为 16px；真正绘制背景的 native input 仍是 20px，因此实页出现比已确认 P2 更大的实心蓝色 checkbox。可见 label 也从预览的 `N pinned` 漂移为较长的 `Include N pinned tabs`。
+
+变化：
+
+- Open Tab drag exclusion 只屏蔽 checkbox、X、link/input 等真实操作控件；`.manager-open-tab-content` title/link button 继续支持 click `Go to <tab title>`，同时整块 copy 可起 pointer/touch drag。
+- Popup Checkbox 通过 Mantine `--checkbox-size` 和 input owner 固定为 16px / 4px radius，check glyph 保持居中。
+- Popup 可见 label 恢复 `N pinned`；完整 `Include N pinned tab(s)` 保留为 checkbox accessible name。
+
+当前状态：Current。
+
+### 2026-08-03: Manager 根视口移除纵向回弹
+
+Manager shell 虽已固定为 `100dvh` 并隐藏自身溢出，但 `html / body / #root` 仍使用浏览器默认滚动行为。页面底部的无障碍 live region 会让 document 多出 1px 高度，因此 macOS 上即使没有可用滚动内容，仍能触发最外层纵向 overscroll 回弹。
+
+变化：
+
+- Manager 的 `html / body / #root` 固定为满高并隐藏文档级溢出。
+- `html / body` 使用 `overscroll-behavior: none`，阻断根滚动链和回弹。
+- Board 横向滚动、Open Tabs 与 Session tabs 纵向滚动继续由原有内部容器承担。
+
+当前状态：Current。
+
+### 2026-08-03: 本地文件模式固定 Session 顺序
+
+本地文件模式原先只把每个 Session 拆成 `sessions/<id>.json`，重新加载时直接采用文件系统目录枚举顺序。原子替换任一 Session 文件会改变部分文件系统中的枚举位置，因此新增 Session 或增删 Session 内 Tab 后，Manager 中的 Session 可能突然换位。
+
+变化：
+
+- `meta.json` 新增 `sessionOrder`，保存 canonical `groups` ID 顺序。
+- 读取独立 Session 文件后按 `sessionOrder` 组装 state，目录枚举顺序不再影响 UI。
+- 旧 `meta.json` 缺少该字段时继续兼容读取，并在下一次成功 File commit 时自动回填。
+
+当前状态：Current。
+
+### 2026-08-02: Sidebar C1 motion parity repair
+
+问题：
+
+- Sidebar 的 `collapsed / peek / pinned / drawer` 状态机已实现，但生产 CSS 只声明
+  `opacity / transform` transition；实际变化的是 sidebar width 与 shell
+  `grid-template-columns`，所以展开/收起仍是一帧瞬切。
+- 旧 layout test 还明确禁止 width/grid transition，覆盖了后来用户已经确认的 C1
+  Hybrid Rail preview。
+- Open Tab copy、context bar 和 Filter 使用条件卸载或 `display:none`，无法执行预览中
+  75ms 延迟后的 80ms 淡入/淡出。
+
+变化：
+
+- Pinned 展开/收起恢复 `180ms cubic-bezier(.2,.8,.2,1)` shell track + sidebar
+  width transition；Peek/Drawer 只动画 overlay width 与 shadow，Board 保持 52px
+  offset。
+- Expanded-only 内容改为常驻但 collapsed 时 disabled / inert / `aria-hidden` /
+  `tabIndex=-1`，由共享 owner 延迟 75ms 后淡入；Expand 与 expanded context bar
+  在同一稳定 36px slot 交接。
+- Desktop Open Tab identity 使用稳定 43px slot，展开/收起过程中 favicon 和当前
+  Window glyph 的中心漂移不超过 1px。Drawer 使用独立 44px owner 与 8px gaps。
+- Sidebar overlay 改用 `overflow:clip`，不再被 `scrollIntoView()` 当成横向 scroll
+  owner；真正的 Window switcher 继续独立滚动。
+- 新增真实浏览器中间帧、Peek、快速反向、Drawer、focus restore 与 reduced-motion
+  回归，不再只检查最终 class/offset。
+
+判断：
+
+- 本产品明确选择 C1 Hybrid Rail，width/grid transition 是经过预览确认的必要布局
+  动画，不能被“所有动画只用 compositor 属性”的通用建议覆盖。
+- Motion 验收必须包含时间轴与可中断性；只看终点截图无法证明动画存在。
+
+### 2026-08-02: Compound-control geometry repair
+
+问题：
+
+- 真实 unpacked extension 中，Workspace 默认 `🗂️` emoji 与 `Personal` 名称发生
+  视觉重叠。源码虽然把它们拆成 span，但 Mantine 实际把 emoji、name 和 chevron
+  包在同一个 label 中；4px gap 错加在 label 外层，三个子元素实测均为 0px 间距。
+- 同类检查发现 Category label/count 和 Session metadata icon/copy 也缺少实际
+  owning gap。390px topbar 还把 selected `Saved` Category 裁到视区外。
+- 之前的页面截图、axe 和父容器 overflow 检查没有验证相邻可见槽位，因此
+  “页面 fixture 通过”被错误扩张成“所有 UI 组合通过”。
+
+变化：
+
+- Workspace trigger 改为独立 left emoji / label / right chevron slots；desktop
+  间距为 6px / 4px，compact 隐藏整个 label/right section 并让 emoji 在 44px
+  target 内居中。Workspace menu、Manage row 和 Editor preview 使用 20px/24px
+  emoji slot 与明确 gap。
+- Category label/count 的 gap 移到真实 `.mantine-Button-label` owner；Session
+  metadata item 使用 `inline-flex` + 4px gap。
+- Compact Category strip 收回 Category Options 的桌面 margin，压缩内部 padding/gap
+  但保留 count；`CategoryNav` 在 active Category 或容器尺寸变化时自动恢复
+  active item 的可见位置。
+- 新增真实浏览器几何回归，覆盖 `👩🏽‍💻` ZWJ emoji、超长 Workspace 名称、
+  desktop/390px、Category count 与 Session metadata。
+
+判断：
+
+- Emoji 不是与同尺寸 Lucide SVG 等价的固定墨迹；颜色字体可能越过 advance box，
+  必须分配独立 slot 和保守 gap。
+- UI 验收分为 page/state matrix 与 compound-control geometry matrix。只有前者
+  通过时，不能再声称所有图标、文本、计数和 trailing action 组合都已验收。
+
+### 2026-08-02: Preview-to-production UI parity repair
+
+问题：
+
+- Unpacked extension 的最终实现虽然通过自动化，但 Open Tabs context actions
+  继承 Mantine filled primary，Session card 被旧 taste test 强制为无阴影，
+  Restore/More 在 resting 态以 0.45 半显；这些都与已经确认的 Crisp Utility
+  preview 不一致。
+- 同类偏差还出现在 collapsed Expand、Session/Open selection toolbar、Session
+  title/note、Category active underline 与 Open/Saved trailing X。
+
+变化：
+
+- `AccessibleIconAction` 默认改为 neutral `subtle`，调用方只有显式需要时才使用
+  selected/danger/filled。Collapsed Expand、Open/Session selection toolbar
+  因此不再显示 cobalt 实心方块。
+- Session Header 的 Restore/More 从 raw 22px Mantine ActionIcon 迁移到共享
+  32px Lucide action。Fine pointer resting 为隐藏且不接管 pointer，
+  header hover/focus 与 menu-open 显示；coarse pointer 保持直接可见。
+- Session 恢复 preview 的轻 elevation：A1 使用 `0 1px 3px / 7%`，
+  D1 使用 `0 1px 3px / 28%`。普通 group slot 在 full-height target 内保留
+  3px/5px breathing inset；Empty Category 创建 target 继续通高。
+- T1 title 最多 2 行；S1 group note 使用 accent-soft fill、2px 左侧 accent
+  rule 和紧凑 padding。Category active 移除多余 underline，只保留 quiet fill。
+- Open/Saved trailing X 统一为 32px neutral/danger action；selection mode
+  常显 checkbox，但 fine-pointer X 仍只在 row hover/focus 时出现。Drawer/narrow
+  继续使用 44px target 与 8px gap。
+
+判断：
+
+- 已确认的 Visual Companion preview 与双语 Crisp Utility spec 是视觉 source of
+  truth；更早 taste 阶段的“完全无 elevation”不能覆盖后续明确选择。
+- Progressive disclosure 不能依赖半透明常显，也不能通过 `visibility:hidden`
+  破坏 keyboard path；pointer 与 focus/menu-open 状态分别受 owner 控制。
+- Empty full-slot 是 DnD target geometry，普通 card inset 是 visual geometry；
+  两者必须分开建模和测试。
+
+当前状态：Current。Supersedes 2026-07-28 “Session card 移除 resting shadow”
+的材质子决策；其 border/highlight、stable slot 与 DnD ownership 继续有效。
+
+### 2026-08-03: Crisp Utility Options、Popup、Icon 与主题系统收口
+
+问题：
+
+- Options 的 configured Local Folder 与实际 active backend 混为一个“当前模式”，自动 fallback 看起来像用户主动切回 Browser；folder identity、reason 和最后一次 File freshness 只存在运行时或被 Browser timestamp 覆盖。
+- Popup 仍显示 selected/total 比例和 Chrome Group control，Save/Remove 几何与最终 P2 预览不一致；capture/dedupe 自动关闭也可能影响 pinned source tabs。
+- 生产同时保留 Tabler 与 Lucide，Nord/Mantine blue 仍分散在各 surface，无法保证 A1 Light / D1 Graphite、1.75 stroke、32/44px action geometry 一致。
+- Advanced 中 Safety/Keyboard/Recovery 每层只有一个选项，层级多于信息。
+
+变化：
+
+- `tabboardStorageConfig` 升级为持久化 `StorageStatusProjection`，分离
+  `configuredTarget` 与 `activeBackend`，并保存 `folderName`、
+  `fallbackReason`、`fileUpdatedAt`。File commit 从 `meta.json.updatedAt`
+  发布 freshness；Options 只读/订阅该轻量投影，DirectoryHandle 继续只存
+  IndexedDB。
+- Fallback 保留 configured Local Folder 主语义，显示 folder name、最后 File
+  更新时间、原因、Reconnect 和显式 Use browser storage；只有安全 switch-back
+  完成后 configured target 才变为 Browser。
+- 新安装/Reset 的 toolbar action 默认 Open Popup；显式历史 `store` 不迁移。
+  Advanced 改为 Storage location、删除确认、Keyboard shortcuts、Reset settings
+  四个直接 A2 rows，保持 lazy chunk 与 lightweight Basic projection。
+- Popup 改为 P2 compact action rows：固定 Save、setting-aware helper、仅在存在
+  pinned 时显示一次性 scope/helper，不再显示 Group 或 selected/total。
+  Save/Remove 均为中性80×32 actions；duplicate count只包含实际可关闭的
+  non-pinned tabs。
+- Service worker在capture close与window dedupe两条路径都过滤pinned。
+  Pinned tab可保存但永不自动关闭；同URL有pinned copy时只移除regular copies。
+- 19个production icon owners全部迁移到`lucide-react`，移除
+  `@tabler/icons-react`。Restore使用`SquareArrowOutUpRight`，Save使用`Inbox`；
+  `TabBoardIcon`/`AccessibleIconAction`统一1.75 stroke和32/44px geometry。
+- Shared CSS bridge精确落地A1 Light与D1 Graphite semantic tokens。Manager
+  Canvas/Sidebar/Toolbar/Surface分层，resting Search/Save/Restore保持中性；
+  selected、highlight和DnD target使用semantic cobalt。
+
+判断：
+
+- 配置目标与当前writer是两个独立事实；可靠恢复必须让UI展示两者，而不是从
+  authority是否为File临时推断。
+- Popup是短时动作面，只需要表达本次capture scope和可关闭结果；Chrome Group
+  metadata可继续保存，不需要暴露额外筛选层。
+- 一个icon family和一套semantic tokens比逐组件指定颜色/尺寸更能守住全局一致性，
+  也减少bundle解析成本。
+
+当前状态：Current。Supersedes 2026-07-20 Popup grouped scope、旧
+`{mode}` bootstrap展示、Tabler/Nord生产icon/theme ownership和单项Advanced
+section层级。
+
+### 2026-08-02: Crisp Utility DnD 与 Hybrid Commands 收口
+
+问题：
+
+- Session 的独立 drag handle 与 KeyboardSensor 虽提供 direct keyboard drag，
+  但增加 resting icon、额外 focus stop，并让 title/metadata/note/空白的
+  pointer/touch surface 语义不一致。
+- Saved/Open tabs 创建新 Session 曾缺少明确、稳定的 start / between / end
+  目标；空 Category、All Source Tabs、drag ghost、auto-scroll 与 source
+  replacement 也没有一套完整验收矩阵。
+- dnd-kit 默认 auto-scroll、scroll-compensated delta 与 Board 横向滚动会形成
+  多 owner；精确 `+` 与普通 target hysteresis 混用时容易产生黏滞或误创建。
+
+变化：
+
+- `useManagerDndSensors()` 只保留 Pointer 5px 与 Touch 200ms/5px。各 surface
+  明确拆分 pointer/touch event path，避免触摸被 PointerSensor 抢先；不再注册
+  KeyboardSensor，不保留可见或隐藏 drag activator。
+- Session title、metadata、只读 note、card/shell 空白成为 pointer/touch
+  activator；Restore、More、编辑控件、selection toolbar 与 tab list不启动
+  Session drag。Open/Saved rows 与 Category tab同样只在非交互 surface起拖。
+- Session keyboard结果改由C Hybrid Commands提供：Manage Workspace/Category
+  使用Move Up/Down，Session使用named Before/After + cross-category picker，
+  Saved Move与Open Save to共用Existing/New Session picker。
+- Saved/Open tabs拖动时按当前Category稳定渲染start / between / end 20x20px
+  Gap Anchors；只有精确命中并松手才创建。Plus active不展开slot，离开立即失活，
+  300ms pointer tip与live announcement分开处理。
+- Empty Category使用完整第一条340px Session slot作为target；All Source Saved
+  Tabs同时抑制pointer anchors和keyboard New choices，但仍允许Existing merge。
+- Drag start快照item preview与bounded geometry；pickup、Existing、plus、empty
+  target间不更换模板或尺寸。Ghost半透明、pointer-transparent并位于所有plus上层。
+- Board-owned RAF auto-scroll取代dnd-kit默认owner：左右48px edge、3–12px/frame，
+  每帧remeasure；精确plus active暂停，离开后imperative wake恢复。Reduced motion
+  关闭非必要动画但保留必要滚动。
+- Serial Chromium验收补齐Workspace row、topbar/Manage Category、Session
+  same/cross-category、Saved same/existing/new/all-source、Open existing/new、
+  start/between/end、empty Category、source replacement与reduced-motion paths。
+
+判断：
+
+- Keyboard可达性的目标是“每个pointer结果都有清楚的named command”，不是保留一个
+  visually-hidden drag handle。命令式picker更容易宣布目的地、取消并恢复focus。
+- New Session必须通过精确、显式的Gap Anchor或picker choice触发；不使用持久
+  New Session card，也不把全选一个源Session误解释为拆出新Session。
+- Board scroll、collision remeasure与native pointer coordinate必须各有单一owner。
+
+当前状态：Current。Supersedes 2026-07-21 Session keyboard drag handle /
+KeyboardSensor方案；persistent `DropIntent` wire kinds与storage schema未改变。
+
+### 2026-08-01: Manager Sidebar 四态与 Crisp Utility Material 收口
+
+问题：
+
+- 旧 sidebar 由 `collapsed + overlayOpen + CSS :hover` 混合驱动，desktop preview、pinned layout 与 compact drawer 无法清楚区分，selection/preview 还会形成额外视觉旁路。
+- 54/62px rail、`Window N`、Refresh、colored Save、Trash copy 与第二个 compact toggle 偏离 Crisp Utility spec；collapsed controls 还有视觉隐藏但可聚焦的风险。
+
+变化：
+
+- `useSidebarDisclosure()` 成为 `collapsed / peek / pinned / drawer` 单一状态 owner。Desktop rail 固定 52px；pointer/focus intent 共享约 350ms dwell，任一 intent 保持时 peek 不收回且 board 不移动。Focus 转到 centered Expand 会取消 pending dwell。
+- Explicit Expand/Pin 持久化 desktop preference；peek 内 selection/Filter 使用不写 preference 的 `promote()` 触发本次页面 pinned + reflow。900px 及以下 explicit drawer overlay 让 topbar/main inert，并在 fine/coarse pointer 下统一使用三个 44px Open Tab targets 和 8px 间距；Close 关闭。
+- Window header 改为 count glyph + focused badge，不显示 ordinal/raw ID，不提供 Refresh；Save/Collapse/Pin/Close 使用 neutral actions。
+- 同一 Open Tabs context bar 在 normal 状态显示 count、Selection、Save All，在 selection 状态原位替换为 Task 6 actions，在 collapsed 状态只显示 centered Expand。Filter、checkbox、Close 等 hidden controls 不进入 tab order。
+- Controller browser acceptance 发现 collapsed rail 仍暴露 visually hidden Focus x7；collapsed row 随后改为完全不渲染 title button/accessibility node，仅保留 centered favicon 的 pointer focus/drag surface。Sidebar keyboard tab order 收敛为 selected window glyph + Expand，Frame 同时移除重复 collapsed class。
+- Topbar 固定为 Workspace、Categories + Options、Search、Bin、More；More 仅含 Import/Export/Options。Search 静止态透明无边框；Session panel 使用 8px、dense controls 使用 6px quiet material。Coarse Workspace manager actions 常驻可见、可点击且为 44px。
+- Session drag handle、sortable bindings、collision 与 board geometry 在本阶段保持不变，随后由 2026-08-02 DnD plan 收口。
+
+当前状态：Current；其中 Session drag-handle 临时决策已由 2026-08-02 DnD 收口替代。Fake-timer hook、ManagerFrame DOM、Open Tabs DOM、header/material、selection scope 与 browser acceptance spec 共同守护。
+
+### 2026-08-01: Manager Workspace 导航与嵌套管理焦点收口
+
+问题：
+
+- Workspace create/delete 曾分别拆成 Workspace 和 Category 两次 navigation，导致单个动作产生重复 history entry；active Workspace 的 optimistic delete 还可能让 stale page Workspace 反向写回 store。
+- Manage Workspaces / Manage Categories 的 nested editor 关闭后，恢复中的 parent FocusTrap 会把焦点移到 parent Close，而不是触发 Edit action。
+
+变化：
+
+- Workspace create/select 使用一次 atomic `{ workspaceId, category, view }` push；active delete replacement 使用一次 atomic replace，且 ManagerLayout 只把仍存在的 page Workspace 同步到 store。
+- `useManagerPageState` 将 history 写入移出 React state updater，以免 StrictMode 重放 updater 时重复 `pushState`。
+- Nested editor 在完整 exit 期间保持 parent manager inert/trap paused；exit 完成后先恢复 exact row action 的可见/tabbable 状态并标记 `data-autofocus`，再启用 parent trap。Workspace 与 Category 使用同一 handoff 语义。
+- Coarse Workspace actions 继续在无需 row focus 时保持 44px、visible 和 pointer-interactive。
+
+当前状态：Current。Focused 组件/页面状态测试和真实 Chromium create Back/Forward、active delete、nested Escape、coarse action 四场景共同守护。
+
+### 2026-08-01: Session Selection Toolbar 与 Hybrid Target Picker
+
+问题：
+
+- Task 5 已建立全局互斥 selection scope，但 saved Session 仍缺少 More > Select Tabs、完整批量动作和 keyboard move/save target。
+- Open Tabs 只有直接 Create Session，无法明确保存到已有 Session 或指定的新 Session 位置。
+- 批量 restore 若循环单项 runtime command，会丢失一次性成功证据；批量 delete 若循环普通 `deleteTab`，terminal isolation 可能造成部分成功。
+
+变化：
+
+- Session More > Select Tabs 以 `0 selected` 进入当前 Session scope；Session header 原位替换为一个 icon toolbar，覆盖 visible select toggle、Restore、Copy、Move、Delete 和 Exit。
+- Restore/Copy 只处理 selected Links，Notes仍可Move/Delete；Locked禁Restore/Move/Delete但保留Copy。Restore/Delete成功清IDs并保留mode，Copy保留IDs，reject保留全部上下文。
+- Restore Selected 复用一次 `restore-refs` background batch；Copy只做一次clipboard write；Delete新增atomic `delete-tabs` mutation和无optimistic、authority-confirmed `commitChecked()` waiter。
+- Open Tabs保留Create Session直接New action，并新增Save to；Open和Saved共用body-portaled target picker。Arrow keys preview，Enter/Space commit，Escape/Cancel不改数据/selection，关闭后返回trigger或surviving fallback。
+- Picker choices按active workspace canonical category/session order生成。Existing排除locked、cross-workspace和semantic no-op；New展开每个合法before/between/after index。Saved All Source Tabs隐藏全部New choice但保留Existing merge，Open Tabs不抑制。
+- Picker显示Session title、Category人类名称和位置语义；raw IDs只留在typed choice/DropIntent，不进入visible/accessible label。Commit继续复用已有`move-tabs`、`copy-open-tabs`和`create-session` DropIntent。
+
+判断：
+
+- Selection toolbar只负责transient action lifecycle，persistent move/save仍由既有typed DropIntent authority单路径执行。
+- Batch delete需要一个原子mutation，而不是依赖ordinary mutation queue对多个独立删除“碰巧同批”；只有authority确认后清selection才满足可重试合同。
+- Picker preview是keyboard command UI，不应提前实现DnD `new-session-insert`或改变任何collision/Gap Anchor几何。
+
+当前状态：Current。Focused toolbar/picker DOM、runtime/preview、store/publication、DropIntent、Task 5 selection和真实Manager typed-intent tests共同守护。
+
+### 2026-08-01: Manager 显式 Selection Scope Ownership
+
+问题：
+
+- Open Tabs 和 saved Session 都从 selected ID 数量推导 `selectionMode`，无法表达清空最后一个 ID 后仍停留在 `0 selected` mode。
+- 不同 browser window / Session 各自持有 IDs，但缺少 Manager 级互斥 owner，跨 scope 进入时旧 IDs 不能被同步清理。
+
+变化：
+
+- 新增 pure `SelectionScope` transition 与 `useManagerSelectionScope()` coordinator；Manager 只保存当前 `{kind, windowId|groupId}` scope。
+- Open Tab IDs 继续留在 Open Tabs workflow，saved item IDs 继续留在各 `SessionCard`，不写入 Zustand 或 persistence。
+- 任意 Open/saved checkbox 都先 enter 对应 scope，再 toggle 当前 item；进入另一个 scope 时同步清旧 owner IDs。
+- 清空最后一个 ID、capture、drop、批量关闭/Pin 或 same-window refresh 只产生 `0 selected`，不自动退出 mode。
+- 显式 Exit、sidebar collapse、Open Tabs source window 改变/失效或 scope replacement 才 exit + clear。
+- Drag overlay `SessionCard` 不接收 coordinator，不注册或干扰 selection scope。
+- Selection/preview 只保持 collapsed sidebar 展开，不再复用 blocking overlay 的 `inert` 状态；实际 drawer 仍阻塞被覆盖的 topbar/main。
+- Active saved scope group 加入 session activation forced set，仍在 board 中时不会因 search 等 activation context reset 降级为 shell；若 filter/category 让 owner 真正卸载，则 coordinator 显式 exit。
+
+判断：
+
+- Active mode 是 Manager 级互斥交互上下文，selected IDs 是 source-local transient data；分开 ownership 能表达空选择态，又不污染 canonical state。
+- Task 5 只提供 saved scope 进入能力和 checkbox-first wiring；Session More > Select Tabs 与完整 toolbar 内容由后续任务交付。
+
+当前状态：Current。Focused selection scope、真实 Manager DOM scope replacement/owner lifecycle、Open Tabs panel、session rendering，以及 workflow/runtime/layout 邻接 tests 共同守护。
+
+### 2026-08-01: Category 直接拖拽与并发安全管理
+
+变化：
+
+- 移除 Reorder Categories / Done Reordering mode；整个顶部 Category tab 复用全局 5px threshold，点击导航、超过阈值直接 pointer reorder，无可见或隐藏 drag handle。
+- Manage Categories 改为 Built-in/Custom 共用 canonical order 的单一 dense list，整行 drag 与 Move Up/Down 发布同一完整 order；New/Edit 共享 name + color modal。
+- Category edit/order mutation 增加 UI 操作起点捕获的 expected/target CAS：Editor open 固定 folder snapshot，Manage action/drop 固定 rendered order，topbar resolver 通过 typed intent 固定 canonical order；store 不在 submit 时重读 expected。
+- Exact replay 增加 mutation timestamp witness，并在 replay 前验证 semantic completeness；response-loss retry 只在 target 与 witness 都匹配时成功，ABA/独立 target equality 以及 stale edit/order 以稳定 conflict 拒绝。Legacy named color 在用户主动改色前保持可见并原样保存。
+- 删除 custom Category 显示 workspace 内受影响 Session 数量；包含 locked Session 时预先禁用并继续由 mutation authority 兜底。
+
+判断：
+
+- 直接操作减少模式切换，但 keyboard 排序仍需稳定的 Manage Categories 命令。
+- Category 管理跨页面并发时宁可提示冲突，也不能用旧快照覆盖新状态。
+
+当前状态：Current。Vitest 覆盖 UI-start snapshot、CAS/replay timestamp witness、ABA/conflict、pre-replay completeness、manager no-op drag、legacy color、workspace ownership 和 focus/inert contracts；真实 3px/7px pointer gate 由 serial Playwright 验证。
+
+### 2026-07-28: Design Taste 收敛与可信状态
+
+在可访问性、DnD 与启动性能已经稳定后，rendered taste review 仍发现首屏上下文、设置状态可信度、低频管理动作常驻和视觉层级不一致。
+
+变化：
+
+- Manager 裸入口按 workspace 恢复 page-local 最近分类；没有有效偏好且 Inbox 为空时，按 category order 打开第一个非空分类。显式 URL 与无效 category 的既有语义不变。
+- Desktop workspace trigger 直接显示当前 workspace 名称，compact breakpoint 仍为 icon-only。
+- Category 当时通过 Category Options 进入显式 Reorder Categories mode；该交互后来由 2026-08-01 的 whole-tab direct pointer reorder 取代。`category-column` droppable 常驻约束保留。
+- 新增 shared `Favicon` primitive；Open Tabs、saved link rows 和 info overlays 共享 fixed-size lazy image/fallback，inactive session shell 仍保持 count-only。
+- Options save status 移入 SettingsProjection external store 的 authoritative mutation queue；commit 前显示 `Saving…`，失败回滚并可 Retry。Debounced text draft 与 persistence status 分开。
+- Restore 以 Destination / Placement 呈现；New window 下禁用只适用于 Current window 的 Placement，但不改变持久化 booleans。
+- Advanced Settings 的 Safety、Keyboard Shortcuts、Recovery 改为无框 section；Data Storage 保持唯一 framed tool。
+- Popup 使用 TabBoard extension icon；duplicate cleanup 降为次级 Remove row，Save 保持唯一 primary action。
+- Session card 当时移除 resting shadow，使用 border、focus/highlight state
+  表达层级；该材质子决策后来被 Preview-to-production parity repair 取代，
+  stable slot、interaction border 和 DnD target ownership 保留。
+
+判断：
+
+- New-tab manager 应优先呈现已有工作上下文，而不是在其他分类有数据时表现为空应用。
+- 设置页状态必须来自 authoritative queue，而不是同步切换的 component-local flag。
+- Category reorder 是低频管理动作；该阶段用显式 mode 去掉永久 handle，后续进一步收敛为 whole-tab pointer drag + Manage Categories keyboard commands。
+- 收敛应发生在现有 owner 内，不需要更换 Mantine、增加依赖或改变 schema/DropIntent。
+
+当前状态：Current。Focused TypeScript/Vitest、真实 persisted-state DnD 和后续完整 browser/taste review 共同守护。
 
 ### 2026-07-26: Typed Application Feedback Ownership 深化
 
@@ -282,7 +653,8 @@ Open Tabs 的 runtime contract、selection、refresh、capture feedback、tab fi
 - 采用独立 handle 而不是把 attributes spread 到 `<header>`，避免在包含 title/Restore/More 的容器上产生非法 `role="button"` 与重复 tab stop。
 - 键盘拖拽是 direct-manipulation 的可达性底线，值得作为独立修复而非顺带改动。
 
-当前状态：Current，`tsc`、`npm test`、`npm run check` 通过；Playwright e2e（含键盘拖拽）本地按需运行通过。
+当前状态：Superseded by 2026-08-02 Crisp Utility DnD。该条仍记录旧 direct
+keyboard drag 方案的来源；现行实现使用 pointer/touch surface + Hybrid Commands。
 
 ### 2026-07-21: 架构文档校正与死字段清理
 
@@ -290,10 +662,10 @@ Open Tabs 的 runtime contract、selection、refresh、capture feedback、tab fi
 
 变化：
 
-- 校正 `technical-architecture.md` 的 Drag and Drop 章节：DnD 早已从原生 HTML5（`setDragImage`/`dataTransfer`）迁移到 `@dnd-kit`（`PointerSensor`/`TouchSensor`/`KeyboardSensor` + 自定义 `createGeometryCollisionDetection` + `DragOverlay`），文档此前仍在描述已废弃的原生实现。
+- 校正 `technical-architecture.md` 的 Drag and Drop 章节：DnD 已从原生 HTML5（`setDragImage`/`dataTransfer`）迁移到 `@dnd-kit`。当时使用 `PointerSensor` / `TouchSensor` / `KeyboardSensor`；2026-08-02 后 KeyboardSensor 被 Hybrid Commands 取代。
 - 移除 schema 中的死字段 `quickList`（Quick list workflow 于 2026-07-06 下线，React 重写后 UI 已完全不读写）。`normalizeState()` 遇到历史 `quickList` 数据时迁移成 `Former Quick list` session，保证不丢数据。
 - 新增 `src/shared/model/schema.test.ts` 覆盖迁移与字段移除。
-- 新增 `tests/e2e/`（Playwright）浏览器级冒烟骨架，覆盖 manager 加载与 `@dnd-kit` 键盘拖拽；纯 resolver 回归仍以 `src/manager/core/dnd.test.ts` 为主。
+- 新增 `tests/e2e/`（Playwright）浏览器级冒烟骨架，最初覆盖 manager 加载与 `@dnd-kit` 键盘拖拽；2026-08-02 后扩展为 pointer DnD + Hybrid Commands矩阵。纯 resolver 回归仍以 `src/manager/core/dnd.test.ts` 为主。
 - 大数据量 board 性能：`WorkspaceContent` 的横向 session track 引入按需渲染，减少 session 数量很大时的一次性 DOM 成本。
 
 判断：
@@ -983,7 +1355,9 @@ Starred 已经是一个内置 category，用户认为 session card 上的金色�
 - Categories 从左侧 sidebar 移到顶部，使用 tabExtend 风格 segmented tabs。
 - 点击 category tab 会切换右侧 active category board，而不是展示所有 category sections。
 - Session card 增加 favicon stack、link/note meta、locked/starred chips 和 note preview。
-- Session、saved tabs、open tabs 可拖到顶部 category tab，把内容移入该 category。
+- 当时 Session、saved tabs、open tabs 都可拖到顶部 category tab。现行规则由
+  2026-08-02 DnD 收口替代：顶部 `category-column` 只接收 Session；
+  Saved/Open 使用 Existing Session 或 New Session Gap Anchor / target picker。
 - Popup、Options、数据模型和现有 DnD target-slot 语义保持不变。
 
 判断：
@@ -1115,7 +1489,7 @@ Manager 启动阶段出现依赖或异步顺序问题时，页面不应停在空
 - Popup 增加 hydration 状态、landmark 和 Dedupe confirmation。
 - Options 跟随主题，移除 usage dashboard cards，Basic/Advanced 分层，`?advanced=1` 恢复展开状态，Reset 增加确认。
 - shared UI 增加首帧 system theme、匹配页面背景的 theme-color、Intl 日期/数字格式、focus/touch/modal/reduced-motion foundation。
-- Manager floating Tooltip/Menu/Modal 统一留在 main landmark 并取消关闭 fade；Open Tabs favicon lazy-load，session/Open Tabs/Trash 使用 `content-visibility` 跳过 off-screen paint。
+- Manager floating Tooltip/Menu 留在 main landmark；fixed Modal/Confirm 改由 shared compound owner portal 到 `body`，避免 flex/grid main 将 dialog 偏移出视口。Modal header 使用 `role="presentation"`，仍保留 H2 title 与 dialog `aria-labelledby`，页面只暴露一个 banner。全部 floating transitions 取消关闭 fade；Open Tabs favicon lazy-load，session/Open Tabs/Trash 使用 `content-visibility` 跳过 off-screen paint。
 - 动作、标题与 accessible names 统一 Title Case；异步按钮使用明确且以 `…` 结尾的进行中 copy，generic errors 提供下一步。
 
 判断：
@@ -1197,6 +1571,130 @@ unresolved finding，完整证据见
 当前状态：实现完成，最终 production benchmark、全量测试和 Chrome
 acceptance 证据记录在
 `docs/reviews/2026-07-28-react-startup-performance-review.md`。
+
+### 2026-08-02: Crisp Utility 取证式一致性修复
+
+问题：
+
+- 页面终态截图和 axe 全绿未覆盖 Open/Saved 行的 metadata 缺失、字体 token
+  漂移、hover/selected material、Session title 字号和离屏 intrinsic geometry。
+- Popup 可见 duplicate count、preview harness 与 worker 各自维护规则，Exclude
+  URL 和 pinned duplicate 场景可能导致 UI 结果与实际关闭集合分叉。
+- Options 长 folder name 会换成多行；fallback 的两个恢复动作分散在不同层级，
+  部分 polished helper copy 也回退成泛化文案。
+
+变化：
+
+- Open/Saved 行统一为 14/20 title、12/16 metadata 和至少 44px；Link/Note
+  都保留两层 copy，checkbox/favicons 视觉盒继续精确重合，hover/selected
+  material 与 44px intrinsic placeholder 同步。
+- Session T1 title 明确为 14/18、最多两行；Rest/Hover/Focus/Menu Open 四态和
+  32px actions 建立 computed-style E2E。
+- 新增 shared `classifyWindowDuplicates()`。Worker、Popup 和 preview harness
+  共用 removable/protected-pinned 分类；Popup Save 仍遵守 Exclude URL rules，
+  独立 Remove scope 仍展示整个 eligible window 的真实可关闭数量。
+- Popup 补齐 duplicate result helper，并对 mixed、pinned-only、excluded、
+  keep-all、regular-only、all-pinned 六场景验证实际关闭结果。
+- Options 恢复 pinned-safe Capture、Toolbar、Keyboard、Reset copy；长 folder
+  name 使用 14/20 单行省略；fallback 将 Reconnect 与 Use Browser Storage
+  归入同一恢复动作区。
+- Manage Workspaces 补回 manager 内部 `New Workspace`，并与 Manage Categories
+  统一为 title + 动态数量/drag subtitle、header New/Add、分隔 footer Done。
+  Create/Edit 继续复用同一个 editor；nested inert 与 exact focus return 不变。
+- 具体 Lucide glyph 也纳入合同，不再只检查 icon library/stroke：Save=`Inbox`、
+  Restore=`SquareArrowOutUpRight`、Settings=`Settings2`、Trash/Bin/Delete=`Trash`；
+  Manager toolbar glyph 统一 18px。Reset/Reconnect/Archive 等辅助语义保留各自图标。
+- Popup Save/Remove 恢复为固定 80x32 纯文本动作；Options Browser storage 将
+  Choose Folder 放回 primary row，并在 detail row 说明 Chrome profile storage。
+- Options Basic 恢复 polished capture/restore/focus helper 和 Exclude URL 的
+  comma/new-line 输入说明。
+- 最后一次 unpacked 交叉复查纠正了 Phase 20 的过度约束：Open Tab 展开态
+  恢复 Preview 10 的 24px leading column，同时通过 9.5px row inset 保持
+  collapsed / pinned / Peek 全程 favicon center 不跳；collapsed rail 继续使用
+  43px identity column。
+- Manage Workspace / Category 的可排序行补充 `role="group"`，使可聚焦整行的
+  accessible name 合法；Workspace 普通行与 Category 一致使用显式 surface，
+  current/active 状态材料不变。
+- 删除 Window 顶栏遗留的 Save Window。它与下方 Save All 共用同一个
+  `captureWindow` owner，没有 scope 或结果差异；整窗保存现在只由 Open Tabs
+  context bar 提供，Window 顶栏只保留 disclosure command。
+
+判断：
+
+- Preview/spec 是视觉与交互 source of truth，但最终生产 token 使用非缩尺的
+  14/20、12/16 和 32/44px 体系。
+- 结构、computed geometry、时间、交互焦点和 accessibility 必须分别取证；
+  缺少任一维度时不能用“页面看起来正常”替代验收。
+- 动画稳定性不能反向覆盖静态密度合同；列宽、页面坐标和状态内边距需要分开
+  建模并同时验收。
+- Popup 的 Save scope 与 Remove scope 是两个不同业务集合，不能共享 capture
+  filter；重复分类必须由 shared domain owner 统一。
+
+当前状态：实现完成，自动边界与手工边界记录在
+`docs/reviews/2026-08-02-crisp-utility-forensic-parity-audit.md`。
+
+### 2026-08-02: Tooltip 单一 owner 与 File Storage worker 修复
+
+问题：
+
+- 普通 icon action 同时渲染 Mantine Tooltip 和原生 `title`，部分调用方又在
+  `AccessibleIconAction` 外包第二层 Tooltip，导致同一位置出现两个 tips。
+- Mantine 的延迟打开 timer 在按钮点击后仍可触发；pointer 不移动时，已执行的
+  动作上会重新出现 stale tip。Tab hover 的自定义 180ms tooltip 也缺少相同的
+  activation suppression。
+- 仓库同时存在独立的 `vite.config.js` / `vite.config.ts`。测试显式加载新 TS
+  配置，但 `npm run build` 默认加载旧 JS 配置，导致真实 CRX 产物仍向 service
+  worker 共享 chunk 注入访问 `document` 的 module-preload helper。该异常又会以
+  `File storage error: document is not defined` 持久化为 Browser fallback。
+
+变化：
+
+- 新增 `TabBoardTooltip` 作为普通控件唯一 owner；移除 native `title`、嵌套
+  Tooltip 和 ManagerFrame 对所有 `aria-describedby` 伪造 `mouseout` 的补丁。
+- 标准 Tooltip 在 pointerdown/click 时同步清除可见层和 pending timer，并只在
+  真实 pointer move 或 leave 后进入新 hover 周期。Tab hover tooltip 独立保留
+  180ms、C3 menu description 独立保留 550ms，但 tab activation 同样抑制到真实
+  movement。
+- `dev/build/preview` 显式绑定 `vite.config.ts`；`vite.config.js` 只 re-export
+  该 source。页面 entry 保留 modulepreload 和 file-only lazy chunks；MV3
+  service worker 通过既有 loader seam 静态注入 fileStorage/fsDirectory，避免
+  Chrome 禁止 worker dynamic `import()` 后又被 Vite error handler 遮蔽成
+  `window is not defined`。
+- Storage Authority 对上述 `document` / `window is not defined` 历史构建错误
+  自动重试 File backend；普通 permission、
+  corruption 或 offline fallback 不自动重试。Options 检测到该精确旧状态时主动
+  初始化一次 Authority，因此无需先打开 Manager 或手工 Reconnect。
+
+当前状态：Current。静态 owner 门禁、Authority/Options/production-build 回归和
+真实 Chromium Tooltip 时序均已覆盖；原生 folder picker/OS permission 仍是手工边界。
+
+### 2026-08-03: 全项目 Tip 生命周期统一
+
+问题：
+
+- Compact action、菜单解释、Tab 富预览和 New Session 拖拽提示分别持有 timer/open
+  state；跨类型移动时旧提示不会被新提示可靠清除。
+- Mantine 菜单无条件聚焦首项，使 pointer 打开也立即触发 focus tip；切换到其他
+  menu item 后，旧 focus tip 与新 pointer tip 可以同时存在。
+
+变化：
+
+- 新增 page-realm 级 `tipLifecycle` coordinator，统一 pending timer、current owner、
+  replacement 和 release。四类既有模板与 1000/550/180/300ms 延迟保持不变。
+- Pointer 打开菜单不自动聚焦首项；keyboard 打开仍聚焦首项但不显示 tip，第一次
+  Up/Down 后立即显示当前项说明。
+- 新 owner claim 前同步清理旧 timer、可见层和 `aria-describedby`；activation、
+  leave、Escape、blur、drag start/drop/cancel 都释放 ownership。
+
+当前状态：Current。预览已确认，focused Vitest 与 Chromium menu/action 回归通过。
+
+### 2026-08-03: Popup Duplicate Remove 取消二次确认
+
+- Popup 已明确展示可移除 duplicate 数量和保留策略；额外确认弹窗在 320px viewport
+  中被截断，并重复同一信息。
+- Remove 现在直接调用既有 `dedupe-window` worker action；loading、错误反馈、pinned
+  protection 和成功后关闭 Popup 的行为不变。
+- 其他 destructive action 的确认策略不变。
 
 ## 待观察问题
 

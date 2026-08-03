@@ -17,7 +17,15 @@ interface OptionsSettingsSnapshot {
   hydrated: boolean;
   persistenceError: string | null;
   projection: SettingsProjection;
+  saveStatus: OptionsSaveStatus;
 }
+
+export type OptionsSaveStatus =
+  | 'loading'
+  | 'idle'
+  | 'saving'
+  | 'saved'
+  | 'error';
 
 const EMPTY_PROJECTION = projectionFromState(createEmptyState());
 
@@ -25,11 +33,19 @@ let snapshot: OptionsSettingsSnapshot = {
   hydrated: false,
   persistenceError: null,
   projection: EMPTY_PROJECTION,
+  saveStatus: 'loading',
 };
 let hydrationPromise: Promise<void> | null = null;
 let projectionUnsubscribe: (() => void) | null = null;
 let consumers = 0;
 let mutationQueue: Promise<void> = Promise.resolve();
+let nextMutationId = 1;
+let pendingMutations: Array<{
+  id: number;
+  updates: Partial<Settings>;
+  previous: Partial<Settings>;
+}> = [];
+let lastFailedUpdates: Partial<Settings> | null = null;
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -64,9 +80,16 @@ async function hydrate(): Promise<void> {
   if (hydrationPromise) return hydrationPromise;
   projectionUnsubscribe ??= subscribeSettingsProjection((projection) => {
     setSnapshot({
+      ...snapshot,
       hydrated: true,
-      persistenceError: null,
       projection: newerProjection(snapshot.projection, projection),
+      saveStatus: pendingMutations.length > 0
+        ? 'saving'
+        : lastFailedUpdates
+          ? 'error'
+          : snapshot.saveStatus === 'loading'
+            ? 'idle'
+            : snapshot.saveStatus,
     });
   });
   const run = readSettingsProjection({
@@ -78,12 +101,14 @@ async function hydrate(): Promise<void> {
       hydrated: true,
       persistenceError: null,
       projection: newerProjection(snapshot.projection, projection),
+      saveStatus: 'idle',
     });
   }).catch((error: unknown) => {
     setSnapshot({
       ...snapshot,
       hydrated: false,
       persistenceError: error instanceof Error ? error.message : String(error),
+      saveStatus: 'error',
     });
     throw error;
   });
@@ -101,10 +126,14 @@ function release(): void {
   projectionUnsubscribe = null;
   hydrationPromise = null;
   mutationQueue = Promise.resolve();
+  nextMutationId = 1;
+  pendingMutations = [];
+  lastFailedUpdates = null;
   snapshot = {
     hydrated: false,
     persistenceError: null,
     projection: EMPTY_PROJECTION,
+    saveStatus: 'loading',
   };
 }
 
@@ -126,6 +155,108 @@ async function sendSettingsMutation(
   return response.result as TabBoardState;
 }
 
+function overlayPendingSettings(
+  settings: Settings,
+): Settings {
+  return pendingMutations.reduce(
+    (current, pending) => ({ ...current, ...pending.updates }),
+    settings,
+  );
+}
+
+function withoutUpdatedKeys(
+  failed: Partial<Settings> | null,
+  updates: Partial<Settings>,
+): Partial<Settings> | null {
+  if (!failed) return null;
+  const remaining = Object.fromEntries(
+    Object.entries(failed).filter(([key]) =>
+      !Object.prototype.hasOwnProperty.call(updates, key)),
+  ) as Partial<Settings>;
+  return Object.keys(remaining).length > 0 ? remaining : null;
+}
+
+function enqueueSettingsMutation(updates: Partial<Settings>): void {
+  const previous = Object.fromEntries(
+    Object.keys(updates).map((key) => [
+      key,
+      snapshot.projection.settings[key as keyof Settings],
+    ]),
+  ) as Partial<Settings>;
+  const operation = {
+    id: nextMutationId,
+    updates,
+    previous,
+  };
+  nextMutationId += 1;
+  pendingMutations.push(operation);
+  setSnapshot({
+    hydrated: true,
+    persistenceError: null,
+    projection: {
+      settings: { ...snapshot.projection.settings, ...updates },
+      mutationRevision: snapshot.projection.mutationRevision,
+      updatedAt: nowIso(),
+    },
+    saveStatus: 'saving',
+  });
+
+  mutationQueue = mutationQueue.then(async () => {
+    try {
+      const authoritative = await sendSettingsMutation(updates);
+      pendingMutations = pendingMutations.filter(({ id }) => id !== operation.id);
+      const projection = projectionFromState(authoritative);
+      setSnapshot({
+        hydrated: true,
+        persistenceError: lastFailedUpdates ? snapshot.persistenceError : null,
+        projection: {
+          ...projection,
+          settings: overlayPendingSettings(projection.settings),
+        },
+        saveStatus: lastFailedUpdates
+          ? 'error'
+          : pendingMutations.length > 0
+            ? 'saving'
+            : 'saved',
+      });
+    } catch (error: unknown) {
+      pendingMutations = pendingMutations.filter(({ id }) => id !== operation.id);
+      const nextSettings = { ...snapshot.projection.settings };
+      const retryableUpdates: Partial<Settings> = {};
+      for (const key of Object.keys(updates) as Array<keyof Settings>) {
+        const hasNewerValue = pendingMutations.some((pending) =>
+          Object.prototype.hasOwnProperty.call(pending.updates, key));
+        if (!hasNewerValue) {
+          Object.assign(nextSettings, { [key]: operation.previous[key] });
+          Object.assign(retryableUpdates, { [key]: updates[key] });
+        }
+      }
+      if (Object.keys(retryableUpdates).length > 0) {
+        lastFailedUpdates = {
+          ...lastFailedUpdates,
+          ...retryableUpdates,
+        };
+      }
+      const hasFailure = lastFailedUpdates !== null;
+      setSnapshot({
+        hydrated: true,
+        persistenceError: hasFailure
+          ? error instanceof Error ? error.message : String(error)
+          : null,
+        projection: {
+          ...snapshot.projection,
+          settings: nextSettings,
+        },
+        saveStatus: hasFailure
+          ? 'error'
+          : pendingMutations.length > 0
+            ? 'saving'
+            : 'saved',
+      });
+    }
+  });
+}
+
 export function useOptionsSettings() {
   const current = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
@@ -136,40 +267,23 @@ export function useOptionsSettings() {
   }, []);
 
   const updateSettings = useCallback((updates: Partial<Settings>) => {
-    const previous = snapshot.projection;
-    const optimistic: SettingsProjection = {
-      settings: { ...previous.settings, ...updates },
-      mutationRevision: previous.mutationRevision,
-      updatedAt: nowIso(),
-    };
-    setSnapshot({
-      hydrated: true,
-      persistenceError: null,
-      projection: optimistic,
-    });
+    lastFailedUpdates = withoutUpdatedKeys(lastFailedUpdates, updates);
+    enqueueSettingsMutation(updates);
+  }, []);
 
-    mutationQueue = mutationQueue.then(async () => {
-      try {
-        const authoritative = await sendSettingsMutation(updates);
-        setSnapshot({
-          hydrated: true,
-          persistenceError: null,
-          projection: projectionFromState(authoritative),
-        });
-      } catch (error: unknown) {
-        setSnapshot({
-          hydrated: true,
-          persistenceError: error instanceof Error ? error.message : String(error),
-          projection: previous,
-        });
-      }
-    });
+  const retryLastFailedMutation = useCallback(() => {
+    if (!lastFailedUpdates) return;
+    const updates = lastFailedUpdates;
+    lastFailedUpdates = null;
+    enqueueSettingsMutation(updates);
   }, []);
 
   return {
     hydrated: current.hydrated,
     persistenceError: current.persistenceError,
     projection: current.projection,
+    retryLastFailedMutation,
+    saveStatus: current.saveStatus,
     settings: current.projection.settings,
     updateSettings,
   };

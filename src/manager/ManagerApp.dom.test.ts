@@ -3,6 +3,7 @@ import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installPreviewChrome, type PreviewChromeHarness } from '../dev/previewChrome';
+import { useTabBoardStore } from '../shared/store/useTabBoardStore';
 import { ManagerApp } from './ManagerApp';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -10,13 +11,31 @@ import { ManagerApp } from './ManagerApp';
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 let harness: PreviewChromeHarness | null = null;
+const isolatedPreviewStorage = {
+  read: () => null,
+  write: () => undefined,
+};
+
+async function changeInput(input: HTMLInputElement, value: string): Promise<void> {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value',
+    )?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  history.replaceState(null, '', '/manager.html');
   container = document.createElement('div');
   container.id = 'root';
   document.body.append(container);
-  harness = installPreviewChrome();
+  harness = installPreviewChrome({
+    storagePersistence: isolatedPreviewStorage,
+  });
 });
 
 afterEach(async () => {
@@ -139,9 +158,82 @@ describe('ManagerApp hydration', () => {
     expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/maximum update depth|error #185/i);
   });
 
+  it('creates and navigates to a custom-emoji workspace once under StrictMode', async () => {
+    history.replaceState(
+      null,
+      '',
+      '/manager.html?workspace=workspace_default&category=inbox&view=board',
+    );
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const setActiveWorkspace = vi.spyOn(
+      useTabBoardStore.getState(),
+      'setActiveWorkspace',
+    );
+    root = createRoot(container!);
+
+    await act(async () => {
+      root?.render(createElement(StrictMode, null, createElement(ManagerApp)));
+    });
+
+    const workspaceTrigger = await vi.waitFor(() => {
+      const element = document.querySelector<HTMLButtonElement>(
+        '[aria-label="Workspace: Personal"]',
+      );
+      expect(element).not.toBeNull();
+      return element!;
+    }, { timeout: 2_000, interval: 10 });
+    await act(async () => workspaceTrigger.click());
+
+    const createWorkspace = await vi.waitFor(() => {
+      const element = [...document.querySelectorAll<HTMLButtonElement>('.mantine-Menu-item')]
+        .find((candidate) => candidate.textContent?.includes('New Workspace'));
+      expect(element).toBeDefined();
+      return element!;
+    });
+    await act(async () => createWorkspace.click());
+
+    const name = document.querySelector<HTMLInputElement>('input[name="workspace-name"]');
+    expect(name).not.toBeNull();
+    await changeInput(name!, 'Engineering');
+    const custom = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === 'Custom');
+    expect(custom).toBeDefined();
+    await act(async () => custom?.click());
+    const emoji = document.querySelector<HTMLInputElement>('input[name="workspace-emoji"]');
+    expect(emoji).not.toBeNull();
+    await changeInput(emoji!, '👩🏽‍💻');
+
+    const submit = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === 'Create Workspace');
+    expect(submit?.disabled).toBe(false);
+    await act(async () => submit?.click());
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('[aria-label="Workspace: Engineering"]')).not.toBeNull();
+      expect(document.querySelector('.tabboard-error-boundary')).toBeNull();
+    }, { timeout: 2_000, interval: 10 });
+    await vi.waitFor(() => {
+      expect(harness?.state.activeWorkspaceId).not.toBe('workspace_default');
+    }, { timeout: 2_000, interval: 10 });
+
+    const created = harness?.state.workspaces.find(({ name: workspaceName }) =>
+      workspaceName === 'Engineering');
+    expect(created?.emoji).toBe('👩🏽‍💻');
+    expect(setActiveWorkspace).toHaveBeenCalledTimes(1);
+    expect(setActiveWorkspace).toHaveBeenCalledWith(created?.id);
+    expect(harness?.state.activeWorkspaceId).toBe(created?.id);
+    expect(new URLSearchParams(window.location.search).get('workspace')).toBe(created?.id);
+    expect(new URLSearchParams(window.location.search).get('category')).toBe('inbox');
+    expect(new URLSearchParams(window.location.search).get('view')).toBe('board');
+    expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(
+      /maximum update depth|error #185|sync render loop/i,
+    );
+  });
+
   it('keeps overlay positioning stable after opening a saved tab and returning focus', async () => {
     harness?.uninstall();
     harness = installPreviewChrome({
+      storagePersistence: isolatedPreviewStorage,
       tabs: Array.from({ length: 80 }, (_, index) => ({
         id: index + 1,
         windowId: 1,
@@ -187,7 +279,7 @@ describe('ManagerApp hydration', () => {
     const openTabTrigger = document.querySelector<HTMLButtonElement>('[data-info-popover="open"]');
     expect(openTabTrigger).not.toBeNull();
     await act(async () => {
-      openTabTrigger?.click();
+      openTabTrigger?.focus();
     });
 
     expect(document.querySelector('.manager-info-popover')).not.toBeNull();

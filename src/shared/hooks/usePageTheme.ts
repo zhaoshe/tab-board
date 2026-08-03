@@ -2,8 +2,8 @@ import { useEffect } from 'react';
 
 export type PageColorScheme = 'light' | 'dark';
 
-export const LIGHT_THEME_COLOR = '#ffffff';
-export const DARK_THEME_COLOR = '#242424';
+export const LIGHT_THEME_COLOR = '#f3f5f8';
+export const DARK_THEME_COLOR = '#1a1e24';
 
 export function usePageTheme(colorScheme: PageColorScheme): void {
   useEffect(() => {

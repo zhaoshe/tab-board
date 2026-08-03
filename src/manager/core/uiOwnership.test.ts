@@ -42,9 +42,14 @@ describe('Manager UI ownership', () => {
     expect(source).not.toContain('export function createGeometryCollisionDetection');
     expect(source).not.toContain('dragUiState.payload?.kind === \'category\' ?');
     expect(geometry).toContain('export function createGeometryCollisionDetection');
-    expect(geometry).toContain('export function createManagerKeyboardCoordinates');
+    expect(geometry).not.toContain('createManagerKeyboardCoordinates');
+    expect(geometry).not.toContain('getGroupKeyboardCoordinates');
+    expect(geometry).not.toContain(['sortableKeyboard', 'Coordinates'].join(''));
     expect(overlay).toContain('export function ManagerDragOverlay');
     expect(sensors).toContain('export function useManagerDndSensors');
+    expect(sensors).toContain('PointerSensor');
+    expect(sensors).toContain('TouchSensor');
+    expect(sensors).not.toContain(['Keyboard', 'Sensor'].join(''));
   });
 
   it('keeps SessionCard focused on state and command orchestration', () => {

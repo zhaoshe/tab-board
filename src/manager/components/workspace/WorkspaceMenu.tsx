@@ -1,195 +1,249 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
-  ActionIcon,
   Button,
   Group,
   Menu,
   Stack,
   Text,
-  TextInput,
-  Tooltip,
 } from '@mantine/core';
 import {
-  IconCheck,
-  IconChevronDown,
-  IconEdit,
-  IconLayoutGrid,
-  IconPlus,
-} from '@tabler/icons-react';
-import type { Workspace } from '../../../shared/model/types';
-import { ManagerModal } from '../shell/ManagerModal';
+  ChevronDown,
+  Settings2,
+  Pencil,
+  Plus,
+} from 'lucide-react';
+import type {
+  Folder,
+  Group as TabBoardGroup,
+  Workspace,
+} from '../../../shared/model/types';
+import { AccessibleIconAction } from '../../../shared/components/AccessibleIconAction';
+import { TabBoardIcon } from '../../../shared/components/TabBoardIcon';
+import { TabBoardTooltip } from '../../../shared/components/TabBoardTooltip';
+import {
+  ManagerMenuDescriptionTarget,
+  mergeManagerMenuDescriptionRef,
+} from '../../hooks/useManagerOverlays';
+import {
+  MANAGER_DENSE_MENU_PROPS,
+  useManagerMenuOpening,
+} from './managerMenuPolicy';
+import {
+  WorkspaceEditorModal,
+  type WorkspaceEditorValue,
+} from './WorkspaceEditorModal';
+import { WorkspaceManagerModal } from './WorkspaceManagerModal';
 
 interface WorkspaceMenuProps {
   activeWorkspaceId: string;
   workspaces: readonly Workspace[];
+  groups: readonly TabBoardGroup[];
+  folders: readonly Folder[];
   onSelect: (workspaceId: string) => void;
-  onCreate: (name: string) => void;
-  onRename: (workspaceId: string, name: string) => void;
+  onCreate: (value: WorkspaceEditorValue) => void | Promise<void>;
+  onUpdateWorkspace: (
+    workspaceId: string,
+    value: WorkspaceEditorValue,
+  ) => void | Promise<void>;
+  onUpdateWorkspaceOrder: (
+    orderedWorkspaceIds: readonly string[],
+  ) => void | Promise<void>;
+  onDeleteWorkspace: (workspaceId: string) => void | Promise<void>;
+  onActiveWorkspaceDeleted: (replacementWorkspaceId: string) => void;
 }
 
-type DialogMode = 'create' | 'rename' | null;
-
-function validateWorkspaceName(
-  workspaces: readonly Workspace[],
-  name: string,
-  excludedId?: string,
-): { value: string; error: string | null } {
-  const value = String(name ?? '').normalize('NFC').trim();
-  if (!value) return { value, error: 'Workspace name is required.' };
-  const key = value.toLocaleLowerCase('en-US');
-  const duplicate = workspaces.some((workspace) =>
-    workspace.id !== excludedId
-    && workspace.name.normalize('NFC').trim().toLocaleLowerCase('en-US') === key);
-  return {
-    value,
-    error: duplicate ? 'A workspace with this name already exists.' : null,
-  };
+function savedSessionCountDescription(count: number): string {
+  return `${count} saved ${count === 1 ? 'Session' : 'Sessions'}`;
 }
 
 export function WorkspaceMenu({
   activeWorkspaceId,
   workspaces,
+  groups,
+  folders,
   onSelect,
   onCreate,
-  onRename,
+  onUpdateWorkspace,
+  onUpdateWorkspaceOrder,
+  onDeleteWorkspace,
+  onActiveWorkspaceDeleted,
 }: WorkspaceMenuProps) {
   const workspace = workspaces.find(({ id }) => id === activeWorkspaceId) ?? workspaces[0];
-  const [dialogMode, setDialogMode] = useState<DialogMode>(null);
-  const [name, setName] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const openCreate = () => {
-    setName('');
-    setError(null);
-    setDialogMode('create');
-  };
-  const openRename = () => {
-    if (!workspace) return;
-    setName(workspace.name);
-    setError(null);
-    setDialogMode('rename');
-  };
-  const closeDialog = () => {
-    setDialogMode(null);
-    setError(null);
-  };
-  const submit = () => {
-    const validation = validateWorkspaceName(
-      workspaces,
-      name,
-      dialogMode === 'rename' ? workspace?.id : undefined,
-    );
-    if (validation.error) {
-      setError(validation.error);
-      return;
-    }
-    if (dialogMode === 'create') onCreate(validation.value);
-    if (dialogMode === 'rename' && workspace) onRename(workspace.id, validation.value);
-    closeDialog();
-  };
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editorMode, setEditorMode] = useState<'create' | 'edit' | null>(null);
+  const [managerOpen, setManagerOpen] = useState(false);
+  const createTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const editTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const managerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuOpening = useManagerMenuOpening('manager-workspace-menu');
 
   return (
     <>
       <div className="manager-workspace-switcher">
-        <Menu shadow="md" width={250}>
-          <Menu.Target>
-            <Tooltip label={workspace?.name ?? 'Workspace'}>
+        <Menu
+          {...MANAGER_DENSE_MENU_PROPS}
+          keepMounted
+          withInitialFocusPlaceholder={false}
+          portalProps={{ target: '#manager-main' }}
+          opened={menuOpen}
+          onChange={setMenuOpen}
+          onOpen={menuOpening.onMenuOpen}
+          shadow="md"
+        >
+          <TabBoardTooltip
+            label={workspace?.name ?? 'Workspace'}
+            disabled={menuOpen}
+          >
+            <Menu.Target>
               <Button
                 className="manager-workspace-trigger"
                 variant="subtle"
                 size="sm"
                 aria-label={`Workspace: ${workspace?.name ?? 'Workspace'}`}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onPointerDown={menuOpening.onTriggerPointerDown}
+                onKeyDown={menuOpening.onTriggerKeyDown}
+                leftSection={(
+                  <span className="manager-workspace-trigger__emoji" aria-hidden="true">
+                    {workspace?.emoji}
+                  </span>
+                )}
+                rightSection={(
+                  <ChevronDown size={14} strokeWidth={1.75} aria-hidden="true" />
+                )}
               >
-                <IconLayoutGrid size={18} aria-hidden="true" />
-                <IconChevronDown size={14} aria-hidden="true" />
+                <span className="manager-workspace-trigger__label">
+                  {workspace?.name ?? 'Workspace'}
+                </span>
               </Button>
-            </Tooltip>
-          </Menu.Target>
-          <Menu.Dropdown>
+            </Menu.Target>
+          </TabBoardTooltip>
+          <Menu.Dropdown id="manager-workspace-menu">
             <Stack gap={2} px={4} className="manager-workspace-list">
               {workspaces.map((item) => {
                 const isCurrent = item.id === workspace?.id;
+                const sessionCount = groups.filter(
+                  (group) => group.workspaceId === item.id,
+                ).length;
                 return (
                   <Group
                     key={item.id}
                     className={`manager-workspace-row${isCurrent ? ' manager-workspace-row--current' : ''}`}
+                    data-workspace-menu-id={item.id}
                     gap={2}
                     wrap="nowrap"
                   >
-                    <Button
-                      className="manager-workspace-row-trigger"
-                      variant="subtle"
-                      color="gray"
-                      size="sm"
-                      justify="flex-start"
-                      onClick={() => onSelect(item.id)}
+                    <ManagerMenuDescriptionTarget
+                      description={savedSessionCountDescription(sessionCount)}
                     >
-                      <Text size="sm" lineClamp={1}>{item.name}</Text>
-                    </Button>
+                      {(descriptionTargetProps) => (
+                        <Menu.Item
+                          {...descriptionTargetProps}
+                          className="manager-workspace-row-trigger"
+                          leftSection={(
+                            <span className="manager-workspace-menu-emoji" aria-hidden="true">
+                              {item.emoji}
+                            </span>
+                          )}
+                          onClick={() => onSelect(item.id)}
+                        >
+                          <Text size="sm" lineClamp={1}>{item.name}</Text>
+                        </Menu.Item>
+                      )}
+                    </ManagerMenuDescriptionTarget>
                     {isCurrent && (
-                      <>
-                        <Tooltip label="Rename Workspace" openDelay={1000}>
-                          <ActionIcon
-                            className="manager-workspace-rename"
-                            variant="subtle"
-                            aria-label="Rename Workspace"
-                            onClick={openRename}
-                          >
-                            <IconEdit size={16} aria-hidden="true" />
-                          </ActionIcon>
-                        </Tooltip>
-                        <span className="manager-workspace-current-icon" aria-label="Current Workspace">
-                          <IconCheck size={16} aria-hidden="true" />
-                        </span>
-                      </>
+                      <AccessibleIconAction
+                        ref={editTriggerRef}
+                        className="manager-workspace-edit"
+                        label="Edit Workspace"
+                        variant="subtle"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setEditorMode('edit');
+                        }}
+                      >
+                        <TabBoardIcon icon={Pencil} />
+                      </AccessibleIconAction>
                     )}
                   </Group>
                 );
               })}
             </Stack>
             <Menu.Divider />
-            <Menu.Item
-              className="manager-workspace-create"
-              rightSection={<IconPlus size={16} aria-hidden="true" />}
-              onClick={openCreate}
-            >
-              New Workspace
-            </Menu.Item>
+            <ManagerMenuDescriptionTarget description="Create another Workspace">
+              {(descriptionTargetProps) => (
+                <Menu.Item
+                  {...descriptionTargetProps}
+                  className="manager-workspace-create"
+                  leftSection={<TabBoardIcon icon={Plus} size="menu" />}
+                  onClick={(event) => {
+                    createTriggerRef.current = event.currentTarget;
+                    setMenuOpen(false);
+                    setEditorMode('create');
+                  }}
+                >
+                  New Workspace
+                </Menu.Item>
+              )}
+            </ManagerMenuDescriptionTarget>
+            <ManagerMenuDescriptionTarget description="Rename, reorder, or remove Workspaces">
+              {(descriptionTargetProps) => (
+                <Menu.Item
+                  {...descriptionTargetProps}
+                  ref={mergeManagerMenuDescriptionRef(
+                    descriptionTargetProps.ref,
+                    managerTriggerRef,
+                  )}
+                  leftSection={<TabBoardIcon icon={Settings2} size="menu" />}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setManagerOpen(true);
+                  }}
+                >
+                  Manage Workspaces
+                </Menu.Item>
+              )}
+            </ManagerMenuDescriptionTarget>
           </Menu.Dropdown>
         </Menu>
       </div>
 
-      <ManagerModal
-        opened={dialogMode !== null}
-        onClose={closeDialog}
-        title={dialogMode === 'rename' ? 'Rename Workspace' : 'New Workspace'}
-        size="sm"
-        centered
-      >
-        <Stack gap="md">
-          <TextInput
-            name="workspace-name"
-            label="Workspace name"
-            autoComplete="off"
-            value={name}
-            error={error}
-            onChange={(event) => {
-              setName(event.currentTarget.value);
-              if (error) setError(null);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') submit();
-            }}
-            data-autofocus
-          />
-          <Group justify="flex-end">
-            <Button variant="default" onClick={closeDialog}>Cancel</Button>
-            <Button onClick={submit}>
-              {dialogMode === 'rename' ? 'Rename Workspace' : 'Create Workspace'}
-            </Button>
-          </Group>
-        </Stack>
-      </ManagerModal>
+      <WorkspaceEditorModal
+        opened={editorMode !== null}
+        mode={editorMode ?? 'create'}
+        workspace={editorMode === 'edit' ? workspace : undefined}
+        workspaces={workspaces}
+        finalFocusRef={editorMode === 'edit' ? editTriggerRef : createTriggerRef}
+        onClose={() => {
+          setEditorMode(null);
+          setMenuOpen(true);
+        }}
+        onSubmit={(value) => {
+          if (editorMode === 'edit' && workspace) {
+            return onUpdateWorkspace(workspace.id, value);
+          }
+          return onCreate(value);
+        }}
+      />
+
+      <WorkspaceManagerModal
+        opened={managerOpen}
+        activeWorkspaceId={activeWorkspaceId}
+        workspaces={workspaces}
+        groups={groups}
+        folders={folders}
+        finalFocusRef={managerTriggerRef}
+        onClose={() => {
+          setManagerOpen(false);
+          setMenuOpen(true);
+        }}
+        onCreate={onCreate}
+        onUpdateWorkspace={onUpdateWorkspace}
+        onUpdateWorkspaceOrder={onUpdateWorkspaceOrder}
+        onDeleteWorkspace={onDeleteWorkspace}
+        onActiveWorkspaceDeleted={onActiveWorkspaceDeleted}
+      />
     </>
   );
 }

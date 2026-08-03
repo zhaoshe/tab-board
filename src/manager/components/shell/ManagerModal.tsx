@@ -1,34 +1,28 @@
-import { Modal, type ModalProps } from '@mantine/core';
+import {
+  TabBoardModal,
+  type TabBoardModalProps,
+} from '../../../shared/components/TabBoardModal';
 
-interface ManagerModalProps extends Omit<ModalProps, 'title'> {
+interface ManagerModalProps extends Omit<TabBoardModalProps, 'title'> {
   title: string;
 }
 
 export function ManagerModal({
   title,
-  portalProps,
   closeButtonProps,
   children,
   ...props
 }: ManagerModalProps) {
-  const managerMain = typeof document === 'undefined'
-    ? undefined
-    : document.querySelector<HTMLElement>('#manager-main') ?? undefined;
-
   return (
-    <Modal
+    <TabBoardModal
       {...props}
       title={title}
-      portalProps={{
-        ...portalProps,
-        target: portalProps?.target ?? managerMain,
-      }}
       closeButtonProps={{
         ...closeButtonProps,
         'aria-label': closeButtonProps?.['aria-label'] ?? `Close ${title}`,
       }}
     >
       {children}
-    </Modal>
+    </TabBoardModal>
   );
 }

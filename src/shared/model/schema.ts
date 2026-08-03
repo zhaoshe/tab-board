@@ -2,6 +2,7 @@ import {
   SCHEMA_VERSION,
   DEFAULT_SETTINGS,
   DEFAULT_WORKSPACE_ID,
+  DEFAULT_WORKSPACE_EMOJI,
   BIN_LIMIT,
   ITEM_LINK,
   ITEM_NOTE,
@@ -9,6 +10,7 @@ import {
   LEGACY_ITEM_TODO,
   DROP_OPERATION_LEDGER_LIMIT,
 } from './constants';
+import { normalizeCategoryColor } from './category-colors';
 import type {
   Workspace,
   Folder,
@@ -29,6 +31,8 @@ import {
   MAX_CANONICAL_DIGEST_BYTES,
 } from '../validation';
 import { formatDateTime } from '../utils/formatters';
+
+const EMOJI_CODE_POINT_PATTERN = /\p{Extended_Pictographic}/u;
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -231,9 +235,25 @@ export function createDefaultWorkspace(timestamp = nowIso()): Workspace {
   return {
     id: DEFAULT_WORKSPACE_ID,
     name: 'Personal',
+    emoji: DEFAULT_WORKSPACE_EMOJI,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
+}
+
+export function normalizeWorkspaceEmoji(value: unknown): string {
+  if (typeof value !== 'string') {
+    return DEFAULT_WORKSPACE_EMOJI;
+  }
+  const emoji = value.normalize('NFC');
+  const Segmenter = Intl.Segmenter;
+  const graphemes = typeof Segmenter === 'function'
+    ? [...new Segmenter(undefined, { granularity: 'grapheme' }).segment(emoji)]
+      .map(({ segment }) => segment)
+    : [...emoji].length === 1 ? [emoji] : [];
+  return graphemes.length === 1 && EMOJI_CODE_POINT_PATTERN.test(graphemes[0])
+    ? graphemes[0]
+    : DEFAULT_WORKSPACE_EMOJI;
 }
 
 export function normalizeWorkspace(workspace: unknown): Workspace | null {
@@ -244,6 +264,7 @@ export function normalizeWorkspace(workspace: unknown): Workspace | null {
   return {
     id: String(w.id || createId('workspace')),
     name: String(w.name || 'Workspace'),
+    emoji: normalizeWorkspaceEmoji(w.emoji),
     createdAt: typeof w.createdAt === 'string' ? w.createdAt : nowIso(),
     updatedAt:
       typeof w.updatedAt === 'string'
@@ -262,7 +283,7 @@ export function normalizeFolder(folder: unknown): Folder | null {
   return {
     id: String(f.id || createId('folder')),
     name: String(f.name || 'Folder'),
-    color: String(f.color || 'slate'),
+    color: normalizeCategoryColor(f.color) ?? 'slate',
     workspaceId: f.workspaceId ? String(f.workspaceId) : DEFAULT_WORKSPACE_ID,
     collapsed: Boolean(f.collapsed),
     createdAt: typeof f.createdAt === 'string' ? f.createdAt : nowIso(),
@@ -434,11 +455,12 @@ export function isRestorableTab(tab: TabItem): boolean {
   return tab?.itemType === ITEM_LINK && Boolean(tab?.url);
 }
 
-export function createWorkspace(name: string): Workspace {
+export function createWorkspace(name: string, emoji?: string): Workspace {
   const timestamp = nowIso();
   return {
     id: createId('workspace'),
     name,
+    emoji: normalizeWorkspaceEmoji(emoji),
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -449,7 +471,7 @@ export function createFolder(name: string, color: string, workspaceId: string): 
   return {
     id: createId('folder'),
     name,
-    color,
+    color: normalizeCategoryColor(color) ?? 'slate',
     workspaceId,
     collapsed: false,
     createdAt: timestamp,

@@ -13,6 +13,8 @@ import { SessionCard } from './SessionCard';
 import { SessionCardShell } from './SessionCardShell';
 import { SessionPlaceholder } from './SessionPlaceholder';
 import type { SessionSortableBindings } from './SessionSortableBindings';
+import type { ManagerSelectionScope } from '../../hooks/useManagerSelectionScope';
+import type { OpenSessionTargetPickerInput } from '../shell/SessionTargetPicker';
 
 export function SessionSlot({
   dragMarker,
@@ -25,6 +27,8 @@ export function SessionSlot({
   registerSlot,
   runtime,
   searchQuery,
+  selectionScope,
+  onOpenSessionTargetPicker,
   sourceRect,
 }: {
   dragMarker: DragMarker | null;
@@ -37,13 +41,13 @@ export function SessionSlot({
   registerSlot: (element: Element | null) => void;
   runtime: ManagerRuntime;
   searchQuery: string;
+  selectionScope: ManagerSelectionScope;
+  onOpenSessionTargetPicker: (input: OpenSessionTargetPickerInput) => void;
   sourceRect: DragSourceRect | null;
 }) {
   const {
-    attributes,
     listeners,
     setNodeRef,
-    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
@@ -89,9 +93,7 @@ export function SessionSlot({
   }
 
   const sortable: SessionSortableBindings = {
-    attributes,
     listeners,
-    setActivatorNodeRef,
     setNodeRef,
     style,
   };
@@ -102,6 +104,8 @@ export function SessionSlot({
       highlighted={highlighted}
       runtime={runtime}
       searchQuery={searchQuery}
+      selectionScope={selectionScope}
+      onOpenSessionTargetPicker={onOpenSessionTargetPicker}
       sortable={sortable}
       sourceRect={sourceRect}
     />

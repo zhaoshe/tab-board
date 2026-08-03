@@ -4,6 +4,7 @@ import {
   formatDateTime,
   formatNumber,
   formatRelativeTime,
+  formatTime,
 } from './formatters';
 
 describe('locale formatters', () => {
@@ -23,6 +24,12 @@ describe('locale formatters', () => {
     expect(formatDateTime('2026-07-27T10:00:00.000Z', 'en-US', 'UTC'))
       .toBe('Jul 27, 2026, 10:00 AM');
     expect(formatDateTime('not-a-date', 'en-US', 'UTC')).toBe('');
+  });
+
+  it('formats a time-only storage freshness label', () => {
+    expect(formatTime('2026-07-31T09:10:11.000Z', 'en-GB', 'UTC'))
+      .toBe('09:10:11');
+    expect(formatTime('not-a-date', 'en-GB', 'UTC')).toBe('');
   });
 
   it('formats numeric UI counts through Intl.NumberFormat', () => {

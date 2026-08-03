@@ -4,6 +4,7 @@ import {
   type BinEntry,
   type Folder,
   type Group,
+  type TabItem,
   type TabBoardState,
 } from '../model';
 import {
@@ -46,6 +47,26 @@ function folder(id: string, name = id): Folder {
     color: 'slate',
     workspaceId: 'workspace_default',
     collapsed: false,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function tab(id: string): TabItem {
+  return {
+    id,
+    itemType: 'link',
+    title: id,
+    url: `https://${id}.test`,
+    favIconUrl: '',
+    note: '',
+    pinned: false,
+    incognito: false,
+    starred: false,
+    taskStatus: 'none',
+    browserGroup: null,
+    sourceWindowId: null,
+    sourceTabId: null,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -166,6 +187,62 @@ describe('authoritative publication optimistic commits', () => {
     });
 
     expect(harness.getProjection().state.workspaces[0]).toBe(workspace);
+  });
+
+  it('keeps checked mutations non-optimistic and settles only from authority', async () => {
+    const initial = createEmptyState();
+    const harness = createHarness(initial);
+    let resolveAuthority: ((state: TabBoardState) => void) | undefined;
+    harness.dependencies.sendMutations = vi.fn(
+      () => new Promise<TabBoardState>((resolve) => {
+        resolveAuthority = resolve;
+      }),
+    );
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const mutation: StateMutation = {
+      type: 'update-settings',
+      updates: { theme: 'dark' },
+      updatedAt: timestamp,
+    };
+
+    const persistence = publication.commitChecked(mutation);
+    let settled = false;
+    void persistence.finally(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+
+    expect(harness.dependencies.sendMutations).toHaveBeenCalledWith([mutation]);
+    expect(harness.getProjection().state).toBe(initial);
+    expect(harness.getProjection().state.settings.theme).toBe('system');
+    expect(settled).toBe(false);
+
+    resolveAuthority?.(applyStateMutations(initial, [mutation]));
+    await persistence;
+
+    expect(settled).toBe(true);
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+  });
+
+  it('rejects checked mutations without changing the projection', async () => {
+    const initial = createEmptyState();
+    const harness = createHarness(initial);
+    harness.dependencies.sendMutations = vi.fn(async () => {
+      throw Object.assign(
+        new Error('checked authority rejected'),
+        { code: 'GROUP_LOCKED' },
+      );
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+
+    await expect(publication.commitChecked({
+      type: 'update-settings',
+      updates: { theme: 'dark' },
+      updatedAt: timestamp,
+    })).rejects.toThrow('checked authority rejected');
+
+    expect(harness.getProjection().state).toEqual(initial);
+    expect(harness.getProjection().state.settings.theme).toBe('system');
   });
 });
 
@@ -334,6 +411,68 @@ describe('authoritative publication reconciliation', () => {
 });
 
 describe('authoritative publication persistence outcomes', () => {
+  it('commits an All Source move past an unrelated locked sibling and rejects locked endpoints', async () => {
+    vi.useFakeTimers();
+    const sourceTabs = [tab('authority-all-a'), tab('authority-all-b')];
+    const source = group('authority-all-source', { tabs: sourceTabs });
+    const target = group('authority-all-target', {
+      tabs: [tab('authority-target-existing')],
+    });
+    const lockedSibling = group('authority-unrelated-locked', { locked: true });
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      groups: [source, target, lockedSibling],
+    };
+    const mutation: Extract<StateMutation, { type: 'drop-intent' }> = {
+      type: 'drop-intent',
+      operationId: 'authority-all-source-move',
+      intent: {
+        kind: 'move-tabs',
+        refs: sourceTabs.map(({ id }) => ({ groupId: source.id, tabId: id })),
+        targetGroupId: target.id,
+        targetIndex: target.tabs.length,
+        workspaceId: 'workspace_default',
+      },
+      openTabs: [],
+      expectedRevision: 0,
+      updatedAt: timestamp,
+    };
+    const harness = createHarness(initial);
+    const publication = createAuthoritativePublication(harness.dependencies);
+
+    const persistence = publication.commitDrop(mutation);
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(persistence).resolves.toBeUndefined();
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual([
+      target.id,
+      lockedSibling.id,
+    ]);
+
+    for (const lockedEndpoint of ['source', 'target'] as const) {
+      const lockedInitial = {
+        ...initial,
+        groups: initial.groups.map((item) => {
+          if (lockedEndpoint === 'source' && item.id === source.id) {
+            return { ...item, locked: true };
+          }
+          if (lockedEndpoint === 'target' && item.id === target.id) {
+            return { ...item, locked: true };
+          }
+          return item;
+        }),
+      };
+      const lockedHarness = createHarness(lockedInitial);
+      const lockedPublication = createAuthoritativePublication(
+        lockedHarness.dependencies,
+      );
+      await expect(lockedPublication.commitDrop({
+        ...mutation,
+        operationId: `authority-locked-${lockedEndpoint}`,
+      })).rejects.toThrow('Cannot modify a locked group.');
+      expect(lockedHarness.dependencies.sendMutations).not.toHaveBeenCalled();
+    }
+  });
+
   it('keeps a drop waiter pending through a transient retry and resolves after commit', async () => {
     vi.useFakeTimers();
     const initial: TabBoardState = {
@@ -425,6 +564,209 @@ describe('authoritative publication persistence outcomes', () => {
     await vi.advanceTimersByTimeAsync(10_000);
     expect(harness.dependencies.sendMutations).toHaveBeenCalledTimes(1);
     expect(harness.getProjection().state.folders).toEqual([]);
+  });
+
+  it('resolves a response-lost category retry through exact CAS replay', async () => {
+    vi.useFakeTimers();
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      folders: [folder('folder-response-lost', 'Before')],
+    };
+    const harness = createHarness(initial);
+    let authoritative = initial;
+    let attempts = 0;
+    harness.dependencies.sendMutations = vi.fn(async (
+      mutations: readonly StateMutation[],
+    ) => {
+      attempts += 1;
+      authoritative = applyStateMutations(authoritative, mutations);
+      harness.setAuthoritative(authoritative);
+      if (attempts === 1) throw new Error('response lost after commit');
+      return authoritative;
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const mutation: StateMutation = {
+      type: 'update-folder',
+      id: 'folder-response-lost',
+      name: 'After',
+      color: '#40c057',
+      expected: { name: 'Before', color: 'slate' },
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+    const persistence = publication.commitCategory(mutation);
+
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(persistence).resolves.toBeUndefined();
+    expect(harness.dependencies.sendMutations).toHaveBeenCalledTimes(2);
+    expect(authoritative.folders[0]).toMatchObject({
+      name: 'After',
+      color: '#40c057',
+      updatedAt: mutation.updatedAt,
+    });
+    expect(authoritative.mutationRevision).toBe(initial.mutationRevision + 1);
+  });
+
+  it('rejects a category waiter when recovery contains an intervening newer edit', async () => {
+    vi.useFakeTimers();
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      folders: [folder('folder-conflict', 'Before')],
+    };
+    const newer: TabBoardState = {
+      ...initial,
+      folders: [{
+        ...initial.folders[0],
+        name: 'Remote',
+        color: '#fa5252',
+        updatedAt: '2026-01-03T00:00:00.000Z',
+      }],
+      mutationRevision: initial.mutationRevision + 1,
+      updatedAt: '2026-01-03T00:00:00.000Z',
+    };
+    const harness = createHarness(initial);
+    let attempts = 0;
+    harness.dependencies.sendMutations = vi.fn(async (
+      mutations: readonly StateMutation[],
+    ) => {
+      attempts += 1;
+      if (attempts === 1) {
+        harness.setAuthoritative(newer);
+        throw new Error('response lost before conflict recovery');
+      }
+      return applyStateMutations(newer, mutations);
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const persistence = publication.commitCategory({
+      type: 'update-folder',
+      id: 'folder-conflict',
+      name: 'After',
+      color: '#40c057',
+      expected: { name: 'Before', color: 'slate' },
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    const outcome = persistence.then(
+      () => 'resolved' as const,
+      (error: unknown) => error,
+    );
+
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(outcome).resolves.toMatchObject({
+      code: 'CATEGORY_MUTATION_CONFLICT',
+    });
+    expect(harness.getProjection().state.folders[0]).toMatchObject({
+      name: 'Remote',
+      color: '#fa5252',
+    });
+  });
+
+  it('retries an exact category order after response loss without a second revision', async () => {
+    vi.useFakeTimers();
+    const custom = folder('folder-order-response-lost', 'Work');
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      folders: [custom],
+      categoryOrderByWorkspace: {
+        workspace_default: ['inbox', 'saved', 'archive', custom.id],
+      },
+    };
+    const harness = createHarness(initial);
+    let authoritative = initial;
+    let attempts = 0;
+    harness.dependencies.sendMutations = vi.fn(async (
+      mutations: readonly StateMutation[],
+    ) => {
+      attempts += 1;
+      authoritative = applyStateMutations(authoritative, mutations);
+      harness.setAuthoritative(authoritative);
+      if (attempts === 1) throw new Error('order response lost after commit');
+      return authoritative;
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const mutation: StateMutation = {
+      type: 'set-category-order',
+      workspaceId: 'workspace_default',
+      expectedCategoryOrder: [
+        'inbox',
+        'saved',
+        'archive',
+        `folder:${custom.id}`,
+      ],
+      categoryOrder: [
+        `folder:${custom.id}`,
+        'inbox',
+        'saved',
+        'archive',
+      ],
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+    const persistence = publication.commitCategory(mutation);
+
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(persistence).resolves.toBeUndefined();
+    expect(harness.dependencies.sendMutations).toHaveBeenCalledTimes(2);
+    expect(authoritative.mutationRevision).toBe(initial.mutationRevision + 1);
+    expect(authoritative.updatedAt).toBe(mutation.updatedAt);
+  });
+
+  it('rejects a category order waiter and retains an intervening newer order', async () => {
+    vi.useFakeTimers();
+    const custom = folder('folder-order-conflict', 'Work');
+    const initial: TabBoardState = {
+      ...createEmptyState(),
+      folders: [custom],
+      categoryOrderByWorkspace: {
+        workspace_default: ['inbox', 'saved', 'archive', custom.id],
+      },
+    };
+    const newer: TabBoardState = {
+      ...initial,
+      categoryOrderByWorkspace: {
+        workspace_default: ['saved', 'inbox', 'archive', custom.id],
+      },
+      mutationRevision: initial.mutationRevision + 1,
+      updatedAt: '2026-01-03T00:00:00.000Z',
+    };
+    const harness = createHarness(initial);
+    let attempts = 0;
+    harness.dependencies.sendMutations = vi.fn(async (
+      mutations: readonly StateMutation[],
+    ) => {
+      attempts += 1;
+      if (attempts === 1) {
+        harness.setAuthoritative(newer);
+        throw new Error('order response lost before conflict recovery');
+      }
+      return applyStateMutations(newer, mutations);
+    });
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const persistence = publication.commitCategory({
+      type: 'set-category-order',
+      workspaceId: 'workspace_default',
+      expectedCategoryOrder: [
+        'inbox',
+        'saved',
+        'archive',
+        `folder:${custom.id}`,
+      ],
+      categoryOrder: [
+        `folder:${custom.id}`,
+        'inbox',
+        'saved',
+        'archive',
+      ],
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    const outcome = persistence.then(
+      () => 'resolved' as const,
+      (error: unknown) => error,
+    );
+
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(outcome).resolves.toMatchObject({
+      code: 'CATEGORY_MUTATION_CONFLICT',
+    });
+    expect(harness.getProjection().state.categoryOrderByWorkspace.workspace_default)
+      .toEqual(['saved', 'inbox', 'archive', custom.id]);
   });
 
   it('settles drop waiters by partial-commit indexes and publishes committed siblings', async () => {

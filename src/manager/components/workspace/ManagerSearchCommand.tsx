@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ActionIcon, Group, Tooltip } from '@mantine/core';
-import { IconSearch } from '@tabler/icons-react';
+import { ActionIcon, Group } from '@mantine/core';
+import { Search as IconSearch } from 'lucide-react';
+import { TabBoardIcon } from '../../../shared/components/TabBoardIcon';
+import { TabBoardTooltip } from '../../../shared/components/TabBoardTooltip';
 import type { CategoryFilter } from '../../core/selectors';
 import { useSearchQuery } from '../../hooks/useSearchQuery';
 import { SearchBar } from '../search/SearchBar';
@@ -57,7 +59,7 @@ export function ManagerSearchCommand({
       ml={expanded ? 'xs' : 'auto'}
     >
       {!expanded && (
-        <Tooltip label="Show Search">
+        <TabBoardTooltip label="Show Search">
           <ActionIcon
             className="manager-search-toggle"
             variant="subtle"
@@ -69,9 +71,9 @@ export function ManagerSearchCommand({
               requestAnimationFrame(() => document.getElementById(SEARCH_INPUT_ID)?.focus());
             }}
           >
-            <IconSearch size={20} aria-hidden="true" />
+            <TabBoardIcon icon={IconSearch} />
           </ActionIcon>
-        </Tooltip>
+        </TabBoardTooltip>
       )}
       {expanded && (
         <div style={{ width: 280, minWidth: 200 }}>

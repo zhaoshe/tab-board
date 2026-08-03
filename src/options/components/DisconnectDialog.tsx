@@ -10,7 +10,10 @@ import {
   Loader,
   Center,
 } from '@mantine/core';
-import { IconAlertTriangle, IconPlugConnectedX } from '@tabler/icons-react';
+import {
+  TriangleAlert as IconAlertTriangle,
+  Unplug as IconPlugConnectedX,
+} from 'lucide-react';
 import { switchToBrowserMode } from '../../shared/store/activeAdapter';
 
 interface DisconnectDialogProps {

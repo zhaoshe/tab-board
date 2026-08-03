@@ -4,14 +4,13 @@ export function useSettingsDraft({
   value,
   delay = 500,
   onCommit,
-  onPendingChange,
 }: {
   value: string;
   delay?: number;
   onCommit: (value: string) => void;
-  onPendingChange?: (pending: boolean) => void;
 }) {
   const [draft, setDraft] = useState(value);
+  const [pending, setPending] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestDraftRef = useRef(value);
 
@@ -24,20 +23,21 @@ export function useSettingsDraft({
   const commit = useCallback(() => {
     clearTimer();
     onCommit(latestDraftRef.current);
-    onPendingChange?.(false);
-  }, [clearTimer, onCommit, onPendingChange]);
+    setPending(false);
+  }, [clearTimer, onCommit]);
 
   const updateDraft = useCallback((next: string) => {
     latestDraftRef.current = next;
     setDraft(next);
+    setPending(true);
     clearTimer();
-    onPendingChange?.(true);
     timerRef.current = setTimeout(commit, delay);
-  }, [clearTimer, commit, delay, onPendingChange]);
+  }, [clearTimer, commit, delay]);
 
   useEffect(() => {
     latestDraftRef.current = value;
     setDraft(value);
+    setPending(false);
   }, [value]);
 
   useEffect(() => clearTimer, [clearTimer]);
@@ -45,6 +45,7 @@ export function useSettingsDraft({
   return {
     draft,
     flush: commit,
+    pending,
     setDraft: updateDraft,
   };
 }

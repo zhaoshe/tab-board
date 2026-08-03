@@ -55,13 +55,13 @@ TabBoard 选择中间路线：一键保存当前窗口，把它变成可搜索�
 
 ### 4. Local-first by design
 
-数据留在本机 Chrome extension storage，不需要账号和后端。
+数据默认留在本机 Chrome extension storage，也可以完整切换到用户选择的本地文件夹；不需要账号和远端后端。
 
 用户收益：
 
 - 隐私边界简单。
 - 安装即用。
-- 可导入导出，自主备份。
+- 可导入导出，也可使用普通 JSON 本地文件夹自主备份或交给用户自己的同步盘。
 
 ## Compared with OneTab
 
@@ -102,8 +102,8 @@ TabBoard 避免：
 2. 在 Open Tabs header 选择目标 window，点击 Save。
 3. 展示生成的 session，并双击标题 inline rename。
 4. 右键一个当前 open tab，选择 Filter sessions by this tab，右侧筛选出包含它的 sessions。
-5. 勾选多个 open tabs，点击 Create session。
-6. 拖动一个 open tab 到已有 session，展示它被追加进去。
+5. 勾选多个 open tabs，使用 Create Session，或通过 Save to 明确选择已有/新 Session 位置。
+6. 拖动一个 open tab 到已有 session，或精确命中两个 Session 之间的 `+` 创建新 Session。
 7. 用搜索或 category 找回 session，再 Restore。
 
 ## Current talking points
@@ -112,10 +112,12 @@ TabBoard 避免：
 - “OneTab speed, plus session organization.”
 - “Local-first, no account, no backend.”
 - “Open tabs are not only things to save; they are filters into your past work.”
+- “Pinned tabs can be saved without being removed from your working window.”
 
 ## Risks to explain honestly
 
 - 目前没有跨设备同步。
+- Local Folder 可以放在用户自己的同步目录中，但 TabBoard 不提供冲突解决；同一时间应只在一台设备写入。
 - 新标签页替换默认 Chrome new tab，用户需要接受 TabBoard 成为入口。
 - Open tab filter 由右键菜单触发，后续可能需要更明显的视觉提示来提高发现性。
 - Quick list / Pinned workflow 已移除，未来如果恢复，需要重新定义它和 sessions 的关系。

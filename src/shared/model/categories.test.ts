@@ -16,6 +16,7 @@ function workspace(id: string): Workspace {
   return {
     id,
     name: id,
+    emoji: '🗂️',
     createdAt: timestamp,
     updatedAt: timestamp,
   };

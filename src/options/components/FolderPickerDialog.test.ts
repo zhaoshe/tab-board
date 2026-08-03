@@ -186,10 +186,11 @@ describe('folder migration copy', () => {
     expect(source).not.toContain('newer items win');
   });
 
-  it('uses the contrast-safe primary action class', async () => {
+  it('uses neutral storage actions instead of an accent-only primary class', async () => {
     const source = await import('node:fs/promises').then(({ readFile }) =>
       readFile(new URL('./DataStorageCard.tsx', import.meta.url), 'utf8'));
 
-    expect(source).toContain('className="options-action-primary"');
+    expect(source).not.toContain('options-action-primary');
+    expect(source).toContain('variant="default"');
   });
 });

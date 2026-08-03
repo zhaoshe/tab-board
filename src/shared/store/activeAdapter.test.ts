@@ -18,6 +18,7 @@ import {
   _setActiveAdapterIdbFactory,
   _setActiveAdapterModuleLoadersForTests,
   getActiveAdapter,
+  getStorageStatus,
   isFileModeActive,
   onFallback,
   reconnectFolder,
@@ -378,6 +379,11 @@ describe('activeAdapter', () => {
     expect(await isFileModeActive()).toBe(false);
     expect(fallbackCb).toHaveBeenCalledTimes(1);
     expect(fallbackCb.mock.calls[0][0]).toMatch(/handle/i);
+    expect(await getStorageStatus()).toMatchObject({
+      configuredTarget: 'file',
+      activeBackend: 'browser',
+      fallbackReason: expect.stringMatching(/handle/i),
+    });
     // Verify it actually reads from STATE_KEY by exercising getState/setState
     const testState = knownState({ mutationRevision: 1 });
     await adapter.setState(testState);
@@ -405,6 +411,90 @@ describe('activeAdapter', () => {
     const loaded = await adapter.getState();
     expect(loaded.mutationRevision).toBe(42);
     expect(loaded.groups).toHaveLength(1);
+    expect(await getStorageStatus()).toEqual({
+      configuredTarget: 'file',
+      activeBackend: 'file',
+      folderName: 'root',
+      fallbackReason: null,
+      fileUpdatedAt: state.updatedAt,
+    });
+  });
+
+  it('retries the file backend only for the persisted worker-preload fallback', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const { saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(root, idbFactory);
+    chromeMock.storage.local.data[BOOTSTRAP_KEY] = {
+      configuredTarget: 'file',
+      activeBackend: 'browser',
+      folderName: 'root',
+      fallbackReason: 'File storage error: document is not defined',
+      fileUpdatedAt: '2026-08-02T16:22:31.000Z',
+    };
+    const loadFileStorageModule = vi.fn(() => import('./fileStorage'));
+    const loadFsDirectoryModule = vi.fn(() => import('./fsDirectory'));
+    _setActiveAdapterModuleLoadersForTests({
+      loadFileStorageModule,
+      loadFsDirectoryModule,
+    });
+
+    await getActiveAdapter();
+
+    expect(await isFileModeActive()).toBe(true);
+    expect(loadFileStorageModule).toHaveBeenCalledTimes(1);
+    expect(loadFsDirectoryModule).toHaveBeenCalledTimes(1);
+    expect(await getStorageStatus()).toMatchObject({
+      configuredTarget: 'file',
+      activeBackend: 'file',
+      folderName: 'root',
+      fallbackReason: null,
+    });
+  });
+
+  it('retries the file backend for the persisted worker dynamic-import fallback', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const { saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(root, idbFactory);
+    chromeMock.storage.local.data[BOOTSTRAP_KEY] = {
+      configuredTarget: 'file',
+      activeBackend: 'browser',
+      folderName: 'root',
+      fallbackReason: 'File storage error: window is not defined',
+      fileUpdatedAt: '2026-08-03T00:00:00.000Z',
+    };
+
+    await getActiveAdapter();
+
+    expect(await isFileModeActive()).toBe(true);
+    expect(await getStorageStatus()).toMatchObject({
+      configuredTarget: 'file',
+      activeBackend: 'file',
+      fallbackReason: null,
+    });
+  });
+
+  it('does not automatically retry ordinary persisted file fallbacks', async () => {
+    chromeMock.storage.local.data[BOOTSTRAP_KEY] = {
+      configuredTarget: 'file',
+      activeBackend: 'browser',
+      folderName: 'root',
+      fallbackReason: 'Permission to access the storage folder was denied.',
+      fileUpdatedAt: '2026-08-02T16:22:31.000Z',
+    };
+    const loadFileStorageModule = vi.fn(() => import('./fileStorage'));
+    const loadFsDirectoryModule = vi.fn(() => import('./fsDirectory'));
+    _setActiveAdapterModuleLoadersForTests({
+      loadFileStorageModule,
+      loadFsDirectoryModule,
+    });
+
+    await getActiveAdapter();
+
+    expect(await isFileModeActive()).toBe(false);
+    expect(loadFileStorageModule).not.toHaveBeenCalled();
+    expect(loadFsDirectoryModule).not.toHaveBeenCalled();
   });
 
   it('concurrent getActiveAdapter() calls share one init promise', async () => {
@@ -550,6 +640,13 @@ describe('activeAdapter', () => {
     expect(fallbackCb).toHaveBeenCalledTimes(1);
     expect((await authority.getState()).mutationRevision).toBe(10);
     expect((chromeMock.storage.local.data[STATE_KEY] as TabBoardState).mutationRevision).toBe(10);
+    expect(await getStorageStatus()).toEqual({
+      configuredTarget: 'file',
+      activeBackend: 'browser',
+      folderName: 'root',
+      fallbackReason: expect.stringMatching(/unavailable/i),
+      fileUpdatedAt: committed.updatedAt,
+    });
 
     const retried = knownState({ mutationRevision: 11 });
     await authority.setState(retried);
@@ -642,7 +739,13 @@ describe('activeAdapter', () => {
     await switchToFileMode(root, initialState);
 
     // Bootstrap is now 'file'
-    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toEqual({ mode: 'file' });
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toEqual({
+      configuredTarget: 'file',
+      activeBackend: 'file',
+      folderName: 'root',
+      fallbackReason: null,
+      fileUpdatedAt: initialState.updatedAt,
+    });
 
     // Active adapter is file adapter
     expect(await isFileModeActive()).toBe(true);
@@ -766,7 +869,13 @@ describe('activeAdapter', () => {
     await switchToBrowserMode(true);
 
     // Bootstrap is now 'browser'
-    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toEqual({ mode: 'browser' });
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toEqual({
+      configuredTarget: 'browser',
+      activeBackend: 'browser',
+      folderName: null,
+      fallbackReason: null,
+      fileUpdatedAt: null,
+    });
     expect(await isFileModeActive()).toBe(false);
 
     // State was copied to chrome storage via STATE_KEY
@@ -826,7 +935,13 @@ describe('activeAdapter', () => {
 
     await expect(switchToBrowserMode(true)).rejects.toThrow('chrome storage unavailable');
 
-    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toEqual({ mode: 'file' });
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toEqual({
+      configuredTarget: 'file',
+      activeBackend: 'file',
+      folderName: 'root',
+      fallbackReason: null,
+      fileUpdatedAt: '2026-07-23T10:00:00.000Z',
+    });
     expect(await isFileModeActive()).toBe(true);
     expect(await getActiveAdapter()).toBe(authority);
     expect(await loadRootHandle(idbFactory)).toBe(root);

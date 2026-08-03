@@ -30,6 +30,7 @@ function makeWorkspace(overrides: Partial<Workspace>): Workspace {
   return {
     id: DEFAULT_WORKSPACE_ID,
     name: 'Personal',
+    emoji: '🗂️',
     createdAt: ts.early,
     updatedAt: ts.early,
     ...overrides,

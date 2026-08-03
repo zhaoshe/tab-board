@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createEmptyState,
+  DEFAULT_WORKSPACE_EMOJI,
   type Folder,
   type Group,
   type TabBoardState,
@@ -12,7 +13,13 @@ import { structurallyShareState } from './stateStructuralSharing';
 const timestamp = '2026-01-01T00:00:00.000Z';
 
 function workspace(id: string): Workspace {
-  return { id, name: id, createdAt: timestamp, updatedAt: timestamp };
+  return {
+    id,
+    name: id,
+    emoji: DEFAULT_WORKSPACE_EMOJI,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
 }
 
 function folder(id: string, workspaceId: string): Folder {
@@ -115,6 +122,19 @@ describe('authoritative state structural sharing', () => {
     expect(shared.folders).toBe(previous.folders);
   });
 
+  it('replaces only the workspace whose emoji changed', () => {
+    const previous = state();
+    const next = structuredClone(previous);
+    next.workspaces[1] = { ...next.workspaces[1], emoji: '🧪' };
+
+    const shared = structurallyShareState(previous, next);
+
+    expect(shared.workspaces).not.toBe(previous.workspaces);
+    expect(shared.workspaces[0]).toBe(previous.workspaces[0]);
+    expect(shared.workspaces[1]).not.toBe(previous.workspaces[1]);
+    expect(shared.workspaces[1].emoji).toBe('🧪');
+  });
+
   it('preserves entity references when collections are reordered or extended', () => {
     const previous = state();
     const next = structuredClone(previous);
@@ -125,6 +145,25 @@ describe('authoritative state structural sharing', () => {
     expect(shared.groups).not.toBe(previous.groups);
     expect(shared.groups[1]).toBe(previous.groups[1]);
     expect(shared.groups[2]).toBe(previous.groups[0]);
+  });
+
+  it('preserves every workspace object and unrelated collection when workspace order changes', () => {
+    const previous = state();
+    const next = structuredClone(previous);
+    next.workspaces = [next.workspaces[1], next.workspaces[0]];
+    next.mutationRevision += 1;
+    next.updatedAt = '2026-01-02T00:00:00.000Z';
+
+    const shared = structurallyShareState(previous, next);
+
+    expect(shared.workspaces).not.toBe(previous.workspaces);
+    expect(shared.workspaces[0]).toBe(previous.workspaces[1]);
+    expect(shared.workspaces[1]).toBe(previous.workspaces[0]);
+    expect(shared.activeWorkspaceId).toBe(previous.activeWorkspaceId);
+    expect(shared.folders).toBe(previous.folders);
+    expect(shared.groups).toBe(previous.groups);
+    expect(shared.categoryOrderByWorkspace).toBe(previous.categoryOrderByWorkspace);
+    expect(shared.settings).toBe(previous.settings);
   });
 
   it('only replaces changed settings and category-order branches', () => {

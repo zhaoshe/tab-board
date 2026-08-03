@@ -25,6 +25,7 @@ export function SessionTabList({
   overflowRef,
   runtime,
   searchActive,
+  selectionMode,
   selectedRefs,
   selectedTabIds,
   sourceRect,
@@ -43,6 +44,7 @@ export function SessionTabList({
   overflowRef: (element: HTMLDivElement | null) => void;
   runtime: ManagerRuntime;
   searchActive: boolean;
+  selectionMode: boolean;
   selectedRefs: SavedTabRef[];
   selectedTabIds: ReadonlySet<string>;
   sourceRect: DragSourceRect | null;
@@ -75,7 +77,7 @@ export function SessionTabList({
             selectedRefs={selectedRefs}
             runtime={runtime}
             locked={locked}
-            selectionMode={selectedTabIds.size > 0}
+            selectionMode={selectionMode}
             selected={selectedTabIds.has(tab.id)}
             onStartSelection={() => onStartSelection(tab.id)}
             onToggleSelection={() => onToggleSelection(tab.id)}

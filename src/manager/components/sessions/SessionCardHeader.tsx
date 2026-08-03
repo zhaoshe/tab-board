@@ -1,38 +1,26 @@
 import type {
   KeyboardEvent,
   MouseEvent,
-  PointerEvent,
   RefObject,
 } from 'react';
+import { TextInput } from '@mantine/core';
 import {
-  ActionIcon,
-  TextInput,
-  Tooltip,
-} from '@mantine/core';
-import {
-  IconDots,
-  IconGripVertical,
-  IconRestore,
-} from '@tabler/icons-react';
-import type {
-  DraggableAttributes,
-  DraggableSyntheticListeners,
-} from '@dnd-kit/core';
+  Menu as IconDots,
+  SquareArrowOutUpRight as IconRestore,
+} from 'lucide-react';
+import { AccessibleIconAction } from '../../../shared/components/AccessibleIconAction';
+import { TabBoardIcon } from '../../../shared/components/TabBoardIcon';
 import { SessionCardMeta } from './SessionCardMeta';
 
 export function SessionCardHeader({
-  attributes,
   createdAt,
-  dragHandleRef,
   isDragOverlay,
   isEditingTitle,
   isMenuOpen,
   linkCount,
-  listeners,
   locked,
   moreActionRef,
   noteCount,
-  onHeaderPointerDown,
   onOpenMenu,
   onRestore,
   onTitleActivationKeyDown,
@@ -45,18 +33,14 @@ export function SessionCardHeader({
   titleInputRef,
   titleValue,
 }: {
-  attributes: DraggableAttributes | undefined;
   createdAt: string;
-  dragHandleRef: ((element: HTMLElement | null) => void) | undefined;
   isDragOverlay: boolean;
   isEditingTitle: boolean;
   isMenuOpen: boolean;
   linkCount: number;
-  listeners: DraggableSyntheticListeners | undefined;
   locked: boolean;
   moreActionRef: RefObject<HTMLButtonElement>;
   noteCount: number;
-  onHeaderPointerDown: (event: PointerEvent<HTMLElement>) => void;
   onOpenMenu: (
     event: MouseEvent<HTMLElement> | KeyboardEvent<HTMLElement>,
     trigger?: HTMLElement,
@@ -73,29 +57,7 @@ export function SessionCardHeader({
   titleValue: string;
 }) {
   return (
-    <header
-      className="session-card__header"
-      onPointerDown={onHeaderPointerDown}
-    >
-      {isDragOverlay ? (
-        <span
-          className="session-card__drag-handle session-card__drag-handle--static"
-          aria-hidden="true"
-        >
-          <IconGripVertical size={16} aria-hidden="true" />
-        </span>
-      ) : (
-        <button
-          type="button"
-          ref={dragHandleRef}
-          className="session-card__drag-handle"
-          aria-label={`Drag ${title} to reorder`}
-          {...attributes}
-          {...listeners}
-        >
-          <IconGripVertical size={16} aria-hidden="true" />
-        </button>
-      )}
+    <header className="session-card__header">
       <div className="session-card__heading">
         {isEditingTitle ? (
           <TextInput
@@ -128,41 +90,33 @@ export function SessionCardHeader({
         data-overlay-open={isMenuOpen ? 'true' : undefined}
       >
         {restorableTabCount > 0 && (
-          <Tooltip label="Restore">
-            <ActionIcon
-              size="sm"
-              variant="subtle"
-              color="blue"
-              disabled={isDragOverlay}
-              onClick={onRestore}
-              aria-label="Restore"
-            >
-              <IconRestore size={16} aria-hidden="true" />
-            </ActionIcon>
-          </Tooltip>
-        )}
-        <Tooltip label="More" disabled={isMenuOpen}>
-          <ActionIcon
-            ref={moreActionRef}
-            size="sm"
-            variant="subtle"
-            aria-label="More"
-            aria-haspopup={isDragOverlay ? undefined : 'menu'}
-            aria-expanded={isDragOverlay ? undefined : isMenuOpen}
+          <AccessibleIconAction
+            label="Restore"
             disabled={isDragOverlay}
-            onClick={isDragOverlay
-              ? undefined
-              : (event) => onOpenMenu(event, event.currentTarget)}
-            onContextMenu={isDragOverlay
-              ? undefined
-              : (event) => onOpenMenu(event, event.currentTarget)}
-            onKeyDown={isDragOverlay
-              ? undefined
-              : (event) => onOpenMenu(event, event.currentTarget)}
+            onClick={onRestore}
           >
-            <IconDots size={16} aria-hidden="true" />
-          </ActionIcon>
-        </Tooltip>
+            <TabBoardIcon icon={IconRestore} />
+          </AccessibleIconAction>
+        )}
+        <AccessibleIconAction
+          ref={moreActionRef}
+          label="More"
+          tooltipDisabled={isMenuOpen}
+          aria-haspopup={isDragOverlay ? undefined : 'menu'}
+          aria-expanded={isDragOverlay ? undefined : isMenuOpen}
+          disabled={isDragOverlay}
+          onClick={isDragOverlay
+            ? undefined
+            : (event) => onOpenMenu(event, event.currentTarget)}
+          onContextMenu={isDragOverlay
+            ? undefined
+            : (event) => onOpenMenu(event, event.currentTarget)}
+          onKeyDown={isDragOverlay
+            ? undefined
+            : (event) => onOpenMenu(event, event.currentTarget)}
+        >
+          <TabBoardIcon icon={IconDots} />
+        </AccessibleIconAction>
       </div>
       <SessionCardMeta
         createdAt={createdAt}

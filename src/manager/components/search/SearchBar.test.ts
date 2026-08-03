@@ -55,17 +55,13 @@ vi.mock('@mantine/core', () => ({
       rightSection as ReactNode,
     );
   }),
-  Tooltip: ({ children }: NativeProps) => children,
+  Tooltip: forwardRef<HTMLDivElement, NativeProps>(function Tooltip(
+    { children },
+    ref,
+  ) {
+    return createElement('div', { ref }, children as ReactNode);
+  }),
 }));
-
-vi.mock('@tabler/icons-react', () => {
-  const Icon = () => null;
-  return {
-    IconKeyboard: Icon,
-    IconSearch: Icon,
-    IconX: Icon,
-  };
-});
 
 vi.mock('../../hooks/useBoardProjection', () => ({
   useBoardProjection: () => ({

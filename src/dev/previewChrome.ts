@@ -8,6 +8,14 @@ import {
   createTabRecord,
   normalizeState,
   clone,
+  failedRefOutcome,
+  parseRestoreRefs,
+  restoreRefKey,
+  restoredRefOutcome,
+  classifyWindowDuplicates,
+  isWindowDedupeUrl,
+  type RestoreRef,
+  type RestoreRefOutcome,
 } from '../shared/model';
 import type { BrowserGroup, Group, TabBoardState, TabItem } from '../shared/model';
 import type { OpenTabsCaptureResult } from '../shared/openTabs';
@@ -673,7 +681,6 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
       title: string;
       url: string;
       favIconUrl: string;
-      active: boolean;
       pinned: boolean;
       index: number;
       browserGroup: BrowserGroup | null;
@@ -701,7 +708,6 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
               title: String(tab.title || url || 'Untitled'),
               url,
               favIconUrl: String(tab.favIconUrl || ''),
-              active: Boolean(tab.active),
               pinned: Boolean(tab.pinned),
               index: tab.index,
               browserGroup: null,
@@ -1041,26 +1047,25 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
       createdGroupIds: [group.id],
     };
     if (state.settings.openManagerAfterSave) await tabsApi.create({ url: 'manager.html', windowId: targetWindow.id });
-    const idsToClose = state.settings.closeTabsAfterSave
-      ? [...unique, ...duplicates].map((tab) => tab.id)
-      : duplicates.map((tab) => tab.id);
+    const idsToClose = (
+      state.settings.closeTabsAfterSave
+        ? [...unique, ...duplicates]
+        : duplicates
+    )
+      .filter((tab) => !tab.pinned)
+      .map((tab) => tab.id);
     if (idsToClose.length) await tabsApi.remove(idsToClose);
     return result;
   };
 
   const dedupeWindow = async (): Promise<{ removedTabs: number }> => {
-    const currentTabs = tabs.filter((tab) => tab.windowId === focusedWindow()?.id && resolveTabUrl(tab));
-    const byUrl = new Map<string, PreviewTab[]>();
-    currentTabs.forEach((tab) => {
-      const url = resolveTabUrl(tab);
-      byUrl.set(url, [...(byUrl.get(url) || []), tab]);
-    });
-    const duplicateIds = [...byUrl.values()].flatMap((matches) => matches
-      .sort((left, right) => Number(right.active) - Number(left.active)
-        || (right.lastAccessed || 0) - (left.lastAccessed || 0)
-        || left.index - right.index)
-      .slice(1)
-      .map((tab) => tab.id));
+    const currentTabs = tabs
+      .filter((tab) => tab.windowId === focusedWindow()?.id)
+      .map((tab) => ({ ...tab, url: resolveTabUrl(tab) }))
+      .filter((tab) => isWindowDedupeUrl(tab.url, extensionUrl('')));
+    const duplicateIds = classifyWindowDuplicates(currentTabs)
+      .removable
+      .map((tab) => tab.id);
     if (duplicateIds.length) await tabsApi.remove(duplicateIds);
     return { removedTabs: duplicateIds.length };
   };
@@ -1143,6 +1148,58 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
             await removeRestoredRefs([{ source: 'group', groupId, tabId }]);
           }
           return { restoredTabs: created.length };
+        });
+      case 'restore-refs':
+        return enqueueRestore(async () => {
+          const refs = parseRestoreRefs(message.refs);
+          const resolved = refs.map((ref) => {
+            const group = state.groups.find(({ id }) => id === ref.groupId);
+            const record = group?.tabs.find(({ id }) => id === ref.tabId);
+            if (!group || !record) {
+              return { ref, group: null, record: null, error: 'missing' as const };
+            }
+            if (record.itemType !== 'link' || !record.url) {
+              return {
+                ref,
+                group,
+                record,
+                error: 'not-restorable' as const,
+              };
+            }
+            return { ref, group, record, error: null };
+          });
+          const restorable = resolved.filter((item): item is {
+            ref: RestoreRef;
+            group: Group;
+            record: TabItem;
+            error: null;
+          } => item.group !== null
+            && item.record !== null
+            && item.error === null);
+          const created = await createRestoredTabs(
+            restorable.map(({ record }) => record),
+          );
+          const createdRecords = new Set(created.map(({ record }) => record));
+          const outcomes: RestoreRefOutcome[] = resolved.map((item) => {
+            if (item.error) return failedRefOutcome(item.ref, item.error);
+            return item.record && createdRecords.has(item.record)
+              ? restoredRefOutcome(item.ref)
+              : failedRefOutcome(item.ref, 'create-failed');
+          });
+          const restoredKeys = new Set(outcomes.flatMap((outcome) =>
+            outcome.status === 'restored' ? [outcome.key] : []));
+          const removableRefs = restorable
+            .filter(({ ref, group }) =>
+              restoredKeys.has(restoreRefKey(ref)) && !group.locked)
+            .map(({ ref }) => ref);
+          if (state.settings.deleteRestoredTabs && removableRefs.length) {
+            await removeRestoredRefs(removableRefs);
+          }
+          return {
+            restoredTabs: outcomes.filter(({ status }) =>
+              status === 'restored').length,
+            outcomes,
+          };
         });
       default:
         throw new Error(`Unknown message type: ${String(action)}`);

@@ -59,6 +59,15 @@ function isOpenTabIdArray(value: unknown): value is number[] {
     && value.every(isSafeNonNegativeInteger);
 }
 
+function isCategoryOrder(value: unknown): value is string[] {
+  return Array.isArray(value)
+    && isDenseArray(value)
+    && value.length > 0
+    && value.length <= MAX_REFS
+    && new Set(value).size === value.length
+    && value.every(isCategory);
+}
+
 export function isDropIntentShape(value: unknown): value is DropIntent {
   if (!isRecord(value)
     || !isEntityId(value.workspaceId)
@@ -83,11 +92,13 @@ export function isDropIntentShape(value: unknown): value is DropIntent {
           'categoryId',
           'targetCategoryId',
           'placement',
+          'expectedCategoryOrder',
         ],
       )
         && isEntityId(value.categoryId)
         && isEntityId(value.targetCategoryId)
-        && (value.placement === 'before' || value.placement === 'after');
+        && (value.placement === 'before' || value.placement === 'after')
+        && isCategoryOrder(value.expectedCategoryOrder);
     case 'move-tabs':
       return hasOnlyKeys(
         value,
@@ -161,7 +172,6 @@ export function isOpenTabInfoShape(value: unknown): value is OpenTabInfo {
         'title',
         'url',
         'favIconUrl',
-        'active',
         'pinned',
         'index',
         'browserGroup',
@@ -179,7 +189,6 @@ export function isOpenTabInfoShape(value: unknown): value is OpenTabInfo {
     && isBoundedString(value.title, MAX_TITLE_BYTES)
     && isBoundedString(value.url, MAX_URL_BYTES)
     && isBoundedString(value.favIconUrl, MAX_FAVICON_URL_BYTES)
-    && typeof value.active === 'boolean'
     && typeof value.pinned === 'boolean'
     && isSafeNonNegativeInteger(value.index)
     && (value.browserGroup === null || isBrowserGroup(value.browserGroup))

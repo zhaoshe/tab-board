@@ -13,6 +13,10 @@ export interface ReloadableStorageAdapter extends StorageAdapter {
   reloadFromDisk(): Promise<void>;
 }
 
+export interface FileStorageAdapter extends ReloadableStorageAdapter {
+  getFileUpdatedAt(): string | null;
+}
+
 export interface AdapterInitError extends Error {
   code: 'ADAPTER_INIT_FAILED' | 'PERMISSION_DENIED' | 'FILE_CORRUPT' | 'NO_HANDLE';
 }

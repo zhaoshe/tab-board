@@ -1,11 +1,11 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { Notification, Group, Portal, Stack } from '@mantine/core';
 import {
-  IconCheck,
-  IconAlertCircle,
-  IconInfoCircle,
-  IconX,
-} from '@tabler/icons-react';
+  Check as IconCheck,
+  CircleAlert as IconAlertCircle,
+  Info as IconInfoCircle,
+  X as IconX,
+} from 'lucide-react';
 
 type NotificationType = 'success' | 'error' | 'info';
 

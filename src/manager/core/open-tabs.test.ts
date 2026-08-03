@@ -47,7 +47,6 @@ function tab(id: number, title: string, url: string, storable = true): OpenTabIn
     title,
     url,
     favIconUrl: '',
-    active: false,
     pinned: false,
     index: id,
     browserGroup: null,
@@ -235,7 +234,7 @@ describe('Task107 source contracts', () => {
     expect(runtime).toContain('projectOpenTabsWorkflow(workflowState, deferredQuery)');
     expect(workflow).toContain('filterOpenTabs(currentWindow?.tabs ?? [], deferredQuery)');
     expect(row).toContain('content-visibility: auto');
-    expect(row).toContain('contain-intrinsic-size:');
+    expect(row).toContain('contain-intrinsic-size: auto 44px');
   });
 
   it('structurally shares direct selected-capture reconciliation before publishing it', () => {
@@ -269,8 +268,12 @@ describe('Task107 source contracts', () => {
     expect(panel).toContain('<OpenTabsWindowBar');
     expect(row).toContain('UnstyledButton');
     expect(windowBar).toContain('visibleWindows');
-    expect(windowBar).toContain('manager-refresh-icon--loading');
-    expect(windowBar).toContain('aria-busy={loading || undefined}');
+    expect(windowBar).not.toContain('IconRefresh');
+    expect(windowBar).not.toContain('manager-refresh-icon--loading');
+    expect(windowBar).not.toContain('onRefresh');
+    expect(windowBar).not.toContain('onSaveWindow');
+    expect(windowBar).not.toContain('manager-save-window');
+    expect(windowBar).not.toContain('Save Window');
     expect(panel).not.toContain('Loading open tabs…');
     expect(hook).toContain('closingTabIds');
     expect(panel).toContain('No selected browser window');
@@ -307,7 +310,10 @@ describe('Task107 source contracts', () => {
     const hook = read('manager/hooks/useOpenTabsRuntime.ts');
     const workflow = read('manager/core/openTabsWorkflow.ts');
 
-    expect(hook).toContain("dispatch({ type: 'selection-all' })");
+    expect(hook).toContain("dispatch({ type: 'selection-visible'");
+    expect(hook).toContain('tabIds: [...visibleIds]');
+    expect(workflow).toContain("case 'selection-visible'");
+    expect(workflow).toContain('state.selectedTabIds.filter((id) => !visibleSet.has(id))');
     expect(workflow).toContain('getSelectableOpenTabIds(selectedWindow(state))');
     expect(workflow).toContain('getSelectableOpenTabIds(nextSelectedWindow)');
     expect(hook).not.toContain('tab.storable === true && !tab.pinned');

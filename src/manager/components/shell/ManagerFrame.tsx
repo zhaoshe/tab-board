@@ -1,30 +1,17 @@
-import { useEffect, type ReactNode } from 'react';
-
-function ManagerTooltipDismissal() {
-  useEffect(() => {
-    const dismiss = () => {
-      document.querySelectorAll<HTMLElement>('[aria-describedby]').forEach((target) => {
-        target.dispatchEvent(new MouseEvent('mouseout', {
-          bubbles: true,
-          relatedTarget: document.body,
-        }));
-      });
-    };
-    document.addEventListener('pointerdown', dismiss, true);
-    return () => document.removeEventListener('pointerdown', dismiss, true);
-  }, []);
-  return null;
-}
+import type { ReactNode } from 'react';
+import type { SidebarDisclosureState } from '../../hooks/useSidebarDisclosure';
 
 interface ManagerFrameProps {
   dragActive: boolean;
-  sidebarCollapsed: boolean;
-  sidebarOverlayOpen: boolean;
-  sidebarHoverSuppressed: boolean;
+  sidebarState: SidebarDisclosureState;
   openTabsDragActive: boolean;
   dragMarkerKind?: string;
   dragTargetKind?: string;
-  onSidebarMouseLeave: () => void;
+  onSidebarPointerIntent: (active: boolean) => void;
+  onSidebarFocusIntent: (
+    active: boolean,
+    options?: { cancelPending?: boolean },
+  ) => void;
   header: ReactNode;
   sidebar: ReactNode;
   main: ReactNode;
@@ -33,29 +20,29 @@ interface ManagerFrameProps {
 
 export function ManagerFrame({
   dragActive,
-  sidebarCollapsed,
-  sidebarOverlayOpen,
-  sidebarHoverSuppressed,
+  sidebarState,
   openTabsDragActive,
   dragMarkerKind,
   dragTargetKind,
-  onSidebarMouseLeave,
+  onSidebarPointerIntent,
+  onSidebarFocusIntent,
   header,
   sidebar,
   main,
   dialogs,
 }: ManagerFrameProps) {
+  const sidebarCollapsed = sidebarState !== 'pinned';
+  const drawerOpen = sidebarState === 'drawer';
+
   return (
     <>
-      <ManagerTooltipDismissal />
       <a className="skip-link" href="#manager-main">Skip to Saved Sessions</a>
       <div
         className={[
           'manager-shell',
           dragActive && 'manager-shell--drag-active',
           sidebarCollapsed && 'manager-shell--sidebar-collapsed',
-          sidebarOverlayOpen && 'manager-shell--sidebar-overlay-open',
-          sidebarHoverSuppressed && 'manager-shell--sidebar-hover-suppressed',
+          sidebarState !== 'collapsed' && `manager-shell--sidebar-${sidebarState}`,
           openTabsDragActive && 'manager-shell--open-tabs-drag-active',
         ].filter(Boolean).join(' ')}
         data-drag-marker={dragMarkerKind}
@@ -63,7 +50,7 @@ export function ManagerFrame({
       >
         <header
           className="manager-topbar"
-          {...(sidebarOverlayOpen ? { inert: '' } : {})}
+          {...(drawerOpen ? { inert: '' } : {})}
         >
           {header}
         </header>
@@ -71,7 +58,23 @@ export function ManagerFrame({
           className="manager-sidebar"
           id="manager-sidebar"
           aria-label="Open Tabs workspace"
-          onMouseLeave={onSidebarMouseLeave}
+          onMouseEnter={() => onSidebarPointerIntent(true)}
+          onMouseLeave={() => onSidebarPointerIntent(false)}
+          onFocus={(event) => {
+            const focusesExpand = Boolean((
+              event.target as HTMLElement
+            ).closest('.manager-open-tabs-context-expand'));
+            if (focusesExpand) {
+              onSidebarFocusIntent(false, { cancelPending: true });
+            } else {
+              onSidebarFocusIntent(true);
+            }
+          }}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              onSidebarFocusIntent(false);
+            }
+          }}
         >
           {sidebar}
         </aside>
@@ -79,7 +82,7 @@ export function ManagerFrame({
           <h1 className="visually-hidden"><span translate="no">TabBoard</span> Tab Manager</h1>
           <div
             className="manager-main-surface"
-            {...(sidebarOverlayOpen ? { inert: '' } : {})}
+            {...(drawerOpen ? { inert: '' } : {})}
           >
             {main}
           </div>

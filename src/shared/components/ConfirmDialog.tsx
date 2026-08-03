@@ -1,11 +1,11 @@
-import { useCallback, type RefObject } from 'react';
+import type { RefObject } from 'react';
 import {
   Button,
   Group,
-  Modal,
   Stack,
   Text,
 } from '@mantine/core';
+import { TabBoardModal } from './TabBoardModal';
 
 export interface ConfirmDialogProps {
   opened: boolean;
@@ -36,12 +36,8 @@ export function ConfirmDialog({
   onCancel,
   onConfirm,
 }: ConfirmDialogProps) {
-  const setCancelRef = useCallback((element: HTMLButtonElement | null) => {
-    if (opened) element?.focus();
-  }, [opened]);
-
   return (
-    <Modal
+    <TabBoardModal
       opened={opened}
       onClose={loading ? () => undefined : onCancel}
       title={title}
@@ -58,7 +54,6 @@ export function ConfirmDialog({
         <Text className="confirm-dialog__message" size="sm">{message}</Text>
         <Group justify="flex-end" gap="xs">
           <Button
-            ref={setCancelRef}
             data-autofocus
             variant="default"
             disabled={loading}
@@ -77,6 +72,6 @@ export function ConfirmDialog({
           </Button>
         </Group>
       </Stack>
-    </Modal>
+    </TabBoardModal>
   );
 }

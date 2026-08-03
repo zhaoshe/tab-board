@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
 import {
+  benchmarkPageStorage,
+  benchmarkPagePath,
   createBenchmarkSchedule,
   createBenchmarkState,
   summarizeRuns,
@@ -94,8 +96,11 @@ async function launch(profilePath) {
   });
 }
 
-async function gotoExtensionPage(page, extensionId, pageName) {
-  const url = `chrome-extension://${extensionId}/${pageName}.html`;
+async function gotoExtensionPage(page, extensionId, pagePath) {
+  const relativePath = pagePath.includes('.html')
+    ? pagePath
+    : `${pagePath}.html`;
+  const url = `chrome-extension://${extensionId}/${relativePath}`;
   try {
     await page.goto(url, { waitUntil: 'commit', timeout: 15_000 });
   } catch (error) {
@@ -122,9 +127,11 @@ async function activateWorker(context, extensionId) {
 function startupProbe() {
   const record = {
     scriptStart: performance.now(),
+    initialLocation: window.location.href,
     firstRootContent: null,
     firstUsefulUi: null,
     calls: [],
+    historyCalls: [],
     longTasks: [],
   };
   globalThis.__TABBOARD_STARTUP_BENCHMARK__ = record;
@@ -153,6 +160,18 @@ function startupProbe() {
     `runtime:${message?.type || 'unknown'}`);
   wrap(chrome.storage?.local, 'get', (keys) =>
     `storage:get:${Array.isArray(keys) ? keys.join(',') : String(keys)}`);
+
+  for (const method of ['pushState', 'replaceState']) {
+    const original = history[method].bind(history);
+    history[method] = function wrappedHistory(state, unused, url) {
+      record.historyCalls.push({
+        method,
+        from: window.location.href,
+        url: String(url ?? ''),
+      });
+      return original(state, unused, url);
+    };
+  }
 
   try {
     new PerformanceObserver((list) => {
@@ -192,16 +211,22 @@ async function seedProfile(profilePath, extensionId, state) {
     await gotoExtensionPage(page, extensionId, 'options');
     await page.evaluate(async (seed) => {
       await chrome.storage.local.clear();
+      for (const [key, value] of Object.entries(seed.pageStorage)) {
+        localStorage.setItem(key, value);
+      }
       await chrome.storage.local.set({
         tabboardStorageConfig: { mode: 'browser' },
-        tabboardState: seed,
+        tabboardState: seed.state,
         tabboardSettingsProjection: {
-          settings: seed.settings,
-          mutationRevision: seed.mutationRevision,
-          updatedAt: seed.updatedAt,
+          settings: seed.state.settings,
+          mutationRevision: seed.state.mutationRevision,
+          updatedAt: seed.state.updatedAt,
         },
       });
-    }, state);
+    }, {
+      state,
+      pageStorage: benchmarkPageStorage(),
+    });
   } finally {
     await context.close();
   }
@@ -212,7 +237,11 @@ async function measure(profilePath, extensionId, pageName) {
   try {
     await context.addInitScript(startupProbe);
     const page = context.pages()[0] ?? await context.newPage();
-    await gotoExtensionPage(page, extensionId, pageName);
+    await gotoExtensionPage(
+      page,
+      extensionId,
+      benchmarkPagePath(pageName),
+    );
     const selector = pageName === 'manager' ? '.manager-shell' : '.options-header';
     await page.locator(selector).waitFor({ state: 'attached', timeout: 30_000 });
     const result = await page.evaluate(() => {
@@ -224,6 +253,11 @@ async function measure(profilePath, extensionId, pageName) {
       const listCalls = record.calls.filter(({ label }) =>
         label === 'runtime:list-open-tabs');
       return {
+        initialLocation: record.initialLocation,
+        historyCalls: record.historyCalls,
+        location: window.location.href,
+        activeBoard: document.querySelector('.manager-board')
+          ?.getAttribute('aria-label') ?? null,
         usefulMs: record.firstUsefulUi,
         rootMs: record.firstRootContent,
         stateReadEndMs: stateReads.length

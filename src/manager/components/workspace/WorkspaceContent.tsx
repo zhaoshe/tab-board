@@ -1,6 +1,11 @@
-import { memo, useCallback, useMemo } from 'react';
+import { memo, useCallback, useMemo, type ReactNode } from 'react';
 import { Box, Text } from '@mantine/core';
-import { IconArchive, IconFolder, IconSearch, IconStar } from '@tabler/icons-react';
+import {
+  Archive as IconArchive,
+  Folder as IconFolder,
+  Search as IconSearch,
+  Star as IconStar,
+} from 'lucide-react';
 import { SortableContext, rectSortingStrategy } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
 import { useShallow } from 'zustand/react/shallow';
@@ -9,18 +14,33 @@ import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import type { CategoryFilter } from '../../core/selectors';
 import { getCanonicalGroupIndexById } from '../../core/selectors';
-import type { DndData, DragMarker, DragSourceRect } from '../../core/dnd';
+import type {
+  DndData,
+  DragMarker,
+  DragPayload,
+  DragSourceRect,
+  DropTarget,
+} from '../../core/dnd';
+import { isAllSourceTabs } from '../../core/dnd';
 import { SessionSlot } from '../sessions/SessionSlot';
 import { useOverflowCues } from '../../hooks/useOverflowCues';
 import { useSessionActivation } from '../../hooks/useSessionActivation';
+import type { ManagerSelectionScope } from '../../hooks/useManagerSelectionScope';
+import type { OpenSessionTargetPickerInput } from '../shell/SessionTargetPicker';
+import { NewSessionGapTarget } from './NewSessionGapTarget';
 
 interface WorkspaceContentProps {
   category: CategoryFilter;
   workspaceName: string;
   runtime: ManagerRuntime;
+  registerBoardElement?: (element: HTMLElement | null) => void;
+  activeDragPayload?: DragPayload | null;
+  activeDropTarget?: DropTarget | null;
   highlightedGroupId?: string | null;
   dragMarker?: DragMarker | null;
   sourceRect?: DragSourceRect | null;
+  selectionScope: ManagerSelectionScope;
+  onOpenSessionTargetPicker: (input: OpenSessionTargetPickerInput) => void;
 }
 
 interface GroupInsertionTargetProps {
@@ -49,16 +69,57 @@ const GroupInsertionTarget = memo(function GroupInsertionTarget({
       } satisfies DndData,
     },
   });
-  // data-drop-target="new-group" remains oracle marker for end insertion targets.
   return (
     <div
       ref={setNodeRef}
-      className={`session-board__group-insert-target${isEndTarget ? ' session-board__end-target' : ''}`}
-      data-drop-target={id.startsWith('new-group') ? 'new-group' : 'group-insert'}
+      className={`session-board__group-insert-target${isEndTarget ? ' session-board__group-end-target' : ''}`}
+      data-drop-target="group-insert"
       data-over={isMarker || undefined}
       aria-hidden="true"
     >
       {isMarker && <span className="session-board__drop-marker" aria-hidden="true" />}
+    </div>
+  );
+});
+
+interface EmptySessionSlotTargetProps {
+  category: CategoryFilter;
+  workspaceId: string;
+  active: boolean;
+  children: ReactNode;
+}
+
+const EmptySessionSlotTarget = memo(function EmptySessionSlotTarget({
+  category,
+  workspaceId,
+  active,
+  children,
+}: EmptySessionSlotTargetProps) {
+  const { setNodeRef } = useDroppable({
+    id: `new-session-insert-empty-${workspaceId}-${category}`,
+    data: {
+      type: 'new-session-insert',
+      dnd: {
+        targets: [{
+          kind: 'new-session-insert',
+          category,
+          index: 0,
+          workspaceId,
+        }],
+      } satisfies DndData,
+    },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className="session-board__empty-slot-target"
+      data-active={active || undefined}
+      data-drop-target="new-session-insert"
+      data-empty-category={category}
+    >
+      <span className="session-board__empty-slot-plus" aria-hidden="true" />
+      {children}
     </div>
   );
 });
@@ -76,9 +137,14 @@ export function WorkspaceContent({
   category,
   workspaceName,
   runtime,
+  registerBoardElement,
+  activeDragPayload = null,
+  activeDropTarget = null,
   highlightedGroupId,
   dragMarker = null,
   sourceRect = null,
+  selectionScope,
+  onOpenSessionTargetPicker,
 }: WorkspaceContentProps) {
   const {
     workspaceId,
@@ -105,9 +171,30 @@ export function WorkspaceContent({
     () => getCanonicalGroupIndexById(categoryGroups),
     [categoryGroups],
   );
+  const canonicalGroups = useTabBoardStore.getState().groups;
+  const suppressNewSessionTargets = activeDragPayload?.kind === 'tabs'
+    && isAllSourceTabs(activeDragPayload, canonicalGroups);
+  const newSessionAnchorsEnabled = !suppressNewSessionTargets
+    && (activeDragPayload?.kind === 'tab'
+    || activeDragPayload?.kind === 'tabs'
+    || activeDragPayload?.kind === 'open-tabs');
+  const canonicalEmptyTargetEnabled = categoryGroups.length === 0
+    && !hasSearch
+    && newSessionAnchorsEnabled;
+  const isNewSessionAnchorActive = useCallback((index: number) => (
+    activeDropTarget?.kind === 'new-session-insert'
+    && activeDropTarget.category === category
+    && activeDropTarget.index === index
+    && activeDropTarget.workspaceId === workspaceId
+  ), [activeDropTarget, category, workspaceId]);
   const forcedIds = useMemo(
-    () => highlightedGroupId ? [highlightedGroupId] : [],
-    [highlightedGroupId],
+    () => [
+      ...(highlightedGroupId ? [highlightedGroupId] : []),
+      ...(selectionScope.scope?.kind === 'saved-tabs'
+        ? [selectionScope.scope.groupId]
+        : []),
+    ],
+    [highlightedGroupId, selectionScope.scope],
   );
   const sessionActivation = useSessionActivation({
     contextKey: activationContextKey,
@@ -117,7 +204,12 @@ export function WorkspaceContent({
   const setBoardRef = useCallback((element: HTMLElement | null) => {
     boardOverflow.ref(element);
     sessionActivation.rootRef(element);
-  }, [boardOverflow.ref, sessionActivation.rootRef]);
+    registerBoardElement?.(element);
+  }, [
+    boardOverflow.ref,
+    registerBoardElement,
+    sessionActivation.rootRef,
+  ]);
 
   const getTitle = () => {
     if (category === 'saved') return 'Saved';
@@ -126,7 +218,11 @@ export function WorkspaceContent({
     return currentFolder?.name || 'Category';
   };
 
-  const getEmptyState = () => {
+  const getEmptyState = (
+    replacePrimaryCopy = false,
+    reservePlusSpace = false,
+  ) => {
+    const primaryCopyMargin = reservePlusSpace ? 24 : 'md';
     const emptyStateProps = {
       style: {
         display: 'flex',
@@ -152,7 +248,9 @@ export function WorkspaceContent({
       return (
         <Box {...emptyStateProps}>
           <IconStar size={48} aria-hidden="true" style={{ opacity: 0.3 }} />
-          <Text mt="md" fw={500}>No saved sessions yet</Text>
+          <Text mt={primaryCopyMargin} fw={500}>
+            {replacePrimaryCopy ? 'Release to create session' : 'No saved sessions yet'}
+          </Text>
           <Text size="sm" c="dimmed">Star important sessions to find them quickly</Text>
         </Box>
       );
@@ -162,7 +260,9 @@ export function WorkspaceContent({
       return (
         <Box {...emptyStateProps}>
           <IconArchive size={48} aria-hidden="true" style={{ opacity: 0.3 }} />
-          <Text mt="md" fw={500}>No archived sessions yet</Text>
+          <Text mt={primaryCopyMargin} fw={500}>
+            {replacePrimaryCopy ? 'Release to create session' : 'No archived sessions yet'}
+          </Text>
           <Text size="sm" c="dimmed">Archive old sessions to keep your inbox clean</Text>
         </Box>
       );
@@ -172,7 +272,9 @@ export function WorkspaceContent({
       return (
         <Box {...emptyStateProps}>
           <IconFolder size={48} aria-hidden="true" style={{ opacity: 0.3 }} />
-          <Text mt="md" fw={500}>This category is empty</Text>
+          <Text mt={primaryCopyMargin} fw={500}>
+            {replacePrimaryCopy ? 'Release to create session' : 'This category is empty'}
+          </Text>
           <Text size="sm" c="dimmed">Move sessions here to organize your work</Text>
         </Box>
       );
@@ -181,7 +283,9 @@ export function WorkspaceContent({
     return (
       <Box {...emptyStateProps}>
         <IconArchive size={48} aria-hidden="true" style={{ opacity: 0.3 }} />
-        <Text mt="md" fw={500}>No sessions here yet</Text>
+        <Text mt={primaryCopyMargin} fw={500}>
+          {replacePrimaryCopy ? 'Release to create session' : 'No sessions here yet'}
+        </Text>
         <Text size="sm" c="dimmed">Save tabs from your browser to get started</Text>
       </Box>
     );
@@ -197,19 +301,35 @@ export function WorkspaceContent({
       tabIndex={-1}
     >
       {visibleGroups.length === 0 ? (
-        <div className="manager-board__empty-content">
-          {getEmptyState()}
+        canonicalEmptyTargetEnabled ? (
           <div className="session-board" tabIndex={-1}>
-            <GroupInsertionTarget
-              id={`new-group-${workspaceId}-${category}`}
+            <EmptySessionSlotTarget
               category={category}
-              index={categoryGroups.length}
               workspaceId={workspaceId}
-              isMarker={dragMarker?.kind === 'group' && dragMarker.index === categoryGroups.length}
-              isEndTarget
-            />
+              active={isNewSessionAnchorActive(0)}
+            >
+              {getEmptyState(isNewSessionAnchorActive(0), true)}
+            </EmptySessionSlotTarget>
           </div>
-        </div>
+        ) : (
+          <div className="manager-board__empty-content">
+            {getEmptyState()}
+            <div className="session-board" tabIndex={-1}>
+              <GroupInsertionTarget
+                id={`group-insert-end-${workspaceId}-${category}`}
+                category={category}
+                index={categoryGroups.length}
+                workspaceId={workspaceId}
+                isMarker={
+                  activeDragPayload?.kind === 'group'
+                  && dragMarker?.kind === 'group'
+                  && dragMarker.index === categoryGroups.length
+                }
+                isEndTarget
+              />
+            </div>
+          </div>
+        )
       ) : (
         <SortableContext items={visibleGroups.map((group) => `group-${group.id}`)} strategy={rectSortingStrategy}>
           <div className="session-board" tabIndex={-1}>
@@ -217,12 +337,25 @@ export function WorkspaceContent({
               const groupIndex = canonicalIndexByGroupId.get(group.id) ?? 0;
               return (
                 <div key={group.id} className="session-board__group-slot">
+                  {newSessionAnchorsEnabled && (
+                    <NewSessionGapTarget
+                      category={category}
+                      index={groupIndex}
+                      workspaceId={workspaceId}
+                      enabled
+                      active={isNewSessionAnchorActive(groupIndex)}
+                    />
+                  )}
                   <GroupInsertionTarget
                     id={`group-insert-${group.id}`}
                     category={category}
                     index={groupIndex}
                     workspaceId={workspaceId}
-                    isMarker={dragMarker?.kind === 'group' && dragMarker.index === groupIndex}
+                    isMarker={
+                      activeDragPayload?.kind === 'group'
+                      && dragMarker?.kind === 'group'
+                      && dragMarker.index === groupIndex
+                    }
                   />
                   <SessionSlot
                     activate={() => sessionActivation.activate(group.id)}
@@ -236,16 +369,33 @@ export function WorkspaceContent({
                     registerSlot={sessionActivation.registerSlot(group.id)}
                     dragMarker={getSessionCardDragMarker(dragMarker, group.id)}
                     sourceRect={sourceRect}
+                    selectionScope={selectionScope}
+                    onOpenSessionTargetPicker={onOpenSessionTargetPicker}
                   />
                 </div>
               );
             })}
+            {newSessionAnchorsEnabled && (
+              <div className="session-board__new-session-end-anchor">
+                <NewSessionGapTarget
+                  category={category}
+                  index={categoryGroups.length}
+                  workspaceId={workspaceId}
+                  enabled
+                  active={isNewSessionAnchorActive(categoryGroups.length)}
+                />
+              </div>
+            )}
             <GroupInsertionTarget
-              id={`new-group-${workspaceId}-${category}`}
+              id={`group-insert-end-${workspaceId}-${category}`}
               category={category}
               index={categoryGroups.length}
               workspaceId={workspaceId}
-              isMarker={dragMarker?.kind === 'group' && dragMarker.index === categoryGroups.length}
+              isMarker={
+                activeDragPayload?.kind === 'group'
+                && dragMarker?.kind === 'group'
+                && dragMarker.index === categoryGroups.length
+              }
               isEndTarget
             />
           </div>

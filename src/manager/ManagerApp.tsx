@@ -23,7 +23,7 @@ function FileStorageFallbackToast() {
     const unsub = onFallback((reason: string) => {
       logWarning('manager', `file storage fallback: ${reason}`);
       showError(
-        'File storage is unavailable — using browser storage for now. Open settings to reconnect.',
+        'File storage is unavailable. Using browser storage for now. Open settings to reconnect.',
         'Storage fallback',
       );
     });
@@ -39,7 +39,7 @@ function AppContent() {
   return (
     <MantineProvider theme={managerTheme} forceColorScheme={colorScheme}>
       <ToastProvider>
-        <DestructiveConfirmationProvider portalTarget="#manager-main">
+        <DestructiveConfirmationProvider>
           <FileStorageFallbackToast />
           <ManagerLayout />
         </DestructiveConfirmationProvider>

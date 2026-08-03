@@ -1,6 +1,12 @@
-import { useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Group } from '@mantine/core';
 import { useShallow } from 'zustand/react/shallow';
+import type { Workspace } from '../../../shared/model';
 import type { DragMarker } from '../../core/dnd';
 import {
   getCategoryStrip,
@@ -42,10 +48,48 @@ export interface WorkspaceHeaderProps {
   showBin: boolean;
   dragMarker?: DragMarker | null;
   onSelectCategory: (category: CategoryFilter) => void;
-  onSelectWorkspace: (workspaceId: string) => void;
+  onSelectWorkspace: (
+    workspaceId: string,
+    category?: CategoryFilter,
+    method?: 'push' | 'replace',
+  ) => void;
   onToggleBin: () => void;
   onOpenImport: () => void;
   onOpenExport: () => void;
+}
+
+export function usePendingCreatedWorkspaceNavigation({
+  workspaces,
+  onSelectWorkspace,
+}: {
+  workspaces: readonly Workspace[];
+  onSelectWorkspace: (workspaceId: string, category: 'inbox') => void;
+}): (workspaceId: string) => void {
+  const [pendingWorkspaceId, setPendingWorkspaceId] = useState<string | null>(null);
+  const pendingWorkspaceIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const workspaceId = pendingWorkspaceIdRef.current;
+    if (
+      !workspaceId
+      || workspaceId !== pendingWorkspaceId
+      || !workspaces.some(({ id }) => id === workspaceId)
+    ) {
+      return;
+    }
+    pendingWorkspaceIdRef.current = null;
+    setPendingWorkspaceId((current) => current === workspaceId ? null : current);
+    onSelectWorkspace(workspaceId, 'inbox');
+  }, [
+    onSelectWorkspace,
+    pendingWorkspaceId,
+    workspaces,
+  ]);
+
+  return useCallback((workspaceId: string) => {
+    pendingWorkspaceIdRef.current = workspaceId;
+    setPendingWorkspaceId(workspaceId);
+  }, []);
 }
 
 export function WorkspaceHeader({
@@ -66,15 +110,21 @@ export function WorkspaceHeader({
       groups: currentState.groups,
       categoryOrderByWorkspace: currentState.categoryOrderByWorkspace,
       addWorkspace: currentState.addWorkspace,
-      renameWorkspace: currentState.renameWorkspace,
+      updateWorkspace: currentState.updateWorkspace,
+      updateWorkspaceOrder: currentState.updateWorkspaceOrder,
+      deleteWorkspace: currentState.deleteWorkspace,
       addFolder: currentState.addFolder,
-      renameFolder: currentState.renameFolder,
+      updateFolder: currentState.updateFolder,
       deleteFolder: currentState.deleteFolder,
       updateCategoryOrder: currentState.updateCategoryOrder,
     })),
   );
   const { closeOverlays } = useManagerOverlayCommands();
   const [searchExpanded, setSearchExpanded] = useState(false);
+  const queueCreatedWorkspaceNavigation = usePendingCreatedWorkspaceNavigation({
+    workspaces: state.workspaces,
+    onSelectWorkspace,
+  });
   const workspace = state.workspaces.find(({ id }) => id === state.activeWorkspaceId)
     ?? state.workspaces[0];
   const folders = state.folders.filter(({ workspaceId }) => workspaceId === workspace?.id);
@@ -88,7 +138,10 @@ export function WorkspaceHeader({
 
   return (
     <Group
-      className={`workspace-header${searchExpanded ? ' workspace-header--search-expanded' : ''}`}
+      className={[
+        'workspace-header',
+        searchExpanded && 'workspace-header--search-expanded',
+      ].filter(Boolean).join(' ')}
       gap={0}
       wrap="nowrap"
       style={{ flex: 1, minWidth: 0 }}
@@ -96,15 +149,22 @@ export function WorkspaceHeader({
       <WorkspaceMenu
         activeWorkspaceId={state.activeWorkspaceId}
         workspaces={state.workspaces}
+        groups={state.groups}
+        folders={state.folders}
         onSelect={(workspaceId) => {
           closeOverlays();
           onSelectWorkspace(workspaceId);
         }}
-        onCreate={(name) => {
-          state.addWorkspace(name);
-          onSelectCategory('inbox');
+        onCreate={({ name, emoji }) => {
+          const workspaceId = state.addWorkspace(name, emoji);
+          queueCreatedWorkspaceNavigation(workspaceId);
         }}
-        onRename={state.renameWorkspace}
+        onUpdateWorkspace={state.updateWorkspace}
+        onUpdateWorkspaceOrder={state.updateWorkspaceOrder}
+        onDeleteWorkspace={state.deleteWorkspace}
+        onActiveWorkspaceDeleted={(workspaceId) => {
+          onSelectWorkspace(workspaceId, 'inbox', 'replace');
+        }}
       />
 
       <div className="manager-category-strip">
@@ -124,12 +184,18 @@ export function WorkspaceHeader({
             workspaceId={workspace.id}
             categories={categories}
             folders={folders}
+            groups={state.groups}
             selectedCategory={selectedCategory}
             onSelectCategory={onSelectCategory}
             onAddFolder={(name, color) => state.addFolder(workspace.id, name, color)}
-            onRenameFolder={state.renameFolder}
+            onUpdateFolder={state.updateFolder}
             onDeleteFolder={state.deleteFolder}
-            onUpdateOrder={(order) => state.updateCategoryOrder(workspace.id, order)}
+            onUpdateOrder={(order, { expectedCategoryOrder }) =>
+              state.updateCategoryOrder(
+                workspace.id,
+                order,
+                { expectedCategoryOrder },
+              )}
           />
         )}
       </div>

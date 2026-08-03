@@ -8,7 +8,12 @@ import {
   SegmentedControl,
   Alert,
 } from '@mantine/core';
-import { IconDownload, IconCopy, IconCheck, IconAlertCircle } from '@tabler/icons-react';
+import {
+  Check as IconCheck,
+  CircleAlert as IconAlertCircle,
+  Copy as IconCopy,
+  Upload as IconDownload,
+} from 'lucide-react';
 import { persistedSnapshot, useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import { exportToText } from '../../../shared/model';
 import { ManagerModal } from '../shell/ManagerModal';

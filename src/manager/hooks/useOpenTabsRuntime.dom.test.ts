@@ -6,6 +6,10 @@ import { createEmptyState } from '../../shared/model';
 import type { OpenTabsWorkflow } from './useOpenTabsRuntime';
 import { useOpenTabsRuntime } from './useOpenTabsRuntime';
 import type { OpenWindowInfo } from '../../shared/openTabs';
+import {
+  isDropPayloadWithinLimits,
+  isOpenTabInfoShape,
+} from '../../shared/model/drop-validation';
 
 const testHarness = vi.hoisted(() => {
   const state = {} as ReturnType<typeof import('../../shared/model').createEmptyState>;
@@ -90,7 +94,6 @@ function createTab(overrides: Partial<OpenWindowInfo['tabs'][number]> = {}): Ope
     title: 'Example',
     url: 'https://example.test',
     favIconUrl: '',
-    active: true,
     pinned: false,
     index: 0,
     browserGroup: null,
@@ -182,6 +185,46 @@ async function mountRuntime(windows: OpenWindowInfo[]): Promise<void> {
 }
 
 describe('Open Tabs runtime refresh', () => {
+  it('canonicalizes a legacy list response before rows reach the drop boundary', async () => {
+    const legacyTab = {
+      ...createTab({
+        browserGroup: {
+          sourceGroupId: 7,
+          title: 'Research',
+          color: 'blue',
+          collapsed: false,
+        },
+      }),
+      active: true,
+      legacyExtra: 'strip me',
+    };
+
+    await mountRuntime(createWindow([legacyTab]));
+
+    const refreshedTab = runtime?.model.windows[0]?.tabs[0];
+    expect(refreshedTab).toEqual(createTab({
+      browserGroup: {
+        sourceGroupId: 7,
+        title: 'Research',
+        color: 'blue',
+        collapsed: false,
+      },
+    }));
+    expect(isOpenTabInfoShape(refreshedTab)).toBe(true);
+    expect(isDropPayloadWithinLimits(
+      'runtime-copy-operation',
+      {
+        kind: 'copy-open-tabs',
+        workspaceId: 'workspace_default',
+        tabIds: [1],
+        windowId: 1,
+        targetGroupId: 'target-group',
+        targetIndex: 0,
+      },
+      [refreshedTab],
+    )).toBe(true);
+  });
+
   it('coalesces a startup event burst into one trailing list request', async () => {
     vi.useFakeTimers();
     let resolveInitial!: (value: unknown) => void;
@@ -221,13 +264,12 @@ describe('Open Tabs runtime refresh', () => {
     expect(testHarness.sendMessage).toHaveBeenCalledTimes(2);
   });
 
-  it('exits selection mode when refresh removes every selected tab', async () => {
+  it('clears invalid selected IDs without owning selection mode', async () => {
     await mountRuntime(createWindow([createTab()]));
 
     await act(async () => {
       runtime?.commands.toggleSelection(1);
     });
-    expect(runtime?.model.selection.active).toBe(true);
     expect(runtime?.model.selection.ids).toEqual([1]);
 
     testHarness.sendMessage.mockResolvedValueOnce({
@@ -244,7 +286,7 @@ describe('Open Tabs runtime refresh', () => {
     });
 
     expect(runtime?.model.selection.ids).toEqual([]);
-    expect(runtime?.model.selection.active).toBe(false);
+    expect(runtime?.model.selection).not.toHaveProperty('active');
   });
 
   it('returns selected capture completion directly without dispatching a global event', async () => {
@@ -368,7 +410,7 @@ describe('Open Tabs runtime refresh', () => {
       selectionCurrent: true,
       createdGroupIds: ['window-capture'],
     });
-    expect(runtime?.model.selection.active).toBe(false);
+    expect(runtime?.model.selection.ids).toEqual([]);
   });
 
   it('captures a URL filter set in the same call stack before React effects run', async () => {

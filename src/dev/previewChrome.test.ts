@@ -3,6 +3,7 @@ import {
   createGroupFromTabRecords,
   createTabRecord,
   normalizeState,
+  restoreRefKey,
 } from '../shared/model';
 import { installPreviewChrome } from './previewChrome';
 import type { PreviewChromeOptions, PreviewResponse, PreviewTab } from './previewChrome';
@@ -222,6 +223,9 @@ describe('preview Chrome fixture', () => {
       storable: expect.any(Boolean),
       reason: null,
     });
+    expect(response.result!.windows.flatMap(({ tabs }) => tabs).every(
+      (tab) => !Object.hasOwn(tab, 'active'),
+    )).toBe(true);
   });
 
   it('applies real state mutations and broadcasts storage changes', async () => {
@@ -317,6 +321,151 @@ describe('preview Chrome fixture', () => {
       groupId: tabGroup.id,
       tabId: tab.id,
     })).resolves.toMatchObject({ ok: false, error: 'Saved tab not found' });
+  });
+
+  it('restores selected refs as one batch and preserves locked records', async () => {
+    const harness = install();
+    const unlocked = harness.state.groups[0];
+    const locked = harness.state.groups[1];
+    const unlockedLink = unlocked.tabs.find((tab) => tab.itemType === 'link')!;
+    const lockedLink = locked.tabs.find((tab) => tab.itemType === 'link')!;
+
+    await expect(harness.chrome.runtime.sendMessage({
+      type: 'restore-refs',
+      refs: [
+        { source: 'group', groupId: unlocked.id, tabId: unlockedLink.id },
+        { source: 'group', groupId: locked.id, tabId: lockedLink.id },
+      ],
+    })).resolves.toMatchObject({
+      ok: true,
+      result: { restoredTabs: 2 },
+    });
+
+    expect(harness.sentMessages.filter((message) =>
+      (message as { type?: string }).type === 'restore-refs')).toHaveLength(1);
+    expect(harness.state.groups.find(({ id }) => id === unlocked.id)?.tabs)
+      .not.toContainEqual(expect.objectContaining({ id: unlockedLink.id }));
+    expect(harness.state.groups.find(({ id }) => id === locked.id)?.tabs)
+      .toContainEqual(expect.objectContaining({ id: lockedLink.id }));
+  });
+
+  it('keeps successful source refs when deleteRestoredTabs is disabled', async () => {
+    const seed = install();
+    const state = structuredClone(seed.state);
+    state.settings = {
+      ...state.settings,
+      deleteRestoredTabs: false,
+    };
+    const source = state.groups[0]!;
+    const success = source.tabs.find((tab) => tab.itemType === 'link')!;
+    seed.uninstall();
+    installed.pop();
+    const harness = install({ state });
+    const ref = {
+      source: 'group',
+      groupId: source.id,
+      tabId: success.id,
+    };
+
+    await expect(harness.chrome.runtime.sendMessage({
+      type: 'restore-refs',
+      refs: [ref],
+    })).resolves.toMatchObject({
+      ok: true,
+      result: {
+        restoredTabs: 1,
+        outcomes: [{
+          key: restoreRefKey(ref),
+          groupId: source.id,
+          tabId: success.id,
+          status: 'restored',
+        }],
+      },
+    });
+
+    expect(harness.state.groups.find(({ id }) => id === source.id)?.tabs)
+      .toContainEqual(expect.objectContaining({ id: success.id }));
+    const removeMutations = harness.sentMessages.filter((message) =>
+      (message as {
+        type?: string;
+        mutations?: Array<{ type?: string }>;
+      }).mutations?.some(({ type }) => type === 'remove-restored-refs'));
+    expect(removeMutations).toEqual([]);
+  });
+
+  it('reports one ordered outcome per valid restore ref and rejects duplicate requests atomically', async () => {
+    const seed = install();
+    const state = structuredClone(seed.state);
+    const group = state.groups[0]!;
+    const success = group.tabs.find((tab) => tab.itemType === 'link')!;
+    const note = createGroupFromTabRecords([], {
+      workspaceId: state.activeWorkspaceId,
+    });
+    note.id = 'restore-outcome-note-group';
+    note.tabs = [{
+      ...success,
+      id: 'restore-outcome-note',
+      itemType: 'note',
+      title: 'Not restorable',
+      url: '',
+      note: 'Not restorable',
+    }];
+    state.groups = [group, note];
+    seed.uninstall();
+    installed.pop();
+    const harness = install({ state });
+    const refs = [
+      { source: 'group', groupId: group.id, tabId: success.id },
+      { source: 'group', groupId: group.id, tabId: 'missing-link' },
+      { source: 'group', groupId: note.id, tabId: note.tabs[0]!.id },
+    ];
+
+    await expect(harness.chrome.runtime.sendMessage({
+      type: 'restore-refs',
+      refs,
+    })).resolves.toMatchObject({
+      ok: true,
+      result: {
+        restoredTabs: 1,
+        outcomes: [
+          {
+            key: restoreRefKey(refs[0]),
+            groupId: refs[0].groupId,
+            tabId: refs[0].tabId,
+            status: 'restored',
+          },
+          {
+            key: restoreRefKey(refs[1]),
+            groupId: refs[1].groupId,
+            tabId: refs[1].tabId,
+            status: 'failed',
+            error: 'missing',
+          },
+          {
+            key: restoreRefKey(refs[2]),
+            groupId: refs[2].groupId,
+            tabId: refs[2].tabId,
+            status: 'failed',
+            error: 'not-restorable',
+          },
+        ],
+      },
+    });
+
+    const createdBeforeDuplicate = harness.tabs.length;
+    for (const invalidRefs of [
+      [refs[0], refs[0]],
+      [refs[0], { source: 'group', groupId: '', tabId: 'malformed' }],
+    ]) {
+      await expect(harness.chrome.runtime.sendMessage({
+        type: 'restore-refs',
+        refs: invalidRefs,
+      })).resolves.toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/unique|valid/),
+      });
+    }
+    expect(harness.tabs).toHaveLength(createdBeforeDuplicate);
   });
 
   it('keeps inserted tabs ordered and reindexes the remaining tabs after removal', async () => {
@@ -535,6 +684,119 @@ describe('preview Chrome fixture', () => {
     expect(harness.state.groups.some((group) => group.id === response.result!.createdGroupIds[0])).toBe(true);
     expect(harness.tabs.some((tab) => tab.id === 103)).toBe(false);
     expect(harness.tabs.some((tab) => tab.id === 104)).toBe(false);
+  });
+
+  it('matches production dedupe by removing only regular copies when a pinned duplicate exists', async () => {
+    const harness = install({
+      tabs: [
+        {
+          id: 1,
+          windowId: 1,
+          index: 0,
+          active: false,
+          pinned: true,
+          title: 'Pinned copy',
+          url: 'https://duplicate.example/',
+        },
+        {
+          id: 2,
+          windowId: 1,
+          index: 1,
+          active: true,
+          pinned: false,
+          title: 'Regular copy',
+          url: 'https://duplicate.example/',
+        },
+      ],
+    });
+
+    await expect(harness.chrome.runtime.sendMessage({
+      type: 'dedupe-window',
+    })).resolves.toMatchObject({
+      ok: true,
+      result: { removedTabs: 1 },
+    });
+    expect(harness.tabs.map(({ id }) => id)).toEqual([1]);
+  });
+
+  it('matches production dedupe by retaining every all-pinned duplicate', async () => {
+    const harness = install({
+      tabs: [
+        {
+          id: 1,
+          windowId: 1,
+          index: 0,
+          active: true,
+          pinned: true,
+          title: 'First pinned copy',
+          url: 'https://duplicate.example/',
+        },
+        {
+          id: 2,
+          windowId: 1,
+          index: 1,
+          active: false,
+          pinned: true,
+          title: 'Second pinned copy',
+          url: 'https://duplicate.example/',
+        },
+      ],
+    });
+
+    await expect(harness.chrome.runtime.sendMessage({
+      type: 'dedupe-window',
+    })).resolves.toMatchObject({
+      ok: true,
+      result: { removedTabs: 0 },
+    });
+    expect(harness.tabs.map(({ id }) => id)).toEqual([1, 2]);
+  });
+
+  it('matches production capture by closing regular sources while retaining pinned sources', async () => {
+    const base = install();
+    const state = structuredClone(base.state);
+    state.settings = {
+      ...state.settings,
+      closeTabsAfterSave: true,
+      dedupeOnSave: false,
+      openManagerAfterSave: false,
+    };
+    base.uninstall();
+    installed.pop();
+    const harness = install({
+      state,
+      tabs: [
+        {
+          id: 1,
+          windowId: 1,
+          index: 0,
+          active: true,
+          pinned: true,
+          title: 'Pinned source',
+          url: 'https://pinned-source.example/',
+        },
+        {
+          id: 2,
+          windowId: 1,
+          index: 1,
+          active: false,
+          pinned: false,
+          title: 'Regular source',
+          url: 'https://regular-source.example/',
+        },
+      ],
+    });
+
+    await expect(harness.chrome.runtime.sendMessage({
+      type: 'saveSelectedTabs',
+      selectedWindowId: 1,
+      tabIds: [1, 2],
+      workspaceId: state.activeWorkspaceId,
+    })).resolves.toMatchObject({
+      ok: true,
+      result: { storedTabs: 2 },
+    });
+    expect(harness.tabs.map(({ id }) => id)).toEqual([1]);
   });
 
   it('changes virtual tabs for focus, pin, close, and restore operations', async () => {

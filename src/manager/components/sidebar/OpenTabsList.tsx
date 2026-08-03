@@ -2,7 +2,6 @@ import type { MouseEvent } from 'react';
 import {
   Button,
   Group,
-  ScrollArea,
   Stack,
   Text,
 } from '@mantine/core';
@@ -26,13 +25,12 @@ export function OpenTabsList({
   selectedTabIdSet,
   selectedWindow,
   selectionMode,
+  sidebarCollapsed,
   windows,
   workspaceId,
   onClearQuery,
-  onCloseTab,
   onCloseTabAction,
   onFocusTab,
-  onPinTab,
   onToggleSelection,
 }: {
   closingTabIdSet: ReadonlySet<number>;
@@ -46,10 +44,10 @@ export function OpenTabsList({
   selectedTabIdSet: ReadonlySet<number>;
   selectedWindow: OpenWindowInfo | null;
   selectionMode: boolean;
+  sidebarCollapsed: boolean;
   windows: OpenWindowInfo[];
   workspaceId: string;
   onClearQuery: () => void;
-  onCloseTab: (tabId: number | undefined) => Promise<void>;
   onCloseTabAction: (
     event: MouseEvent<HTMLButtonElement>,
     tabId: number | undefined,
@@ -58,18 +56,14 @@ export function OpenTabsList({
     tabId: number | undefined,
     windowId: number | undefined,
   ) => Promise<void>;
-  onPinTab: (tabId: number | undefined) => Promise<void>;
   onToggleSelection: (tabId: number | undefined) => void;
 }) {
   return (
-    <ScrollArea
+    <div
+      ref={overflowRef}
       className="manager-open-tabs-scroll"
       data-block-end={overflowCues.blockEnd || undefined}
       data-block-start={overflowCues.blockStart || undefined}
-      viewportRef={overflowRef}
-      style={{ flex: 1, minHeight: 0 }}
-      type="auto"
-      scrollbarSize={4}
     >
       <Stack
         gap={2}
@@ -103,15 +97,14 @@ export function OpenTabsList({
             selectedStorableTabIds={selectedStorableTabIds}
             selectedCount={selectedCount}
             selectionMode={selectionMode}
+            sidebarCollapsed={sidebarCollapsed}
             isClosing={isValidTabId(tab.id) && closingTabIdSet.has(tab.id)}
             onToggleSelection={onToggleSelection}
-            onCloseTab={onCloseTab}
             onCloseTabAction={onCloseTabAction}
-            onPinTab={onPinTab}
             onFocusTab={onFocusTab}
           />
         ))}
       </Stack>
-    </ScrollArea>
+    </div>
   );
 }

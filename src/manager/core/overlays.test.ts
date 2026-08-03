@@ -3,16 +3,21 @@ import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   advanceOverlayFocusEpoch,
+  getMenuDescriptionTipPosition,
   getOverlayFocusRestoreTarget,
+  getTabHoverTooltipPosition,
   getViewportMenuPosition,
   hasExpectedGroupRemovalLifecycle,
   hasExpectedGroupUpdateLifecycle,
   isContextMenuKey,
   scheduleOverlayFocusRestore,
-  shouldRestorePreviewFocusOnClose,
+  TAB_HOVER_TOOLTIP_CONTRACT,
 } from '../hooks/useManagerOverlays';
 import type { Group } from '../../shared/model';
-import { getTabDropMarkerPlacement } from '../components/sessions/TabItemRow';
+import {
+  getSavedTabMenuTrigger,
+  getTabDropMarkerPlacement,
+} from '../components/sessions/TabItemRow';
 import { isCategoryDragMarkerFor } from '../components/workspace/WorkspaceHeader';
 
 const managerRoot = resolve(process.cwd(), 'src/manager');
@@ -50,6 +55,7 @@ const css = [
   'overlays.css',
   'responsive.css',
 ].map((file) => readFileSync(resolve(managerRoot, 'styles', file), 'utf8')).join('\n');
+const menuCss = readFileSync(resolve(managerRoot, 'styles/overlays.css'), 'utf8');
 
 const sourceFiles = [layout, card, row, openTabs, header];
 
@@ -89,6 +95,32 @@ describe('overlay geometry and keyboard helpers', () => {
       { width: 900, height: 700 },
       { width: 400, height: 300 },
     )).toEqual({ left: 8, top: 8 });
+  });
+
+  it('places description tips beside the item and flips at the right viewport edge', () => {
+    expect(getMenuDescriptionTipPosition(
+      { left: 40, right: 140, top: 80, bottom: 109 },
+      { width: 120, height: 40 },
+      { width: 400, height: 240 },
+    )).toEqual({ left: 146, top: 74.5 });
+    expect(getMenuDescriptionTipPosition(
+      { left: 260, right: 360, top: 80, bottom: 109 },
+      { width: 120, height: 40 },
+      { width: 400, height: 240 },
+    )).toEqual({ left: 134, top: 74.5 });
+  });
+
+  it('clamps description tips to the top and bottom viewport padding', () => {
+    expect(getMenuDescriptionTipPosition(
+      { left: 40, right: 140, top: 0, bottom: 29 },
+      { width: 120, height: 40 },
+      { width: 400, height: 240 },
+    )).toEqual({ left: 146, top: 8 });
+    expect(getMenuDescriptionTipPosition(
+      { left: 40, right: 140, top: 225, bottom: 254 },
+      { width: 120, height: 40 },
+      { width: 400, height: 240 },
+    )).toEqual({ left: 146, top: 192 });
   });
 });
 
@@ -221,24 +253,31 @@ describe('overlay focus restoration scheduling', () => {
     expect(hook).toContain('getOverlayFocusRestoreTarget(null, currentPreview, shouldRestore)');
   });
 
-  it('keeps keyboard-generated preview clicks restorable while pointer clicks are not', () => {
-    const trigger = {} as HTMLElement;
-    const keyboardActivation = { detail: 0 } as Pick<MouseEvent, 'detail'>;
-    const pointerActivation = { detail: 1 } as Pick<MouseEvent, 'detail'>;
+  it('restores explicitly owned saved menus independently of invocation method', () => {
+    const checkboxTrigger = {} as HTMLElement;
+    const deleteTrigger = {} as HTMLElement;
 
-    expect(shouldRestorePreviewFocusOnClose(keyboardActivation)).toBe(true);
-    expect(shouldRestorePreviewFocusOnClose(pointerActivation)).toBe(false);
     expect(getOverlayFocusRestoreTarget(
+      {
+        trigger: checkboxTrigger,
+        openedByKeyboard: false,
+        restoreFocusOnClose: true,
+      },
       null,
-      { trigger, restoreFocusOnClose: shouldRestorePreviewFocusOnClose(keyboardActivation) },
       true,
-    )).toBe(trigger);
+    )).toBe(checkboxTrigger);
     expect(getOverlayFocusRestoreTarget(
+      {
+        trigger: deleteTrigger,
+        openedByKeyboard: true,
+        restoreFocusOnClose: true,
+      },
       null,
-      { trigger, restoreFocusOnClose: shouldRestorePreviewFocusOnClose(pointerActivation) },
       true,
-    )).toBeNull();
-    expect(hook).toContain('restoreFocusOnClose: shouldRestorePreviewFocusOnClose(event)');
+    )).toBe(deleteTrigger);
+    expect(row).toContain('getSavedTabMenuTrigger');
+    expect(row).toContain('restoreFocusOnClose: true');
+    expect(hook).toContain('currentMenu.restoreFocusOnClose');
   });
 
   it('cancels a pending frame before advancing the focus epoch', () => {
@@ -252,6 +291,25 @@ describe('overlay focus restoration scheduling', () => {
 });
 
 describe('centralized manager overlay contracts', () => {
+  it('uses B2 dense rows without letting descriptions change row height or capture pointers', () => {
+    expect(menuCss).toMatch(
+      /\.manager-overlay-menu\s*\{[\s\S]*?box-sizing: border-box;[\s\S]*?width: 190px;[\s\S]*?max-width: 190px;/,
+    );
+    expect(menuCss).not.toContain('min-width: 190px');
+    expect(menuCss).toMatch(
+      /\.manager-overlay-menu__item-label\s*\{[\s\S]*?overflow: hidden;[\s\S]*?text-overflow: ellipsis;[\s\S]*?white-space: nowrap;/,
+    );
+    expect(menuCss).toContain('min-height: 29px');
+    expect(menuCss).toContain('@media (hover: none), (pointer: coarse)');
+    expect(menuCss).toContain('min-height: 44px');
+    expect(menuCss).toMatch(
+      /\.manager-menu-item__description-tip\s*\{[\s\S]*?position: fixed;[\s\S]*?pointer-events: none;/,
+    );
+    expect(menuCss).toMatch(
+      /\.manager-overlay-menu__item--danger\s*\{[\s\S]*?color:\s*var\(--tabboard-danger\)/,
+    );
+  });
+
   it('has one menu owner and one preview owner with shared lifecycle cleanup', () => {
     expect(hook).toContain('const [menu, setMenu]');
     expect(hook).toContain('const [preview, setPreview]');
@@ -273,15 +331,16 @@ describe('centralized manager overlay contracts', () => {
     expect(hook).toContain('openedByKeyboard');
   });
 
-  it('connects contextual menus for sessions while saved tabs use previews', () => {
+  it('connects contextual menus for sessions and saved tabs but not Open Tabs', () => {
     expect(layout).toContain('useManagerOverlays');
     expect(card).toContain('onContextMenu');
-    expect(row).not.toContain('onContextMenu');
+    expect(row).toContain('onContextMenu');
     expect(openTabs).not.toContain('onContextMenu');
     expect(card).toContain('isContextMenuKey');
-    expect(row).not.toContain('isContextMenuKey');
+    expect(row).toContain('isContextMenuKey');
     expect(openTabs).not.toContain('isContextMenuKey');
-    expect(header).toContain('aria-label="Category Options"');
+    expect(row).toContain("ariaLabel: 'Saved Tab Actions'");
+    expect(header).toContain('label="Category Options"');
     expect(header).toContain('Manage Categories');
   });
 
@@ -291,29 +350,47 @@ describe('centralized manager overlay contracts', () => {
     expect(openTabs).toContain('return;');
   });
 
-  it('renders both oracle preview trigger kinds without eye buttons or whole-row triggers', () => {
-    expect(openTabs).toContain('data-info-popover="open"');
+  it('links Open and Saved title controls to the shared read-only tooltip', () => {
+    expect(openTabs).toContain(
+      "data-info-popover={sidebarCollapsed ? undefined : 'open'}",
+    );
     expect(row).toMatch(/data-info-popover(?:="saved"|=\{isDragOverlay \? undefined : 'saved'\})/);
-    expect(openTabs).toMatch(/aria-haspopup="dialog"|aria-haspopup=\{isOpenTabMenuOpen \? 'menu' : 'dialog'\}/);
-    expect(row).toContain("aria-haspopup={isDragOverlay ? undefined : 'dialog'}");
-    expect(openTabs).toContain('aria-expanded');
-    expect(row).toContain('aria-expanded');
+    expect(openTabs).toContain(
+      'data-info-key={sidebarCollapsed ? undefined : previewKey}',
+    );
+    expect(row).toContain('data-info-key={isDragOverlay ? undefined : infoKey}');
+    expect(openTabs).not.toContain('aria-haspopup="dialog"');
+    expect(row).not.toContain("aria-haspopup={isDragOverlay ? undefined : 'dialog'}");
+    expect(openTabs).not.toContain('aria-expanded={isPreviewOpen}');
+    expect(row).not.toContain('aria-expanded={isDragOverlay ? undefined : isPreviewOpen}');
     expect(row).not.toContain('IconEye');
-    expect(row).not.toMatch(/aria-label="Preview"|>Preview<|>Preview action</);
-    expect(row).not.toMatch(/onClick=\{[^}]*showPreview/);
+    expect(row).not.toMatch(/manager-info-card-action|>Preview action</);
+    expect(openTabs).toContain('aria-label={`Go to ${title}`}');
     expect(row).toContain('openSavedTab');
   });
 
-  it('keeps preview timing and ARIA synchronization in the shared owner', () => {
+  it('keeps read-only tooltip timing, ARIA description, and top-bottom placement in one owner', () => {
     expect(hook).toContain('180');
     expect(hook).toContain('120');
-    expect(hook).toContain('aria-expanded');
-    expect(hook).toContain('right-start');
-    expect(hook).toContain('PREVIEW_DISTANCE = 10');
+    expect(hook).toContain("setAttribute('aria-describedby', options.id)");
+    expect(hook).toContain("removeAttribute('aria-describedby')");
+    expect(hook).toContain("role: 'tooltip'");
+    expect(hook).not.toMatch(/className: 'manager-info-popover'[\s\S]*?'aria-label'/);
+    expect(hook).toContain('TAB_HOVER_TOOLTIP_GAP = 6');
+    expect(getTabHoverTooltipPosition(
+      { left: 40, right: 240, top: 120, bottom: 150 },
+      { width: 180, height: 60 },
+      { width: 320, height: 240 },
+    )).toEqual({ left: 40, top: 54, placement: 'top' });
+    expect(getTabHoverTooltipPosition(
+      { left: 40, right: 240, top: 20, bottom: 50 },
+      { width: 180, height: 60 },
+      { width: 320, height: 240 },
+    )).toEqual({ left: 40, top: 56, placement: 'bottom' });
     expect(hook).toContain('Escape');
     expect(hook).toContain('if (preview.position) return;');
     expect(hook).not.toContain('}, [controller, preview]);');
-    expect(row).toContain('event.stopPropagation();');
+    expect(hook).not.toContain("document.addEventListener('click', handleClick)");
     expect(hook).toContain("window.addEventListener('blur'");
     expect(hook).toContain("document.addEventListener('visibilitychange'");
     expect(hook).toContain('MANAGER_HOVER_SUPPRESSED_ATTRIBUTE');
@@ -335,6 +412,49 @@ describe('centralized manager overlay contracts', () => {
     expect(layout).toContain('manager-drag-overlay__stack');
     expect(layout).toContain('pointerEvents: \'none\'');
     expect(layout).toContain('aria-hidden="true"');
+  });
+
+  it('keeps item ghosts translucent and explicitly stacked above new-session targets', () => {
+    expect(css).toMatch(
+      /\.manager-drag-overlay__preview\[data-item-preview='true'\][^{]*\{[^}]*opacity:\s*0\.\d+/,
+    );
+    expect(css).not.toMatch(
+      /\.manager-drag-overlay__preview\[data-item-preview='true'\][^{]*\{[^}]*overflow:\s*visible/,
+    );
+    expect(css).toMatch(
+      /\.manager-drag-overlay__stack[^{]*\{[^}]*grid-template-rows:\s*repeat\(var\(--drag-preview-rows\), minmax\(0, 1fr\)\)/,
+    );
+    expect(css).toMatch(
+      /\.manager-drag-overlay__stack[^{]*\{[^}]*grid-template-columns:\s*repeat\(var\(--drag-preview-columns\), minmax\(0, 1fr\)\)/,
+    );
+    expect(css).toMatch(
+      /\.manager-drag-overlay__row[^{]*\{[^}]*min-height:\s*0/,
+    );
+    expect(css).toMatch(
+      /\.manager-drag-overlay__stack[^{]*\{[^}]*border-radius:\s*var\(--mantine-radius-sm\)/,
+    );
+    expect(css).toMatch(
+      /\.manager-drag-overlay__stack[^{]*\{[^}]*box-shadow:\s*inset 0 0 0 1px/,
+    );
+    expect(css).not.toMatch(
+      /\.manager-drag-overlay__stack[^{]*\{[^}]*border:\s*1px/,
+    );
+    expect(css).not.toContain('.manager-drag-overlay__row:first-child');
+    expect(css).not.toContain('.manager-drag-overlay__row:last-child');
+    expect(css).toMatch(
+      /\.manager-drag-overlay(?:,|\s*\{)[\s\S]*pointer-events:\s*none/,
+    );
+    expect(layout).toContain('className="manager-drag-overlay"');
+    expect(layout).toContain('zIndex={17}');
+    expect(layout).toContain('className="manager-drag-overlay__row"');
+    expect(layout).toContain('className="manager-drag-overlay__title"');
+    expect(layout).toContain('className="manager-drag-overlay__domain"');
+    expect(layout).toContain("'--drag-preview-rows'");
+    expect(layout).toContain("'--drag-preview-columns'");
+    expect(layout).toContain('dragUiState.previewRect');
+    expect(layout).toContain('dragUiState.previewLayout');
+    expect(layout).not.toContain('MIN_PREVIEW_ROW_HEIGHT');
+    expect(layout).not.toContain('manager-drag-overlay__count');
   });
 
   it('passes resolved markers to rendered drop surfaces', () => {
@@ -364,9 +484,12 @@ describe('centralized manager overlay contracts', () => {
     expect(layout).toContain('useDndMonitor');
     expect(layout).toContain('onDragStart: () => closeOverlays()');
     expect(card).toContain('isDragOverlay={isDragOverlay}');
-    expect(row).toContain('isDragOverlay ? undefined : infoTriggerRef');
-    expect(hook).toContain("'aria-label': 'Item details'");
-    expect(hook).toContain('leavingPreview');
+    expect(row).toContain('isDragOverlay ? undefined : setTitleTrigger');
+    expect(hook).toContain("role: 'tooltip'");
+    expect(hook).not.toMatch(
+      /className: 'manager-info-popover',[\s\S]{0,300}onPointerDown/,
+    );
+    expect(layout).toContain("pointerEvents: 'none'");
   });
 
   it('restores focus only for keyboard menu-item activation', () => {
@@ -382,33 +505,56 @@ describe('centralized manager overlay contracts', () => {
 
   it('keeps category management in the unified native menu', () => {
     expect(header).toContain('<Menu');
-    expect(header).toContain('{...MANAGER_MENU_A11Y_PROPS}');
-    expect(header).toContain('width={190}');
+    expect(header).toContain('{...MANAGER_DENSE_MENU_PROPS}');
     expect(header).toContain('position="bottom-end"');
     expect(header).toContain('setManagerOpen(true)');
+    expect(header).toContain('Manage Categories');
+    expect(header).toContain('Add Category');
+    expect(header).not.toContain('Reorder Categories');
   });
 
-  it('keeps menu semantics on sessions while saved tabs use a preview dialog', () => {
+  it('keeps session and saved-tab menu semantics while Open Tabs have no application menu', () => {
     expect(card).toContain('aria-haspopup="menu"');
     expect(card).toContain('aria-expanded={isSessionMenuOpen}');
-    expect(row).toContain("aria-haspopup={isDragOverlay ? undefined : 'dialog'}");
-    expect(row).toContain('aria-expanded={isDragOverlay ? undefined : isPreviewOpen}');
-    expect(row).toMatch(/aria-label="Delete"[\s\S]*disabled=\{locked\}[\s\S]*onClick=\{handleDelete\}/);
+    expect(row).toContain("ariaLabel: 'Saved Tab Actions'");
+    expect(row).toContain('onContextMenu');
+    expect(row).toContain('isContextMenuKey');
+    expect(row).toContain("label={tab.itemType === ITEM_LINK && !tab.note ? 'Add Note' : 'Edit Note'}");
+    expect(row).toContain('label="Copy URL"');
+    expect(row).toContain('label="Copy Text"');
+    expect(row).toContain('label="Delete"');
+    expect(row).toContain('restoreFocusOnClose: true');
+    expect(row).toMatch(/label="Delete"[\s\S]*disabled=\{locked\}[\s\S]*onClick=\{handleDelete\}/);
     expect(row).not.toContain('aria-label="More"');
-    expect(openTabs).toContain('aria-haspopup="dialog"');
-    expect(openTabs).toContain('aria-expanded={isPreviewOpen}');
+    expect(row).not.toContain('manager-info-card-action');
+    expect(openTabs).not.toContain('aria-haspopup="menu"');
     expect(openTabs).not.toContain('onContextMenu');
-    expect(header).toContain('aria-label="Category Options"');
+    expect(header).toContain('label="Category Options"');
     expect(header).toContain('Manage Categories');
     expect(header).not.toContain('data-category-trigger="dots"');
+    expect(card).toContain('description="Add a saved URL"');
+    expect(card).toContain('description="Choose a Category and Session position"');
+    expect(row).toContain('description="Copy the saved address"');
+    expect(row).toContain('description="Move this item to Bin"');
   });
 
-  it('keeps shared preview triggers as dialogs when Open Tab filtering is unavailable', () => {
-    expect(row).toContain("aria-haspopup={isDragOverlay ? undefined : 'dialog'}");
-    expect(row).toContain('aria-expanded={isDragOverlay ? undefined : isPreviewOpen}');
-    expect(openTabs).toContain('aria-haspopup="dialog"');
-    expect(openTabs).toContain('aria-expanded={isPreviewOpen}');
-    expect(row).not.toContain('event.stopPropagation(); handleClick()');
+  it('keeps the shared tooltip read-only with unclobbered detail text and line limits', () => {
+    expect(hook).toContain("className: 'manager-tab-tooltip'");
+    expect(hook).toContain("className: 'manager-tab-tooltip__title'");
+    expect(hook).toContain("className: 'manager-tab-tooltip__domain'");
+    expect(hook).toContain("className: 'manager-tab-tooltip__link'");
+    expect(hook).toContain("className: 'manager-tab-tooltip__timestamp'");
+    expect(hook).not.toMatch(/manager-tab-tooltip'[^\n]*aria-label/);
+    expect(hook).not.toMatch(
+      /className: 'manager-info-popover',[\s\S]{0,300}'aria-label'/,
+    );
+    expect(hook).not.toMatch(/renderTabHoverTooltipContent[\s\S]*?Favicon|manager-info-card-action/);
+    expect(TAB_HOVER_TOOLTIP_CONTRACT.titleLines).toBe(2);
+    expect(TAB_HOVER_TOOLTIP_CONTRACT.linkLines).toBe(4);
+    expect(TAB_HOVER_TOOLTIP_CONTRACT.pointerEvents).toBe('none');
+    expect(menuCss).toMatch(/\.manager-tab-tooltip__title\s*\{[\s\S]*?-webkit-line-clamp: 2;/);
+    expect(menuCss).toMatch(/\.manager-tab-tooltip__link\s*\{[\s\S]*?-webkit-line-clamp: 4;/);
+    expect(menuCss).toMatch(/\.manager-tab-tooltip__timestamp\s*\{[\s\S]*?white-space: nowrap;/);
   });
 
   it('does not reopen a preview while restoring focus after Escape', () => {
@@ -429,11 +575,17 @@ describe('centralized manager overlay contracts', () => {
   });
 
   it('focuses Open Tabs with one click and keeps details on an explicit action', () => {
-    expect(openTabs).toContain('onClick={() => void onFocusTab(tab.id, tab.windowId)}');
+    expect(openTabs).toContain('aria-label={`Go to ${title}`}');
+    expect(openTabs).toContain('void onFocusTab(tab.id, tab.windowId)');
     expect(openTabs).not.toContain('onDoubleClick');
-    expect(openTabs).toContain('aria-label={`More Actions for ${title}`}');
-    expect(openTabs).toContain('data-info-popover="open"');
-    expect(openTabs).toMatch(/isValidTabId\(tab\.id\) && \([\s\S]*Close tab/);
+    expect(openTabs).toContain('label={`Close ${tab.title || \'untitled tab\'}`}');
+    expect(openTabs).not.toContain('More Actions');
+    expect(openTabs).toContain(
+      "data-info-popover={sidebarCollapsed ? undefined : 'open'}",
+    );
+    expect(openTabs).toContain(
+      'data-info-key={sidebarCollapsed ? undefined : previewKey}',
+    );
   });
 
   it('defers keyboard action focus until after mutation with row and card fallbacks', () => {
@@ -446,15 +598,19 @@ describe('centralized manager overlay contracts', () => {
     expect(hook).toMatch(/closeOverlays\(\);[\s\S]*await onClick\(focusIntent\);[\s\S]*restoreFocusAfterMutation/);
   });
 
-  it('removes Open Tab filtering context menus and keeps pin in the preview actions', () => {
+  it('keeps Open rows menu-free and pointer-draggable without a keyboard drag stop', () => {
     expect(openTabs).not.toContain('Filter sessions');
     expect(openTabs).not.toContain('onContextMenu');
-    expect(openTabs).toContain('Pin tab');
-    expect(openTabs).toContain('onPinTab(tab.id)');
-    expect(openTabs).toContain('semanticRole="button"');
-    expect(openTabs).toContain('ariaLabel={`Pin ${tab.title || \'untitled tab\'}`}');
-    expect(openTabs).toContain('ariaLabel={`Close ${tab.title || \'untitled tab\'}`}');
-    expect(hook).toContain("role: semanticRole === 'menuitem' ? 'menuitem' : undefined");
+    expect(openTabs).not.toContain('Pin tab');
+    expect(openTabs).not.toContain('onPinTab');
+    expect(openTabs).not.toContain('More Actions');
+    expect(openTabs).toContain('setActivatorNodeRef(node)');
+    expect(openTabs).toContain('listeners?.onPointerDown?.(event)');
+    expect(openTabs).toContain('listeners?.onTouchStart?.(event)');
+    expect(openTabs).toContain("event.pointerType === 'touch'");
+    expect(openTabs).not.toContain('{...attributes}');
+    expect(openTabs).not.toContain('{...listeners}');
+    expect(openTabs).not.toContain('aria-roledescription');
   });
 
   it('keeps saved-tab focus selectors exact first and scoped to the session', () => {
@@ -475,7 +631,7 @@ describe('centralized manager overlay contracts', () => {
     expect(hook).toContain('intent.workspaceKey');
     expect(hook).toContain('intent.categoryKey');
     expect(hook).toContain('intent.groupItems');
-    expect(openTabs).toContain('lifecycleAllowance="open-tab-removal"');
+    expect(openTabs).toContain("kind: 'open-tab-removal' as const");
     expect(hook).toContain('setTimeout(() => restoreFocusAfterMutation(focusIntent), 0)');
     expect(hook).toContain('closeOverlays();');
   });
@@ -498,7 +654,8 @@ describe('centralized manager overlay contracts', () => {
     expect(hook).toContain("kind: 'open-tab-removal'");
     expect(hook).toContain('data-open-tab-id');
     expect(hook).toContain('data-open-window-id');
-    expect(openTabs).toContain('lifecycleAllowance="open-tab-removal"');
+    expect(openTabs).toContain("kind: 'open-tab-removal' as const");
+    expect(openTabs).toContain('captureFocusRestoreIntent(event.currentTarget)');
     expect(openTabs).toContain('const hasValidTabId = isValidTabId(tab.id);');
     expect(openTabs).toContain('data-open-window-id={hasValidTabId ? tab.windowId : undefined}');
   });
@@ -512,7 +669,7 @@ describe('centralized manager overlay contracts', () => {
     expect(hook).toContain('.session-board .session-card');
     expect(hook).toContain('.session-board');
     expect(card).toContain('lifecycleAllowance="session-removal"');
-    expect(row).toContain('aria-label="Delete"');
+    expect(row).toContain('label="Delete"');
   });
 
   it('keeps saved-tab removal valid when its group key stays stable or disappears', () => {

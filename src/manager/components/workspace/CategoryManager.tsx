@@ -1,6 +1,12 @@
-import { useRef, useState } from 'react';
 import {
-  ActionIcon,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type FocusEvent as ReactFocusEvent,
+  type RefObject,
+} from 'react';
+import {
   Box,
   Button,
   Group,
@@ -8,39 +14,39 @@ import {
   Stack,
   Text,
   TextInput,
-  Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import {
-  IconArrowDown,
-  IconArrowUp,
-  IconDots,
-  IconEdit,
-  IconFolderPlus,
-  IconTrash,
-  IconTrashX,
-} from '@tabler/icons-react';
+  ArrowDown,
+  ArrowUp,
+  Menu as MenuIcon,
+  Pencil,
+  Plus,
+  Settings2,
+  Trash,
+} from 'lucide-react';
 import {
+  CATEGORY_COLOR_PALETTE,
+  categoryColorCssValue,
+  isLegacyCategoryColor,
   validateFolderName,
   type Folder,
   type FolderNameValidation,
+  type Group as TabBoardGroup,
 } from '../../../shared/model';
 import type { CategoryFilter, CategoryStripItem } from '../../core/selectors';
+import { AccessibleIconAction } from '../../../shared/components/AccessibleIconAction';
+import { ConfirmDialog } from '../../../shared/components/ConfirmDialog';
+import { TabBoardIcon } from '../../../shared/components/TabBoardIcon';
 import { ManagerModal } from '../shell/ManagerModal';
-import { MANAGER_MENU_A11Y_PROPS } from './managerMenuPolicy';
+import { ManagerMenuDescriptionTarget } from '../../hooks/useManagerOverlays';
+import {
+  MANAGER_DENSE_MENU_PROPS,
+  useManagerMenuOpening,
+} from './managerMenuPolicy';
 import { formatNumber } from '../../../shared/utils/formatters';
 
-const FOLDER_COLORS = [
-  '#228be6',
-  '#40c057',
-  '#fab005',
-  '#fa5252',
-  '#be4bdb',
-  '#7950f2',
-  '#15aabf',
-  '#fd7e14',
-  '#868e96',
-  '#e64980',
-];
+const CATEGORY_DRAG_MIME = 'application/x-tabboard-category';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unable to save category. Try again.';
@@ -88,227 +94,667 @@ export async function runValidatedCategoryMutation<T>(
   return runCategoryMutation(lock, () => mutation(validation.value), onError, onBusyChange);
 }
 
+function moveCategoryToIndex(
+  categories: readonly CategoryStripItem[],
+  categoryId: CategoryFilter,
+  targetIndex: number,
+): CategoryFilter[] | null {
+  const currentIndex = categories.findIndex(({ id }) => id === categoryId);
+  if (
+    currentIndex < 0
+    || targetIndex < 0
+    || targetIndex >= categories.length
+    || currentIndex === targetIndex
+  ) {
+    return null;
+  }
+  const order = categories.map(({ id }) => id);
+  const [moved] = order.splice(currentIndex, 1);
+  order.splice(targetIndex, 0, moved);
+  return order;
+}
+
+function moveCategoryToDrop(
+  categories: readonly CategoryStripItem[],
+  draggedCategoryId: CategoryFilter,
+  targetCategoryId: CategoryFilter,
+  placement: 'before' | 'after',
+): CategoryFilter[] | null {
+  if (draggedCategoryId === targetCategoryId) return null;
+  const order = categories
+    .map(({ id }) => id)
+    .filter((id) => id !== draggedCategoryId);
+  const targetIndex = order.indexOf(targetCategoryId);
+  if (targetIndex < 0) return null;
+  order.splice(
+    targetIndex + (placement === 'after' ? 1 : 0),
+    0,
+    draggedCategoryId,
+  );
+  const current = categories.map(({ id }) => id);
+  return order.every((id, index) => id === current[index]) ? null : order;
+}
+
+function countLabel(
+  count: number,
+  singular = 'Session',
+  plural = 'Sessions',
+): string {
+  return `${formatNumber(count)} ${count === 1 ? singular : plural}`;
+}
+
+function restoreFinalFocus(finalFocusRef?: RefObject<HTMLElement>): void {
+  window.setTimeout(() => finalFocusRef?.current?.focus(), 0);
+}
+
 interface CategoryManagerProps {
   workspaceId: string;
   categories: readonly CategoryStripItem[];
   folders: readonly Folder[];
+  groups: readonly TabBoardGroup[];
   selectedCategory: CategoryFilter;
   onSelectCategory: (category: CategoryFilter) => void;
   onAddFolder: (name: string, color: string) => Promise<void>;
-  onRenameFolder: (folderId: string, name: string) => Promise<void>;
+  onUpdateFolder: (
+    folderId: string,
+    updates: { name: string; color: string },
+    expected: { name: string; color: string },
+  ) => Promise<void>;
   onDeleteFolder: (folderId: string) => Promise<void>;
-  onUpdateOrder: (order: CategoryFilter[]) => Promise<void>;
+  onUpdateOrder: (
+    order: CategoryFilter[],
+    options: { expectedCategoryOrder: CategoryFilter[] },
+  ) => Promise<void>;
 }
 
 export function CategoryManager({
   workspaceId,
   categories,
   folders,
+  groups,
   selectedCategory,
   onSelectCategory,
   onAddFolder,
-  onRenameFolder,
+  onUpdateFolder,
   onDeleteFolder,
   onUpdateOrder,
 }: CategoryManagerProps) {
   const [managerOpen, setManagerOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [newName, setNewName] = useState('');
+  const [editorMode, setEditorMode] = useState<'create' | 'edit' | null>(null);
+  const [editorExiting, setEditorExiting] = useState(false);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState('');
-  const [selectedColor, setSelectedColor] = useState(FOLDER_COLORS[0]);
+  const [editingFolderExpected, setEditingFolderExpected] = useState<{
+    name: string;
+    color: string;
+  } | null>(null);
+  const [editorName, setEditorName] = useState('');
+  const [selectedColor, setSelectedColor] = useState<string>(
+    CATEGORY_COLOR_PALETTE[0],
+  );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [focusedRowId, setFocusedRowId] = useState<CategoryFilter | null>(null);
+  const [draggedCategoryId, setDraggedCategoryId] = useState<CategoryFilter | null>(null);
+  const [deletingFolderId, setDeletingFolderId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const lock = useRef(false);
+  const managerContentRef = useRef<HTMLDivElement | null>(null);
+  const categoryOptionsTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const editorTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const restoreEditorFocusRef = useRef(false);
+  const deletingFolder = folders.find(({ id }) => id === deletingFolderId);
+  const nestedModalOpen = Boolean(
+    (managerOpen && (editorMode !== null || editorExiting)) || deletingFolder,
+  );
 
-  const resetCreate = () => {
-    setManagerOpen(false);
-    setNewName('');
-    setSelectedColor(FOLDER_COLORS[0]);
+  useEffect(() => {
+    const dialog = managerContentRef.current?.closest<HTMLElement>('[role="dialog"]');
+    if (!dialog || !nestedModalOpen) return undefined;
+    dialog.setAttribute('inert', '');
+    dialog.setAttribute('aria-hidden', 'true');
+    return () => {
+      dialog.removeAttribute('inert');
+      dialog.removeAttribute('aria-hidden');
+    };
+  }, [nestedModalOpen]);
+
+  useEffect(() => {
+    if (nestedModalOpen || !restoreEditorFocusRef.current) return undefined;
+    restoreEditorFocusRef.current = false;
+    const timeout = window.setTimeout(() => {
+      editorTriggerRef.current?.focus();
+      editorTriggerRef.current?.removeAttribute('data-autofocus');
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [nestedModalOpen]);
+
+  const openCreate = (trigger: HTMLButtonElement) => {
+    editorTriggerRef.current = trigger;
+    setEditingFolderId(null);
+    setEditingFolderExpected(null);
+    setEditorName('');
+    setSelectedColor(CATEGORY_COLOR_PALETTE[0]);
     setError(null);
-    setCreateOpen(true);
+    setEditorExiting(false);
+    setEditorMode('create');
   };
-  const openRename = (folderId: string) => {
+  const openEdit = (folderId: string, trigger: HTMLButtonElement) => {
     const folder = folders.find(({ id }) => id === folderId);
     if (!folder) return;
-    setManagerOpen(false);
+    editorTriggerRef.current = trigger;
     setEditingFolderId(folder.id);
-    setEditingName(folder.name);
+    setEditingFolderExpected({ name: folder.name, color: folder.color });
+    setEditorName(folder.name);
+    setSelectedColor(folder.color);
     setError(null);
-    setRenameOpen(true);
+    setEditorExiting(false);
+    setEditorMode('edit');
   };
-  const openDelete = (folderId: string) => {
-    setManagerOpen(false);
-    setEditingFolderId(folderId);
+  const closeEditor = () => {
+    if (submitting) return;
+    if (managerOpen) {
+      restoreEditorFocusRef.current = true;
+      setEditorExiting(true);
+    }
+    setEditorMode(null);
     setError(null);
-    setDeleteOpen(true);
   };
-  const createFolder = async () => {
+  const submitEditor = async () => {
+    if (!editorMode) return;
     const success = await runValidatedCategoryMutation(
       lock,
-      () => validateFolderName(folders, workspaceId, newName),
-      (value) => onAddFolder(value, selectedColor),
+      () => validateFolderName(
+        folders,
+        workspaceId,
+        editorName,
+        editorMode === 'edit' ? editingFolderId ?? undefined : undefined,
+      ),
+      (value) => editorMode === 'edit'
+        && editingFolderId
+        && editingFolderExpected
+        ? onUpdateFolder(
+            editingFolderId,
+            { name: value, color: selectedColor },
+            editingFolderExpected,
+          )
+        : onAddFolder(value, selectedColor),
       setError,
       setSubmitting,
     );
-    if (success) setCreateOpen(false);
+    if (success) {
+      if (managerOpen) {
+        restoreEditorFocusRef.current = true;
+        setEditorExiting(true);
+      }
+      setEditorMode(null);
+    }
   };
-  const renameFolder = async () => {
-    if (!editingFolderId) return;
-    const success = await runValidatedCategoryMutation(
+  const publishOrder = async (order: CategoryFilter[] | null) => {
+    if (!order) return;
+    const expectedCategoryOrder = categories.map(({ id }) => id);
+    await runCategoryMutation(
       lock,
-      () => validateFolderName(folders, workspaceId, editingName, editingFolderId),
-      (value) => onRenameFolder(editingFolderId, value),
+      () => onUpdateOrder(
+        [...order],
+        { expectedCategoryOrder: [...expectedCategoryOrder] },
+      ),
       setError,
       setSubmitting,
     );
-    if (success) setRenameOpen(false);
   };
-  const deleteFolder = async () => {
-    if (!editingFolderId) return;
-    const deletedId = editingFolderId;
+  const moveCategory = (categoryId: CategoryFilter, direction: -1 | 1) => {
+    const currentIndex = categories.findIndex(({ id }) => id === categoryId);
+    void publishOrder(moveCategoryToIndex(
+      categories,
+      categoryId,
+      currentIndex + direction,
+    ));
+  };
+  const handleDrop = (
+    event: ReactDragEvent<HTMLElement>,
+    targetCategoryId: CategoryFilter,
+  ) => {
+    event.preventDefault();
+    const draggedId = (
+      event.dataTransfer.getData(CATEGORY_DRAG_MIME)
+      || draggedCategoryId
+    ) as CategoryFilter;
+    if (!draggedId) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const placement = rect.height > 0
+      && event.clientY < rect.top + rect.height / 2
+      ? 'before'
+      : 'after';
+    void publishOrder(moveCategoryToDrop(
+      categories,
+      draggedId,
+      targetCategoryId,
+      placement,
+    ));
+    setDraggedCategoryId(null);
+  };
+  const handleRowBlur = (
+    event: ReactFocusEvent<HTMLElement>,
+    categoryId: CategoryFilter,
+  ) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setFocusedRowId((current) => current === categoryId ? null : current);
+    }
+  };
+  const confirmDelete = async () => {
+    if (!deletingFolder || submitting) return;
+    const deletedId = deletingFolder.id;
     const success = await runCategoryMutation(
       lock,
       () => onDeleteFolder(deletedId),
-      setError,
+      setDeleteError,
       setSubmitting,
     );
     if (!success) return;
-    setDeleteOpen(false);
+    setDeletingFolderId(null);
+    setDeleteError(null);
     if (selectedCategory === `folder:${deletedId}`) onSelectCategory('inbox');
   };
-  const moveCategory = async (categoryId: CategoryFilter, direction: -1 | 1) => {
-    const order = categories.map(({ id }) => id);
-    const currentIndex = order.indexOf(categoryId);
-    const targetIndex = currentIndex + direction;
-    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= order.length) return;
-    [order[currentIndex], order[targetIndex]] = [order[targetIndex], order[currentIndex]];
-    await runCategoryMutation(lock, () => onUpdateOrder(order), setError, setSubmitting);
-  };
+  const validation = editorMode
+    ? validateFolderName(
+        folders,
+        workspaceId,
+        editorName,
+        editorMode === 'edit' ? editingFolderId ?? undefined : undefined,
+      )
+    : null;
+  const editorError = error
+    ?? (validation && !validation.ok ? validationMessage(validation.reason) : null);
+  const affectedGroups = deletingFolder
+    ? groups.filter((group) =>
+        group.workspaceId === workspaceId
+        && group.folderId === deletingFolder.id)
+    : [];
+  const deleteMessage = deletingFolder
+    ? [
+        `Delete ${deletingFolder.name}?`,
+        `${countLabel(affectedGroups.length)} will move to Inbox.`,
+        deleteError,
+      ].filter(Boolean).join(' ')
+    : '';
+  const menuOpening = useManagerMenuOpening('category-options-menu');
 
   return (
     <>
       <Menu
-        {...MANAGER_MENU_A11Y_PROPS}
+        {...MANAGER_DENSE_MENU_PROPS}
         keepMounted
         withInitialFocusPlaceholder={false}
         portalProps={{ target: '#manager-main' }}
         opened={categoryMenuOpen}
         onChange={setCategoryMenuOpen}
+        onOpen={menuOpening.onMenuOpen}
         shadow="md"
-        width={190}
         position="bottom-end"
       >
         <Menu.Target>
-          <ActionIcon
+          <AccessibleIconAction
+            ref={categoryOptionsTriggerRef}
             className="manager-category-actions"
+            label="Category Options"
             variant="subtle"
-            aria-label="Category Options"
             aria-haspopup="menu"
             aria-expanded={categoryMenuOpen}
+            onPointerDown={menuOpening.onTriggerPointerDown}
+            onKeyDown={menuOpening.onTriggerKeyDown}
           >
-            <IconDots size={17} aria-hidden="true" />
-          </ActionIcon>
+            <TabBoardIcon icon={MenuIcon} />
+          </AccessibleIconAction>
         </Menu.Target>
         <Menu.Dropdown id="category-options-menu">
-          <Menu.Item onClick={() => setManagerOpen(true)}>Manage Categories</Menu.Item>
-          <Menu.Item leftSection={<IconFolderPlus size={16} aria-hidden="true" />} onClick={resetCreate}>
-            Add Category
-          </Menu.Item>
+          <ManagerMenuDescriptionTarget description="Rename, reorder, or remove Categories">
+            {(descriptionTargetProps) => (
+              <Menu.Item
+                {...descriptionTargetProps}
+                leftSection={<TabBoardIcon icon={Settings2} size="menu" />}
+                onClick={() => {
+                  setCategoryMenuOpen(false);
+                  setManagerOpen(true);
+                }}
+              >
+                Manage Categories
+              </Menu.Item>
+            )}
+          </ManagerMenuDescriptionTarget>
+          <ManagerMenuDescriptionTarget description="Create a custom Category">
+            {(descriptionTargetProps) => (
+              <Menu.Item
+                {...descriptionTargetProps}
+                leftSection={<TabBoardIcon icon={Plus} size="menu" />}
+                onClick={() => {
+                  setCategoryMenuOpen(false);
+                  const trigger = categoryOptionsTriggerRef.current;
+                  if (trigger) openCreate(trigger);
+                }}
+              >
+                Add Category
+              </Menu.Item>
+            )}
+          </ManagerMenuDescriptionTarget>
         </Menu.Dropdown>
       </Menu>
 
-      <ManagerModal opened={managerOpen} onClose={() => !submitting && setManagerOpen(false)} title="Manage Categories" size="md" centered>
-        <Stack gap="md">
-          <Text size="sm" c="dimmed">Reorder categories in the top bar, or rename and remove custom categories.</Text>
-          {error && <Text c="red" size="sm">{error}</Text>}
+      <ManagerModal
+        opened={managerOpen}
+        onClose={() => {
+          if (submitting || nestedModalOpen) return;
+          setManagerOpen(false);
+          restoreFinalFocus(categoryOptionsTriggerRef);
+        }}
+        title="Manage Categories"
+        size="md"
+        centered
+        trapFocus={!nestedModalOpen}
+        closeOnClickOutside={!nestedModalOpen}
+        closeOnEscape={!nestedModalOpen}
+        returnFocus={false}
+        headerSubtitle={`${countLabel(categories.length, 'Category', 'Categories')} · drag to reorder`}
+        headerAction={(
+          <Button
+            variant="default"
+            disabled={submitting}
+            onClick={(event) => openCreate(event.currentTarget)}
+          >
+            Add Category
+          </Button>
+        )}
+      >
+        <div ref={managerContentRef}>
           <Stack gap="xs" className="manager-category-manager-list">
             {categories.map((item, index) => {
               const folder = item.folderId ? folders.find(({ id }) => id === item.folderId) : null;
+              const locked = folder
+                ? groups.some((group) =>
+                    group.workspaceId === workspaceId
+                    && group.folderId === folder.id
+                    && group.locked)
+                : false;
+              const actionsAvailable = focusedRowId === item.id;
               return (
-                <Group key={item.id} className="manager-category-manager-row" gap="xs" wrap="nowrap">
-                  <Box className="manager-category-manager-swatch" style={{ backgroundColor: folder?.color ?? 'var(--mantine-color-gray-5)' }} />
-                  <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
-                    <Text size="sm" fw={600} lineClamp={1}>{item.label}</Text>
-                    <Text size="xs" c="dimmed">{item.kind === 'folder' ? `${formatNumber(item.count)} sessions` : `${formatNumber(item.count)} sessions · Built-in`}</Text>
+                <div
+                  key={item.id}
+                  className={[
+                    'manager-category-manager-row',
+                    item.id === selectedCategory
+                      ? 'manager-category-manager-row--active'
+                      : '',
+                    draggedCategoryId === item.id
+                      ? 'manager-category-manager-row--dragging'
+                      : '',
+                  ].filter(Boolean).join(' ')}
+                  data-category-manager-id={item.id}
+                  data-actions-visible={actionsAvailable || undefined}
+                  draggable={!nestedModalOpen}
+                  role="group"
+                  tabIndex={0}
+                  aria-label={`${item.label} Category`}
+                  onFocus={() => setFocusedRowId(item.id)}
+                  onBlur={(event) => handleRowBlur(event, item.id)}
+                  onDragStart={(event) => {
+                    setDraggedCategoryId(item.id);
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData(CATEGORY_DRAG_MIME, item.id);
+                  }}
+                  onDragEnd={() => setDraggedCategoryId(null)}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                  }}
+                  onDrop={(event) => handleDrop(event, item.id)}
+                >
+                  <Box
+                    className="manager-category-manager-swatch"
+                    style={{
+                      backgroundColor: folder
+                        ? categoryColorCssValue(folder.color)
+                        : 'var(--mantine-color-gray-5)',
+                    }}
+                  />
+                  <Stack
+                    className="manager-category-manager-row__summary"
+                    gap={0}
+                  >
+                    <Text
+                      className="manager-category-manager-row__name"
+                      size="sm"
+                      fw={600}
+                      lineClamp={1}
+                    >
+                      {item.label}
+                    </Text>
+                    <Text
+                      className="manager-category-manager-row__meta"
+                      component="span"
+                      size="xs"
+                      c="dimmed"
+                    >
+                      {countLabel(item.count)}
+                      {item.kind === 'folder' ? ' · Custom' : ' · Built-in'}
+                    </Text>
                   </Stack>
-                  <Group gap={2} wrap="nowrap">
-                    <Tooltip label="Move up">
-                      <ActionIcon size="sm" variant="subtle" aria-label={`Move ${item.label} up`} disabled={submitting || index === 0} onClick={() => void moveCategory(item.id, -1)}>
-                        <IconArrowUp size={15} aria-hidden="true" />
-                      </ActionIcon>
-                    </Tooltip>
-                    <Tooltip label="Move down">
-                      <ActionIcon size="sm" variant="subtle" aria-label={`Move ${item.label} down`} disabled={submitting || index === categories.length - 1} onClick={() => void moveCategory(item.id, 1)}>
-                        <IconArrowDown size={15} aria-hidden="true" />
-                      </ActionIcon>
-                    </Tooltip>
+                  <Group
+                    className="manager-category-manager-row__actions"
+                    gap={2}
+                    wrap="nowrap"
+                  >
+                    <AccessibleIconAction
+                      className="manager-category-manager-row__action"
+                      label={`Move ${item.label} up`}
+                      variant="subtle"
+                      disabled={submitting || index === 0}
+                      tabIndex={actionsAvailable ? 0 : -1}
+                      onClick={() => moveCategory(item.id, -1)}
+                    >
+                      <TabBoardIcon icon={ArrowUp} />
+                    </AccessibleIconAction>
+                    <AccessibleIconAction
+                      className="manager-category-manager-row__action"
+                      label={`Move ${item.label} down`}
+                      variant="subtle"
+                      disabled={submitting || index === categories.length - 1}
+                      tabIndex={actionsAvailable ? 0 : -1}
+                      onClick={() => moveCategory(item.id, 1)}
+                    >
+                      <TabBoardIcon icon={ArrowDown} />
+                    </AccessibleIconAction>
                     {item.folderId && (
-                      <Tooltip label="Rename">
-                        <ActionIcon size="sm" variant="subtle" aria-label={`Rename ${item.label}`} disabled={submitting} onClick={() => openRename(item.folderId!)}>
-                          <IconEdit size={15} aria-hidden="true" />
-                        </ActionIcon>
-                      </Tooltip>
+                      <AccessibleIconAction
+                        className="manager-category-manager-row__action"
+                        label={`Edit ${item.label}`}
+                        variant="subtle"
+                        disabled={submitting}
+                        tabIndex={actionsAvailable ? 0 : -1}
+                        onClick={(event) => openEdit(
+                          item.folderId!,
+                          event.currentTarget,
+                        )}
+                      >
+                        <TabBoardIcon icon={Pencil} />
+                      </AccessibleIconAction>
                     )}
                     {item.folderId && (
-                      <Tooltip label="Delete">
-                        <ActionIcon size="sm" color="red" variant="subtle" aria-label={`Delete ${item.label}`} disabled={submitting} onClick={() => openDelete(item.folderId!)}>
-                          <IconTrash size={15} aria-hidden="true" />
-                        </ActionIcon>
-                      </Tooltip>
+                      <AccessibleIconAction
+                        className="manager-category-manager-row__action"
+                        label={`Delete ${item.label}`}
+                        tooltip={locked
+                          ? 'Unlock every Session before deleting this Category'
+                          : `Delete ${item.label}`}
+                        aria-description={locked
+                          ? 'Unlock every Session before deleting this Category'
+                          : undefined}
+                        variant="subtle"
+                        danger
+                        disabled={submitting || locked}
+                        tabIndex={actionsAvailable ? 0 : -1}
+                        onClick={(event) => {
+                          deleteTriggerRef.current = event.currentTarget;
+                          setDeleteError(null);
+                          setDeletingFolderId(item.folderId!);
+                        }}
+                      >
+                        <TabBoardIcon icon={Trash} />
+                      </AccessibleIconAction>
                     )}
                   </Group>
-                </Group>
+                </div>
               );
             })}
           </Stack>
-          <Group justify="space-between">
-            <Button variant="light" leftSection={<IconFolderPlus size={16} aria-hidden="true" />} disabled={submitting} onClick={resetCreate}>Add Category</Button>
-            <Button variant="default" disabled={submitting} onClick={() => setManagerOpen(false)}>Done</Button>
+          {error ? <Text c="red" size="sm">{error}</Text> : null}
+          <Group
+            className="manager-management-footer"
+            justify="flex-end"
+            mt="sm"
+          >
+            <Button
+              variant="default"
+              disabled={submitting}
+              onClick={() => {
+                setManagerOpen(false);
+                restoreFinalFocus(categoryOptionsTriggerRef);
+              }}
+            >
+              Done
+            </Button>
           </Group>
-        </Stack>
+        </div>
       </ManagerModal>
 
-      <ManagerModal opened={createOpen} onClose={() => !submitting && setCreateOpen(false)} title="New Category" size="sm" centered>
+      <ManagerModal
+        opened={editorMode !== null}
+        onClose={closeEditor}
+        title={editorMode === 'edit' ? 'Edit Category' : 'New Category'}
+        size="sm"
+        centered
+        closeOnClickOutside={!submitting}
+        closeOnEscape={!submitting}
+        returnFocus={false}
+        onExitTransitionEnd={() => {
+          if (managerOpen) {
+            const trigger = editorTriggerRef.current;
+            trigger?.setAttribute('data-autofocus', 'true');
+            const row = trigger?.closest<HTMLElement>('[data-category-manager-id]');
+            setFocusedRowId(
+              row?.dataset.categoryManagerId as CategoryFilter | undefined ?? null,
+            );
+            setEditorExiting(false);
+          } else {
+            editorTriggerRef.current?.focus();
+          }
+        }}
+      >
         <Stack gap="md">
-          <TextInput name="category-name" autoComplete="off" label="Category name" placeholder="Enter category name…" value={newName} onChange={(event) => setNewName(event.currentTarget.value)} onKeyDown={(event) => event.key === 'Enter' && void createFolder()} error={error} disabled={submitting} data-autofocus />
-          <Group gap="xs" aria-label="Category color">
-            {FOLDER_COLORS.map((color) => (
-              <ActionIcon key={color} size="lg" variant={selectedColor === color ? 'filled' : 'light'} aria-label={`Use color ${color}`} aria-pressed={selectedColor === color} disabled={submitting} style={{ backgroundColor: selectedColor === color ? color : 'transparent', color }} onClick={() => setSelectedColor(color)}>
-                <Box w={16} h={16} aria-hidden="true" style={{ backgroundColor: color, borderRadius: '50%' }} />
-              </ActionIcon>
+          <TextInput
+            name="category-name"
+            autoComplete="off"
+            label="Category name"
+            placeholder="Enter category name…"
+            value={editorName}
+            onChange={(event) => {
+              setEditorName(event.currentTarget.value);
+              setError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void submitEditor();
+            }}
+            error={editorError}
+            disabled={submitting}
+            data-autofocus
+          />
+          <div
+            className="category-editor-color-grid"
+            role="group"
+            aria-label="Category color"
+          >
+            {isLegacyCategoryColor(selectedColor) ? (
+              <UnstyledButton
+                className="category-editor-color-option"
+                type="button"
+                aria-label={`Keep Legacy Color ${selectedColor}`}
+                aria-pressed="true"
+                disabled={submitting}
+                onClick={() => setSelectedColor(selectedColor)}
+              >
+                <span
+                  className="category-editor-color-swatch"
+                  data-category-color={selectedColor}
+                  aria-hidden="true"
+                  style={{
+                    backgroundColor: categoryColorCssValue(selectedColor),
+                  }}
+                />
+              </UnstyledButton>
+            ) : null}
+            {CATEGORY_COLOR_PALETTE.map((color) => (
+              <UnstyledButton
+                key={color}
+                className="category-editor-color-option"
+                type="button"
+                aria-label={`Use Color ${color}`}
+                aria-pressed={selectedColor === color}
+                disabled={submitting}
+                onClick={() => setSelectedColor(color)}
+              >
+                <span
+                  className="category-editor-color-swatch"
+                  data-category-color={color}
+                  aria-hidden="true"
+                  style={{ backgroundColor: color }}
+                />
+              </UnstyledButton>
             ))}
-          </Group>
+          </div>
           <Group justify="flex-end">
-            <Button variant="default" disabled={submitting} onClick={() => setCreateOpen(false)}>Cancel</Button>
-            <Button loading={submitting} aria-label={submitting ? 'Creating Category…' : 'Create Category'} onClick={() => void createFolder()} leftSection={<IconFolderPlus size={16} aria-hidden="true" />}>{submitting ? 'Creating Category…' : 'Create Category'}</Button>
+            <Button variant="default" disabled={submitting} onClick={closeEditor}>
+              Cancel
+            </Button>
+            <Button
+              loading={submitting}
+              disabled={!validation?.ok}
+              aria-label={submitting
+                ? editorMode === 'edit'
+                  ? 'Saving Category…'
+                  : 'Creating Category…'
+                : editorMode === 'edit'
+                  ? 'Save Category'
+                  : 'Create Category'}
+              leftSection={<TabBoardIcon icon={editorMode === 'edit' ? Pencil : Plus} size="menu" />}
+              onClick={() => void submitEditor()}
+            >
+              {submitting
+                ? editorMode === 'edit'
+                  ? 'Saving Category…'
+                  : 'Creating Category…'
+                : editorMode === 'edit'
+                  ? 'Save Category'
+                  : 'Create Category'}
+            </Button>
           </Group>
         </Stack>
       </ManagerModal>
 
-      <ManagerModal opened={renameOpen} onClose={() => !submitting && setRenameOpen(false)} title="Rename Category" size="sm" centered>
-        <Stack gap="md">
-          <TextInput name="category-name" autoComplete="off" label="Category name" placeholder="Enter category name…" value={editingName} onChange={(event) => setEditingName(event.currentTarget.value)} onKeyDown={(event) => event.key === 'Enter' && void renameFolder()} error={error} disabled={submitting} data-autofocus />
-          <Group justify="flex-end">
-            <Button variant="default" disabled={submitting} onClick={() => setRenameOpen(false)}>Cancel</Button>
-            <Button loading={submitting} aria-label={submitting ? 'Renaming Category…' : 'Rename Category'} onClick={() => void renameFolder()} leftSection={<IconEdit size={16} aria-hidden="true" />}>{submitting ? 'Renaming Category…' : 'Rename Category'}</Button>
-          </Group>
-        </Stack>
-      </ManagerModal>
-
-      <ManagerModal opened={deleteOpen} onClose={() => !submitting && setDeleteOpen(false)} title="Delete Category" size="sm" centered>
-        <Stack gap="md">
-          <Text>Delete <strong>{folders.find(({ id }) => id === editingFolderId)?.name}</strong>? Sessions move to Inbox.</Text>
-          {error && <Text c="red" size="sm">{error}</Text>}
-          <Group justify="flex-end">
-            <Button variant="default" disabled={submitting} onClick={() => setDeleteOpen(false)}>Cancel</Button>
-            <Button color="red" loading={submitting} aria-label={submitting ? 'Deleting Category…' : 'Delete Category'} onClick={() => void deleteFolder()} leftSection={<IconTrashX size={16} aria-hidden="true" />}>{submitting ? 'Deleting Category…' : 'Delete Category'}</Button>
-          </Group>
-        </Stack>
-      </ManagerModal>
+      <ConfirmDialog
+        opened={Boolean(deletingFolder)}
+        title="Delete Category"
+        message={deleteMessage}
+        confirmLabel="Delete Category"
+        loadingLabel="Deleting Category…"
+        loading={submitting}
+        finalFocusRef={deleteTriggerRef}
+        onCancel={() => {
+          if (submitting) return;
+          setDeletingFolderId(null);
+          setDeleteError(null);
+        }}
+        onConfirm={confirmDelete}
+      />
     </>
   );
 }

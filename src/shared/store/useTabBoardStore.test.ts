@@ -83,16 +83,607 @@ afterEach(() => {
 });
 
 describe('TabBoard store remote persistence reconciliation', () => {
+  it('publishes topbar category drag as the same complete category-order mutation used by management', async () => {
+    const folder = {
+      id: 'folder-work',
+      name: 'Work',
+      color: '#40c057',
+      workspaceId: 'workspace_default',
+      collapsed: false,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const persisted: TabBoardState = {
+      ...createEmptyState(),
+      folders: [folder],
+      categoryOrderByWorkspace: {
+        workspace_default: ['inbox', 'saved', folder.id, 'archive'],
+      },
+    };
+    const sentBatches: StateMutation[][] = [];
+    const sendMessage = vi.fn(async (
+      message: { type: string; mutations?: StateMutation[] },
+    ) => {
+      const mutations = structuredClone(message.mutations || []);
+      sentBatches.push(mutations);
+      return {
+        ok: true,
+        result: applyStateMutations(persisted, mutations),
+      };
+    });
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore } = await import('./useTabBoardStore');
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+
+    const expectedCategoryOrder = [
+      'inbox',
+      'saved',
+      `folder:${folder.id}`,
+      'archive',
+    ];
+    const persistence = useTabBoardStore.getState().applyDropIntent({
+      kind: 'reorder-category',
+      categoryId: `folder:${folder.id}`,
+      targetCategoryId: 'archive',
+      placement: 'after',
+      workspaceId: 'workspace_default',
+      expectedCategoryOrder,
+    });
+    expectedCategoryOrder.reverse();
+    await persistence;
+
+    expect(sentBatches).toHaveLength(1);
+    expect(sentBatches[0]).toEqual([expect.objectContaining({
+      type: 'set-category-order',
+      workspaceId: 'workspace_default',
+      expectedCategoryOrder: [
+        'inbox',
+        'saved',
+        `folder:${folder.id}`,
+        'archive',
+      ],
+      categoryOrder: [
+        'inbox',
+        'saved',
+        'archive',
+        `folder:${folder.id}`,
+      ],
+    })]);
+  });
+
+  it.each([
+    {
+      label: 'manager',
+      run: (store: typeof useTabBoardStore) => store.getState().updateCategoryOrder(
+        'workspace_default',
+        ['saved', 'inbox', 'archive'],
+        { expectedCategoryOrder: ['inbox', 'saved', 'archive'] },
+      ),
+    },
+    {
+      label: 'topbar',
+      run: (store: typeof useTabBoardStore) => store.getState().applyDropIntent({
+        kind: 'reorder-category',
+        categoryId: 'saved',
+        targetCategoryId: 'inbox',
+        placement: 'before',
+        workspaceId: 'workspace_default',
+        expectedCategoryOrder: ['inbox', 'saved', 'archive'],
+      }),
+    },
+  ])('rejects a stale $label order snapshot and retains newer authority', async ({ run }) => {
+    const newer: TabBoardState = {
+      ...createEmptyState(),
+      categoryOrderByWorkspace: {
+        workspace_default: ['archive', 'inbox', 'saved'],
+      },
+      mutationRevision: 1,
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+    let sentMutation: StateMutation | undefined;
+    const sendMessage = vi.fn(async (
+      message: { mutations?: StateMutation[] },
+    ) => {
+      sentMutation = structuredClone(message.mutations?.[0]);
+      try {
+        return {
+          ok: true,
+          result: applyStateMutations(newer, message.mutations || []),
+        };
+      } catch (error: unknown) {
+        return {
+          ok: false,
+          code: (error as { code?: string }).code,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore: store } = await import('./useTabBoardStore');
+    store.setState({
+      ...newer,
+      hydrated: true,
+      persistenceError: null,
+    });
+
+    await expect(run(store)).rejects.toMatchObject({
+      code: 'CATEGORY_MUTATION_CONFLICT',
+    });
+    expect(sentMutation).toMatchObject({
+      type: 'set-category-order',
+      expectedCategoryOrder: ['inbox', 'saved', 'archive'],
+      categoryOrder: ['saved', 'inbox', 'archive'],
+    });
+    expect(store.getState().categoryOrderByWorkspace.workspace_default)
+      .toEqual(['archive', 'inbox', 'saved']);
+  });
+
+  it('rejects a category waiter when independent authority already equals its target', async () => {
+    const independentTarget: TabBoardState = {
+      ...createEmptyState(),
+      categoryOrderByWorkspace: {
+        workspace_default: ['saved', 'inbox', 'archive'],
+      },
+      mutationRevision: 1,
+      updatedAt: '2026-01-03T00:00:00.000Z',
+    };
+    const sendMessage = vi.fn(async (
+      message: { mutations?: StateMutation[] },
+    ) => {
+      try {
+        return {
+          ok: true,
+          result: applyStateMutations(
+            independentTarget,
+            message.mutations || [],
+          ),
+        };
+      } catch (error: unknown) {
+        return {
+          ok: false,
+          code: (error as { code?: string }).code,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore: store } = await import('./useTabBoardStore');
+    store.setState({
+      ...independentTarget,
+      hydrated: true,
+      persistenceError: null,
+    });
+
+    const waiter = store.getState().updateCategoryOrder(
+      'workspace_default',
+      ['saved', 'inbox', 'archive'],
+      { expectedCategoryOrder: ['inbox', 'saved', 'archive'] },
+    );
+
+    await expect(waiter).rejects.toMatchObject({
+      code: 'CATEGORY_MUTATION_CONFLICT',
+    });
+    expect(store.getState().mutationRevision)
+      .toBe(independentTarget.mutationRevision);
+    expect(store.getState().updatedAt).toBe(independentTarget.updatedAt);
+  });
+
+  it('copies complete prior and target order snapshots before category enqueue', async () => {
+    const folder = {
+      id: 'folder-order-copy',
+      name: 'Copy',
+      color: 'slate',
+      workspaceId: 'workspace_default',
+      collapsed: false,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const persisted: TabBoardState = {
+      ...createEmptyState(),
+      folders: [folder],
+      categoryOrderByWorkspace: {
+        workspace_default: ['inbox', 'saved', 'archive', folder.id],
+      },
+    };
+    let sentMutation: StateMutation | undefined;
+    const sendMessage = vi.fn(async (
+      message: { mutations?: StateMutation[] },
+    ) => {
+      sentMutation = message.mutations?.[0];
+      return {
+        ok: true,
+        result: applyStateMutations(persisted, message.mutations || []),
+      };
+    });
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore } = await import('./useTabBoardStore');
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+    const requested = [
+      `folder:${folder.id}`,
+      'inbox',
+      'saved',
+      'archive',
+    ];
+    const expectedCategoryOrder = [
+      'inbox',
+      'saved',
+      'archive',
+      `folder:${folder.id}`,
+    ];
+
+    const persistence = useTabBoardStore.getState().updateCategoryOrder(
+      'workspace_default',
+      requested,
+      { expectedCategoryOrder },
+    );
+    requested.reverse();
+    expectedCategoryOrder.reverse();
+    await persistence;
+
+    expect(sentMutation).toMatchObject({
+      type: 'set-category-order',
+      expectedCategoryOrder: [
+        'inbox',
+        'saved',
+        'archive',
+        `folder:${folder.id}`,
+      ],
+      categoryOrder: [
+        `folder:${folder.id}`,
+        'inbox',
+        'saved',
+        'archive',
+      ],
+    });
+  });
+
+  it('returns the optimistic workspace ID and persists the chosen emoji', async () => {
+    vi.useFakeTimers();
+    const persisted = createEmptyState();
+    const sendMessage = vi.fn(async (
+      message: { type: string; mutations?: StateMutation[] },
+    ) => ({
+      ok: true,
+      result: applyStateMutations(persisted, message.mutations || []),
+    }));
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore } = await import('./useTabBoardStore');
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+
+    const workspaceId = useTabBoardStore.getState().addWorkspace(
+      'Research',
+      '🧪',
+    );
+
+    expect(workspaceId).toEqual(expect.any(String));
+    expect(useTabBoardStore.getState().workspaces.at(-1)).toMatchObject({
+      id: workspaceId,
+      name: 'Research',
+      emoji: '🧪',
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0]?.[0]?.mutations?.[0]).toMatchObject({
+      type: 'add-workspace',
+      workspace: {
+        id: workspaceId,
+        name: 'Research',
+        emoji: '🧪',
+      },
+    });
+  });
+
+  it('resolves delete after optimistic enqueue without waiting for durable persistence', async () => {
+    vi.useFakeTimers();
+    const workspaceA = {
+      ...createEmptyState().workspaces[0],
+      id: 'workspace-a',
+      name: 'A',
+    };
+    const workspaceB = {
+      ...workspaceA,
+      id: 'workspace-b',
+      name: 'B',
+    };
+    const persisted: TabBoardState = {
+      ...createEmptyState(),
+      workspaces: [workspaceA, workspaceB],
+      activeWorkspaceId: workspaceA.id,
+    };
+    const sendMessage = vi.fn(async (
+      message: { mutations?: StateMutation[] },
+    ) => ({
+      ok: true,
+      result: applyStateMutations(persisted, message.mutations || []),
+    }));
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore } = await import('./useTabBoardStore');
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+
+    const enqueue = useTabBoardStore.getState().deleteWorkspace(workspaceA.id);
+
+    expect(enqueue).toBeInstanceOf(Promise);
+    expect(useTabBoardStore.getState().workspaces.map(({ id }) => id)).toEqual([
+      workspaceB.id,
+    ]);
+    await expect(enqueue).resolves.toBeUndefined();
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects stale only-workspace deletion through mutation authority without scheduling persistence or toast', async () => {
+    vi.useFakeTimers();
+    const persisted = createEmptyState();
+    const sendMessage = vi.fn();
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+    const feedback = collectFeedback();
+
+    const enqueue = useTabBoardStore.getState().deleteWorkspace(
+      persisted.activeWorkspaceId,
+    );
+
+    await expect(enqueue).rejects.toMatchObject({
+      code: 'WORKSPACE_DELETE_INVALID',
+      message: 'Cannot delete the only workspace.',
+    });
+    expect(persistedSnapshot(useTabBoardStore.getState())).toEqual(persisted);
+    expect(useTabBoardStore.getState().persistenceError)
+      .toBe('Cannot delete the only workspace.');
+    expect(feedback).toEqual([]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing workspace ID instead of crashing replacement lookup', async () => {
+    vi.useFakeTimers();
+    const workspaceA = {
+      ...createEmptyState().workspaces[0],
+      id: 'workspace-a',
+      name: 'A',
+    };
+    const workspaceB = {
+      ...workspaceA,
+      id: 'workspace-b',
+      name: 'B',
+    };
+    const persisted: TabBoardState = {
+      ...createEmptyState(),
+      workspaces: [workspaceA, workspaceB],
+      activeWorkspaceId: workspaceA.id,
+    };
+    const sendMessage = vi.fn();
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+    const feedback = collectFeedback();
+
+    const enqueue = useTabBoardStore.getState().deleteWorkspace(
+      'workspace-missing',
+    );
+
+    await expect(enqueue).rejects.toMatchObject({
+      code: 'WORKSPACE_NOT_FOUND',
+      message: 'Workspace not found.',
+    });
+    expect(persistedSnapshot(useTabBoardStore.getState())).toEqual(persisted);
+    expect(useTabBoardStore.getState().persistenceError).toBe('Workspace not found.');
+    expect(feedback).toEqual([]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects failed optimistic delete enqueue, retains state, and leaves feedback inline', async () => {
+    const workspaceA = {
+      ...createEmptyState().workspaces[0],
+      id: 'workspace-a',
+      name: 'A',
+    };
+    const workspaceB = {
+      ...workspaceA,
+      id: 'workspace-b',
+      name: 'B',
+    };
+    const persisted: TabBoardState = {
+      ...createEmptyState(),
+      workspaces: [workspaceA, workspaceB],
+      activeWorkspaceId: workspaceA.id,
+      groups: [group('locked-workspace-b', workspaceB.id, { locked: true })],
+    };
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+    const feedback = collectFeedback();
+
+    const enqueue = useTabBoardStore.getState().deleteWorkspace(workspaceB.id);
+
+    await expect(enqueue).rejects.toThrow('Cannot modify a locked group.');
+    expect(useTabBoardStore.getState().workspaces).toEqual(persisted.workspaces);
+    expect(useTabBoardStore.getState().persistenceError)
+      .toBe('Cannot modify a locked group.');
+    expect(feedback).toEqual([]);
+  });
+
+  it('queues atomic workspace updates and canonical order through ordinary publication', async () => {
+    vi.useFakeTimers();
+    const workspaceA = {
+      ...createEmptyState().workspaces[0],
+      id: 'workspace-a',
+      name: 'A',
+    };
+    const workspaceB = {
+      ...workspaceA,
+      id: 'workspace-b',
+      name: 'B',
+    };
+    const folderA = {
+      id: 'folder-a',
+      name: 'Folder A',
+      color: 'slate',
+      workspaceId: workspaceA.id,
+      collapsed: false,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const groupB = group('group-b', workspaceB.id);
+    const persisted: TabBoardState = {
+      ...createEmptyState(),
+      workspaces: [workspaceA, workspaceB],
+      activeWorkspaceId: workspaceA.id,
+      folders: [folderA],
+      groups: [groupB],
+      categoryOrderByWorkspace: {
+        [workspaceA.id]: ['inbox', 'saved'],
+      },
+    };
+    const sendMessage = vi.fn(async (message: { type: string; mutations?: StateMutation[] }) => {
+      if (message.type === 'tabboard-ensure-state') {
+        return { ok: true, result: structuredClone(persisted) };
+      }
+      return {
+        ok: true,
+        result: applyStateMutations(persisted, message.mutations || []),
+      };
+    });
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore } = await import('./useTabBoardStore');
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+    const workspaceActions = useTabBoardStore.getState();
+    const before = useTabBoardStore.getState();
+
+    await workspaceActions.updateWorkspace(workspaceA.id, {
+      name: 'Research Lab',
+      emoji: '🧪',
+    });
+    await workspaceActions.updateWorkspaceOrder([workspaceB.id, workspaceA.id]);
+
+    expect(useTabBoardStore.getState().workspaces.map(({ id }) => id)).toEqual([
+      workspaceB.id,
+      workspaceA.id,
+    ]);
+    const optimistic = useTabBoardStore.getState();
+    expect(optimistic.workspaces[0]).toBe(before.workspaces[1]);
+    expect(optimistic.workspaces[1]).toMatchObject({
+      name: 'Research Lab',
+      emoji: '🧪',
+    });
+    expect(optimistic.activeWorkspaceId).toBe(before.activeWorkspaceId);
+    expect(optimistic.folders).toBe(before.folders);
+    expect(optimistic.groups).toBe(before.groups);
+    expect(optimistic.categoryOrderByWorkspace).toBe(before.categoryOrderByWorkspace);
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const mutations = sendMessage.mock.calls[0]?.[0]?.mutations;
+    expect(mutations?.map(({ type }) => type)).toEqual([
+      'update-workspace',
+      'set-workspace-order',
+    ]);
+    expect(mutations?.[0]).toMatchObject({
+      type: 'update-workspace',
+      id: workspaceA.id,
+      name: 'Research Lab',
+      emoji: '🧪',
+    });
+    expect(mutations?.[1]).toEqual(expect.objectContaining({
+      type: 'set-workspace-order',
+      orderedWorkspaceIds: [workspaceB.id, workspaceA.id],
+    }));
+  });
+
+  it('snapshots mutable workspace order input before the delayed save flush', async () => {
+    vi.useFakeTimers();
+    const workspaceA = {
+      ...createEmptyState().workspaces[0],
+      id: 'workspace-a',
+      name: 'A',
+    };
+    const workspaceB = {
+      ...workspaceA,
+      id: 'workspace-b',
+      name: 'B',
+    };
+    const persisted: TabBoardState = {
+      ...createEmptyState(),
+      workspaces: [workspaceA, workspaceB],
+      activeWorkspaceId: workspaceA.id,
+    };
+    const sendMessage = vi.fn(async (
+      message: { type: string; mutations?: StateMutation[] },
+    ) => ({
+      ok: true,
+      result: applyStateMutations(persisted, message.mutations || []),
+    }));
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore } = await import('./useTabBoardStore');
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+    const orderedWorkspaceIds = [workspaceB.id, workspaceA.id];
+
+    await useTabBoardStore.getState().updateWorkspaceOrder(orderedWorkspaceIds);
+    orderedWorkspaceIds.splice(0, orderedWorkspaceIds.length, workspaceA.id, workspaceB.id);
+
+    expect(useTabBoardStore.getState().workspaces.map(({ id }) => id)).toEqual([
+      workspaceB.id,
+      workspaceA.id,
+    ]);
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0]?.[0]?.mutations?.[0]).toEqual(expect.objectContaining({
+      type: 'set-workspace-order',
+      orderedWorkspaceIds: [workspaceB.id, workspaceA.id],
+    }));
+  });
+
   it('preserves current-workspace entity references for an authoritative write in another workspace', async () => {
     const workspaceA = {
       id: 'workspace-a',
       name: 'A',
+      emoji: '🗂️',
       createdAt: timestamp,
       updatedAt: timestamp,
     };
     const workspaceB = {
       id: 'workspace-b',
       name: 'B',
+      emoji: '🗂️',
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -373,7 +964,11 @@ describe('TabBoard store remote persistence reconciliation', () => {
     vi.stubGlobal('chrome', chromeMock);
     const { useTabBoardStore } = await import('./useTabBoardStore');
     await useTabBoardStore.getState().hydrate();
-    const orderPromise = useTabBoardStore.getState().updateCategoryOrder('workspace_default', ['saved', 'inbox']);
+    const orderPromise = useTabBoardStore.getState().updateCategoryOrder(
+      'workspace_default',
+      ['saved', 'inbox', 'archive'],
+      { expectedCategoryOrder: ['inbox', 'saved', 'archive'] },
+    );
     await vi.waitFor(() => expect(sentMutations).toBeDefined());
 
     const remoteState: TabBoardState = {
@@ -442,7 +1037,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     expect(useTabBoardStore.getState().groups[0]).toMatchObject({ title: 'Renamed', collapsed: true });
   });
 
-  it('replays a committed folder rename onto the latest remote folder fields', async () => {
+  it('replays a committed folder edit onto the latest remote folder fields', async () => {
     let stored: TabBoardState = {
       ...createEmptyState(),
       folders: [{
@@ -472,8 +1067,19 @@ describe('TabBoard store remote persistence reconciliation', () => {
     vi.stubGlobal('chrome', chromeMock);
     const { useTabBoardStore } = await import('./useTabBoardStore');
     await useTabBoardStore.getState().hydrate();
-    const renamePromise = useTabBoardStore.getState().renameFolder('folder-target', 'Renamed');
+    const updatePromise = useTabBoardStore.getState().updateFolder(
+      'folder-target',
+      { name: 'Renamed', color: '#40c057' },
+      { name: 'Before', color: 'slate' },
+    );
     await vi.waitFor(() => expect(sentMutations).toBeDefined());
+    expect(sentMutations?.[0]).toMatchObject({
+      type: 'update-folder',
+      expected: {
+        name: 'Before',
+        color: 'slate',
+      },
+    });
 
     const remoteState: TabBoardState = {
       ...stored,
@@ -486,9 +1092,13 @@ describe('TabBoard store remote persistence reconciliation', () => {
     const respond = resolveRpc;
     if (!mutations || !respond) throw new Error('Mutation RPC was not started.');
     respond({ ok: true, result: applyStateMutations(stored, mutations) });
-    await renamePromise;
+    await updatePromise;
 
-    expect(useTabBoardStore.getState().folders[0]).toMatchObject({ name: 'Renamed', collapsed: true });
+    expect(useTabBoardStore.getState().folders[0]).toMatchObject({
+      name: 'Renamed',
+      color: '#40c057',
+      collapsed: true,
+    });
   });
 
   it('replays a committed cross-entity tab move without losing a remote target tab', async () => {
@@ -679,6 +1289,121 @@ describe('TabBoard store remote persistence reconciliation', () => {
       result: applyStateMutations(persisted, request?.mutations || []),
     });
     await expect(persistencePromise).resolves.toBeUndefined();
+  });
+
+  it('keeps a checked Hybrid drop non-optimistic until authority settles', async () => {
+    const movedTab = tab('checked-hybrid-tab');
+    const source = group('checked-hybrid-source', 'workspace_default', {
+      tabs: [movedTab],
+    });
+    const target = group('checked-hybrid-target');
+    const persisted: TabBoardState = {
+      ...createEmptyState(),
+      groups: [source, target],
+    };
+    let request: { mutations?: StateMutation[] } | undefined;
+    let resolveRpc: ((response: unknown) => void) | undefined;
+    const sendMessage = vi.fn((message: { mutations?: StateMutation[] }) => {
+      request = message;
+      return new Promise((resolve) => {
+        resolveRpc = resolve;
+      });
+    });
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore } = await import('./useTabBoardStore');
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+    const intent = {
+      kind: 'move-tabs' as const,
+      refs: [{ groupId: source.id, tabId: movedTab.id }],
+      targetGroupId: target.id,
+      targetIndex: 0,
+      workspaceId: 'workspace_default',
+    };
+
+    const persistence = useTabBoardStore.getState().applyDropIntent(
+      intent,
+      [],
+      { authority: 'checked' },
+    );
+    intent.refs[0]!.groupId = 'mutated-after-submit';
+    await vi.waitFor(() => expect(request?.mutations).toHaveLength(1));
+
+    expect(useTabBoardStore.getState().groups).toEqual([source, target]);
+    expect(request?.mutations?.[0]).toMatchObject({
+      type: 'drop-intent',
+      expectedRevision: persisted.mutationRevision,
+      intent: {
+        kind: 'move-tabs',
+        refs: [{ groupId: source.id, tabId: movedTab.id }],
+        targetGroupId: target.id,
+      },
+    });
+
+    resolveRpc?.({
+      ok: false,
+      code: 'INVALID_DROP_INTENT',
+      error: 'Checked Hybrid authority rejected.',
+      invalidMutationIndexes: [0],
+    });
+    await expect(persistence).rejects.toThrow('Checked Hybrid authority rejected.');
+    expect(useTabBoardStore.getState().groups).toEqual([source, target]);
+  });
+
+  it('publishes a checked Hybrid drop exactly once after authority success', async () => {
+    const movedTab = tab('checked-hybrid-success-tab');
+    const source = group('checked-hybrid-success-source', 'workspace_default', {
+      tabs: [movedTab],
+    });
+    const target = group('checked-hybrid-success-target');
+    const persisted: TabBoardState = {
+      ...createEmptyState(),
+      groups: [source, target],
+    };
+    let request: { mutations?: StateMutation[] } | undefined;
+    let resolveRpc: ((response: unknown) => void) | undefined;
+    const sendMessage = vi.fn((message: { mutations?: StateMutation[] }) => {
+      request = message;
+      return new Promise((resolve) => {
+        resolveRpc = resolve;
+      });
+    });
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore } = await import('./useTabBoardStore');
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+
+    const persistence = useTabBoardStore.getState().applyDropIntent(
+      {
+        kind: 'move-tabs',
+        refs: [{ groupId: source.id, tabId: movedTab.id }],
+        targetGroupId: target.id,
+        targetIndex: 0,
+        workspaceId: 'workspace_default',
+      },
+      [],
+      { authority: 'checked' },
+    );
+    await vi.waitFor(() => expect(request?.mutations).toHaveLength(1));
+    expect(useTabBoardStore.getState().groups).toEqual([source, target]);
+
+    const authoritative = applyStateMutations(
+      persisted,
+      request?.mutations || [],
+    );
+    resolveRpc?.({ ok: true, result: authoritative });
+    await expect(persistence).resolves.toBeUndefined();
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(useTabBoardStore.getState().groups).toEqual(authoritative.groups);
+    expect(useTabBoardStore.getState().mutationRevision)
+      .toBe(persisted.mutationRevision + 1);
   });
 
   it('uses one publication owner to isolate an in-flight persistence context replacement', async () => {
@@ -2225,6 +2950,262 @@ describe('Task191 persistence feedback and terminal failures', () => {
   });
 });
 
+describe('Task 6 authoritative batch deletion facade', () => {
+  it('accepts 80 refs but rejects 81 before sending with an actionable limit', async () => {
+    const tabs = Array.from(
+      { length: 81 },
+      (_, index) => tab(`delete-limit-${index}`),
+    );
+    const source = group('delete-limit-source', 'workspace_default', {
+      tabs,
+    });
+    const persisted = { ...createEmptyState(), groups: [source] };
+    let sentMutations: StateMutation[] | undefined;
+    let resolveMutation: ((response: unknown) => void) | undefined;
+    const sendMessage = vi.fn((message: { mutations?: StateMutation[] }) => {
+      sentMutations = message.mutations;
+      return new Promise((resolve) => {
+        resolveMutation = resolve;
+      });
+    });
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore } = await import('./useTabBoardStore');
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+
+    const accepted = useTabBoardStore.getState().deleteTabs(
+      tabs.slice(0, 80).map(({ id }) => ({ groupId: source.id, tabId: id })),
+    );
+    await vi.waitFor(() => expect(sentMutations).toHaveLength(1));
+    expect(sentMutations?.[0]).toMatchObject({
+      type: 'delete-tabs',
+      deletions: expect.arrayContaining([
+        expect.objectContaining({ tabId: 'delete-limit-0' }),
+        expect.objectContaining({ tabId: 'delete-limit-79' }),
+      ]),
+    });
+    if (!sentMutations) throw new Error('Expected checked delete mutation.');
+    resolveMutation?.({
+      ok: true,
+      result: applyStateMutations(persisted, sentMutations),
+    });
+    await expect(accepted).resolves.toBeUndefined();
+
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+    sendMessage.mockClear();
+    sendMessage.mockResolvedValueOnce({
+      ok: false,
+      code: 'INVALID_MUTATION',
+      error: 'The over-limit delete reached authority.',
+    } as never);
+    await expect(useTabBoardStore.getState().deleteTabs(
+      tabs.map(({ id }) => ({ groupId: source.id, tabId: id })),
+    )).rejects.toThrow('Delete up to 80 selected items at a time.');
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(useTabBoardStore.getState().groups).toEqual([source]);
+    expect(useTabBoardStore.getState().bin).toEqual([]);
+  });
+
+  it('snapshots refs and deletion records, waits for authority, and rejects without partial deletion', async () => {
+    const firstTab = tab('checked-delete-first');
+    const secondTab = tab('checked-delete-second');
+    const source = group('checked-delete-source', 'workspace_default', {
+      tabs: [firstTab, secondTab],
+    });
+    const persisted = { ...createEmptyState(), groups: [source] };
+    let sentMutations: StateMutation[] | undefined;
+    let resolveMutation: ((response: unknown) => void) | undefined;
+    const sendMessage = vi.fn((
+      message: { type: string; mutations?: StateMutation[] },
+    ) => {
+      sentMutations = message.mutations;
+      return new Promise((resolve) => {
+        resolveMutation = resolve;
+      });
+    });
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore } = await import('./useTabBoardStore');
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+    const refs = [
+      { groupId: source.id, tabId: firstTab.id },
+      { groupId: source.id, tabId: secondTab.id },
+    ];
+
+    const deletion = useTabBoardStore.getState().deleteTabs(refs);
+    refs[0].groupId = 'mutated-after-call';
+    firstTab.title = 'mutated-after-call';
+    await vi.waitFor(() => expect(sentMutations).toBeDefined());
+
+    expect(useTabBoardStore.getState().groups[0]?.tabs.map(({ id }) => id))
+      .toEqual(['checked-delete-first', 'checked-delete-second']);
+    expect(useTabBoardStore.getState().bin).toEqual([]);
+    expect(sentMutations).toEqual([
+      expect.objectContaining({
+        type: 'delete-tabs',
+        deletions: [
+          expect.objectContaining({
+            groupId: source.id,
+            tabId: 'checked-delete-first',
+            binEntry: expect.objectContaining({
+              item: expect.objectContaining({
+                id: 'checked-delete-first',
+                title: 'checked-delete-first',
+              }),
+            }),
+          }),
+          expect.objectContaining({
+            groupId: source.id,
+            tabId: 'checked-delete-second',
+          }),
+        ],
+      }),
+    ]);
+
+    resolveMutation?.({
+      ok: false,
+      code: 'GROUP_LOCKED',
+      error: 'Cannot modify a locked group.',
+    });
+    await expect(deletion).rejects.toMatchObject({ code: 'GROUP_LOCKED' });
+    expect(useTabBoardStore.getState().groups[0]?.tabs.map(({ id }) => id))
+      .toEqual(['checked-delete-first', 'checked-delete-second']);
+    expect(useTabBoardStore.getState().bin).toEqual([]);
+  });
+
+  it('commits once through authority and exact replay does not duplicate Bin entries', async () => {
+    const firstTab = tab('checked-replay-first');
+    const secondTab = tab('checked-replay-second');
+    const source = group('checked-replay-source', 'workspace_default', {
+      tabs: [firstTab, secondTab],
+    });
+    let authoritative = {
+      ...createEmptyState(),
+      groups: [source],
+    };
+    let capturedMutation: StateMutation | undefined;
+    const sendMessage = vi.fn(async (
+      message: { type: string; mutations?: StateMutation[] },
+    ) => {
+      capturedMutation = message.mutations?.[0];
+      authoritative = applyStateMutations(
+        authoritative,
+        message.mutations || [],
+      );
+      return { ok: true, result: authoritative };
+    });
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore } = await import('./useTabBoardStore');
+    useTabBoardStore.setState({
+      ...authoritative,
+      hydrated: true,
+      persistenceError: null,
+    });
+
+    await useTabBoardStore.getState().deleteTabs([
+      { groupId: source.id, tabId: firstTab.id },
+      { groupId: source.id, tabId: secondTab.id },
+    ]);
+
+    expect(capturedMutation?.type).toBe('delete-tabs');
+    expect(useTabBoardStore.getState().groups[0]?.tabs).toEqual([]);
+    expect(useTabBoardStore.getState().bin).toHaveLength(2);
+    if (!capturedMutation) throw new Error('Expected delete-tabs mutation.');
+    const replayed = applyStateMutations(authoritative, [capturedMutation]);
+    expect(replayed).toEqual(authoritative);
+    expect(replayed.bin).toHaveLength(2);
+  });
+
+  it('rejects locked, missing, duplicate-ref, and duplicate-bin batches as a whole', async () => {
+    const unlockedTab = tab('checked-guard-unlocked');
+    const lockedTab = tab('checked-guard-locked');
+    const unlocked = group('checked-guard-source', 'workspace_default', {
+      tabs: [unlockedTab],
+    });
+    const locked = group('checked-guard-locked-group', 'workspace_default', {
+      locked: true,
+      tabs: [lockedTab],
+    });
+    let persisted = {
+      ...createEmptyState(),
+      groups: [unlocked, locked],
+    };
+    const sendMessage = vi.fn(async (
+      message: { mutations?: StateMutation[] },
+    ) => {
+      try {
+        return {
+          ok: true,
+          result: applyStateMutations(persisted, message.mutations || []),
+        };
+      } catch (error: unknown) {
+        return {
+          ok: false,
+          code: error && typeof error === 'object' && 'code' in error
+            ? (error as { code?: string }).code
+            : undefined,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    const { useTabBoardStore } = await import('./useTabBoardStore');
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+
+    await expect(useTabBoardStore.getState().deleteTabs([
+      { groupId: unlocked.id, tabId: unlockedTab.id },
+      { groupId: locked.id, tabId: lockedTab.id },
+    ])).rejects.toThrow('Cannot modify a locked group.');
+    await expect(useTabBoardStore.getState().deleteTabs([
+      { groupId: unlocked.id, tabId: unlockedTab.id },
+      { groupId: unlocked.id, tabId: 'missing-tab' },
+    ])).rejects.toThrow('no longer exists');
+    await expect(useTabBoardStore.getState().deleteTabs([
+      { groupId: unlocked.id, tabId: unlockedTab.id },
+      { groupId: unlocked.id, tabId: unlockedTab.id },
+    ])).rejects.toThrow('unique');
+
+    const originalCrypto = globalThis.crypto;
+    vi.stubGlobal('crypto', {
+      ...originalCrypto,
+      randomUUID: () => 'duplicate-bin-id',
+    });
+    const second = tab('checked-guard-second');
+    persisted = {
+      ...persisted,
+      groups: [{ ...unlocked, tabs: [unlockedTab, second] }, locked],
+    };
+    useTabBoardStore.setState({
+      ...persisted,
+      hydrated: true,
+      persistenceError: null,
+    });
+    await expect(useTabBoardStore.getState().deleteTabs([
+      { groupId: unlocked.id, tabId: unlockedTab.id },
+      { groupId: unlocked.id, tabId: second.id },
+    ])).rejects.toThrow('Tab snapshot does not match the live tab.');
+
+    expect(useTabBoardStore.getState().groups[0]?.tabs.map(({ id }) => id))
+      .toEqual([unlockedTab.id, second.id]);
+    expect(useTabBoardStore.getState().bin).toEqual([]);
+  });
+});
+
 describe('TabBoard store hydration lifecycle', () => {
   type StorageListener = (
     changes: Record<string, { newValue: TabBoardState }>,
@@ -2707,7 +3688,7 @@ describe('restore-group category placement', () => {
   it('selects a surviving legacy source group globally before active workspace fallback', async () => {
     vi.useFakeTimers();
     const sourceTab = tab('legacy-store-cross-workspace-tab');
-    const workspaceB = { id: 'legacy-store-workspace-b', name: 'B', createdAt: timestamp, updatedAt: timestamp };
+    const workspaceB = { id: 'legacy-store-workspace-b', name: 'B', emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
     const entry: BinEntry = {
       id: 'legacy-store-cross-workspace-entry',
       kind: 'tab',
@@ -2746,7 +3727,7 @@ describe('restore-group category placement', () => {
   it('selects source workspace Inbox when legacy source group is missing', async () => {
     vi.useFakeTimers();
     const sourceTab = tab('legacy-store-inbox-tab');
-    const workspaceB = { id: 'legacy-store-inbox-workspace-b', name: 'B', createdAt: timestamp, updatedAt: timestamp };
+    const workspaceB = { id: 'legacy-store-inbox-workspace-b', name: 'B', emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
     const entry: BinEntry = {
       id: 'legacy-store-inbox-entry',
       kind: 'tab',
@@ -2901,7 +3882,7 @@ describe('restore-group category placement', () => {
 
   it('restores a legacy group into the surviving source folder and uses the snapshot group ID', async () => {
     vi.useFakeTimers();
-    const workspaceB = { id: 'legacy-store-group-workspace-b', name: 'B', createdAt: timestamp, updatedAt: timestamp };
+    const workspaceB = { id: 'legacy-store-group-workspace-b', name: 'B', emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
     const folderB = {
       id: 'legacy-store-group-folder-b', name: 'B folder', color: 'slate', workspaceId: workspaceB.id,
       collapsed: false, createdAt: timestamp, updatedAt: timestamp,

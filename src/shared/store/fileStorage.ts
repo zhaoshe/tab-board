@@ -26,6 +26,7 @@
  */
 
 import {
+  BOOTSTRAP_KEY,
   FILE_LAYOUT_VERSION,
   FILE_PING_KEY,
   SETTINGS_PROJECTION_KEY,
@@ -55,8 +56,8 @@ import {
   splitState,
   type FileParts,
 } from './fileSerialization';
-import type { AdapterInitError, ReloadableStorageAdapter } from './storageAdapter';
-import { projectionFromState } from './settingsProjection';
+import type { AdapterInitError, FileStorageAdapter } from './storageAdapter';
+import { fileStorageStatus, projectionFromState } from './settingsProjection';
 
 // ---------- Types for DOM widenings ----------
 
@@ -91,6 +92,7 @@ interface StoredMeta {
   createdAt: string;
   updatedAt: string;
   fileLayoutVersion: number;
+  sessionOrder?: string[];
   writeInProgress?: boolean;
   migrationInProgress?: boolean;
 }
@@ -138,6 +140,7 @@ async function pooledMap<T, R>(
 export interface FileStorageInitInfo {
   state: TabBoardState | null;
   hasExistingData: boolean;
+  fileUpdatedAt: string | null;
 }
 
 async function ensurePermission(root: FileSystemDirectoryHandle): Promise<void> {
@@ -272,7 +275,7 @@ export async function initFileStorageDirectory(
   const metaResult = await readJsonFile<StoredMeta>(root, META_FILE);
   if (!metaResult.found) {
     logBreadcrumb('file-storage: init', 'empty directory, no existing state');
-    return { state: null, hasExistingData: false };
+    return { state: null, hasExistingData: false, fileUpdatedAt: null };
   }
   const meta = metaResult.value as StoredMeta;
   const recoveryActions: string[] = [];
@@ -315,6 +318,9 @@ export async function initFileStorageDirectory(
       fileLayoutVersion: typeof meta.fileLayoutVersion === 'number'
         ? meta.fileLayoutVersion
         : FILE_LAYOUT_VERSION,
+      sessionOrder: Array.isArray(meta.sessionOrder)
+        ? meta.sessionOrder.filter((id): id is string => typeof id === 'string')
+        : [...sessions.keys()],
     },
     settings: (settings.found ? settings.value : {}) as FileParts['settings'],
     workspaces: (workspaces.found ? workspaces.value : []) as FileParts['workspaces'],
@@ -329,7 +335,11 @@ export async function initFileStorageDirectory(
 
   const state = assembleState(parts);
   logBreadcrumb('file-storage: read', `revision=${state.mutationRevision} sessions=${sessions.size}${recoveryActions.length ? ` recovery=${recoveryActions.join(',')}` : ''}`);
-  return { state, hasExistingData: true };
+  return {
+    state,
+    hasExistingData: true,
+    fileUpdatedAt: parts.meta.updatedAt,
+  };
 }
 
 // ---------- adapter ----------
@@ -345,9 +355,10 @@ interface FileStorageAdapterDeps {
 
 const STATE_CHANGED_EVENT = 'state-changed';
 
-class FileStorageAdapterImpl implements ReloadableStorageAdapter {
+class FileStorageAdapterImpl implements FileStorageAdapter {
   private root: FileSystemDirectoryHandle;
   private cachedState: TabBoardState | null = null;
+  private fileUpdatedAt: string | null = null;
   private initialized = false;
   private initPromise: Promise<void> | null = null;
   private writeQueue: Promise<void> = Promise.resolve();
@@ -368,6 +379,7 @@ class FileStorageAdapterImpl implements ReloadableStorageAdapter {
     this.initPromise = (async () => {
       const info = await initFileStorageDirectory(this.root);
       this.cachedState = info.state ? clone(info.state) : null;
+      this.fileUpdatedAt = info.fileUpdatedAt;
       this.initialized = true;
     })();
     await this.initPromise;
@@ -395,6 +407,7 @@ class FileStorageAdapterImpl implements ReloadableStorageAdapter {
     // Bypass ensureInitialized's cached-state fast path by forcing a fresh read.
     const info = await initFileStorageDirectory(this.root);
     const next = info.state ? clone(info.state) : null;
+    this.fileUpdatedAt = info.fileUpdatedAt;
     this.initialized = true;
     this.initPromise = null;
     const changed = !statesEqual(this.cachedState, next);
@@ -446,6 +459,7 @@ class FileStorageAdapterImpl implements ReloadableStorageAdapter {
       createdAt: parts.meta.createdAt,
       updatedAt: parts.meta.updatedAt,
       fileLayoutVersion: parts.meta.fileLayoutVersion,
+      sessionOrder: parts.meta.sessionOrder,
       writeInProgress: true,
     };
     await atomicWriteFile(this.root, META_FILE, serializeJson(inProgressMeta));
@@ -487,6 +501,7 @@ class FileStorageAdapterImpl implements ReloadableStorageAdapter {
       createdAt: parts.meta.createdAt,
       updatedAt: nextState.updatedAt,
       fileLayoutVersion: parts.meta.fileLayoutVersion,
+      sessionOrder: parts.meta.sessionOrder,
       writeInProgress: false,
     };
     await atomicWriteFile(this.root, META_FILE, serializeJson(finalMeta));
@@ -494,6 +509,7 @@ class FileStorageAdapterImpl implements ReloadableStorageAdapter {
     // Update cache.
     const committedState: TabBoardState = clone(nextState);
     this.cachedState = committedState;
+    this.fileUpdatedAt = nextState.updatedAt;
 
     // Same-context notification.
     this.dispatchStateChanged(committedState);
@@ -505,6 +521,10 @@ class FileStorageAdapterImpl implements ReloadableStorageAdapter {
     try {
       if (this.deps.shouldPublishPing?.() !== false && globalThis.chrome?.storage?.local?.set) {
         await globalThis.chrome.storage.local.set({
+          [BOOTSTRAP_KEY]: fileStorageStatus({
+            folderName: this.root.name || null,
+            fileUpdatedAt: nextState.updatedAt,
+          }),
           [SETTINGS_PROJECTION_KEY]: projectionFromState(nextState),
           [FILE_PING_KEY]: {
             mutationRevision: nextState.mutationRevision,
@@ -516,6 +536,10 @@ class FileStorageAdapterImpl implements ReloadableStorageAdapter {
       // Ping failure should not fail the whole write — data is durably on disk.
       logWarning('fileStorage', 'Failed to write cross-context ping after commit', err);
     }
+  }
+
+  getFileUpdatedAt(): string | null {
+    return this.fileUpdatedAt;
   }
 
   private dispatchStateChanged(state: TabBoardState): void {
@@ -562,7 +586,7 @@ class FileStorageAdapterImpl implements ReloadableStorageAdapter {
 export async function createFileStorageAdapter(
   root: FileSystemDirectoryHandle,
   deps?: FileStorageAdapterDeps,
-): Promise<ReloadableStorageAdapter> {
+): Promise<FileStorageAdapter> {
   const adapter = new FileStorageAdapterImpl(root, deps);
   await (adapter as unknown as { ensureInitialized(): Promise<void> }).ensureInitialized();
   return adapter;

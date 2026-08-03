@@ -829,7 +829,7 @@ describe('state persistence queue', () => {
   });
 
   it('rejects cross-workspace legacy restore without writing', async () => {
-    const workspaceB = { id: 'persist-legacy-workspace-b', name: 'B', createdAt: timestamp, updatedAt: timestamp };
+    const workspaceB = { id: 'persist-legacy-workspace-b', name: 'B', emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
     const sourceTab = tab('persist-legacy-cross-workspace-tab');
     const entry: BinEntry = {
       id: 'persist-legacy-cross-workspace-entry',
@@ -872,7 +872,7 @@ describe('state persistence queue', () => {
   });
 
   it('persists legacy restore into the surviving source workspace Inbox', async () => {
-    const workspaceB = { id: 'persist-legacy-inbox-b', name: 'B', createdAt: timestamp, updatedAt: timestamp };
+    const workspaceB = { id: 'persist-legacy-inbox-b', name: 'B', emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
     const sourceTab = tab('persist-legacy-inbox-tab');
     const entry: BinEntry = {
       id: 'persist-legacy-inbox-entry',

@@ -1,6 +1,15 @@
+// @vitest-environment happy-dom
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import {
+  act,
+  createElement,
+  useEffect,
+} from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { describe, expect, it } from 'vitest';
+import { afterEach, vi } from 'vitest';
+import type { Workspace } from '../../../shared/model';
 import {
   collapseSearchState,
   getInitialSearchExpanded,
@@ -8,7 +17,10 @@ import {
   runCategoryMutation,
   runValidatedCategoryMutation,
   shouldExpandSearchShortcut,
+  usePendingCreatedWorkspaceNavigation,
 } from './WorkspaceHeader';
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const source = readFileSync(resolve(process.cwd(), 'src/manager/components/workspace/WorkspaceHeader.tsx'), 'utf8');
 const globalActionsSource = readFileSync(resolve(process.cwd(), 'src/manager/components/workspace/ManagerGlobalActions.tsx'), 'utf8');
@@ -19,6 +31,96 @@ const searchCommandSource = readFileSync(resolve(process.cwd(), 'src/manager/com
 const searchSource = readFileSync(resolve(process.cwd(), 'src/manager/components/search/SearchBar.tsx'), 'utf8');
 const boardProjectionSource = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useBoardProjection.ts'), 'utf8');
 const selectorsSource = readFileSync(resolve(process.cwd(), 'src/manager/core/selectors.ts'), 'utf8');
+const timestamp = '2026-07-31T00:00:00.000Z';
+let navigationRoot: Root | null = null;
+let navigationContainer: HTMLDivElement | null = null;
+
+function workspace(id: string): Workspace {
+  return {
+    id,
+    name: id,
+    emoji: '🗂️',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function PendingNavigationHarness({
+  workspaces,
+  onQueueReady,
+  onSelectWorkspace,
+  onSelectCategory,
+}: {
+  workspaces: readonly Workspace[];
+  onQueueReady: (queue: (workspaceId: string) => void) => void;
+  onSelectWorkspace: (workspaceId: string, category: 'inbox') => void;
+  onSelectCategory: (category: 'inbox') => void;
+}) {
+  const queue = usePendingCreatedWorkspaceNavigation({
+    workspaces,
+    onSelectWorkspace,
+    onSelectCategory,
+  } as never);
+  useEffect(() => onQueueReady(queue), [onQueueReady, queue]);
+  return null;
+}
+
+afterEach(async () => {
+  if (navigationRoot) await act(async () => navigationRoot?.unmount());
+  navigationRoot = null;
+  navigationContainer?.remove();
+  navigationContainer = null;
+});
+
+describe('WorkspaceHeader create navigation', () => {
+  it('waits for the optimistic workspace projection before navigating exactly once', async () => {
+    navigationContainer = document.createElement('div');
+    document.body.append(navigationContainer);
+    navigationRoot = createRoot(navigationContainer);
+    const onSelectWorkspace = vi.fn();
+    const onSelectCategory = vi.fn();
+    let queueCreatedWorkspace: (workspaceId: string) => void = () => undefined;
+    const baseWorkspaces = [workspace('workspace-personal')];
+    const render = async (workspaces: readonly Workspace[]) => {
+      await act(async () => {
+        navigationRoot?.render(createElement(PendingNavigationHarness, {
+          workspaces,
+          onQueueReady: (queue) => {
+            queueCreatedWorkspace = queue;
+          },
+          onSelectWorkspace: (workspaceId, category) =>
+            onSelectWorkspace(workspaceId, category),
+          onSelectCategory,
+        }));
+      });
+    };
+
+    await render(baseWorkspaces);
+    await act(async () => queueCreatedWorkspace('workspace-created'));
+    expect(onSelectWorkspace).not.toHaveBeenCalled();
+    expect(onSelectCategory).not.toHaveBeenCalled();
+
+    await render([...baseWorkspaces, workspace('workspace-created')]);
+    expect(onSelectWorkspace).toHaveBeenCalledTimes(1);
+    expect(onSelectWorkspace).toHaveBeenCalledWith('workspace-created', 'inbox');
+    expect(onSelectCategory).not.toHaveBeenCalled();
+
+    await render([...baseWorkspaces, workspace('workspace-created')]);
+    expect(onSelectWorkspace).toHaveBeenCalledTimes(1);
+
+    await act(async () => queueCreatedWorkspace('workspace-created-later'));
+    await render([
+      ...baseWorkspaces,
+      workspace('workspace-created'),
+      workspace('workspace-created-later'),
+    ]);
+    expect(onSelectWorkspace).toHaveBeenCalledTimes(2);
+    expect(onSelectWorkspace).toHaveBeenLastCalledWith(
+      'workspace-created-later',
+      'inbox',
+    );
+  });
+});
 
 describe('WorkspaceHeader source contracts', () => {
   it('renders an accessible category strip with a single category options menu', () => {
@@ -26,9 +128,15 @@ describe('WorkspaceHeader source contracts', () => {
     expect(source).toContain('<CategoryManager');
     expect(categoryNavSource).toContain('aria-label="Categories"');
     expect(categoryNavSource).toContain("aria-current={isActive ? 'page' : undefined}");
-    expect(categoryManagerSource).toContain('aria-label="Category Options"');
+    expect(categoryManagerSource).toContain('label="Category Options"');
     expect(categoryManagerSource).toContain('Manage Categories');
     expect(categoryManagerSource).toContain('Add Category');
+    expect(categoryManagerSource).toContain('Rename, reorder, or remove Categories');
+    expect(categoryManagerSource).toContain('Create a custom Category');
+    expect(globalActionsSource).toContain('Bring sessions into TabBoard');
+    expect(globalActionsSource).toContain('Download a TabBoard backup');
+    expect(workspaceMenuSource).toContain('Create another Workspace');
+    expect(workspaceMenuSource).toContain('Rename, reorder, or remove Workspaces');
     expect(categoryNavSource).not.toContain('aria-label={`Actions for ${item.label}`}');
     expect(categoryManagerSource).toContain('Menu.Target');
   });
@@ -48,23 +156,34 @@ describe('WorkspaceHeader source contracts', () => {
     expect(isCategoryDragMarkerFor({ kind: 'category', categoryId: 'folder-a', placement: 'after' }, 'folder-a')).toBe(false);
   });
 
-  it('keeps category drag labels focused on navigation', () => {
+  it('uses the whole category tab as the pointer-only drag activator without explicit reorder mode', () => {
     expect(categoryNavSource).toContain('data-category-trigger="label"');
-    expect(categoryNavSource).toContain('data-category-drag-handle');
     expect(categoryNavSource).toContain('setActivatorNodeRef');
-    expect(categoryNavSource).toContain('aria-label={`Reorder ${item.label}`}');
-    expect(categoryNavSource).not.toMatch(
-      /data-category-trigger="label"[\s\S]{0,300}\{\.\.\.listeners\}/,
-    );
+    expect(categoryNavSource).toContain('{...surfaceListeners}');
+    expect(categoryNavSource).toContain('onPointerDown?.(event)');
+    expect(categoryNavSource).toContain('onTouchStart?.(event)');
+    expect(categoryNavSource).toContain("event.pointerType === 'touch'");
+    expect(categoryNavSource).not.toContain('data-category-drag-handle');
+    expect(categoryNavSource).not.toContain('reorderMode');
+    expect(categoryNavSource).not.toContain('{...attributes}');
+    expect(categoryManagerSource).not.toContain('Reorder Categories');
+    expect(categoryManagerSource).not.toContain('Done Reordering');
+    expect(source).not.toContain('categoryReorderMode');
+    expect(source).not.toContain('workspace-header--category-reorder');
     expect(categoryNavSource).not.toContain('className="manager-category-actions"');
     expect(categoryManagerSource).toContain('className="manager-category-actions"');
   });
 
-  it('manages category creation, ordering, and custom-category naming in one surface', () => {
+  it('manages canonical ordering and shared custom-category editing in one surface', () => {
     expect(categoryManagerSource).toContain('title="Manage Categories"');
     expect(categoryManagerSource).toContain('moveCategory');
-    expect(source).toContain('state.updateCategoryOrder(workspace.id, order)');
-    expect(categoryManagerSource).toContain('openRename(item.folderId!)');
+    expect(categoryManagerSource).toContain('data-category-manager-id');
+    expect(categoryManagerSource).toContain('onDragStart');
+    expect(source).toContain('onUpdateOrder={(order, { expectedCategoryOrder }) =>');
+    expect(source).toContain('{ expectedCategoryOrder }');
+    expect(categoryManagerSource).toContain('Edit Category');
+    expect(categoryManagerSource).toContain('Save Category');
+    expect(categoryManagerSource).not.toContain('Rename Category');
     expect(categoryManagerSource).toContain('Add Category');
   });
 
@@ -72,26 +191,45 @@ describe('WorkspaceHeader source contracts', () => {
     expect(categoryManagerSource).toContain('validateFolderName');
     expect(categoryManagerSource).toContain('runValidatedCategoryMutation');
     expect(source).toContain('state.addFolder(workspace.id');
-    expect(source).toContain('onRenameFolder={state.renameFolder}');
+    expect(source).toContain('onUpdateFolder={state.updateFolder}');
     expect(categoryManagerSource).toContain('runCategoryMutation');
     expect(source).toContain('onDeleteFolder={state.deleteFolder}');
     expect(categoryManagerSource).toContain("onSelectCategory('inbox')");
     expect(categoryManagerSource).toContain('loading={submitting}');
+    expect(source).toContain('groups={state.groups}');
   });
 
   it('keeps workspace selection and actions separate from header actions', () => {
     expect(source).toContain('<WorkspaceMenu');
     expect(workspaceMenuSource).toContain('New Workspace');
-    expect(workspaceMenuSource).toContain('Rename Workspace');
-    expect(workspaceMenuSource).toContain('Current Workspace');
-    expect(workspaceMenuSource).toContain('IconCheck');
+    expect(workspaceMenuSource).toContain('Manage Workspaces');
+    expect(workspaceMenuSource).toContain('label="Edit Workspace"');
+    expect(workspaceMenuSource).toContain('<WorkspaceEditorModal');
+    expect(workspaceMenuSource).toContain('<WorkspaceManagerModal');
+    expect(workspaceMenuSource).not.toContain('Rename Workspace');
+    expect(workspaceMenuSource).not.toContain('Change Emoji');
+    expect(workspaceMenuSource).not.toContain('Current Workspace');
+    expect(workspaceMenuSource).not.toContain('IconCheck');
     expect(workspaceMenuSource).not.toContain('window.prompt');
+    expect(source).toContain('const workspaceId = state.addWorkspace(name, emoji)');
+    expect(source).toContain('queueCreatedWorkspaceNavigation(workspaceId)');
+    const createHandler = source.slice(
+      source.indexOf('onCreate={({ name, emoji }) => {'),
+      source.indexOf('onUpdateWorkspace={state.updateWorkspace}'),
+    );
+    expect(source).toContain("onSelectWorkspace(workspaceId, 'inbox')");
+    expect(createHandler).not.toContain("onSelectCategory('inbox')");
+    expect(source).toContain("onSelectWorkspace(workspaceId, 'inbox')");
+    expect(source).toContain('onUpdateWorkspace={state.updateWorkspace}');
+    expect(source).toContain('onUpdateWorkspaceOrder={state.updateWorkspaceOrder}');
+    expect(source).toContain('onDeleteWorkspace={state.deleteWorkspace}');
     expect(source).toContain('<ManagerGlobalActions');
-    expect(globalActionsSource).toContain('aria-label="Import"');
-    expect(globalActionsSource).toContain('aria-label="Export"');
-    expect(globalActionsSource).toContain('aria-label="Trash"');
-    expect(globalActionsSource).toContain('aria-label="Options"');
-    expect(globalActionsSource).toContain('aria-label="More Actions"');
+    expect(globalActionsSource).toContain('label="Bin"');
+    expect(globalActionsSource).not.toContain('label="Trash"');
+    expect(globalActionsSource).toContain('label="More Actions"');
+    expect(globalActionsSource).toContain('Import');
+    expect(globalActionsSource).toContain('Export');
+    expect(globalActionsSource).toContain('Options');
     expect(source).not.toContain('Delete workspace');
     expect(source).not.toContain('Workspace Stats');
     expect(source).not.toContain('Reset category order');
@@ -104,7 +242,8 @@ describe('WorkspaceHeader source contracts', () => {
     expect(searchCommandSource).toContain('aria-controls={SEARCH_INPUT_ID}');
     expect(searchCommandSource).toContain('aria-expanded={expanded}');
     expect(searchCommandSource).toContain('setExpanded');
-    expect(source).toContain("workspace-header${searchExpanded ? ' workspace-header--search-expanded' : ''}");
+    expect(source).toContain("searchExpanded && 'workspace-header--search-expanded'");
+    expect(source).not.toContain('workspace-header--category-reorder');
     expect(searchCommandSource).toContain('fullWidth={false}');
     expect(searchCommandSource).toContain('onEscape={() => setSearchExpanded(collapseSearchState(query).isExpanded)}');
     expect(getInitialSearchExpanded('needle')).toBe(true);
@@ -116,6 +255,59 @@ describe('WorkspaceHeader source contracts', () => {
     expect(shortcutEffect).toBeDefined();
     expect(shortcutEffect?.[2].trim()).toBe('');
     expect(effects.some(([, body]) => body.includes('query') && body.includes('setIsSearchExpanded(true)'))).toBe(false);
+  });
+
+  it('keeps persistent topbar ownership in Workspace, Categories, Search, Bin, More order', () => {
+    const workspaceIndex = source.indexOf('<WorkspaceMenu');
+    const categoriesIndex = source.indexOf('<div className="manager-category-strip">');
+    const searchIndex = source.indexOf('<ManagerSearchCommand');
+    const globalIndex = source.indexOf('<ManagerGlobalActions');
+
+    expect(workspaceIndex).toBeGreaterThanOrEqual(0);
+    expect(categoriesIndex).toBeGreaterThan(workspaceIndex);
+    expect(searchIndex).toBeGreaterThan(categoriesIndex);
+    expect(globalIndex).toBeGreaterThan(searchIndex);
+    expect(globalActionsSource).toContain('label="Bin"');
+    const importIndex = globalActionsSource.indexOf('Import');
+    const exportIndex = globalActionsSource.indexOf('Export');
+    const optionsIndex = globalActionsSource.indexOf('Options');
+    expect(importIndex).toBeGreaterThanOrEqual(0);
+    expect(exportIndex).toBeGreaterThan(importIndex);
+    expect(optionsIndex).toBeGreaterThan(exportIndex);
+  });
+
+  it('keeps search visually neutral while preserving exclusive expansion at 48px', () => {
+    const headerCss = readFileSync(
+      resolve(process.cwd(), 'src/manager/styles/header.css'),
+      'utf8',
+    );
+    expect(headerCss).toMatch(
+      /\.manager-search-toggle\s*\{[^}]*background:\s*transparent;[^}]*border:\s*0;/,
+    );
+    expect(headerCss).toMatch(
+      /\.workspace-header--search-expanded \.manager-category-strip\s*\{[^}]*display:\s*none;/,
+    );
+    expect(headerCss).not.toMatch(
+      /\.manager-search-toggle\s*\{[^}]*background:\s*var\(--mantine-primary/,
+    );
+    expect(headerCss).toMatch(
+      /\.manager-search-input \.mantine-TextInput-input\s*\{[^}]*border-color:\s*transparent;[^}]*background:\s*transparent;/,
+    );
+    expect(headerCss).toContain('.manager-topbar');
+    expect(headerCss).toContain('grid-template-rows: 48px minmax(0, 1fr)');
+  });
+
+  it('keeps coarse Workspace manager actions visible, clickable, and 44px without row focus', () => {
+    const headerCss = readFileSync(
+      resolve(process.cwd(), 'src/manager/styles/header.css'),
+      'utf8',
+    );
+    expect(headerCss).toMatch(
+      /@media \(hover: none\), \(pointer: coarse\)[\s\S]*?\.workspace-manager-row__actions\s*\{[^}]*visibility:\s*visible;[^}]*pointer-events:\s*auto;[^}]*opacity:\s*1;/,
+    );
+    expect(headerCss).toMatch(
+      /@media \(hover: none\), \(pointer: coarse\)[\s\S]*?\.workspace-manager-row__actions \.accessible-icon-action\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px;/,
+    );
   });
 
   it('uses concrete shallow store selectors and an exact category projection', () => {

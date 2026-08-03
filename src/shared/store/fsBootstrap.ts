@@ -9,25 +9,54 @@
  */
 
 import { BOOTSTRAP_KEY } from '../model/constants';
+import {
+  BROWSER_STORAGE_STATUS,
+  parseStorageStatusProjection,
+  type StorageStatusProjection,
+} from './settingsProjection';
 import type { StorageMode } from './storageAdapter';
 
-interface BootstrapConfig {
-  mode: StorageMode;
-}
-
-function isValidMode(v: unknown): v is StorageMode {
-  return v === 'browser' || v === 'file';
-}
-
 export async function readBootstrapMode(): Promise<StorageMode> {
+  return (await readStorageStatusProjection()).activeBackend;
+}
+
+export async function readStorageStatusProjection(): Promise<StorageStatusProjection> {
   const result = await chrome.storage.local.get(BOOTSTRAP_KEY);
-  const config = result[BOOTSTRAP_KEY] as BootstrapConfig | undefined;
-  if (config && isValidMode(config.mode)) {
-    return config.mode;
-  }
-  return 'browser';
+  return parseStorageStatusProjection(result[BOOTSTRAP_KEY])
+    ?? { ...BROWSER_STORAGE_STATUS };
+}
+
+export async function writeStorageStatusProjection(
+  status: StorageStatusProjection,
+): Promise<void> {
+  await chrome.storage.local.set({ [BOOTSTRAP_KEY]: status });
 }
 
 export async function writeBootstrapMode(mode: StorageMode): Promise<void> {
-  await chrome.storage.local.set({ [BOOTSTRAP_KEY]: { mode } satisfies BootstrapConfig });
+  await writeStorageStatusProjection(
+    mode === 'browser'
+      ? { ...BROWSER_STORAGE_STATUS }
+      : {
+          configuredTarget: 'file',
+          activeBackend: 'file',
+          folderName: null,
+          fallbackReason: null,
+          fileUpdatedAt: null,
+        },
+  );
+}
+
+export function subscribeStorageStatusProjection(
+  callback: (status: StorageStatusProjection) => void,
+): () => void {
+  const listener = (
+    changes: Record<string, chrome.storage.StorageChange>,
+    area: string,
+  ) => {
+    if (area !== 'local' || !changes[BOOTSTRAP_KEY]) return;
+    const status = parseStorageStatusProjection(changes[BOOTSTRAP_KEY].newValue);
+    if (status) callback(status);
+  };
+  chrome.storage.onChanged.addListener(listener);
+  return () => chrome.storage.onChanged.removeListener(listener);
 }

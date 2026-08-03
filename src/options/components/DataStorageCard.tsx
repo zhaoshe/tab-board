@@ -1,94 +1,80 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Card,
-  Stack,
-  Group,
-  Title,
-  Text,
-  Button,
   Alert,
+  Button,
+  Group,
+  Stack,
+  Text,
+  Title,
 } from '@mantine/core';
 import {
-  IconDatabase,
-  IconFolder,
-  IconAlertTriangle,
-  IconRefresh,
-  IconPlugConnectedX,
-} from '@tabler/icons-react';
+  FolderOpen as IconFolder,
+  RefreshCw as IconRefresh,
+  TriangleAlert as IconAlertTriangle,
+  Unplug as IconPlugConnectedX,
+} from 'lucide-react';
 import {
-  getActiveState,
-  isFileModeActive,
-  onFallback,
+  getActiveAdapter,
+  isWorkerModuleFallbackReason,
   reconnectFolder,
 } from '../../shared/store/activeAdapter';
+import {
+  readStorageStatusProjection,
+  subscribeStorageStatusProjection,
+} from '../../shared/store/fsBootstrap';
+import type { StorageStatusProjection } from '../../shared/store/settingsProjection';
+import { formatTime } from '../../shared/utils/formatters';
 import { FolderPickerDialog } from './FolderPickerDialog';
 import { DisconnectDialog } from './DisconnectDialog';
-import { formatRelativeTime } from '../../shared/utils/formatters';
-
-interface SavedRootInfo {
-  name: string | null;
-}
-
-async function getFolderNameFromIdb(): Promise<string | null> {
-  // The root handle is persisted via fsDirectory. loadRootHandle retrieves it.
-  try {
-    const { loadRootHandle } = await import('../../shared/store/fsDirectory');
-    const root = await loadRootHandle();
-    return root ? root.name : null;
-  } catch {
-    return null;
-  }
-}
-
-async function readLastSavedFromAuthority(): Promise<string | null> {
-  try {
-    const state = await getActiveState();
-    return state.updatedAt || null;
-  } catch {
-    return null;
-  }
-}
 
 export function DataStorageCard() {
-  const [fileMode, setFileMode] = useState<boolean>(false);
-  const [folderName, setFolderName] = useState<string | null>(null);
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [fallbackReason, setFallbackReason] = useState<string | null>(null);
+  const [status, setStatus] = useState<StorageStatusProjection | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
-
-  const refreshStatus = async () => {
-    try {
-      const active = await isFileModeActive();
-      setFileMode(active);
-      if (active) {
-        const [name, saved] = await Promise.all([
-          getFolderNameFromIdb(),
-          readLastSavedFromAuthority(),
-        ]);
-        setFolderName(name);
-        setUpdatedAt(saved);
-      } else {
-        setFolderName(null);
-        setUpdatedAt(null);
-      }
-    } catch {
-      setFileMode(false);
-    }
-  };
+  const [reconnectError, setReconnectError] = useState<string | null>(null);
+  const [legacyRecoveryAttempted, setLegacyRecoveryAttempted] = useState(false);
 
   useEffect(() => {
-    void refreshStatus();
-    const unsub = onFallback((reason: string) => {
-      setFallbackReason(reason);
-      setFileMode(false);
+    let disposed = false;
+    let receivedSubscriptionUpdate = false;
+    const unsubscribe = subscribeStorageStatusProjection((nextStatus) => {
+      receivedSubscriptionUpdate = true;
+      setStatus(nextStatus);
     });
+
+    void readStorageStatusProjection().then((initialStatus) => {
+      if (!disposed && !receivedSubscriptionUpdate) setStatus(initialStatus);
+    });
+
     return () => {
-      unsub();
+      disposed = true;
+      unsubscribe();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (
+      legacyRecoveryAttempted
+      || status?.configuredTarget !== 'file'
+      || status.activeBackend !== 'browser'
+      || !isWorkerModuleFallbackReason(status.fallbackReason)
+    ) {
+      return;
+    }
+    setLegacyRecoveryAttempted(true);
+    void getActiveAdapter()
+      .then(async () => {
+        try {
+          await chrome.runtime.sendMessage({ type: 'tabboard-storage-switched' });
+        } catch {
+          // Other extension contexts will re-read the persisted backend on next startup.
+        }
+      })
+      .catch(() => {
+        // The persisted fallback remains visible with its normal recovery actions.
+      });
+  }, [legacyRecoveryAttempted, status]);
 
   const reloadPage = () => {
     window.location.reload();
@@ -96,15 +82,13 @@ export function DataStorageCard() {
 
   const handleReconnect = async () => {
     setReconnecting(true);
+    setReconnectError(null);
     try {
-      // Prompt the user to re-pick the folder; this also re-grants permission.
       const picker = (globalThis as unknown as {
         showDirectoryPicker?: (opts?: { mode?: 'read' | 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
       }).showDirectoryPicker;
       if (!picker) {
-        setFallbackReason('showDirectoryPicker is not available in this context.');
-        setReconnecting(false);
-        return;
+        throw new Error('Folder access is not available in this context.');
       }
       const root = await picker({ mode: 'readwrite' });
       await reconnectFolder(root);
@@ -113,104 +97,158 @@ export function DataStorageCard() {
       } catch {
         // ignore
       }
-      reloadPage();
     } catch (err) {
       if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'NotAllowedError')) {
-        setReconnecting(false);
         return;
       }
-      setFallbackReason(err instanceof Error ? err.message : String(err));
+      setReconnectError(err instanceof Error ? err.message : String(err));
+    } finally {
       setReconnecting(false);
     }
   };
 
-  const storageLabel = fileMode
-    ? (folderName ? `File storage — ${folderName}` : 'File storage')
-    : 'Browser storage';
+  const isFileConfigured = status?.configuredTarget === 'file';
+  const isFallback = isFileConfigured && status.activeBackend === 'browser';
+  const updatedTime = status?.fileUpdatedAt
+    ? formatTime(status.fileUpdatedAt)
+    : null;
 
   return (
     <>
-      <Card withBorder shadow="sm" padding="lg">
+      <section
+        className="options-advanced-row options-storage-panel"
+        aria-label="Storage location"
+        aria-busy={status === null}
+      >
         <Stack gap="md">
-          <div>
-            <Group gap="xs" mb={2}>
-              {fileMode
-                ? <IconFolder size={18} aria-hidden="true" />
-                : <IconDatabase size={18} aria-hidden="true" />}
+          <Group
+            className="options-storage-heading-row"
+            justify="space-between"
+            align="flex-start"
+            wrap="nowrap"
+          >
+            <div>
               <Title order={2} size="h5">
-                Data Storage
+                Storage location
               </Title>
-            </Group>
-            <Text size="sm" c="dimmed">
-              Where <span translate="no">TabBoard</span> saves your sessions
-            </Text>
-          </div>
-
-          <Text size="sm">
-            <strong>Current storage:</strong> {storageLabel}
-          </Text>
-
-          {fileMode && updatedAt && (
-            <Text size="xs" c="dimmed">
-              Last saved: {formatRelativeTime(updatedAt)}
-            </Text>
-          )}
-
-          {fallbackReason && (
-            <Alert color="red" icon={<IconAlertTriangle size={16} aria-hidden="true" />}>
-              <Text size="sm">{fallbackReason}</Text>
-              <Group mt="sm">
-                <Button
-                  size="xs"
-                  leftSection={<IconRefresh size={14} aria-hidden="true" />}
-                  loading={reconnecting}
-                  aria-label={reconnecting ? 'Reconnecting…' : 'Reconnect Folder'}
-                  onClick={() => void handleReconnect()}
-                >
-                  {reconnecting ? 'Reconnecting…' : 'Reconnect Folder'}
-                </Button>
-              </Group>
-            </Alert>
-          )}
-
-          <Group gap="xs">
-            {!fileMode && (
+              <Text size="sm" c="dimmed">
+                Choose where <span translate="no">TabBoard</span> saves session data.
+              </Text>
+            </div>
+            {status?.configuredTarget === 'browser' && (
               <Button
-                className="options-action-primary"
-                variant="filled"
-                color="blue"
+                variant="default"
                 leftSection={<IconFolder size={16} aria-hidden="true" />}
                 onClick={() => setPickerOpen(true)}
               >
-                Choose Folder…
+                Choose folder
               </Button>
             )}
-            {fileMode && (
-              <>
-                <Button
-                  className="options-action-primary"
-                  variant="filled"
-                  color="blue"
-                  leftSection={<IconRefresh size={16} aria-hidden="true" />}
-                  loading={reconnecting}
-                  aria-label={reconnecting ? 'Reconnecting…' : 'Reconnect Folder'}
-                  onClick={() => void handleReconnect()}
-                >
-                  {reconnecting ? 'Reconnecting…' : 'Reconnect Folder'}
-                </Button>
-                <Button
-                  variant="outline"
-                  color="red"
-                  leftSection={<IconPlugConnectedX size={16} aria-hidden="true" />}
-                  onClick={() => setDisconnectOpen(true)}
-                >
-                  Stop Using File Storage
-                </Button>
-              </>
+            {isFileConfigured && !isFallback && (
+              <Button
+                variant="default"
+                leftSection={<IconPlugConnectedX size={16} aria-hidden="true" />}
+                onClick={() => setDisconnectOpen(true)}
+              >
+                Use browser storage
+              </Button>
             )}
           </Group>
+
+          {status === null && (
+            <Text size="sm" c="dimmed" role="status">
+              Loading storage status…
+            </Text>
+          )}
+
+          {status?.configuredTarget === 'browser' && (
+            <div
+              className="options-storage-detail-row"
+            >
+              <Text size="sm">Browser storage</Text>
+              <Text size="xs" c="dimmed">
+                Session data is stored in this Chrome profile.
+              </Text>
+            </div>
+          )}
+
+          {isFileConfigured && (
+            <>
+              <Group
+                className="options-storage-detail-row"
+                justify="space-between"
+                align="center"
+                wrap="nowrap"
+              >
+                <Group
+                  className="options-storage-folder-meta"
+                  gap="md"
+                  justify="space-between"
+                  wrap="nowrap"
+                >
+                  <Text size="sm">
+                    Local folder name: {status.folderName ?? 'Unavailable'}
+                  </Text>
+                  {updatedTime && (
+                    <Text size="xs" c="dimmed">
+                      updated: {updatedTime}
+                    </Text>
+                  )}
+                </Group>
+                {!isFallback && (
+                  <Button
+                    variant="default"
+                    leftSection={<IconFolder size={16} aria-hidden="true" />}
+                    onClick={() => setPickerOpen(true)}
+                  >
+                    Change folder
+                  </Button>
+                )}
+              </Group>
+
+              {isFallback && (
+                <Alert
+                  className="options-storage-fallback"
+                  color="yellow"
+                  icon={<IconAlertTriangle size={16} aria-hidden="true" />}
+                >
+                  <Stack gap="xs">
+                    <Text size="sm">
+                      New writes are temporarily stored in browser storage.
+                    </Text>
+                    {status.fallbackReason && (
+                      <Text size="xs" c="dimmed">{status.fallbackReason}</Text>
+                    )}
+                    {reconnectError && (
+                      <Text size="xs" c="red">{reconnectError}</Text>
+                    )}
+                    <Group className="options-storage-fallback-actions">
+                      <Button
+                        size="xs"
+                        variant="default"
+                        leftSection={<IconRefresh size={14} aria-hidden="true" />}
+                        loading={reconnecting}
+                        aria-label={reconnecting ? 'Reconnecting…' : 'Reconnect folder'}
+                        onClick={() => void handleReconnect()}
+                      >
+                        {reconnecting ? 'Reconnecting…' : 'Reconnect folder'}
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="default"
+                        leftSection={<IconPlugConnectedX size={14} aria-hidden="true" />}
+                        onClick={() => setDisconnectOpen(true)}
+                      >
+                        Use browser storage
+                      </Button>
+                    </Group>
+                  </Stack>
+                </Alert>
+              )}
+            </>
+          )}
         </Stack>
-      </Card>
+      </section>
 
       <FolderPickerDialog
         opened={pickerOpen}

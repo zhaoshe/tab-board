@@ -22,7 +22,7 @@ import type {
 const timestamp = '2026-01-01T00:00:00.000Z';
 
 function makeWorkspace(id: string): Workspace {
-  return { id, name: id, createdAt: timestamp, updatedAt: timestamp };
+  return { id, name: id, emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
 }
 
 function makeFolder(id: string, workspaceId: string, name = id): Folder {
@@ -405,7 +405,7 @@ describe('filterGroupsByQuery', () => {
 });
 
 describe('getCategoryStrip', () => {
-  it('orders Inbox, Saved, Archive, then active-workspace custom folders', () => {
+  it('projects the complete canonical order across built-in and custom categories', () => {
     const state = makeState({
       folders: [
         makeFolder('folder-a', 'workspace-1', 'Alpha'),
@@ -414,7 +414,16 @@ describe('getCategoryStrip', () => {
         makeFolder('other-folder', 'workspace-2', 'Other'),
       ],
       categoryOrderByWorkspace: {
-        'workspace-1': ['folder:folder-b', 'folder-b', 'missing', 'folder:other-folder', 'folder-a'],
+        'workspace-1': [
+          'saved',
+          'folder:folder-b',
+          'inbox',
+          'folder-b',
+          'missing',
+          'folder:other-folder',
+          'folder-a',
+          'archive',
+        ],
       },
       groups: [
         makeGroup('inbox', 'workspace-1'),
@@ -433,11 +442,11 @@ describe('getCategoryStrip', () => {
     });
 
     expect(getCategoryStrip(state)).toEqual([
-      { id: 'inbox', label: 'Inbox', count: 3, kind: 'inbox' },
       { id: 'saved', label: 'Saved', count: 2, kind: 'saved' },
-      { id: 'archive', label: 'Archive', count: 1, kind: 'archive' },
       { id: 'folder:folder-b', label: 'Beta', count: 3, kind: 'folder', folderId: 'folder-b' },
+      { id: 'inbox', label: 'Inbox', count: 3, kind: 'inbox' },
       { id: 'folder:folder-a', label: 'Alpha', count: 2, kind: 'folder', folderId: 'folder-a' },
+      { id: 'archive', label: 'Archive', count: 1, kind: 'archive' },
       { id: 'folder:folder-c', label: 'Gamma', count: 0, kind: 'folder', folderId: 'folder-c' },
     ]);
   });
@@ -449,10 +458,10 @@ describe('getCategoryStrip', () => {
     });
 
     expect(getCategoryStrip(state).map((item) => item.id)).toEqual([
+      'folder:folder-b',
       'inbox',
       'saved',
       'archive',
-      'folder:folder-b',
       'folder:folder-a',
     ]);
   });
@@ -546,7 +555,7 @@ describe('normalizeState settings validation', () => {
     expect(normalized.settings.includeChromeUrls).toBe(false);
     expect(normalized.settings.dedupeOnSave).toBe(true);
     expect(normalized.settings.theme).toBe('system');
-    expect(normalized.settings.actionClick).toBe('store');
+    expect(normalized.settings.actionClick).toBe('popup');
     expect(JSON.stringify(raw)).toBe(before);
   });
 

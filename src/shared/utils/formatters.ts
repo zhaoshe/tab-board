@@ -36,6 +36,22 @@ export function formatDateTime(
   }).format(date);
 }
 
+export function formatTime(
+  value: DateValue,
+  locale?: Intl.LocalesArgument,
+  timeZone?: string,
+): string {
+  const date = toDate(value);
+  if (!date) return '';
+  return new Intl.DateTimeFormat(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZone,
+  }).format(date);
+}
+
 export function formatRelativeTime(
   value: DateValue,
   now = new Date(),

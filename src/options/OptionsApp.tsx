@@ -16,7 +16,6 @@ import {
   Stack,
   Switch,
   Text,
-  Divider,
   Group,
   Radio,
   SegmentedControl,
@@ -25,15 +24,16 @@ import {
   Loader,
 } from '@mantine/core';
 import {
-  IconSettings,
-  IconExternalLink,
-  IconAlertTriangle,
-} from '@tabler/icons-react';
+  AppWindow as IconExternalLink,
+  ChevronDown,
+  TriangleAlert as IconAlertTriangle,
+} from 'lucide-react';
 import '@mantine/core/styles.css';
 import { theme } from '../shared/styles/theme';
 import { usePreferredColorScheme } from '../shared/hooks/usePreferredColorScheme';
 import { usePageTheme } from '../shared/hooks/usePageTheme';
 import { SettingsSection } from './components/SettingsSection';
+import { RestoreSettingsSection } from './components/RestoreSettingsSection';
 import { useSettingsDraft } from './hooks/useSettingsDraft';
 import { useOptionsSettings } from './hooks/useOptionsSettings';
 import './options.css';
@@ -77,12 +77,13 @@ export function OptionsApp() {
     hydrated,
     settings,
     persistenceError,
+    retryLastFailedMutation,
+    saveStatus,
     updateSettings,
   } = useOptionsSettings();
   const colorScheme = usePreferredColorScheme(settings.theme);
   usePageTheme(colorScheme);
 
-  const [savePending, setSavePending] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(
     () => new URLSearchParams(window.location.search).get('advanced') === '1',
   );
@@ -91,9 +92,7 @@ export function OptionsApp() {
     key: K,
     value: (typeof settings)[K]
   ) => {
-    setSavePending(true);
     updateSettings({ [key]: value } as Partial<typeof settings>);
-    setSavePending(false);
 
     if (key === 'actionClick') {
       chrome.runtime
@@ -107,7 +106,6 @@ export function OptionsApp() {
     onCommit: (value) => {
       updateSettings({ customUrlFilter: value });
     },
-    onPendingChange: setSavePending,
   });
 
   const handleOpenManager = () => {
@@ -144,16 +142,15 @@ export function OptionsApp() {
   return (
     <MantineProvider theme={theme} forceColorScheme={colorScheme}>
       <main>
-        <Container size="sm" py="xl">
-          <Stack gap="xl">
-          <Group className="options-header" justify="space-between" align="flex-start">
+        <Container className="options-page-container" size="sm">
+          <Stack gap={0}>
+          <Group className="options-header" justify="space-between" align="flex-start" wrap="nowrap">
             <div className="options-header__title">
               <Title order={1} size="h3">
                 <span translate="no">TabBoard</span> Settings
               </Title>
-              <Text c="dimmed" size="sm" mt={4}>
-                Configure how <span translate="no">TabBoard</span> works
-              </Text>
+            </div>
+            <Group className="options-header__actions" gap="md" wrap="nowrap">
               <Text
                 className="options-save-status"
                 role="status"
@@ -161,24 +158,33 @@ export function OptionsApp() {
                 aria-atomic="true"
                 size="xs"
                 c={persistenceError ? 'red' : 'dimmed'}
-                mt={4}
               >
                 {!hydrated
                   ? 'Loading settings…'
-                  : persistenceError
+                  : saveStatus === 'error' || persistenceError
                     ? 'Could not save'
-                    : savePending
+                    : customFilter.pending || saveStatus === 'saving'
                       ? 'Saving…'
                       : 'Saved'}
               </Text>
-            </div>
-            <Button
-              variant="default"
-              leftSection={<IconExternalLink size={16} aria-hidden="true" />}
-              onClick={handleOpenManager}
-            >
-              Open Manager
-            </Button>
+              {hydrated && saveStatus === 'error' && (
+                <Button
+                  className="options-save-retry"
+                  size="compact-xs"
+                  variant="subtle"
+                  onClick={retryLastFailedMutation}
+                >
+                  Retry
+                </Button>
+              )}
+              <Button
+                variant="default"
+                leftSection={<IconExternalLink size={16} aria-hidden="true" />}
+                onClick={handleOpenManager}
+              >
+                Open Manager
+              </Button>
+            </Group>
           </Group>
 
           <fieldset
@@ -189,11 +195,10 @@ export function OptionsApp() {
           <SettingsSection
             title="Toolbar"
             description="Extension button behavior"
-            icon={<IconSettings size={18} aria-hidden="true" />}
           >
 
               <Radio.Group
-                label="Extension button behavior"
+                label="When the toolbar button is clicked"
                 value={settings.actionClick}
                 onChange={(value) =>
                   handleSettingChange(
@@ -205,7 +210,7 @@ export function OptionsApp() {
               >
                 <Group mt="xs">
                   <Radio value="store" label="Save current window" />
-                  <Radio value="popup" label="Open popup" />
+                  <Radio value="popup" label="Open Popup" />
                 </Group>
               </Radio.Group>
           </SettingsSection>
@@ -213,50 +218,58 @@ export function OptionsApp() {
           <SettingsSection title="Capture" description="Daily save behavior">
 
               <Stack gap="sm">
-                <Switch
-                  name="close-tabs-after-save"
-                  label="Close tabs after saving"
-                  description="Tabs are closed once they are stored in a session"
-                  checked={settings.closeTabsAfterSave}
-                  onChange={(e) =>
-                    handleSettingChange(
-                      'closeTabsAfterSave',
-                      e.currentTarget.checked
-                    )
-                  }
-                />
+                <div className="options-switch-row">
+                  <Switch
+                    name="close-tabs-after-save"
+                    label="Close tabs after saving"
+                    description="Close regular source tabs after they are stored; pinned tabs stay open."
+                    labelPosition="left"
+                    checked={settings.closeTabsAfterSave}
+                    onChange={(e) =>
+                      handleSettingChange(
+                        'closeTabsAfterSave',
+                        e.currentTarget.checked
+                      )
+                    }
+                  />
+                </div>
 
-                <Switch
-                  name="open-manager-after-save"
-                  label="Open manager after save"
-                  description="Show the manager page after saving tabs"
-                  checked={settings.openManagerAfterSave}
-                  onChange={(e) =>
-                    handleSettingChange(
-                      'openManagerAfterSave',
-                      e.currentTarget.checked
-                    )
-                  }
-                />
+                <div className="options-switch-row">
+                  <Switch
+                    name="open-manager-after-save"
+                    label="Open manager after save"
+                    description="Show the manager after capturing tabs."
+                    labelPosition="left"
+                    checked={settings.openManagerAfterSave}
+                    onChange={(e) =>
+                      handleSettingChange(
+                        'openManagerAfterSave',
+                        e.currentTarget.checked
+                      )
+                    }
+                  />
+                </div>
 
-                <Switch
-                  name="dedupe-on-save"
-                  label="Deduplicate on save"
-                  description="Remove duplicate URLs within the tabs being saved. Keep one copy in the new session and close duplicate source tabs."
-                  checked={settings.dedupeOnSave}
-                  onChange={(e) =>
-                    handleSettingChange(
-                      'dedupeOnSave',
-                      e.currentTarget.checked
-                    )
-                  }
-                />
-
-                <Divider />
+                <div className="options-switch-row">
+                  <Switch
+                    name="dedupe-on-save"
+                    label="Deduplicate on save"
+                    description="Keep one copy of repeated URLs; pinned source tabs stay open."
+                    labelPosition="left"
+                    checked={settings.dedupeOnSave}
+                    onChange={(e) =>
+                      handleSettingChange(
+                        'dedupeOnSave',
+                        e.currentTarget.checked
+                      )
+                    }
+                  />
+                </div>
 
                 <Textarea
-                  label="Custom filter rules"
-                  description="Hide matching open tabs. Separate URL keywords with commas or new lines."
+                  className="options-exclude-setting"
+                  label="Exclude URL rules"
+                  description="Matching tabs are hidden from Open Tabs and excluded from selection, drag, and save. Separate URL keywords with commas or new lines."
                   placeholder="example.com, chrome://newtab…"
                   name="custom-url-filter"
                   autoComplete="off"
@@ -270,62 +283,10 @@ export function OptionsApp() {
               </Stack>
           </SettingsSection>
 
-          <SettingsSection title="Restore" description="How saved tabs return">
-
-              <Stack gap="sm">
-                <Switch
-                  name="delete-restored-tabs"
-                  label="Delete saved tabs after restore"
-                  description="Remove tabs from the session when restored"
-                  checked={settings.deleteRestoredTabs}
-                  onChange={(e) =>
-                    handleSettingChange(
-                      'deleteRestoredTabs',
-                      e.currentTarget.checked
-                    )
-                  }
-                />
-
-                <Switch
-                  name="restore-groups-in-new-window"
-                  label="Restore groups in new window"
-                  description="Open entire tab groups in a new window"
-                  checked={settings.restoreGroupsInNewWindow}
-                  onChange={(e) =>
-                    handleSettingChange(
-                      'restoreGroupsInNewWindow',
-                      e.currentTarget.checked
-                    )
-                  }
-                />
-
-                <Switch
-                  name="restore-next-to-current"
-                  label="Restore next to current tab"
-                  description="Open restored tabs next to the currently active tab"
-                  checked={settings.restoreNextToCurrent}
-                  onChange={(e) =>
-                    handleSettingChange(
-                      'restoreNextToCurrent',
-                      e.currentTarget.checked
-                    )
-                  }
-                />
-
-                <Switch
-                  name="focus-restored-tabs"
-                  label="Focus restored tabs"
-                  description="Bring focus to newly opened tabs"
-                  checked={settings.focusRestoredTabs}
-                  onChange={(e) =>
-                    handleSettingChange(
-                      'focusRestoredTabs',
-                      e.currentTarget.checked
-                    )
-                  }
-                />
-              </Stack>
-          </SettingsSection>
+          <RestoreSettingsSection
+            settings={settings}
+            onChange={updateSettings}
+          />
 
           <SettingsSection title="Appearance" description="Theme preference">
 
@@ -357,7 +318,14 @@ export function OptionsApp() {
               open={advancedOpen}
               onToggle={(event) => handleAdvancedToggle(event.currentTarget.open)}
             >
-              <summary>Advanced Settings</summary>
+              <summary>
+                <span>Advanced Settings</span>
+                <ChevronDown
+                  className="options-advanced-chevron"
+                  size={16}
+                  aria-hidden="true"
+                />
+              </summary>
               {advancedOpen ? (
                 <AdvancedSettingsErrorBoundary>
                   <Suspense

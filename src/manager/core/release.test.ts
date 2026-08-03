@@ -78,8 +78,19 @@ describe('core contracts', () => {
       payload: null,
       target: null,
       sourceRect: null,
+      previewRect: null,
+      previewLayout: null,
       marker: null,
-    })).toEqual({ payload: null, target: null, sourceRect: null, marker: null });
+      previewItems: [],
+    })).toEqual({
+      payload: null,
+      target: null,
+      sourceRect: null,
+      previewRect: null,
+      previewLayout: null,
+      marker: null,
+      previewItems: [],
+    });
 
     const replayIntent = {
       kind: 'move-session' as const,

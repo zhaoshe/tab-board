@@ -1,6 +1,63 @@
 import { describe, it, expect } from 'vitest';
-import { defaultGroupTitle, normalizeState } from './schema';
-import { DEFAULT_WORKSPACE_ID, DEFAULT_SETTINGS, FILE_LAYOUT_VERSION, BOOTSTRAP_KEY, FILE_PING_KEY, FILE_STORE_DB, FILE_STORE_STORE, FILE_STORE_HANDLE_KEY } from './constants';
+import {
+  createWorkspace,
+  defaultGroupTitle,
+  normalizeState,
+  normalizeWorkspace,
+  normalizeWorkspaceEmoji,
+} from './schema';
+import {
+  DEFAULT_WORKSPACE_EMOJI,
+  DEFAULT_WORKSPACE_ID,
+  DEFAULT_SETTINGS,
+  FILE_LAYOUT_VERSION,
+  BOOTSTRAP_KEY,
+  FILE_PING_KEY,
+  FILE_STORE_DB,
+  FILE_STORE_STORE,
+  FILE_STORE_HANDLE_KEY,
+} from './constants';
+
+const timestamp = '2026-01-01T00:00:00.000Z';
+
+describe('workspace emoji normalization', () => {
+  it('fills the default emoji for a legacy workspace', () => {
+    expect(normalizeWorkspace({
+      id: 'workspace-a',
+      name: 'Research',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })?.emoji).toBe('🗂️');
+  });
+
+  it('preserves one emoji grapheme when creating a workspace', () => {
+    expect(createWorkspace('Research', '🧪').emoji).toBe('🧪');
+  });
+
+  it('accepts a ZWJ emoji with a skin-tone modifier as one grapheme', () => {
+    expect(normalizeWorkspaceEmoji('👩🏽‍💻')).toBe('👩🏽‍💻');
+  });
+
+  it('falls back when the value is not an emoji grapheme', () => {
+    expect(normalizeWorkspaceEmoji('text')).toBe(DEFAULT_WORKSPACE_EMOJI);
+  });
+
+  it('conservatively rejects multiple emoji when Intl.Segmenter is unavailable', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
+    Object.defineProperty(Intl, 'Segmenter', {
+      configurable: true,
+      value: undefined,
+    });
+    try {
+      expect(normalizeWorkspaceEmoji('😀')).toBe('😀');
+      expect(normalizeWorkspaceEmoji('😀😀')).toBe(DEFAULT_WORKSPACE_EMOJI);
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(Intl, 'Segmenter', descriptor);
+      }
+    }
+  });
+});
 
 describe('normalizeState quickList migration', () => {
   it('drops the quickList field from normalized state', () => {
@@ -60,6 +117,14 @@ describe('default session titles', () => {
 });
 
 describe('storage settings defaults', () => {
+  it('uses popup for new/default settings while preserving explicit legacy store mode', () => {
+    expect(DEFAULT_SETTINGS.actionClick).toBe('popup');
+    expect(normalizeState({ settings: {} }).settings.actionClick).toBe('popup');
+    expect(normalizeState({
+      settings: { actionClick: 'store' },
+    }).settings.actionClick).toBe('store');
+  });
+
   it('DEFAULT_SETTINGS includes storageMode and storageFolderName', () => {
     expect(DEFAULT_SETTINGS.storageMode).toBe('browser');
     expect(DEFAULT_SETTINGS.storageFolderName).toBe('');

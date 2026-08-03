@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEmptyState, DEFAULT_SETTINGS } from '../model';
 import {
+  parseStorageStatusProjection,
   projectionFromState,
   readSettingsProjection,
   subscribeSettingsProjection,
   type SettingsProjection,
+  type StorageStatusProjection,
 } from './settingsProjection';
 
 afterEach(() => {
@@ -116,5 +118,86 @@ describe('settings projection', () => {
     expect(callback).toHaveBeenCalledWith(projection({ mutationRevision: 8 }));
     unsubscribe();
     expect(chrome.storage.onChanged.removeListener).toHaveBeenCalledWith(listener);
+  });
+});
+
+describe('storage status projection', () => {
+  it('normalizes current Browser and Local Folder status records', () => {
+    const browser: StorageStatusProjection = {
+      configuredTarget: 'browser',
+      activeBackend: 'browser',
+      folderName: null,
+      fallbackReason: null,
+      fileUpdatedAt: null,
+    };
+    const file: StorageStatusProjection = {
+      configuredTarget: 'file',
+      activeBackend: 'file',
+      folderName: 'TabBoard',
+      fallbackReason: null,
+      fileUpdatedAt: '2026-07-31T09:10:11.000Z',
+    };
+
+    expect(parseStorageStatusProjection(browser)).toEqual(browser);
+    expect(parseStorageStatusProjection(file)).toEqual(file);
+  });
+
+  it('keeps configured Local Folder identity while Browser is the fallback backend', () => {
+    expect(parseStorageStatusProjection({
+      configuredTarget: 'file',
+      activeBackend: 'browser',
+      folderName: 'TabBoard',
+      fallbackReason: 'Permission to access the storage folder was denied.',
+      fileUpdatedAt: '2026-07-31T09:10:11.000Z',
+    })).toEqual({
+      configuredTarget: 'file',
+      activeBackend: 'browser',
+      folderName: 'TabBoard',
+      fallbackReason: 'Permission to access the storage folder was denied.',
+      fileUpdatedAt: '2026-07-31T09:10:11.000Z',
+    });
+  });
+
+  it('upgrades legacy bootstrap mode records without inventing folder metadata', () => {
+    expect(parseStorageStatusProjection({ mode: 'file' })).toEqual({
+      configuredTarget: 'file',
+      activeBackend: 'file',
+      folderName: null,
+      fallbackReason: null,
+      fileUpdatedAt: null,
+    });
+    expect(parseStorageStatusProjection({ mode: 'browser' })).toEqual({
+      configuredTarget: 'browser',
+      activeBackend: 'browser',
+      folderName: null,
+      fallbackReason: null,
+      fileUpdatedAt: null,
+    });
+  });
+
+  it.each([
+    ['mismatched Browser target', {
+      configuredTarget: 'browser',
+      activeBackend: 'file',
+      folderName: null,
+      fallbackReason: null,
+      fileUpdatedAt: null,
+    }],
+    ['missing file folder type', {
+      configuredTarget: 'file',
+      activeBackend: 'file',
+      folderName: 42,
+      fallbackReason: null,
+      fileUpdatedAt: null,
+    }],
+    ['invalid update timestamp', {
+      configuredTarget: 'file',
+      activeBackend: 'browser',
+      folderName: 'TabBoard',
+      fallbackReason: 'Missing',
+      fileUpdatedAt: 42,
+    }],
+  ])('rejects %s', (_name, value) => {
+    expect(parseStorageStatusProjection(value)).toBeNull();
   });
 });

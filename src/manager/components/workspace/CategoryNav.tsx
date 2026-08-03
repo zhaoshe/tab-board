@@ -1,6 +1,9 @@
-import { ActionIcon, Button, Group, Text, Tooltip } from '@mantine/core';
+import {
+  useLayoutEffect,
+  useRef,
+} from 'react';
+import { Button, Group, Text } from '@mantine/core';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
-import { IconGripVertical } from '@tabler/icons-react';
 import type { CategoryFilter, CategoryStripItem } from '../../core/selectors';
 import type { DndData, DragMarker } from '../../core/dnd';
 import { formatNumber } from '../../../shared/utils/formatters';
@@ -16,32 +19,40 @@ export function isCategoryDragMarkerFor(
 }
 
 function CategoryReorderTarget({
-  id,
   categoryId,
   placement,
   workspaceId,
   dragMarker,
 }: {
-  id: string;
   categoryId: string;
   placement: 'before' | 'after';
   workspaceId: string;
   dragMarker?: DragMarker | null;
 }) {
   const { setNodeRef, isOver } = useDroppable({
-    id,
+    id: `category-reorder-${categoryId}-${placement}`,
     data: {
       type: 'category-reorder',
       dnd: {
-        targets: [{ kind: 'category-reorder', categoryId, placement, workspaceId }],
+        targets: [{
+          kind: 'category-reorder',
+          categoryId,
+          placement,
+          workspaceId,
+        }],
       } satisfies DndData,
     },
   });
-  const isMarker = isCategoryDragMarkerFor(dragMarker, categoryId, placement);
+  const isMarker = isCategoryDragMarkerFor(
+    dragMarker,
+    categoryId,
+    placement,
+  );
   return (
     <span
       ref={setNodeRef}
       className="manager-category-reorder-target"
+      data-category-reorder-target={`${categoryId}-${placement}`}
       data-over={isOver || isMarker || undefined}
       data-drag-marker={isMarker ? placement : undefined}
       aria-hidden="true"
@@ -63,7 +74,6 @@ function CategoryDndItem({
   onSelect: () => void;
 }) {
   const {
-    attributes,
     listeners,
     setNodeRef: setDragNodeRef,
     setActivatorNodeRef,
@@ -72,7 +82,11 @@ function CategoryDndItem({
     data: {
       type: 'category',
       dnd: {
-        payload: { kind: 'category', categoryId: item.id, workspaceId },
+        payload: {
+          kind: 'category',
+          categoryId: item.id,
+          workspaceId,
+        },
       } satisfies DndData,
     },
   });
@@ -86,6 +100,13 @@ function CategoryDndItem({
     },
   });
   const isMarker = dragMarker?.kind === 'category' && dragMarker.categoryId === item.id;
+  const {
+    onKeyDown: _keyboardListener,
+    onPointerDown,
+    onTouchStart,
+    ...surfaceListeners
+  } = listeners ?? {};
+
   return (
     <div
       ref={(node) => {
@@ -98,33 +119,26 @@ function CategoryDndItem({
       data-drag-marker={isMarker ? dragMarker.placement : undefined}
     >
       <CategoryReorderTarget
-        id={`category-reorder-${item.id}-before`}
         categoryId={item.id}
         placement="before"
         workspaceId={workspaceId}
         dragMarker={dragMarker}
       />
       <Group className="manager-category-control" gap={0} wrap="nowrap">
-        <Tooltip label={`Reorder ${item.label}`}>
-          <ActionIcon
-            ref={setActivatorNodeRef}
-            {...attributes}
-            {...listeners}
-            className="manager-category-drag-handle"
-            data-category-drag-handle
-            variant="subtle"
-            aria-label={`Reorder ${item.label}`}
-          >
-            <IconGripVertical size={14} aria-hidden="true" />
-          </ActionIcon>
-        </Tooltip>
         <Button
+          ref={setActivatorNodeRef}
           variant={isActive ? 'light' : 'subtle'}
-          color={isActive ? 'blue' : 'gray'}
+          color={isActive ? 'cobalt' : 'gray'}
           size="sm"
           data-category-id={item.id}
           data-category-trigger="label"
           aria-current={isActive ? 'page' : undefined}
+          {...surfaceListeners}
+          onPointerDown={(event) => {
+            if (event.pointerType === 'touch') return;
+            onPointerDown?.(event);
+          }}
+          onTouchStart={(event) => onTouchStart?.(event)}
           onClick={onSelect}
         >
           <Text size="sm">{item.label}</Text>
@@ -136,7 +150,6 @@ function CategoryDndItem({
         </Button>
       </Group>
       <CategoryReorderTarget
-        id={`category-reorder-${item.id}-after`}
         categoryId={item.id}
         placement="after"
         workspaceId={workspaceId}
@@ -161,8 +174,43 @@ export function CategoryNav({
   dragMarker?: DragMarker | null;
   onSelect: (category: CategoryFilter) => void;
 }) {
+  const navRef = useRef<HTMLElement | null>(null);
+
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (!nav || showBin) return undefined;
+    const active = [...nav.querySelectorAll<HTMLElement>('[data-category-id]')]
+      .find((item) => item.dataset.categoryId === selectedCategory);
+    if (!active) return undefined;
+
+    let frame = 0;
+    const revealActiveCategory = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const navRect = nav.getBoundingClientRect();
+        const activeRect = active.getBoundingClientRect();
+        if (activeRect.left < navRect.left) {
+          nav.scrollLeft += activeRect.left - navRect.left;
+        } else if (activeRect.right > navRect.right) {
+          nav.scrollLeft += activeRect.right - navRect.right;
+        }
+      });
+    };
+
+    revealActiveCategory();
+    const observer = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(revealActiveCategory)
+      : null;
+    observer?.observe(nav);
+    observer?.observe(active);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [selectedCategory, showBin]);
+
   return (
-    <nav className="manager-category-nav" aria-label="Categories">
+    <nav ref={navRef} className="manager-category-nav" aria-label="Categories">
       <Group gap={2} wrap="nowrap">
         {categories.map((item) => (
           <CategoryDndItem

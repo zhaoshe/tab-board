@@ -13,6 +13,14 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    modulePreload: {
+      resolveDependencies(filename, deps, context) {
+        const isWorkerFileStorageImport = context.hostType === 'js'
+          && context.hostId.includes('activeAdapter-')
+          && /(?:fileStorage|fsDirectory)-/.test(filename);
+        return isWorkerFileStorageImport ? [] : deps;
+      },
+    },
     rollupOptions: {
       input: {
         manager: 'manager.html',
@@ -24,6 +32,7 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     exclude: ['tests/**/*.mjs', 'node_modules/**', 'dist/**'],
+    setupFiles: ['src/test/setup.ts'],
   },
   server: {
     port: 5173,

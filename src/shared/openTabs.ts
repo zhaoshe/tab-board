@@ -7,7 +7,6 @@ export interface OpenTabInfo {
   title: string;
   url: string;
   favIconUrl: string;
-  active: boolean;
   pinned: boolean;
   index: number;
   browserGroup: BrowserGroup | null;
@@ -66,7 +65,6 @@ export function isOpenTabInfo(value: unknown): value is OpenTabInfo {
     && typeof value.title === 'string'
     && typeof value.url === 'string'
     && typeof value.favIconUrl === 'string'
-    && typeof value.active === 'boolean'
     && typeof value.pinned === 'boolean'
     && isNonNegativeInteger(value.index)
     && (value.browserGroup === null || isBrowserGroup(value.browserGroup))
@@ -90,7 +88,33 @@ export function parseOpenTabsListResult(value: unknown): OpenTabsListResult {
     || !value.windows.every(isOpenWindowInfo)) {
     throw new Error('Invalid Open Tabs list result.');
   }
-  return { windows: value.windows };
+  return {
+    windows: value.windows.map((window) => ({
+      id: window.id,
+      focused: window.focused,
+      incognito: window.incognito,
+      tabCount: window.tabCount,
+      tabs: window.tabs.map((tab) => ({
+        id: tab.id,
+        windowId: tab.windowId,
+        title: tab.title,
+        url: tab.url,
+        favIconUrl: tab.favIconUrl,
+        pinned: tab.pinned,
+        index: tab.index,
+        browserGroup: tab.browserGroup === null
+          ? null
+          : {
+              sourceGroupId: tab.browserGroup.sourceGroupId,
+              title: tab.browserGroup.title,
+              color: tab.browserGroup.color,
+              collapsed: tab.browserGroup.collapsed,
+            },
+        storable: tab.storable,
+        reason: tab.reason,
+      })),
+    })),
+  };
 }
 
 export function parseOpenTabsCaptureResult(value: unknown): OpenTabsCaptureResult {

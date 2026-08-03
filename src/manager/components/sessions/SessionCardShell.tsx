@@ -1,4 +1,9 @@
-import { IconGripVertical, IconLink, IconLock, IconNote } from '@tabler/icons-react';
+import type { PointerEvent, TouchEvent } from 'react';
+import {
+  Link as IconLink,
+  Lock as IconLock,
+  StickyNote as IconNote,
+} from 'lucide-react';
 import type { Group } from '../../../shared/model';
 import { ITEM_LINK, ITEM_NOTE } from '../../../shared/model';
 import { formatNumber } from '../../../shared/utils/formatters';
@@ -20,6 +25,25 @@ export function SessionCardShell({
     if (tab.itemType === ITEM_NOTE) noteCount += 1;
   }
 
+  const blocksSessionDrag = (target: EventTarget | null): boolean => {
+    if (!(target instanceof Element)) return false;
+    if (target.closest(
+      'input, textarea, a, [data-no-drag], .session-card__actions, .session-card__tabs',
+    )) {
+      return true;
+    }
+    const button = target.closest('button');
+    return Boolean(button && !button.matches('.session-card__title, .session-card__note'));
+  };
+  const handlePointerDown = (event: PointerEvent<HTMLElement>) => {
+    if (event.pointerType === 'touch' || blocksSessionDrag(event.target)) return;
+    sortable.listeners?.onPointerDown?.(event);
+  };
+  const handleTouchStart = (event: TouchEvent<HTMLElement>) => {
+    if (blocksSessionDrag(event.target)) return;
+    sortable.listeners?.onTouchStart?.(event);
+  };
+
   return (
     <article
       ref={sortable.setNodeRef}
@@ -29,18 +53,10 @@ export function SessionCardShell({
       data-session-shell="true"
       style={sortable.style}
       aria-label={`${group.title} session`}
+      onPointerDown={handlePointerDown}
+      onTouchStart={handleTouchStart}
     >
       <header className="session-card__header">
-        <button
-          ref={sortable.setActivatorNodeRef}
-          type="button"
-          className="session-card__drag-handle"
-          aria-label={`Drag ${group.title} to reorder`}
-          {...sortable.attributes}
-          {...sortable.listeners}
-        >
-          <IconGripVertical size={16} aria-hidden="true" />
-        </button>
         <div className="session-card__heading">
           <button
             type="button"

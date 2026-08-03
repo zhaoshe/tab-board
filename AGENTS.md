@@ -6,7 +6,7 @@ This file is the shared operating guide for AI agents working in this repo. `CLA
 
 TabBoard is a local-first Chrome Manifest V3 tab manager inspired by OneTab and tabExtend. It saves browser tabs into recoverable sessions, then lets the user organize them with workspaces, categories, search, notes, drag and drop, import/export, and a new-tab manager page.
 
-The project is a React + TypeScript app built with Vite. It uses React 18, Mantine v7, Zustand, `@dnd-kit`, `@tabler/icons-react`, Chrome extension APIs, and `chrome.storage.local`. The extension is packaged with `@crxjs/vite-plugin`.
+The project is a React + TypeScript app built with Vite. It uses React 18, Mantine v7, Zustand, `@dnd-kit`, `lucide-react`, Chrome extension APIs, and a browser/file Storage Authority. The extension is packaged with `@crxjs/vite-plugin`.
 
 ## Read First
 
@@ -27,7 +27,7 @@ Before making meaningful changes, read these docs in order:
 - `src/background/service-worker.ts`: service worker, Chrome API boundary, capture/restore/context menus/omnibox.
 - `src/background/statePersistence.ts`: serialized mutation queue and normalized atomic writes.
 - `src/shared/model/`: state schema, types, normalize, creation helpers, import/export, matching logic.
-- `src/shared/store/`: `chrome.storage.local` adapter, immutable state mutations, mutation validation, Zustand store.
+- `src/shared/store/`: browser/file Storage Authority, projections, immutable state mutations, mutation validation, Zustand facade.
 - `src/manager/components/`: Mantine shell, workspace header, sidebar/Open Tabs, session board, Bin, import/export, search, overlays.
 - `src/manager/core/`: pure selectors, commands, capture, open-tabs, typed DnD contracts, and core tests.
 - `src/manager/hooks/`: hydration, runtime message, Open Tabs, and overlay lifecycle adapters.
@@ -64,7 +64,8 @@ npm run icons
 - Category is a single session assignment. A session can belong to at most one category.
 - Built-in categories:
   - `Inbox`: sessions with no custom category and not starred.
-  - `Starred`: sessions marked as starred.
+  - `Saved`: sessions marked as starred.
+  - `Archive`: sessions marked as archived.
 - There is no separate `All items` category in the sidebar.
 - Quick list / pinned workflow was removed; do not rebuild it unless explicitly requested.
 
@@ -77,10 +78,11 @@ npm run icons
 - The workspace switcher/header belongs in the main top bar.
 - Search belongs in the workspace header area, not the left sidebar.
 - The sidebar is for open tabs and browser windows.
-- Open Tabs should only show tabs that can be stored under current settings, plus pinned tabs marked as not storable.
+- Open Tabs hides extension pages and custom URL exclusions. Pinned tabs are storable when allowed by the shared capture policy and stay open after automatic capture/dedupe.
 - Selection mode for open tabs is explicit. Checked tabs are for creating sessions or batch dragging, not for automatic filtering.
 - Filtering sessions by an open tab is triggered from a right-click/context action, not by merely checking a tab.
 - Session tab items open on click. Per-item action buttons are intentionally minimized; use right-click menus for secondary actions.
+- Workspace names and emoji are edited together. Workspace/category order is persisted through typed mutations.
 
 ## Drag And Drop Rules
 
@@ -88,11 +90,12 @@ Drag and drop is one of the most fragile areas. Be conservative.
 
 - Session drag should reorder sessions and move them between categories.
 - Do not merge session A into session B by dropping one session onto another; this was removed because it caused accidental merges.
-- While dragging a session, show a clear target line/placeholder at the final insertion point.
-- On drag start, if the target position is not yet recalculated, the placeholder should stay at the session's original position.
+- Pointer/touch drag uses object surfaces, never a visible or hidden drag handle. Keyboard-equivalent results use named Hybrid Commands.
+- While dragging a session, show a clear target line/placeholder at the final insertion point. At pickup the source slot remains the current target.
 - The dragged session should remain visually attached to the pointer via a valid drag image.
-- Dragging one or more tab items can either add them to an existing session or create a new session at the indicated insertion point.
+- Dragging tab items can add them to an existing session. Creating a new session requires an explicit start/between/end `new-session-insert` Gap Anchor, or the empty-category first slot.
 - Avoid persistent "New session" cards. New-session targets should appear as part of drag feedback when relevant.
+- If all tabs from one saved session are selected, suppress New Session targets while still allowing an explicit merge into another existing session.
 - If changing drag behavior, manually test dragging:
   - a session within the same category,
   - a session across categories,
@@ -105,14 +108,15 @@ Drag and drop is one of the most fragile areas. Be conservative.
 - Import should support TabBoard JSON/text and OneTab export text through the normal Import entry.
 - Do not add a separate "Import from OneTab" entry unless explicitly requested.
 - Export should preserve enough data for round-tripping TabBoard sessions.
-- The sidebar utility actions are Bin, Import, Export, and Options.
+- Bin is direct in the manager top bar; Import, Export, and Options live in the global More menu.
 - Import icon semantics should point inward/down; Export should point outward/up.
 
 ## Settings And Special URLs
 
-- Capture settings can exclude pinned tabs, duplicate URLs, `chrome://` URLs, and `file://` URLs.
-- `chrome://` and `file://` storage are separate settings and default to off.
+- Capture settings include duplicate handling, one custom exclusion rule set, and separate compatibility toggles for `chrome://` / `file://` URLs.
+- Pinned tabs are selectable and savable, but automatic capture and dedupe never close pinned source tabs.
 - Respect Chrome API restrictions when restoring or storing special URLs.
+- Local-folder mode is a substitute backend. Keep the directory handle in IndexedDB; persist only the configured-target/active-backend status projection in `chrome.storage.local`.
 
 ## Documentation Rules
 

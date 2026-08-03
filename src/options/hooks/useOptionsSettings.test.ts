@@ -130,6 +130,53 @@ describe('useOptionsSettings', () => {
     expect(container?.textContent).toBe('dark:ok');
   });
 
+  it('keeps save status pending until the authoritative mutation commits', async () => {
+    const initial = createEmptyState();
+    const authoritative = {
+      ...initial,
+      mutationRevision: 4,
+      settings: { ...initial.settings, theme: 'dark' as const },
+      updatedAt: '2026-02-02T00:00:00.000Z',
+    };
+    let resolveMutation!: (value: unknown) => void;
+    vi.stubGlobal('chrome', {
+      runtime: {
+        sendMessage: vi.fn(() => new Promise((resolve) => {
+          resolveMutation = resolve;
+        })),
+      },
+      storage: {
+        local: {
+          get: vi.fn(async () => ({
+            [SETTINGS_PROJECTION_KEY]: projectionFromState(initial),
+          })),
+          set: vi.fn(),
+        },
+        onChanged: {
+          addListener: vi.fn((listener) => { storageListener = listener; }),
+          removeListener: vi.fn(),
+        },
+      },
+    });
+
+    await mountProbe();
+    await vi.waitFor(() => expect(latest?.saveStatus).toBe('idle'));
+    await act(async () => {
+      container?.querySelector('button')?.click();
+    });
+
+    expect(latest?.settings.theme).toBe('dark');
+    expect(latest?.saveStatus).toBe('saving');
+
+    await act(async () => {
+      resolveMutation({ ok: true, result: authoritative });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(latest?.saveStatus).toBe('saved'));
+    expect(latest?.projection.mutationRevision).toBe(4);
+  });
+
   it('rolls back an optimistic change when persistence rejects', async () => {
     const initial = createEmptyState();
     vi.stubGlobal('chrome', {
@@ -163,6 +210,95 @@ describe('useOptionsSettings', () => {
     await vi.waitFor(() => {
       expect(container?.textContent).toBe('system:storage unavailable');
     });
+    expect(latest?.saveStatus).toBe('error');
+  });
+
+  it('retries the exact failed settings update through the same queue', async () => {
+    const initial = createEmptyState();
+    const authoritative = {
+      ...initial,
+      mutationRevision: 1,
+      settings: { ...initial.settings, theme: 'dark' as const },
+      updatedAt: '2026-02-03T00:00:00.000Z',
+    };
+    const sendMessage = vi.fn()
+      .mockResolvedValueOnce({ ok: false, error: 'storage unavailable' })
+      .mockResolvedValueOnce({ ok: true, result: authoritative });
+    vi.stubGlobal('chrome', {
+      runtime: { sendMessage },
+      storage: {
+        local: {
+          get: vi.fn(async () => ({
+            [SETTINGS_PROJECTION_KEY]: projectionFromState(initial),
+          })),
+          set: vi.fn(),
+        },
+        onChanged: {
+          addListener: vi.fn((listener) => { storageListener = listener; }),
+          removeListener: vi.fn(),
+        },
+      },
+    });
+
+    await mountProbe();
+    await vi.waitFor(() => expect(latest?.saveStatus).toBe('idle'));
+    await act(async () => {
+      container?.querySelector('button')?.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(latest?.saveStatus).toBe('error'));
+
+    await act(async () => {
+      latest?.retryLastFailedMutation();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(latest?.saveStatus).toBe('saved'));
+    expect(latest?.settings.theme).toBe('dark');
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage.mock.calls.map(([message]) => message.mutations[0].updates))
+      .toEqual([{ theme: 'dark' }, { theme: 'dark' }]);
+  });
+
+  it('does not retain a stale failed patch after a newer update for the same field commits', async () => {
+    const initial = createEmptyState();
+    const authoritative = {
+      ...initial,
+      mutationRevision: 1,
+      settings: { ...initial.settings, theme: 'light' as const },
+      updatedAt: '2026-02-04T00:00:00.000Z',
+    };
+    const sendMessage = vi.fn()
+      .mockResolvedValueOnce({ ok: false, error: 'first write failed' })
+      .mockResolvedValueOnce({ ok: true, result: authoritative });
+    vi.stubGlobal('chrome', {
+      runtime: { sendMessage },
+      storage: {
+        local: {
+          get: vi.fn(async () => ({
+            [SETTINGS_PROJECTION_KEY]: projectionFromState(initial),
+          })),
+          set: vi.fn(),
+        },
+        onChanged: {
+          addListener: vi.fn((listener) => { storageListener = listener; }),
+          removeListener: vi.fn(),
+        },
+      },
+    });
+
+    await mountProbe();
+    await vi.waitFor(() => expect(latest?.saveStatus).toBe('idle'));
+    await act(async () => {
+      latest?.updateSettings({ theme: 'dark' });
+      latest?.updateSettings({ theme: 'light' });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(latest?.saveStatus).toBe('saved'));
+    expect(latest?.settings.theme).toBe('light');
+    expect(latest?.persistenceError).toBeNull();
   });
 
   it('accepts a newer cross-context projection publication', async () => {

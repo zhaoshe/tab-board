@@ -5,8 +5,6 @@ import {
   Text,
   Button,
   Group,
-  ActionIcon,
-  Tooltip,
   Paper,
   Checkbox,
   Center,
@@ -14,20 +12,19 @@ import {
 } from '@mantine/core';
 import '@mantine/core/styles.css';
 import {
-  IconArchive,
-  IconCheck,
-  IconBrandChrome,
-  IconCopy,
-  IconLayoutGrid,
-  IconSettings,
-} from '@tabler/icons-react';
+  AppWindow as IconLayoutGrid,
+  Settings2 as IconSettings,
+} from 'lucide-react';
 import { theme } from '../shared/styles/theme';
 import { isStorableCaptureCandidate } from '../shared/model/capture-policy';
+import {
+  classifyWindowDuplicates,
+  isWindowDedupeUrl,
+} from '../shared/model/window-dedupe';
 import { useTabBoardStore } from '../shared/store/useTabBoardStore';
 import { useStoreHydration } from '../shared/hooks/useStoreHydration';
 import { useColorScheme } from '../shared/hooks/useColorScheme';
 import { usePageTheme } from '../shared/hooks/usePageTheme';
-import { ConfirmDialog } from '../shared/components/ConfirmDialog';
 import { AccessibleIconAction } from '../shared/components/AccessibleIconAction';
 import { formatNumber } from '../shared/utils/formatters';
 import './popup.css';
@@ -46,6 +43,12 @@ function errorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+export function popupSaveHelper(closeTabsAfterSave: boolean): string {
+  return closeTabsAfterSave
+    ? 'Save and close tabs'
+    : 'Save and keep tabs open';
+}
+
 export function PopupApp() {
   const { hydrated } = useStoreHydration();
   const settings = useTabBoardStore((state) => state.settings);
@@ -58,10 +61,7 @@ export function PopupApp() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [includePinned, setIncludePinned] = useState(true);
-  const [includeGroups, setIncludeGroups] = useState(true);
-  const [dedupeConfirmOpen, setDedupeConfirmOpen] = useState(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dedupeActionRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (hydrated) {
@@ -102,32 +102,21 @@ export function PopupApp() {
     return tabs.filter((tab) => isStorableCaptureCandidate(tab, settings, extensionBaseUrl));
   }, [tabs, settings, hydrated]);
 
-  const duplicateCount = useMemo(() => {
-    const urlMap = new Map<string, number>();
-    filteredTabs.forEach((tab) => {
-      urlMap.set(tab.url, (urlMap.get(tab.url) || 0) + 1);
-    });
-    let count = 0;
-    urlMap.forEach((c) => {
-      if (c > 1) count += c - 1;
-    });
-    return count;
-  }, [filteredTabs]);
-
-  const groupedTabCount = useMemo(
-    () => filteredTabs.filter((tab) => typeof tab.groupId === 'number' && tab.groupId >= 0).length,
-    [filteredTabs],
-  );
-
-  const groupCount = useMemo(
-    () => new Set(filteredTabs.flatMap((tab) => typeof tab.groupId === 'number' && tab.groupId >= 0 ? [tab.groupId] : [])).size,
-    [filteredTabs],
-  );
+  const duplicateClassification = useMemo(() => {
+    const extensionBaseUrl = import.meta.env.DEV
+      ? `${window.location.origin}/dev/`
+      : chrome.runtime.getURL('');
+    return classifyWindowDuplicates(
+      tabs.filter((tab) => isWindowDedupeUrl(tab.url, extensionBaseUrl)),
+    );
+  }, [tabs]);
+  const duplicateCount = duplicateClassification.removable.length;
+  const hasProtectedPinnedDuplicates =
+    duplicateClassification.protectedPinnedCount > 0;
 
   const selectedTabs = useMemo(
-    () => filteredTabs.filter((tab) => (includePinned || !tab.pinned)
-      && (includeGroups || typeof tab.groupId !== 'number' || tab.groupId < 0)),
-    [filteredTabs, includeGroups, includePinned],
+    () => filteredTabs.filter((tab) => includePinned || !tab.pinned),
+    [filteredTabs, includePinned],
   );
 
   const handleSave = async () => {
@@ -197,54 +186,60 @@ export function PopupApp() {
 
   const feedbackError = loadError || saveError;
   const pinnedTabCount = filteredTabs.filter((tab) => tab.pinned).length;
-  const hasCaptureOptions = pinnedTabCount > 0 || groupedTabCount > 0;
   const selectedCount = selectedTabs.length;
-  const selectedCountLabel = `${formatNumber(selectedCount)} ${selectedCount === 1 ? 'Tab' : 'Tabs'}`;
   const saveButtonText = savingTabs
     ? 'Saving…'
     : saved
       ? 'Saved'
-      : selectedCount
-        ? `Save ${selectedCountLabel}`
-        : 'No Tabs Selected';
+      : 'Save';
   const saveButtonLabel = savingTabs
     ? 'Saving Selected Tabs…'
     : selectedCount
-      ? `Save ${selectedCountLabel} as a Session`
+      ? `Save ${formatNumber(selectedCount)} ${selectedCount === 1 ? 'tab' : 'tabs'} as a session`
       : 'No Tabs Selected to Save';
-  const selectionSummary = selectedCount
-    ? `${formatNumber(selectedCount)} of ${formatNumber(filteredTabs.length)} tabs selected`
-    : filteredTabs.length > 0
-      ? 'No tabs selected. Include pinned tabs or tab groups to save this window.'
-      : 'No savable tabs in this window.';
 
   return (
     <MantineProvider theme={theme} forceColorScheme={colorScheme}>
       <Paper component="main" className="popup-app">
         <h1 className="visually-hidden"><span translate="no">TabBoard</span></h1>
-        <Group className="popup-app__header">
+        <Group className="popup-app__header" justify="space-between" wrap="nowrap">
           <Group gap="xs">
-            <IconBrandChrome size={18} aria-hidden="true" style={{ color: 'var(--mantine-color-blue-6)' }} />
+            <img
+              className="popup-app__brand-icon"
+              src="/icons/icon-32.png"
+              alt=""
+              width={22}
+              height={22}
+            />
             <Text fw={700} size="sm"><span translate="no">TabBoard</span></Text>
+          </Group>
+          <Group gap={4} wrap="nowrap">
+            <AccessibleIconAction label="Open Manager" variant="subtle" onClick={openManager}>
+              <IconLayoutGrid size={18} aria-hidden="true" />
+            </AccessibleIconAction>
+            <AccessibleIconAction label="Open Settings" variant="subtle" onClick={openOptions}>
+              <IconSettings size={18} aria-hidden="true" />
+            </AccessibleIconAction>
           </Group>
         </Group>
 
         <div className="popup-app__capture">
-          <Text className="popup-app__count" fw={700} size="md">
-            {formatNumber(filteredTabs.length)} {filteredTabs.length === 1 ? 'Tab' : 'Tabs'}
-          </Text>
+          <div className="popup-app__save-copy">
+            <Text className="popup-app__count">
+              {formatNumber(selectedCount)} {selectedCount === 1 ? 'tab' : 'tabs'}
+            </Text>
+            <Text className="popup-app__save-helper" c="dimmed">
+              {popupSaveHelper(settings.closeTabsAfterSave)}
+            </Text>
+          </div>
           <Button
             className="popup-app__save"
             data-popup-save
-            fullWidth
-            leftSection={saved
-              ? <IconCheck size={14} aria-hidden="true" />
-              : <IconArchive size={14} aria-hidden="true" />}
             size="sm"
             onClick={handleSave}
             loading={savingTabs}
             disabled={selectedTabs.length === 0}
-            color={saved ? 'green' : 'blue'}
+            variant="default"
             aria-label={saveButtonLabel}
           >
             {saveButtonText}
@@ -253,91 +248,56 @@ export function PopupApp() {
             {saved ? 'Tabs saved. Closing popup…' : ''}
           </span>
 
-          <Text
-            className="popup-app__selection-summary"
-            data-popup-selection-summary
-            size="xs"
-            c="dimmed"
-            aria-live="polite"
-          >
-            {selectionSummary}
-          </Text>
-
-          {filteredTabs.length > 0 && hasCaptureOptions && (
-            <Group className="popup-app__filters" gap="sm">
-              {pinnedTabCount > 0 && (
-                <Checkbox
-                  size="sm"
-                  name="include-pinned-tabs"
-                  label={`${formatNumber(pinnedTabCount)} pinned`}
-                  checked={includePinned}
-                  onChange={(event) => setIncludePinned(event.currentTarget.checked)}
-                />
-              )}
-              {groupedTabCount > 0 && (
-                <Checkbox
-                  size="sm"
-                  name="include-tab-groups"
-                  label={`${formatNumber(groupCount)} group${groupCount === 1 ? '' : 's'}`}
-                  checked={includeGroups}
-                  onChange={(event) => setIncludeGroups(event.currentTarget.checked)}
-                />
-              )}
-            </Group>
+          {pinnedTabCount > 0 && (
+            <div className="popup-app__pinned">
+              <Checkbox
+                size="16px"
+                name="include-pinned-tabs"
+                label={`${formatNumber(pinnedTabCount)} pinned`}
+                aria-label={`Include ${formatNumber(pinnedTabCount)} pinned ${pinnedTabCount === 1 ? 'tab' : 'tabs'}`}
+                checked={includePinned}
+                onChange={(event) => setIncludePinned(event.currentTarget.checked)}
+              />
+              <Text className="popup-app__pinned-helper" c="dimmed">
+                {includePinned
+                  ? 'Pinned tabs will be saved and stay open after capture.'
+                  : 'Pinned tabs will not be saved and will stay open.'}
+              </Text>
+            </div>
           )}
 
           {duplicateCount > 0 && (
-            <>
-              <div className="popup-app__separator" />
-              <Text className="popup-app__duplicate popup-app__duplicate--contrast popup-app__stat" fw={700} size="md">
-                {formatNumber(duplicateCount)} Duplicate{duplicateCount === 1 ? '' : 's'}
-              </Text>
+            <Group className="popup-app__duplicate-row" justify="space-between" wrap="nowrap">
+              <div className="popup-app__duplicate-copy">
+                <Text className="popup-app__duplicate">
+                  {formatNumber(duplicateCount)} duplicate {duplicateCount === 1 ? 'tab' : 'tabs'}
+                </Text>
+                <Text className="popup-app__duplicate-helper" c="dimmed">
+                  {hasProtectedPinnedDuplicates
+                    ? 'Pinned duplicates stay open'
+                    : 'Keep one copy in this window'}
+                </Text>
+              </div>
               <Button
-                ref={dedupeActionRef}
                 className="popup-app__dedupe"
-                fullWidth
                 variant="default"
-                size="sm"
-                leftSection={<IconCopy size={14} color="var(--mantine-color-orange-6)" aria-hidden="true" />}
-                onClick={() => setDedupeConfirmOpen(true)}
+                size="compact-sm"
+                onClick={handleDedupe}
                 loading={deduping}
-                disabled={savingTabs}
+                disabled={savingTabs || deduping}
                 aria-label={deduping ? 'Removing Duplicate Tabs…' : 'Remove Duplicate Tabs from This Window'}
               >
-                {deduping ? 'Removing…' : 'Dedupe'}
+                {deduping ? 'Removing…' : 'Remove'}
               </Button>
-            </>
+            </Group>
           )}
         </div>
-
-        <Group className="popup-app__footer" justify="flex-end" gap={4}>
-          <AccessibleIconAction label="Open Manager" variant="subtle" onClick={openManager}>
-            <IconLayoutGrid size={18} aria-hidden="true" />
-          </AccessibleIconAction>
-          <AccessibleIconAction label="Open Settings" variant="subtle" onClick={openOptions}>
-            <IconSettings size={18} aria-hidden="true" />
-          </AccessibleIconAction>
-        </Group>
 
         {feedbackError && (
           <Text role="alert" size="xs" c="red" ta="center" px="md" pb="md">
             {feedbackError}
           </Text>
         )}
-        <ConfirmDialog
-          opened={dedupeConfirmOpen}
-          title="Remove Duplicate Tabs"
-          message={`Close ${formatNumber(duplicateCount)} duplicate tab${duplicateCount === 1 ? '' : 's'} in this window? Keep the active or most recently visited copy.`}
-          confirmLabel={duplicateCount === 1 ? 'Remove Duplicate Tab' : 'Remove Duplicate Tabs'}
-          loadingLabel="Removing Duplicate Tabs…"
-          loading={deduping}
-          finalFocusRef={dedupeActionRef}
-          onCancel={() => setDedupeConfirmOpen(false)}
-          onConfirm={async () => {
-            await handleDedupe();
-            setDedupeConfirmOpen(false);
-          }}
-        />
       </Paper>
     </MantineProvider>
   );

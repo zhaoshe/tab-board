@@ -18,7 +18,7 @@ import {
 const timestamp = '2026-01-01T00:00:00.000Z';
 
 function workspace(id: string): Workspace {
-  return { id, name: id, createdAt: timestamp, updatedAt: timestamp };
+  return { id, name: id, emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
 }
 
 function folder(id: string, workspaceId: string): Folder {

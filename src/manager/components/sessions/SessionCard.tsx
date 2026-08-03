@@ -3,12 +3,16 @@ import {
   Box,
 } from '@mantine/core';
 import {
-  IconLockOpen,
-  IconNotes,
-  IconPlus,
-  IconTrash,
-} from '@tabler/icons-react';
-import { useShallow } from 'zustand/react/shallow';
+  Copy,
+  FileText,
+  Folder,
+  Link,
+  Lock,
+  LockOpen,
+  Pencil,
+  SquareCheckBig,
+  Trash,
+} from 'lucide-react';
 import type { Group, TabItem } from '../../../shared/model';
 import {
   type DragMarker,
@@ -43,6 +47,9 @@ import {
 } from '../../hooks/useManagerOverlays';
 import { useOverflowCues } from '../../hooks/useOverflowCues';
 import type { SessionSortableBindings } from './SessionSortableBindings';
+import type { ManagerSelectionScope } from '../../hooks/useManagerSelectionScope';
+import { SessionSelectionToolbar } from './SessionSelectionToolbar';
+import type { OpenSessionTargetPickerInput } from '../shell/SessionTargetPicker';
 
 interface SessionCardProps {
   group: Group;
@@ -53,6 +60,8 @@ interface SessionCardProps {
   dragMarker?: DragMarker | null;
   sortable?: SessionSortableBindings;
   sourceRect?: DragSourceRect | null;
+  selectionScope?: ManagerSelectionScope;
+  onOpenSessionTargetPicker?: (input: OpenSessionTargetPickerInput) => void;
 }
 
 export const SessionCard = memo(function SessionCard({
@@ -64,6 +73,8 @@ export const SessionCard = memo(function SessionCard({
   dragMarker = null,
   sortable,
   sourceRect = null,
+  selectionScope,
+  onOpenSessionTargetPicker,
 }: SessionCardProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(group.title);
@@ -78,14 +89,14 @@ export const SessionCard = memo(function SessionCard({
   const noteTextareaRef = useRef<HTMLTextAreaElement>(null);
   const moreActionRef = useRef<HTMLButtonElement>(null);
   const [selectedTabIds, setSelectedTabIds] = useState<Set<string>>(new Set());
+  const selectionMode = selectionScope?.scope?.kind === 'saved-tabs'
+    && selectionScope.scope.groupId === group.id;
+  const registerSavedTabsClear = selectionScope?.registerSavedTabsClear;
   const { showError, showSuccess } = useToast();
   const confirmDestructive = useDestructiveConfirmation();
   const tabOverflow = useOverflowCues<HTMLDivElement>();
 
   const updateGroup = useTabBoardStore((state) => state.updateGroup);
-  const folders = useTabBoardStore(
-    useShallow((state) => state.folders.filter((folder) => folder.workspaceId === group.workspaceId)),
-  );
   const deleteGroup = useTabBoardStore((state) => state.deleteGroup);
   const lockGroup = useTabBoardStore((state) => state.lockGroup);
   const addTabToGroup = useTabBoardStore((state) => state.addTabToGroup);
@@ -95,6 +106,7 @@ export const SessionCard = memo(function SessionCard({
   );
   const updateTab = useTabBoardStore((state) => state.updateTab);
   const deleteTab = useTabBoardStore((state) => state.deleteTab);
+  const deleteTabs = useTabBoardStore((state) => state.deleteTabs);
   const tabCommands = useMemo(() => ({
     confirmBeforeDestructive,
     deleteTab,
@@ -106,6 +118,7 @@ export const SessionCard = memo(function SessionCard({
   const tabMetadata = useMemo(() => {
     const visibleTabs: TabItem[] = [];
     const selectedRefs: SavedTabRef[] = [];
+    const selectedItems: TabItem[] = [];
     const canonicalIndexByTabId = new Map<string, number>();
     let restorableTabCount = 0;
     let linkCount = 0;
@@ -116,7 +129,10 @@ export const SessionCard = memo(function SessionCard({
       if (isRestorableTab(tab)) restorableTabCount += 1;
       if (tab.itemType === ITEM_LINK) linkCount += 1;
       if (tab.itemType === ITEM_NOTE) noteCount += 1;
-      if (selectedTabIds.has(tab.id)) selectedRefs.push({ groupId: group.id, tabId: tab.id });
+      if (selectedTabIds.has(tab.id)) {
+        selectedRefs.push({ groupId: group.id, tabId: tab.id });
+        selectedItems.push(tab);
+      }
       if (!normalizedQuery || titleMatches || tabMatchesQuery(tab, normalizedQuery)) {
         visibleTabs.push(tab);
       }
@@ -127,6 +143,7 @@ export const SessionCard = memo(function SessionCard({
       linkCount,
       noteCount,
       restorableTabCount,
+      selectedItems,
       selectedRefs,
       visibleTabs,
     };
@@ -142,6 +159,18 @@ export const SessionCard = memo(function SessionCard({
       titleInputRef.current.select();
     }
   }, [isEditingTitle]);
+
+  useEffect(() => {
+    if (isDragOverlay || !registerSavedTabsClear) return;
+    return registerSavedTabsClear(
+      group.id,
+      () => setSelectedTabIds(new Set()),
+    );
+  }, [
+    group.id,
+    isDragOverlay,
+    registerSavedTabsClear,
+  ]);
 
   useEffect(() => {
     if (isEditingNote && noteTextareaRef.current) {
@@ -268,22 +297,13 @@ export const SessionCard = memo(function SessionCard({
     void copyText(text);
   };
 
-  const categoryOptions = [
-    { id: 'inbox', label: 'Inbox', folderId: null, starred: false, archived: false },
-    { id: 'saved', label: 'Saved', folderId: null, starred: true, archived: false },
-    { id: 'archive', label: 'Archive', folderId: null, starred: false, archived: true },
-    ...folders.map((folder) => ({ id: `folder:${folder.id}`, label: folder.name, folderId: folder.id, starred: false, archived: false })),
-  ].filter((category) => category.folderId !== group.folderId || category.starred !== group.starred || category.archived !== group.archived);
-
-  const handleMoveToCategory = (category: typeof categoryOptions[number]) => {
-    updateGroup(group.id, { folderId: category.folderId, starred: category.starred, archived: category.archived });
-  };
-
   const startSelection = (tabId: string) => {
+    selectionScope?.commands.enterSavedTabs(group.id);
     setSelectedTabIds(new Set([tabId]));
   };
 
   const toggleSelection = (tabId: string) => {
+    selectionScope?.commands.enterSavedTabs(group.id);
     setSelectedTabIds((current) => {
       const next = new Set(current);
       if (next.has(tabId)) next.delete(tabId);
@@ -292,45 +312,152 @@ export const SessionCard = memo(function SessionCard({
     });
   };
 
-  const moveMenuItems = () => (
-    <>
-      {categoryOptions.map((category) => (
-        <ManagerMenuItem key={category.id} onClick={() => handleMoveToCategory(category)}>
-          {category.label}
-        </ManagerMenuItem>
-      ))}
-    </>
-  );
-
-  const openMoveMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    const bounds = event.currentTarget.getBoundingClientRect();
-    openMenu({
-      id: `${menuKey}:move`,
-      kind: 'session',
-      anchor: { x: bounds.right + 4, y: bounds.top },
-      trigger: moreActionRef.current,
-      content: moveMenuItems(),
+  const changeVisibleSelection = (
+    tabIds: readonly string[],
+    selected: boolean,
+  ) => {
+    setSelectedTabIds((current) => {
+      const next = new Set(current);
+      tabIds.forEach((tabId) => {
+        if (selected) next.add(tabId);
+        else next.delete(tabId);
+      });
+      return next;
     });
+  };
+
+  const removeSelection = (tabIds: readonly string[]) => {
+    if (!tabIds.length) return;
+    const removed = new Set(tabIds);
+    setSelectedTabIds((current) => new Set(
+      [...current].filter((tabId) => !removed.has(tabId)),
+    ));
+  };
+
+  const enterSelectionMode = () => {
+    setSelectedTabIds(new Set());
+    selectionScope?.commands.enterSavedTabs(group.id);
+  };
+
+  const restoreSelectedTabs = async (
+    refs: readonly SavedTabRef[],
+  ): Promise<readonly string[]> => {
+    const result = await runtime.restoreTabs(refs);
+    const restoredTabIds = result.outcomes.flatMap((outcome) =>
+      outcome.status === 'restored' ? [outcome.tabId] : []);
+    const failedCount = result.outcomes.length - restoredTabIds.length;
+    if (failedCount > 0) {
+      showError(
+        `${failedCount} ${failedCount === 1 ? 'link could' : 'links could'} not be restored and ${failedCount === 1 ? 'remains' : 'remain'} selected. Retry or copy the URL.`,
+      );
+    }
+    return restoredTabIds;
+  };
+
+  const copySelectedUrls = async (urls: readonly string[]) => {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Clipboard is unavailable. Copy the URLs manually.');
+      }
+      await navigator.clipboard.writeText(urls.join('\n'));
+      showSuccess('Copied');
+    } catch (error: unknown) {
+      showError(error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  };
+
+  const deleteSelectedTabs = async (refs: readonly SavedTabRef[]) => {
+    if (group.locked) throw new Error('Cannot modify a locked group.');
+    if (confirmBeforeDestructive) {
+      const confirmed = await confirmDestructive({
+        title: 'Delete Selected Items',
+        message: `Move ${refs.length} selected items to Trash?`,
+        confirmLabel: 'Delete Selected Items',
+      });
+      if (!confirmed) throw new Error('Delete cancelled.');
+    }
+    try {
+      await deleteTabs(refs);
+    } catch (error: unknown) {
+      showError(error instanceof Error ? error.message : String(error));
+      throw error;
+    }
   };
 
   const menuItems = () => (
     <>
-      <ManagerMenuItem onClick={handleAddLink}>Add Link</ManagerMenuItem>
-      <ManagerMenuItem onClick={handleAddNote}>Add Note</ManagerMenuItem>
-      <ManagerMenuItem onClick={handleRename}>Rename</ManagerMenuItem>
-      <button type="button" role="menuitem" className="manager-overlay-menu__item" onClick={openMoveMenu}>Move to Category</button>
-      <ManagerMenuItem onClick={handleToggleLock}>{group.locked ? 'Unlock' : 'Lock'}</ManagerMenuItem>
-      <ManagerMenuItem onClick={handleCopyGroup}>Copy</ManagerMenuItem>
+      <ManagerMenuItem
+        icon={Link}
+        label="Add Link"
+        description="Add a saved URL"
+        onClick={handleAddLink}
+      />
+      <ManagerMenuItem
+        icon={FileText}
+        label="Add Note"
+        description="Add a note item"
+        onClick={handleAddNote}
+      />
       <div role="separator" className="manager-overlay-menu__divider" />
       <ManagerMenuItem
+        icon={Pencil}
+        label="Rename Session"
+        description="Edit the Session title"
+        onClick={handleRename}
+      />
+      <ManagerMenuItem
+        icon={FileText}
+        label="Edit Session Note"
+        description="Edit the summary note"
+        onClick={handleEditNote}
+      />
+      <ManagerMenuItem
+        icon={Folder}
+        label="Move Session"
+        disabled={group.locked || !onOpenSessionTargetPicker}
+        description="Choose a Category and Session position"
+        preventFocusRestore={Boolean(onOpenSessionTargetPicker)}
+        onClick={(focusIntent) => {
+          const trigger = focusIntent?.trigger instanceof HTMLButtonElement
+            ? focusIntent.trigger
+            : moreActionRef.current;
+          if (!onOpenSessionTargetPicker || !trigger) return;
+          onOpenSessionTargetPicker({
+            mode: 'move-session-category',
+            source: { kind: 'session', groupId: group.id },
+            trigger,
+          });
+        }}
+      />
+      <ManagerMenuItem
+        icon={group.locked ? LockOpen : Lock}
+        label={group.locked ? 'Unlock Session' : 'Lock Session'}
+        description={group.locked ? 'Allow records to change after restore' : 'Keep records after restore'}
+        onClick={handleToggleLock}
+      />
+      <ManagerMenuItem
+        icon={Copy}
+        label="Copy Links"
+        description="Copy all URLs in this Session"
+        onClick={handleCopyGroup}
+      />
+      <ManagerMenuItem
+        icon={SquareCheckBig}
+        label="Select Tabs"
+        description="Enter this Session's selection mode"
+        onClick={enterSelectionMode}
+      />
+      <div role="separator" className="manager-overlay-menu__divider" />
+      <ManagerMenuItem
+        icon={Trash}
+        label="Delete Session"
+        danger
         disabled={group.locked}
-        className="manager-overlay-menu__item--danger"
+        description="Move this Session to Bin"
         lifecycleAllowance="session-removal"
         onClick={handleDelete}
-      >
-        Delete
-      </ManagerMenuItem>
+      />
     </>
   );
 
@@ -350,7 +477,30 @@ export const SessionCard = memo(function SessionCard({
       trigger,
       openedByKeyboard: 'key' in event,
       content: menuItems(),
+      ariaLabel: 'Session Actions',
     });
+  };
+
+  const blocksSessionDrag = (target: EventTarget | null): boolean => {
+    if (!(target instanceof Element)) return false;
+    if (target.closest(
+      'input, textarea, a, [data-no-drag], .session-card__actions, .session-card__tabs',
+    )) {
+      return true;
+    }
+    const button = target.closest('button');
+    return Boolean(
+      button
+      && !button.matches('.session-card__title, .session-card__note'),
+    );
+  };
+  const handleSessionPointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.pointerType === 'touch' || blocksSessionDrag(event.target)) return;
+    sortable?.listeners?.onPointerDown?.(event);
+  };
+  const handleSessionTouchStart = (event: React.TouchEvent<HTMLElement>) => {
+    if (blocksSessionDrag(event.target)) return;
+    sortable?.listeners?.onTouchStart?.(event);
   };
 
   return (
@@ -367,37 +517,55 @@ export const SessionCard = memo(function SessionCard({
       tabIndex={isDragOverlay ? -1 : 0}
       onContextMenu={isDragOverlay ? undefined : (event) => openSessionMenu(event)}
       onKeyDown={isDragOverlay ? undefined : (event) => openSessionMenu(event)}
+      onPointerDown={handleSessionPointerDown}
+      onTouchStart={handleSessionTouchStart}
     >
-      <SessionCardHeader
-        attributes={sortable?.attributes}
-        createdAt={group.createdAt}
-        dragHandleRef={sortable?.setActivatorNodeRef}
-        isDragOverlay={isDragOverlay}
-        isEditingTitle={isEditingTitle}
-        isMenuOpen={isSessionMenuOpen}
-        linkCount={tabMetadata.linkCount}
-        listeners={sortable?.listeners}
-        locked={group.locked}
-        moreActionRef={moreActionRef}
-        noteCount={tabMetadata.noteCount}
-        onHeaderPointerDown={(event) => {
-          if (event.target instanceof Element && event.target.closest('button, input, textarea, a, [data-no-drag]')) {
-            return;
-          }
-          sortable?.listeners?.onPointerDown?.(event);
-        }}
-        onOpenMenu={openSessionMenu}
-        onRestore={handleRestore}
-        onTitleActivationKeyDown={handleTitleActivationKeyDown}
-        onTitleBlur={handleTitleSubmit}
-        onTitleChange={setTitleValue}
-        onTitleDoubleClick={handleTitleDoubleClick}
-        onTitleInputKeyDown={handleTitleKeyDown}
-        restorableTabCount={tabMetadata.restorableTabCount}
-        title={group.title}
-        titleInputRef={titleInputRef}
-        titleValue={titleValue}
-      />
+      {selectionMode ? (
+        <SessionSelectionToolbar
+          groupId={group.id}
+          locked={group.locked}
+          selectedItems={tabMetadata.selectedItems}
+          selectedTabIds={selectedTabIds}
+          visibleTabIds={tabMetadata.visibleTabs.map(({ id }) => id)}
+          onChangeVisibleSelection={changeVisibleSelection}
+          onRestore={restoreSelectedTabs}
+          onCopy={copySelectedUrls}
+          onMove={(trigger) => onOpenSessionTargetPicker?.({
+            mode: 'move-saved-tabs',
+            source: {
+              kind: 'saved-tabs',
+              refs: tabMetadata.selectedRefs,
+            },
+            trigger,
+          })}
+          onDelete={deleteSelectedTabs}
+          onRemoveSelection={removeSelection}
+          onClearSelection={() => setSelectedTabIds(new Set())}
+          onExit={() => selectionScope?.commands.exit()}
+        />
+      ) : (
+        <SessionCardHeader
+          createdAt={group.createdAt}
+          isDragOverlay={isDragOverlay}
+          isEditingTitle={isEditingTitle}
+          isMenuOpen={isSessionMenuOpen}
+          linkCount={tabMetadata.linkCount}
+          locked={group.locked}
+          moreActionRef={moreActionRef}
+          noteCount={tabMetadata.noteCount}
+          onOpenMenu={openSessionMenu}
+          onRestore={handleRestore}
+          onTitleActivationKeyDown={handleTitleActivationKeyDown}
+          onTitleBlur={handleTitleSubmit}
+          onTitleChange={setTitleValue}
+          onTitleDoubleClick={handleTitleDoubleClick}
+          onTitleInputKeyDown={handleTitleKeyDown}
+          restorableTabCount={tabMetadata.restorableTabCount}
+          title={group.title}
+          titleInputRef={titleInputRef}
+          titleValue={titleValue}
+        />
+      )}
 
       <SessionCardEditor
         editing={isEditingNote}
@@ -424,6 +592,7 @@ export const SessionCard = memo(function SessionCard({
         searchActive={Boolean(normalizedQuery)}
         selectedRefs={tabMetadata.selectedRefs}
         selectedTabIds={selectedTabIds}
+        selectionMode={selectionMode}
         sourceRect={sourceRect}
         tabs={tabMetadata.visibleTabs}
         workspaceId={group.workspaceId}

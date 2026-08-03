@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BIN_LIMIT,
   createEmptyState,
   createNoteRecord,
   DROP_OPERATION_LEDGER_LIMIT,
@@ -102,6 +103,26 @@ function groupBinEntry(source: Group, id = `${source.id}-bin`): BinEntry {
   };
 }
 
+function tabBinEntry(
+  source: Group,
+  sourceTab: TabItem,
+  id = `${sourceTab.id}-bin`,
+): BinEntry {
+  return {
+    id,
+    kind: 'tab',
+    label: sourceTab.title,
+    groupId: source.id,
+    groupTitle: source.title,
+    source: 'group',
+    item: sourceTab,
+    deletedAt: timestamp,
+    originalGroupId: source.id,
+    originalWorkspaceId: source.workspaceId,
+    originalFolderId: source.folderId,
+  };
+}
+
 describe('state mutations', () => {
   it('applies semantic mutations immutably and preserves both interleaved changes', () => {
     const before = createEmptyState();
@@ -133,11 +154,308 @@ describe('state mutations', () => {
     ])).toThrow('Category name is required.');
   });
 
-  it('accepts raw and prefixed category ids while persisting canonical ids', () => {
+  it('updates a custom category name and color atomically while excluding itself from duplicate checks', () => {
+    const existing = folder('folder-a', 'workspace_default', 'Work');
     const state = applyStateMutations(createEmptyState(), [
-      { type: 'add-folder', folder: folder('folder-a') },
-      { type: 'set-category-order', workspaceId: 'workspace_default', categoryOrder: ['folder:folder-a', 'inbox', 'saved'], updatedAt: timestamp },
+      { type: 'add-folder', folder: existing },
     ]);
+    const mutation = {
+      type: 'update-folder' as const,
+      id: existing.id,
+      name: ' Work ',
+      color: '#fab005',
+      expected: { name: 'Work', color: 'slate' },
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+
+    expect(isStateMutation(mutation)).toBe(true);
+    expect(applyStateMutation(state, mutation).folders[0]).toMatchObject({
+      id: existing.id,
+      name: 'Work',
+      color: '#fab005',
+      updatedAt: mutation.updatedAt,
+    });
+  });
+
+  it('treats exact folder edit replay as success without revision or timestamp regression', () => {
+    const existing = folder('folder-cas', 'workspace_default', 'Before');
+    const before = applyStateMutations(createEmptyState(), [
+      { type: 'add-folder', folder: existing },
+    ]);
+    const mutation: StateMutation = {
+      type: 'update-folder',
+      id: existing.id,
+      name: 'After',
+      color: '#40c057',
+      expected: { name: 'Before', color: 'slate' },
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+    const once = applyStateMutation(before, mutation);
+    const replay = applyStateMutation(once, mutation);
+
+    expect(replay).toEqual(once);
+    expect(replay.mutationRevision).toBe(once.mutationRevision);
+    expect(replay.updatedAt).toBe(once.updatedAt);
+    expect(replay.folders[0]?.updatedAt).toBe(once.folders[0]?.updatedAt);
+  });
+
+  it('rejects independent or ABA folder target equality without the timestamp witness', () => {
+    const existing = folder('folder-cas-aba', 'workspace_default', 'Before');
+    const base = applyStateMutations(createEmptyState(), [
+      { type: 'add-folder', folder: existing },
+    ]);
+    const mutation: StateMutation = {
+      type: 'update-folder',
+      id: existing.id,
+      name: 'After',
+      color: '#40c057',
+      expected: { name: 'Before', color: 'slate' },
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+    const independent: TabBoardState = {
+      ...base,
+      folders: [{
+        ...base.folders[0],
+        name: 'After',
+        color: '#40c057',
+        updatedAt: '2026-01-03T00:00:00.000Z',
+      }],
+      mutationRevision: base.mutationRevision + 1,
+      updatedAt: '2026-01-03T00:00:00.000Z',
+    };
+
+    expect(() => applyStateMutation(independent, mutation)).toThrowError(
+      expect.objectContaining({ code: 'CATEGORY_MUTATION_CONFLICT' }),
+    );
+  });
+
+  it('rejects folder edit when current state differs from expected and target', () => {
+    const existing = folder('folder-cas-conflict', 'workspace_default', 'Before');
+    const base = applyStateMutations(createEmptyState(), [
+      { type: 'add-folder', folder: existing },
+    ]);
+    const newer: TabBoardState = {
+      ...base,
+      folders: [{
+        ...base.folders[0],
+        name: 'Remote',
+        color: '#fa5252',
+        updatedAt: '2026-01-03T00:00:00.000Z',
+      }],
+      mutationRevision: base.mutationRevision + 1,
+      updatedAt: '2026-01-03T00:00:00.000Z',
+    };
+    const snapshot = structuredClone(newer);
+
+    expect(() => applyStateMutation(newer, {
+      type: 'update-folder',
+      id: existing.id,
+      name: 'After',
+      color: '#40c057',
+      expected: { name: 'Before', color: 'slate' },
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    })).toThrowError(expect.objectContaining({
+      code: 'CATEGORY_MUTATION_CONFLICT',
+    }));
+    expect(newer).toEqual(snapshot);
+  });
+
+  it('strictly validates folder edit snapshots and supported colors', () => {
+    const base = {
+      type: 'update-folder',
+      id: 'folder-a',
+      name: 'After',
+      color: '#40c057',
+      expected: { name: 'Before', color: 'slate' },
+      updatedAt: timestamp,
+    };
+
+    expect(isStateMutation(base)).toBe(true);
+    expect(isStateMutation({ ...base, expected: { name: 'Before' } })).toBe(false);
+    expect(isStateMutation({
+      ...base,
+      expected: { name: 'Before', color: 'slate', extra: true },
+    })).toBe(false);
+    expect(isStateMutation({
+      ...base,
+      expected: { name: ' Before ', color: 'slate' },
+    })).toBe(false);
+    expect(isStateMutation({
+      ...base,
+      expected: { name: 'Before', color: 'SLATE' },
+    })).toBe(false);
+    expect(isStateMutation({ ...base, color: 'transparent' })).toBe(false);
+    expect(isStateMutation({ ...base, id: 'x'.repeat(129) })).toBe(false);
+    expect(isStateMutation({
+      ...base,
+      expected: { name: 'Before', color: 'url(javascript:alert(1))' },
+    })).toBe(false);
+  });
+
+  it('applies category order CAS once, replays exactly, and rejects intervening order', () => {
+    const existing = folder('folder-order-cas');
+    const base = applyStateMutations(createEmptyState(), [
+      { type: 'add-folder', folder: existing },
+    ]);
+    const expectedCategoryOrder = [
+      'inbox',
+      'saved',
+      'archive',
+      `folder:${existing.id}`,
+    ];
+    const categoryOrder = [
+      `folder:${existing.id}`,
+      'inbox',
+      'saved',
+      'archive',
+    ];
+    const mutation: StateMutation = {
+      type: 'set-category-order',
+      workspaceId: 'workspace_default',
+      expectedCategoryOrder,
+      categoryOrder,
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+    const once = applyStateMutation(base, mutation);
+    const replay = applyStateMutation(once, mutation);
+
+    expect(replay).toEqual(once);
+    expect(replay.mutationRevision).toBe(once.mutationRevision);
+    expect(replay.updatedAt).toBe(once.updatedAt);
+
+    const newer: TabBoardState = {
+      ...base,
+      categoryOrderByWorkspace: {
+        workspace_default: ['saved', 'inbox', 'archive', existing.id],
+      },
+      mutationRevision: base.mutationRevision + 1,
+      updatedAt: '2026-01-03T00:00:00.000Z',
+    };
+    const snapshot = structuredClone(newer);
+    expect(() => applyStateMutation(newer, mutation)).toThrowError(
+      expect.objectContaining({ code: 'CATEGORY_MUTATION_CONFLICT' }),
+    );
+    expect(newer).toEqual(snapshot);
+  });
+
+  it('rejects independent or ABA target order without the top-level timestamp witness', () => {
+    const existing = folder('folder-order-aba');
+    const base = applyStateMutations(createEmptyState(), [
+      { type: 'add-folder', folder: existing },
+    ]);
+    const mutation: StateMutation = {
+      type: 'set-category-order',
+      workspaceId: 'workspace_default',
+      expectedCategoryOrder: [
+        'inbox',
+        'saved',
+        'archive',
+        `folder:${existing.id}`,
+      ],
+      categoryOrder: [
+        `folder:${existing.id}`,
+        'inbox',
+        'saved',
+        'archive',
+      ],
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+    const independent: TabBoardState = {
+      ...base,
+      categoryOrderByWorkspace: {
+        workspace_default: [
+          existing.id,
+          'inbox',
+          'saved',
+          'archive',
+        ],
+      },
+      mutationRevision: base.mutationRevision + 1,
+      updatedAt: '2026-01-03T00:00:00.000Z',
+    };
+
+    expect(() => applyStateMutation(independent, mutation)).toThrowError(
+      expect.objectContaining({ code: 'CATEGORY_MUTATION_CONFLICT' }),
+    );
+  });
+
+  it('rejects incomplete expected order before already-applied replay detection', () => {
+    const existing = folder('folder-order-incomplete-replay');
+    const base = applyStateMutations(createEmptyState(), [
+      { type: 'add-folder', folder: existing },
+    ]);
+    const currentTarget: TabBoardState = {
+      ...base,
+      categoryOrderByWorkspace: {
+        workspace_default: [
+          existing.id,
+          'inbox',
+          'saved',
+          'archive',
+        ],
+      },
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+
+    expect(() => applyStateMutation(currentTarget, {
+      type: 'set-category-order',
+      workspaceId: 'workspace_default',
+      expectedCategoryOrder: ['inbox', 'saved', 'archive'],
+      categoryOrder: [
+        `folder:${existing.id}`,
+        'inbox',
+        'saved',
+        'archive',
+      ],
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    })).toThrowError(expect.objectContaining({ code: 'REORDER_INVALID' }));
+  });
+
+  it('strictly validates complete dense category order snapshots', () => {
+    const mutation = {
+      type: 'set-category-order',
+      workspaceId: 'workspace_default',
+      expectedCategoryOrder: ['inbox', 'saved', 'archive'],
+      categoryOrder: ['saved', 'inbox', 'archive'],
+      updatedAt: timestamp,
+    };
+    expect(isStateMutation(mutation)).toBe(true);
+    expect(isStateMutation({
+      ...mutation,
+      expectedCategoryOrder: new Array(1),
+    })).toBe(false);
+    expect(isStateMutation({
+      ...mutation,
+      categoryOrder: ['saved', 'saved', 'archive'],
+    })).toBe(false);
+    expect(isStateMutation({
+      ...mutation,
+      extra: true,
+    })).toBe(false);
+    expect(isStateMutation({
+      ...mutation,
+      workspaceId: 'x'.repeat(129),
+    })).toBe(false);
+  });
+
+  it('accepts raw and prefixed category ids while persisting canonical ids', () => {
+    const withFolder = applyStateMutation(
+      createEmptyState(),
+      { type: 'add-folder', folder: folder('folder-a') },
+    );
+    const expectedCategoryOrder = [
+      'inbox',
+      'saved',
+      'archive',
+      'folder:folder-a',
+    ];
+    const state = applyStateMutation(withFolder, {
+      type: 'set-category-order',
+      workspaceId: 'workspace_default',
+      expectedCategoryOrder,
+      categoryOrder: ['folder:folder-a', 'inbox', 'saved', 'archive'],
+      updatedAt: timestamp,
+    });
 
     expect(state.categoryOrderByWorkspace.workspace_default).toEqual([
       'folder-a',
@@ -153,6 +471,177 @@ describe('state mutations', () => {
     expect(() => applyStateMutations(createEmptyState(), [
       { type: 'unknown-action' } as never,
     ])).toThrow('Invalid state mutation.');
+  });
+
+  it('requires a normalized emoji in add-workspace payloads', () => {
+    const workspace = {
+      ...createEmptyState().workspaces[0],
+      id: 'workspace-emoji-boundary',
+    };
+    const { emoji: _emoji, ...missingEmoji } = workspace;
+
+    for (const candidate of [
+      missingEmoji,
+      { ...workspace, emoji: 'text' },
+      { ...workspace, emoji: '😀😀' },
+    ]) {
+      const mutation = { type: 'add-workspace', workspace: candidate };
+      expect(isStateMutation(mutation)).toBe(false);
+      expect(() => applyStateMutation(createEmptyState(), mutation as never))
+        .toThrow('Invalid state mutation.');
+    }
+  });
+
+  it('updates a workspace name and emoji atomically with canonical name validation', () => {
+    const workspaceA = {
+      ...createEmptyState().workspaces[0],
+      id: 'workspace-a',
+      name: 'Research',
+    };
+    const workspaceB: Workspace = {
+      ...workspaceA,
+      id: 'workspace-b',
+      name: 'Café',
+    };
+    const state = {
+      ...createEmptyState(),
+      workspaces: [workspaceA, workspaceB],
+      activeWorkspaceId: workspaceA.id,
+    };
+
+    const updated = applyStateMutation(state, {
+      type: 'update-workspace',
+      id: workspaceA.id,
+      name: '  Research Lab  ',
+      emoji: '🧪',
+      updatedAt: timestamp,
+    } as StateMutation);
+
+    expect(updated.workspaces[0]).toMatchObject({
+      name: 'Research Lab',
+      emoji: '🧪',
+      updatedAt: timestamp,
+    });
+    expect(updated.workspaces[1]).toEqual(workspaceB);
+
+    for (const mutation of [
+      {
+        type: 'update-workspace',
+        id: workspaceA.id,
+        name: 'cAFE\u0301',
+        emoji: '🧪',
+        updatedAt: timestamp,
+      },
+      {
+        type: 'update-workspace',
+        id: workspaceA.id,
+        name: '   ',
+        emoji: '🧪',
+        updatedAt: timestamp,
+      },
+      {
+        type: 'update-workspace',
+        id: workspaceA.id,
+        name: 'Research Lab',
+        emoji: 'text',
+        updatedAt: timestamp,
+      },
+    ] as StateMutation[]) {
+      expect(() => applyStateMutation(state, mutation)).toThrow();
+      expect(state.workspaces[0]).toEqual(workspaceA);
+    }
+  });
+
+  it('sets workspace order only from a dense permutation of current workspace IDs', () => {
+    const workspaceA = {
+      ...createEmptyState().workspaces[0],
+      id: 'workspace-a',
+      name: 'A',
+    };
+    const workspaceB: Workspace = { ...workspaceA, id: 'workspace-b', name: 'B' };
+    const workspaceC: Workspace = { ...workspaceA, id: 'workspace-c', name: 'C' };
+    const state = {
+      ...createEmptyState(),
+      workspaces: [workspaceA, workspaceB, workspaceC],
+      activeWorkspaceId: workspaceB.id,
+      folders: [folder('workspace-order-folder', workspaceA.id)],
+      groups: [group('workspace-order-group', workspaceC.id)],
+      categoryOrderByWorkspace: {
+        [workspaceA.id]: ['saved', 'inbox'],
+      },
+    };
+
+    const reordered = applyStateMutation(state, {
+      type: 'set-workspace-order',
+      orderedWorkspaceIds: [workspaceC.id, workspaceA.id, workspaceB.id],
+      updatedAt: timestamp,
+    } as StateMutation);
+
+    expect(reordered.workspaces.map(({ id }) => id)).toEqual([
+      workspaceC.id,
+      workspaceA.id,
+      workspaceB.id,
+    ]);
+    expect(reordered.activeWorkspaceId).toBe(workspaceB.id);
+    expect(reordered.folders).toEqual(state.folders);
+    expect(reordered.groups).toEqual(state.groups);
+    expect(reordered.categoryOrderByWorkspace).toEqual(state.categoryOrderByWorkspace);
+
+    const sparse = new Array(3) as string[];
+    sparse[0] = workspaceA.id;
+    sparse[2] = workspaceC.id;
+    const invalidOrders: unknown[] = [
+      [workspaceA.id, workspaceB.id],
+      [workspaceA.id, workspaceB.id, workspaceB.id],
+      [workspaceA.id, workspaceB.id, workspaceC.id, 'workspace-extra'],
+      [workspaceA.id, workspaceB.id, 'workspace-from-another-state'],
+      sparse,
+      [workspaceA.id, workspaceB.id, 42],
+    ];
+    for (const orderedWorkspaceIds of invalidOrders) {
+      const mutation = {
+        type: 'set-workspace-order',
+        orderedWorkspaceIds,
+        updatedAt: timestamp,
+      };
+      expect(() => applyStateMutation(state, mutation as StateMutation)).toThrow();
+      expect(state.workspaces.map(({ id }) => id)).toEqual([
+        workspaceA.id,
+        workspaceB.id,
+        workspaceC.id,
+      ]);
+    }
+  });
+
+  it('replays exact workspace updates and canonical order without advancing revision', () => {
+    const workspaceA = {
+      ...createEmptyState().workspaces[0],
+      id: 'workspace-a',
+      name: 'A',
+    };
+    const workspaceB: Workspace = { ...workspaceA, id: 'workspace-b', name: 'B' };
+    const state = {
+      ...createEmptyState(),
+      workspaces: [workspaceA, workspaceB],
+      activeWorkspaceId: workspaceA.id,
+    };
+    const update = {
+      type: 'update-workspace',
+      id: workspaceA.id,
+      name: 'Research Lab',
+      emoji: '🧪',
+      updatedAt: timestamp,
+    } as StateMutation;
+    const order = {
+      type: 'set-workspace-order',
+      orderedWorkspaceIds: [workspaceB.id, workspaceA.id],
+      updatedAt: timestamp,
+    } as StateMutation;
+
+    const updatedOnce = applyStateMutation(state, update);
+    expect(applyStateMutation(updatedOnce, update)).toEqual(updatedOnce);
+    const orderedOnce = applyStateMutation(updatedOnce, order);
+    expect(applyStateMutation(orderedOnce, order)).toEqual(orderedOnce);
   });
 
   it('rejects sparse prepend and import group arrays before semantic validation', () => {
@@ -569,8 +1058,8 @@ describe('state mutations', () => {
         workspaceId: 'workspace_default',
       },
       openTabs: [
-        { id: 101, windowId: 7, title: 'One', url: 'https://one.test', favIconUrl: '', active: false, pinned: false, index: 0, browserGroup: null, storable: true, reason: null },
-        { id: 102, windowId: 7, title: 'Two', url: 'https://two.test', favIconUrl: '', active: false, pinned: false, index: 1, browserGroup: null, storable: true, reason: null },
+        { id: 101, windowId: 7, title: 'One', url: 'https://one.test', favIconUrl: '', pinned: false, index: 0, browserGroup: null, storable: true, reason: null },
+        { id: 102, windowId: 7, title: 'Two', url: 'https://two.test', favIconUrl: '', pinned: false, index: 1, browserGroup: null, storable: true, reason: null },
       ],
       updatedAt: timestamp,
     };
@@ -600,7 +1089,7 @@ describe('state mutations', () => {
         index: 0,
         workspaceId: 'workspace_default',
       },
-      openTabs: [{ id: 101, windowId: 7, title: 'Created', url: 'https://created.test', favIconUrl: '', active: false, pinned: false, index: 0, browserGroup: null, storable: true, reason: null }],
+      openTabs: [{ id: 101, windowId: 7, title: 'Created', url: 'https://created.test', favIconUrl: '', pinned: false, index: 0, browserGroup: null, storable: true, reason: null }],
       updatedAt: timestamp,
     };
     const before = {
@@ -627,8 +1116,8 @@ describe('state mutations', () => {
         workspaceId: 'workspace_default',
       },
       openTabs: [
-        { id: 101, windowId: 7, title: 'One', url: 'https://one.test', favIconUrl: '', active: false, pinned: false, index: 0, browserGroup: null, storable: true, reason: null },
-        { id: 102, windowId: 7, title: 'Two', url: 'https://two.test', favIconUrl: '', active: false, pinned: false, index: 1, browserGroup: null, storable: true, reason: null },
+        { id: 101, windowId: 7, title: 'One', url: 'https://one.test', favIconUrl: '', pinned: false, index: 0, browserGroup: null, storable: true, reason: null },
+        { id: 102, windowId: 7, title: 'Two', url: 'https://two.test', favIconUrl: '', pinned: false, index: 1, browserGroup: null, storable: true, reason: null },
       ],
       updatedAt: timestamp,
     };
@@ -670,8 +1159,8 @@ describe('state mutations', () => {
         workspaceId: 'workspace_default',
       },
       openTabs: [
-        { id: 101, windowId: 7, title: 'One', url: 'https://one.test', favIconUrl: '', active: false, pinned: false, index: 0, browserGroup: null, storable: true, reason: null },
-        { id: 102, windowId: 7, title: 'Two', url: 'https://two.test', favIconUrl: '', active: false, pinned: false, index: 1, browserGroup: null, storable: true, reason: null },
+        { id: 101, windowId: 7, title: 'One', url: 'https://one.test', favIconUrl: '', pinned: false, index: 0, browserGroup: null, storable: true, reason: null },
+        { id: 102, windowId: 7, title: 'Two', url: 'https://two.test', favIconUrl: '', pinned: false, index: 1, browserGroup: null, storable: true, reason: null },
       ],
       updatedAt: timestamp,
     };
@@ -1621,6 +2110,7 @@ describe('state mutations', () => {
     const workspace: Workspace = {
       id: 'workspace-extra',
       name: 'Extra',
+      emoji: '🗂️',
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -1734,6 +2224,156 @@ describe('state mutations', () => {
     expect(tabTwice.bin.filter((entry) => entry.id === 'compound-tab-bin')).toHaveLength(1);
   });
 
+  it('deletes mixed saved items atomically and replays without duplicate Bin entries', () => {
+    const link = tab('batch-link');
+    const note = tab('batch-note', 'note');
+    const source = group('batch-source', 'workspace_default', [link, note]);
+    const before = { ...createEmptyState(), groups: [source] };
+    const mutation: StateMutation = {
+      type: 'delete-tabs',
+      deletions: [
+        {
+          groupId: source.id,
+          tabId: link.id,
+          binEntry: tabBinEntry(source, link),
+        },
+        {
+          groupId: source.id,
+          tabId: note.id,
+          binEntry: tabBinEntry(source, note),
+        },
+      ],
+      updatedAt: timestamp,
+    };
+
+    const once = applyStateMutation(before, mutation);
+    const twice = applyStateMutation(once, mutation);
+
+    expect(once.mutationRevision).toBe(before.mutationRevision + 1);
+    expect(once.groups[0]?.tabs).toEqual([]);
+    expect(once.bin.map(({ id }) => id)).toEqual([
+      `${link.id}-bin`,
+      `${note.id}-bin`,
+    ]);
+    expect(twice).toEqual(once);
+  });
+
+  it('accepts 80 checked deletions and rejects a forged 81st deletion without complete evidence', () => {
+    const tabs = Array.from(
+      { length: BIN_LIMIT },
+      (_, index) => tab(`batch-retention-${index}`),
+    );
+    const source = group('batch-retention-source', 'workspace_default', tabs);
+    const mutation: StateMutation = {
+      type: 'delete-tabs',
+      deletions: tabs.map((item) => ({
+        groupId: source.id,
+        tabId: item.id,
+        binEntry: tabBinEntry(source, item),
+      })),
+      updatedAt: timestamp,
+    };
+
+    const once = applyStateMutation(
+      { ...createEmptyState(), groups: [source] },
+      mutation,
+    );
+    const twice = applyStateMutation(once, mutation);
+
+    expect(once.groups[0]?.tabs).toEqual([]);
+    expect(once.bin).toHaveLength(BIN_LIMIT);
+    expect(twice).toEqual(once);
+    expect(twice.mutationRevision).toBe(once.mutationRevision);
+
+    const missing = tab('batch-retention-missing-81');
+    const overLimitMutation = {
+      ...mutation,
+      deletions: [
+        ...mutation.deletions,
+        {
+          groupId: source.id,
+          tabId: missing.id,
+          binEntry: tabBinEntry(source, missing),
+        },
+      ],
+    };
+    const forgedState = {
+      ...once,
+      groups: [{
+        ...source,
+        tabs: [],
+        updatedAt: mutation.updatedAt,
+      }],
+    };
+
+    expect(isStateMutation(mutation)).toBe(true);
+    expect(isStateMutation(overLimitMutation)).toBe(false);
+    expect(() => applyStateMutation(
+      forgedState,
+      overLimitMutation as StateMutation,
+    )).toThrow('Invalid state mutation.');
+    expect(forgedState.mutationRevision).toBe(once.mutationRevision);
+    expect(forgedState.bin).toEqual(once.bin);
+  });
+
+  it('rejects the whole saved-item batch when any source is locked or missing', () => {
+    const unlockedTab = tab('atomic-unlocked');
+    const lockedTab = tab('atomic-locked');
+    const unlocked = group(
+      'atomic-unlocked-group',
+      'workspace_default',
+      [unlockedTab],
+    );
+    const locked = {
+      ...group('atomic-locked-group', 'workspace_default', [lockedTab]),
+      locked: true,
+    };
+    const before = { ...createEmptyState(), groups: [unlocked, locked] };
+    const lockedMutation: StateMutation = {
+      type: 'delete-tabs',
+      deletions: [
+        {
+          groupId: unlocked.id,
+          tabId: unlockedTab.id,
+          binEntry: tabBinEntry(unlocked, unlockedTab),
+        },
+        {
+          groupId: locked.id,
+          tabId: lockedTab.id,
+          binEntry: tabBinEntry(locked, lockedTab),
+        },
+      ],
+      updatedAt: timestamp,
+    };
+
+    expect(() => applyStateMutation(before, lockedMutation)).toThrowError(
+      expect.objectContaining({ code: 'GROUP_LOCKED' }),
+    );
+    expect(before.groups[0]?.tabs).toEqual([unlockedTab]);
+    expect(before.groups[1]?.tabs).toEqual([lockedTab]);
+    expect(before.bin).toEqual([]);
+
+    const missingMutation: StateMutation = {
+      ...lockedMutation,
+      deletions: [
+        lockedMutation.deletions[0],
+        {
+          groupId: unlocked.id,
+          tabId: 'missing-tab',
+          binEntry: tabBinEntry(unlocked, {
+            ...unlockedTab,
+            id: 'missing-tab',
+          }),
+        },
+      ],
+    };
+    expect(() => applyStateMutation(before, missingMutation)).toThrowError(
+      expect.objectContaining({ code: 'TAB_NOT_FOUND' }),
+    );
+    expect(before.groups[0]?.tabs).toEqual([unlockedTab]);
+    expect(before.bin).toEqual([]);
+  });
+
   it('rejects drop intents without a persisted operation identity', () => {
     expect(isStateMutation({
       type: 'drop-intent',
@@ -1775,7 +2415,6 @@ describe('state mutations', () => {
           title: 'One',
           url: 'https://one.test',
           favIconUrl: '',
-          active: false,
           pinned: false,
           index: 0,
           browserGroup: null,
@@ -1788,7 +2427,6 @@ describe('state mutations', () => {
           title: 'Two',
           url: 'https://two.test',
           favIconUrl: '',
-          active: false,
           pinned: false,
           index: 1,
           browserGroup: null,
@@ -1826,7 +2464,6 @@ describe('state mutations', () => {
         title: 'One',
         url: 'https://one.test',
         favIconUrl: '',
-        active: false,
         pinned: false,
         index: 0,
         browserGroup: null,
@@ -2005,7 +2642,7 @@ describe('state mutations', () => {
   });
 
   it('restores legacy groups into the surviving source workspace and folder', () => {
-    const workspaceB: Workspace = { id: 'legacy-group-workspace-b', name: 'B', createdAt: timestamp, updatedAt: timestamp };
+    const workspaceB: Workspace = { id: 'legacy-group-workspace-b', name: 'B', emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
     const source = placedGroup('legacy-group-to-restore', 'workspace-a', 'folder-a');
     const entry: BinEntry = {
       id: 'legacy-group-entry',
@@ -2044,7 +2681,7 @@ describe('state mutations', () => {
   });
 
   it('restores legacy tabs into surviving source groups across workspaces', () => {
-    const workspaceB: Workspace = { id: 'workspace-b', name: 'B', createdAt: timestamp, updatedAt: timestamp };
+    const workspaceB: Workspace = { id: 'workspace-b', name: 'B', emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
     const sourceTab = tab('legacy-cross-workspace-tab');
     const entry: BinEntry = {
       id: 'legacy-cross-workspace-entry',
@@ -2081,7 +2718,7 @@ describe('state mutations', () => {
   });
 
   it('uses legacy source workspace Inbox when source group is gone', () => {
-    const workspaceB: Workspace = { id: 'workspace-b-inbox', name: 'B', createdAt: timestamp, updatedAt: timestamp };
+    const workspaceB: Workspace = { id: 'workspace-b-inbox', name: 'B', emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
     const sourceTab = tab('legacy-source-workspace-tab');
     const entry: BinEntry = {
       id: 'legacy-source-workspace-entry',
@@ -2118,7 +2755,7 @@ describe('state mutations', () => {
   });
 
   it('rejects legacy restore into active workspace when source group survives elsewhere', () => {
-    const workspaceB: Workspace = { id: 'workspace-b-reject', name: 'B', createdAt: timestamp, updatedAt: timestamp };
+    const workspaceB: Workspace = { id: 'workspace-b-reject', name: 'B', emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
     const sourceTab = tab('legacy-reject-tab');
     const entry: BinEntry = {
       id: 'legacy-reject-entry',
@@ -2169,7 +2806,6 @@ describe('state mutations', () => {
         title: 'Created',
         url: 'https://created.test',
         favIconUrl: '',
-        active: false,
         pinned: false,
         index: 0,
         browserGroup: null,
@@ -2235,6 +2871,7 @@ describe('state mutations', () => {
         targetCategoryId: 'inbox',
         placement: 'before',
         workspaceId: 'workspace_default',
+        expectedCategoryOrder: ['inbox', 'saved', 'archive'],
       },
       openTabs: [],
       updatedAt: timestamp,
@@ -2271,6 +2908,73 @@ describe('state mutations', () => {
     expect(applyStateMutations(moveTabsOnce, [moveTabsMutation])).toEqual(moveTabsOnce);
   });
 
+  it('moves all source tabs past an unrelated locked sibling but still rejects locked endpoints', () => {
+    const sourceTabs = [tab('all-source-a'), tab('all-source-b'), tab('all-source-c')];
+    const source = group('all-source', 'workspace_default', sourceTabs);
+    const target = group('all-source-target', 'workspace_default', [tab('target-existing')]);
+    const lockedSibling = {
+      ...group('all-source-unrelated-locked'),
+      locked: true,
+    };
+    const before = {
+      ...createEmptyState(),
+      groups: [source, target, lockedSibling],
+    };
+    const intent = {
+      kind: 'move-tabs' as const,
+      refs: sourceTabs.map(({ id }) => ({ groupId: source.id, tabId: id })),
+      targetGroupId: target.id,
+      targetIndex: target.tabs.length,
+      workspaceId: 'workspace_default',
+    };
+    const mutation: StateMutation = {
+      type: 'drop-intent',
+      expectedRevision: 0,
+      operationId: 'all-source-locked-sibling',
+      intent,
+      openTabs: [],
+      updatedAt: timestamp,
+    };
+
+    const after = applyStateMutation(before, mutation);
+
+    expect(after.groups.map(({ id }) => id)).toEqual([
+      target.id,
+      lockedSibling.id,
+    ]);
+    expect(after.groups[0]?.tabs.map(({ id }) => id)).toEqual([
+      'target-existing',
+      'all-source-a',
+      'all-source-b',
+      'all-source-c',
+    ]);
+    expect(after.groups[1]).toMatchObject({
+      id: lockedSibling.id,
+      locked: true,
+    });
+
+    for (const lockedEndpoint of ['source', 'target'] as const) {
+      const lockedBefore = {
+        ...before,
+        groups: before.groups.map((item) => {
+          if (lockedEndpoint === 'source' && item.id === source.id) {
+            return { ...item, locked: true };
+          }
+          if (lockedEndpoint === 'target' && item.id === target.id) {
+            return { ...item, locked: true };
+          }
+          return item;
+        }),
+      };
+      expect(() => applyStateMutation(lockedBefore, {
+        ...mutation,
+        operationId: `all-source-locked-${lockedEndpoint}`,
+      })).toThrowError(expect.objectContaining({
+        message: 'Cannot modify a locked group.',
+      }));
+    }
+  });
+
   it('replays committed drop mutations with their persisted timestamp', () => {
     const replayTimestamp = '2026-02-01T00:00:00.000Z';
     const copyMutation: StateMutation = {
@@ -2291,7 +2995,6 @@ describe('state mutations', () => {
         title: 'Copied',
         url: 'https://copied.test',
         favIconUrl: '',
-        active: false,
         pinned: false,
         index: 0,
         browserGroup: null,
@@ -2375,6 +3078,7 @@ describe('state mutations', () => {
         targetCategoryId: 'inbox',
         placement: 'before',
         workspaceId: 'workspace_default',
+        expectedCategoryOrder: ['inbox', 'saved', 'archive'],
       },
       openTabs: [],
       updatedAt: timestamp,
@@ -2389,6 +3093,7 @@ describe('state mutations', () => {
         targetCategoryId: 'saved',
         placement: 'before',
         workspaceId: 'workspace_default',
+        expectedCategoryOrder: ['saved', 'inbox', 'archive'],
       },
       openTabs: [],
       updatedAt: timestamp,
@@ -2488,7 +3193,6 @@ describe('state mutations', () => {
         title: 'Copied',
         url: 'https://copied.test',
         favIconUrl: '',
-        active: false,
         pinned: false,
         index: 0,
         browserGroup: null,
@@ -2547,7 +3251,6 @@ describe('state mutations', () => {
         title: 'Copied',
         url: 'https://copied.test',
         favIconUrl: '',
-        active: false,
         pinned: false,
         index: 0,
         browserGroup: null,
@@ -2596,7 +3299,7 @@ describe('state mutations', () => {
         targetIndex: 0,
         workspaceId: 'workspace_default',
       },
-      openTabs: [{ id: 101, windowId: 7, title: 'Moved', url: 'https://moved.test', favIconUrl: '', active: false, pinned: false, index: 0, browserGroup: null, storable: true, reason: null }],
+      openTabs: [{ id: 101, windowId: 7, title: 'Moved', url: 'https://moved.test', favIconUrl: '', pinned: false, index: 0, browserGroup: null, storable: true, reason: null }],
       updatedAt: timestamp,
     };
     const copied = applyStateMutation({ ...createEmptyState(), groups: [group('moved-copy-target')] }, mutation);
@@ -2630,7 +3333,6 @@ describe('state mutations', () => {
       title: 'Open tab',
       url: 'https://open.test',
       favIconUrl: '',
-      active: false,
       pinned: false,
       index: 0,
       browserGroup: null,
@@ -2730,7 +3432,6 @@ describe('state mutations', () => {
         title: 'Pinned',
         url: 'https://pinned.test',
         favIconUrl: '',
-        active: false,
         pinned: true,
         index: 0,
         browserGroup: null,
@@ -3178,7 +3879,6 @@ describe('state mutations', () => {
         title: 'title',
         url: 'https://example.test',
         favIconUrl: '',
-        active: false,
         pinned: false,
         index: 0,
         browserGroup: null,
@@ -3222,7 +3922,6 @@ describe('state mutations', () => {
         title: 'unexpected',
         url: 'https://unexpected.test',
         favIconUrl: '',
-        active: false,
         pinned: false,
         index: 0,
         browserGroup: null,
@@ -3258,6 +3957,10 @@ describe('state mutations', () => {
     const workspace = { ...createEmptyState().workspaces[0], id: 'workspace-replay' };
     const addedWorkspace = applyStateMutation(createEmptyState(), { type: 'add-workspace', workspace });
     expect(applyStateMutation(addedWorkspace, { type: 'add-workspace', workspace })).toEqual(addedWorkspace);
+    expect(() => applyStateMutation(addedWorkspace, {
+      type: 'add-workspace',
+      workspace: { ...workspace, emoji: '🧪' },
+    })).toThrowError(expect.objectContaining({ code: 'WORKSPACE_ID_CONFLICT' }));
 
     const addedFolder = applyStateMutation(createEmptyState(), {
       type: 'add-folder',
@@ -3278,12 +3981,14 @@ describe('state mutations', () => {
     const workspaceB: Workspace = {
       id: 'workspace-b',
       name: 'B',
+      emoji: '🗂️',
       createdAt: timestamp,
       updatedAt: timestamp,
     };
     const workspaceC: Workspace = {
       id: 'workspace-c',
       name: 'C',
+      emoji: '🗂️',
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -3368,6 +4073,7 @@ describe('state mutations', () => {
     expect(() => applyStateMutation(withFolder, {
       type: 'set-category-order',
       workspaceId: 'missing-workspace',
+      expectedCategoryOrder: [],
       categoryOrder: [],
       updatedAt: timestamp,
     })).toThrowError(expect.objectContaining({ code: 'WORKSPACE_NOT_FOUND' }));
@@ -3378,6 +4084,7 @@ describe('state mutations', () => {
     const entityWorkspace: Workspace = {
       id: 'entity-workspace',
       name: 'Entity workspace',
+      emoji: '🗂️',
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -4121,7 +4828,7 @@ describe('state mutations', () => {
       ...reorderState,
       workspaces: [
         ...reorderState.workspaces,
-        { id: 'cascade-workspace', name: 'Cascade', createdAt: timestamp, updatedAt: timestamp },
+        { id: 'cascade-workspace', name: 'Cascade', emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp },
       ],
       groups: [{ ...locked, workspaceId: 'cascade-workspace' }, sibling],
     };
@@ -4656,7 +5363,6 @@ describe('state mutations', () => {
       title: 'Replay open tab',
       url: 'https://replay-open.test',
       favIconUrl: '',
-      active: false,
       pinned: false,
       index: 0,
       browserGroup: null,
@@ -4792,6 +5498,45 @@ describe('state mutations', () => {
     })).toThrowError(expect.objectContaining({ code: 'GROUP_LOCKED' }));
   });
 
+  it('deletes only same-workspace folder placements when stale IDs cross workspaces', () => {
+    const target = folder('workspace-scoped-delete-folder');
+    const otherWorkspace: Workspace = {
+      ...createEmptyState().workspaces[0],
+      id: 'workspace-other-delete',
+      name: 'Other',
+    };
+    const local = {
+      ...group('workspace-scoped-local'),
+      folderId: target.id,
+    };
+    const staleLocked = {
+      ...group('workspace-scoped-stale', otherWorkspace.id),
+      folderId: target.id,
+      locked: true,
+    };
+    const before: TabBoardState = {
+      ...createEmptyState(),
+      workspaces: [...createEmptyState().workspaces, otherWorkspace],
+      folders: [target],
+      groups: [local, staleLocked],
+    };
+
+    const after = applyStateMutation(before, {
+      type: 'delete-folder',
+      id: target.id,
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+
+    expect(after.folders).toEqual([]);
+    expect(after.groups.find(({ id }) => id === local.id)).toMatchObject({
+      folderId: null,
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    expect(after.groups.find(({ id }) => id === staleLocked.id)).toEqual(
+      staleLocked,
+    );
+  });
+
   it('replays a locked create-session after ledger eviction and rejects altered input', () => {
     const openTab = {
       id: 401,
@@ -4799,7 +5544,6 @@ describe('state mutations', () => {
       title: 'Generated replay tab',
       url: 'https://generated-replay.test',
       favIconUrl: '',
-      active: false,
       pinned: false,
       index: 0,
       browserGroup: null,

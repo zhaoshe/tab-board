@@ -30,6 +30,15 @@ const sendMessage = vi.fn();
 const getExtensionUrl = vi.fn(() => 'chrome-extension://test/');
 let activeMount: MountedPopup | null = null;
 const hydrationState = vi.hoisted(() => ({ hydrated: true }));
+const settingsState = vi.hoisted(() => ({
+  value: {
+    customUrlFilter: '',
+    excludePinned: false,
+    includeChromeUrls: true,
+    includeFileUrls: true,
+    closeTabsAfterSave: true,
+  },
+}));
 
 vi.mock('../shared/hooks/useStoreHydration', () => ({
   useStoreHydration: () => ({ hydrated: hydrationState.hydrated }),
@@ -41,13 +50,9 @@ vi.mock('../shared/store/useTabBoardStore', () => ({
     excludePinned: boolean;
     includeChromeUrls: boolean;
     includeFileUrls: boolean;
+    closeTabsAfterSave: boolean;
   } }) => unknown) => selector({
-    settings: {
-      customUrlFilter: '',
-      excludePinned: false,
-      includeChromeUrls: true,
-      includeFileUrls: true,
-    },
+    settings: settingsState.value,
   }),
 }));
 
@@ -96,6 +101,13 @@ async function clickSave(): Promise<void> {
 
 beforeEach(() => {
   hydrationState.hydrated = true;
+  settingsState.value = {
+    customUrlFilter: '',
+    excludePinned: false,
+    includeChromeUrls: true,
+    includeFileUrls: true,
+    closeTabsAfterSave: true,
+  };
   queryTabs.mockReset().mockResolvedValue(tabs);
   sendMessage.mockReset();
   getExtensionUrl.mockClear();
@@ -119,19 +131,20 @@ afterEach(async () => {
 });
 
 describe('PopupApp save response protocol', () => {
-  it('defines compact touch targets in the Popup style owner', () => {
+  it('defines the fixed P2 compact action geometry in the Popup style owner', () => {
     const css = readFileSync(
       resolve(process.cwd(), 'src/popup/popup.css'),
       'utf8',
     );
+    expect(css).not.toMatch(/letter-spacing:\s*(?!0(?:[;\s]|$))/);
     expect(css).toMatch(
-      /@media \(max-width: 760px\)[\s\S]*?\.popup-app__save[\s\S]*?min-height: 44px/,
+      /\.popup-app__save\.mantine-Button-root[\s\S]*?width:\s*80px[\s\S]*?height:\s*32px/,
     );
     expect(css).toMatch(
-      /@media \(max-width: 760px\)[\s\S]*?\.popup-app__footer \.mantine-ActionIcon-root[\s\S]*?width: 44px[\s\S]*?height: 44px/,
+      /\.popup-app__dedupe\.mantine-Button-root[\s\S]*?width:\s*80px[\s\S]*?height:\s*32px/,
     );
     expect(css).toMatch(
-      /@media \(max-width: 760px\)[\s\S]*?\.popup-app__filters \.mantine-Checkbox-root[\s\S]*?min-height: 44px/,
+      /\.popup-app__(?:count|duplicate)[\s\S]*?font-size:\s*13px[\s\S]*?line-height:\s*18px/,
     );
   });
 
@@ -147,12 +160,17 @@ describe('PopupApp save response protocol', () => {
   it('summarizes the current window instead of rendering tab rows', async () => {
     await mountPopup('Save');
 
-    expect(document.body.textContent).toContain('1 Tab');
+    expect(document.body.textContent).toContain('1 tab');
     expect(document.body.textContent).not.toContain('Example');
+    expect(getSaveButton().getAttribute('data-variant')).toBe('default');
     expect(document.querySelector('[translate="no"]')?.textContent).toBe('TabBoard');
+    const brand = document.querySelector<HTMLImageElement>('.popup-app__brand-icon');
+    expect(brand?.getAttribute('src')).toBe('/icons/icon-32.png');
+    expect(brand?.width).toBe(22);
+    expect(brand?.height).toBe(22);
   });
 
-  it('gives capture-option checkboxes stable form names', async () => {
+  it('shows only the pinned capture option and keeps grouped tabs in scope', async () => {
     queryTabs.mockResolvedValue([
       { ...tabs[0], pinned: true, groupId: 7 },
       { ...tabs[0], id: 8, active: false, groupId: 7 },
@@ -162,37 +180,39 @@ describe('PopupApp save response protocol', () => {
     expect(document.querySelector<HTMLInputElement>('input[name="include-pinned-tabs"]'))
       .not.toBeNull();
     expect(document.querySelector<HTMLInputElement>('input[name="include-tab-groups"]'))
-      .not.toBeNull();
+      .toBeNull();
+    expect(document.body.textContent).not.toContain('group');
   });
 
-  it('shows the actual selected result and keeps button copy in sync with filters', async () => {
+  it('uses generic Save copy, hides selected ratios, and updates the scoped count', async () => {
     queryTabs.mockResolvedValue([
       { ...tabs[0], pinned: true, groupId: 7 },
       { ...tabs[0], id: 8, active: false, pinned: false, groupId: 7 },
       { ...tabs[0], id: 9, active: false, pinned: false, groupId: -1 },
     ]);
-    await mountPopup('Save 3 Tabs');
+    await mountPopup('Save');
 
-    expect(document.querySelector('[data-popup-selection-summary]')?.textContent)
-      .toContain('3 of 3 tabs selected');
-    expect(getSaveButton().getAttribute('aria-label'))
-      .toBe('Save 3 Tabs as a Session');
+    expect(getSaveButton().textContent?.trim()).toBe('Save');
+    expect(document.querySelector('[data-popup-selection-summary]')).toBeNull();
+    expect(document.body.textContent).not.toContain('of 3');
+    expect(document.querySelector('.popup-app__count')?.textContent).toContain('3 tabs');
 
     const pinned = document.querySelector<HTMLInputElement>(
       'input[name="include-pinned-tabs"]',
     );
     await act(async () => pinned?.click());
 
-    expect(getSaveButton().textContent).toContain('Save 2 Tabs');
-    expect(document.querySelector('[data-popup-selection-summary]')?.textContent)
-      .toContain('2 of 3 tabs selected');
+    expect(getSaveButton().textContent?.trim()).toBe('Save');
+    expect(document.querySelector('.popup-app__count')?.textContent).toContain('2 tabs');
   });
 
-  it('explains when capture filters exclude every tab', async () => {
+  it('explains pinned inclusion below its checkbox and disables Save at zero scope', async () => {
     queryTabs.mockResolvedValue([
       { ...tabs[0], pinned: true, groupId: 7 },
     ]);
-    await mountPopup('Save 1 Tab');
+    await mountPopup('Save');
+    expect(document.querySelector('.popup-app__pinned-helper')?.textContent)
+      .toContain('Pinned tabs will be saved and stay open after capture.');
 
     const pinned = document.querySelector<HTMLInputElement>(
       'input[name="include-pinned-tabs"]',
@@ -200,23 +220,75 @@ describe('PopupApp save response protocol', () => {
     await act(async () => pinned?.click());
 
     expect(getSaveButton().disabled).toBe(true);
-    expect(document.querySelector('[data-popup-selection-summary]')?.textContent)
-      .toContain('No tabs selected. Include pinned tabs or tab groups to save this window.');
+    expect(document.querySelector('.popup-app__count')?.textContent).toContain('0 tabs');
+    expect(document.querySelector('.popup-app__pinned-helper')?.textContent)
+      .toContain('Pinned tabs will not be saved and will stay open.');
   });
 
-  it('uses contrast-safe duplicate text and action variants', async () => {
+  it('uses the global close setting only for the main helper', async () => {
+    await mountPopup('Save');
+    expect(document.querySelector('.popup-app__save-helper')?.textContent)
+      .toBe('Save and close tabs');
+
+    await act(async () => activeMount?.root.unmount());
+    activeMount?.container.remove();
+    activeMount = null;
+    settingsState.value = {
+      ...settingsState.value,
+      closeTabsAfterSave: false,
+    };
+    await mountPopup('Save');
+
+    expect(document.querySelector('.popup-app__save-helper')?.textContent)
+      .toBe('Save and keep tabs open');
+  });
+
+  it('removes the entire pinned region when no pinned tab exists', async () => {
+    await mountPopup('Save');
+
+    expect(document.querySelector('.popup-app__pinned')).toBeNull();
+    expect(document.querySelector('.popup-app__pinned-helper')).toBeNull();
+  });
+
+  it('renders duplicate cleanup as one secondary maintenance row', async () => {
     queryTabs.mockResolvedValue([...tabs, { ...tabs[0], id: 8, active: false }]);
     await mountPopup('Save');
 
-    expect(document.querySelector('.popup-app__duplicate')?.classList)
-      .toContain('popup-app__duplicate--contrast');
-    expect(document.querySelector('.popup-app__dedupe')?.getAttribute('data-variant'))
-      .toBe('default');
+    expect(document.querySelector('.popup-app__duplicate-row')?.textContent)
+      .toContain('1 duplicate tab');
+    expect(document.querySelector('.popup-app__duplicate-helper')?.textContent)
+      .toBe('Keep one copy in this window');
+    expect(document.querySelector('.popup-app__dedupe')?.textContent?.trim())
+      .toBe('Remove');
+  });
+
+  it('explains protected pinned duplicates without adding them to the Remove count', async () => {
+    queryTabs.mockResolvedValue([
+      { ...tabs[0], pinned: true },
+      { ...tabs[0], id: 8, active: false, pinned: false },
+    ]);
+    await mountPopup('Save');
+
+    expect(document.querySelector('.popup-app__duplicate')?.textContent)
+      .toContain('1 duplicate tab');
+    expect(document.querySelector('.popup-app__duplicate-helper')?.textContent)
+      .toBe('Pinned duplicates stay open');
+  });
+
+  it('does not offer duplicate removal when every duplicate candidate is pinned', async () => {
+    queryTabs.mockResolvedValue([
+      { ...tabs[0], pinned: true },
+      { ...tabs[0], id: 8, active: false, pinned: true },
+    ]);
+    await mountPopup('Save');
+
+    expect(document.querySelector('.popup-app__duplicate-row')).toBeNull();
+    expect(document.body.textContent).not.toContain('duplicate');
   });
 
   it('shows a duplicate-removal action only when duplicate tabs exist', async () => {
     await mountPopup('Save');
-    expect(document.body.textContent).not.toContain('Dedupe');
+    expect(document.querySelector('.popup-app__duplicate-row')).toBeNull();
 
     await act(async () => activeMount?.root.unmount());
     activeMount?.container.remove();
@@ -224,10 +296,13 @@ describe('PopupApp save response protocol', () => {
     queryTabs.mockResolvedValue([...tabs, { ...tabs[0], id: 8, active: false }]);
 
     await mountPopup('Save');
-    expect(document.body.textContent).toContain('Dedupe');
+    expect(document.querySelector('.popup-app__duplicate-row')?.textContent)
+      .toContain('Remove');
+    expect(document.querySelector('.popup-app__duplicate-row')?.textContent)
+      .toContain('1 duplicate tab');
   });
 
-  it('confirms before closing duplicate browser tabs', async () => {
+  it('removes duplicate browser tabs directly without a confirmation dialog', async () => {
     queryTabs.mockResolvedValue([...tabs, { ...tabs[0], id: 8, active: false }]);
     sendMessage.mockResolvedValue({ ok: true });
     const close = vi.spyOn(window, 'close').mockImplementation(() => undefined);
@@ -238,30 +313,9 @@ describe('PopupApp save response protocol', () => {
     );
     await act(async () => dedupe?.click());
 
-    expect(sendMessage).not.toHaveBeenCalled();
-    expect(document.querySelector('[role="dialog"]')?.textContent)
-      .toContain('Close 1 duplicate tab in this window?');
-
-    const confirm = [...document.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.trim() === 'Remove Duplicate Tab');
-    await act(async () => confirm?.click());
     await waitForDom(() => expect(sendMessage).toHaveBeenCalledWith({ action: 'dedupe-window' }));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(close).toHaveBeenCalledTimes(1);
-  });
-
-  it('restores focus to Dedupe after cancelling its confirmation', async () => {
-    queryTabs.mockResolvedValue([...tabs, { ...tabs[0], id: 8, active: false }]);
-    await mountPopup('Save');
-    const dedupe = document.querySelector<HTMLButtonElement>(
-      '[aria-label="Remove Duplicate Tabs from This Window"]',
-    );
-    await act(async () => dedupe?.click());
-
-    const cancel = [...document.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.trim() === 'Cancel');
-    await act(async () => cancel?.click());
-
-    await waitForDom(() => expect(document.activeElement).toBe(dedupe));
   });
 
   it('treats a successful worker envelope as saved and closes after the existing delay', async () => {
@@ -390,7 +444,7 @@ describe('PopupApp save response protocol', () => {
     queryTabs.mockRejectedValue(new Error('Tabs unavailable.'));
     window.addEventListener('unhandledrejection', unhandledRejection);
 
-    await mountPopup('No Tabs');
+    await mountPopup('Save');
     await waitForDom(() => expect(document.querySelector('[role="alert"]')?.textContent)
       .toContain('Tabs unavailable.'));
 

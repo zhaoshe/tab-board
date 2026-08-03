@@ -16,7 +16,6 @@ function tab(
     title: `Tab ${id}`,
     url: `https://example.test/${id}`,
     favIconUrl: '',
-    active: id === 1,
     pinned: false,
     index: id,
     browserGroup: null,
@@ -68,6 +67,24 @@ describe('Open Tabs workflow reducer', () => {
     expect(changed.windows[0]).not.toBe(currentWindow);
     expect(changed.windows[0]?.tabs[0]).toBe(first);
     expect(changed.windows[0]?.tabs[1]).not.toBe(second);
+  });
+
+  it('ignores legacy active values when structurally sharing refresh rows', () => {
+    const current = tab(1);
+    const legacyCurrent = { ...current, active: true };
+    const legacyNext = { ...current, active: false };
+    const initial = {
+      ...createOpenTabsWorkflowState(),
+      windows: [windowInfo(1, [legacyCurrent])],
+      selectedWindowId: 1,
+    };
+
+    const next = reduceOpenTabsWorkflow(initial, {
+      type: 'refresh-succeeded',
+      windows: [windowInfo(1, [legacyNext])],
+    });
+
+    expect(next.windows).toBe(initial.windows);
   });
 
   it('applies refresh atomically and removes selected IDs that are no longer selectable', () => {
@@ -143,6 +160,27 @@ describe('Open Tabs workflow reducer', () => {
     })).toBe(initial);
   });
 
+  it('toggles only visible IDs while preserving hidden Open Tab selection', () => {
+    const initial = {
+      ...createOpenTabsWorkflowState(),
+      windows: [windowInfo(1, [tab(1), tab(2), tab(3), tab(4)])],
+      selectedWindowId: 1,
+      selectedTabIds: [1, 4],
+    };
+
+    const selectedVisible = reduceOpenTabsWorkflow(initial, {
+      type: 'selection-visible',
+      tabIds: [1, 2, 3],
+    });
+    expect(selectedVisible.selectedTabIds).toEqual([1, 4, 2, 3]);
+
+    const unselectedVisible = reduceOpenTabsWorkflow(selectedVisible, {
+      type: 'selection-visible',
+      tabIds: [1, 2, 3],
+    });
+    expect(unselectedVisible.selectedTabIds).toEqual([4]);
+  });
+
   it('projects filtered rows and selected drag records from one canonical state', () => {
     const first = tab(1, { title: 'Alpha' });
     const second = tab(2, { title: 'Beta', pinned: true });
@@ -159,7 +197,6 @@ describe('Open Tabs workflow reducer', () => {
 
     expect(projection.filteredTabs.map(({ id }) => id)).toEqual([1, 2, 3]);
     expect(projection.selection).toEqual({
-      active: true,
       ids: [1, 2],
       count: 2,
       records: [first, second],

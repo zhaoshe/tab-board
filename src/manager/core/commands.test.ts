@@ -22,7 +22,7 @@ import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
 const timestamp = '2026-01-01T00:00:00.000Z';
 
 function workspace(id: string): Workspace {
-  return { id, name: id, createdAt: timestamp, updatedAt: timestamp };
+  return { id, name: id, emoji: '🗂️', createdAt: timestamp, updatedAt: timestamp };
 }
 
 function folder(id: string, workspaceId: string, name = id): Folder {
@@ -891,12 +891,25 @@ describe('store category mutation lock', () => {
     storedState = board;
     useTabBoardStore.setState({ ...board, hydrated: true });
 
-    await useTabBoardStore.getState().updateCategoryOrder('workspace-a', [
-      'folder:folder-c',
-      'folder:folder-a',
-      'folder:folder-c',
-      'folder:folder-b',
-    ]);
+    await useTabBoardStore.getState().updateCategoryOrder(
+      'workspace-a',
+      [
+        'folder:folder-c',
+        'folder:folder-a',
+        'inbox',
+        'saved',
+        'archive',
+      ],
+      {
+        expectedCategoryOrder: [
+          'inbox',
+          'saved',
+          'folder:folder-a',
+          'archive',
+          'folder:folder-c',
+        ],
+      },
+    );
 
     expect(useTabBoardStore.getState().categoryOrderByWorkspace['workspace-a']).toEqual([
       'folder-c',
@@ -940,10 +953,25 @@ describe('store category mutation lock', () => {
     storedState = board;
     useTabBoardStore.setState({ ...board, hydrated: true });
 
-    await useTabBoardStore.getState().updateCategoryOrder('workspace-a', [
-      'folder:folder-a',
-      'folder:folder-b',
-    ]);
+    await useTabBoardStore.getState().updateCategoryOrder(
+      'workspace-a',
+      [
+        'folder:folder-a',
+        'folder:folder-b',
+        'inbox',
+        'saved',
+        'archive',
+      ],
+      {
+        expectedCategoryOrder: [
+          'folder:folder-b',
+          'folder:folder-a',
+          'inbox',
+          'saved',
+          'archive',
+        ],
+      },
+    );
 
     expect(useTabBoardStore.getState().categoryOrderByWorkspace['workspace-a']).toEqual([
       'folder-a',

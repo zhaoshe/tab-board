@@ -20,12 +20,20 @@ import {
 import { logBreadcrumb, logError, logWarning } from '../utils/diagnostics';
 import { createChromeStorageAdapter } from './chromeStorageAdapter';
 import type { IdbFactory } from './fsDirectory';
-import { readBootstrapMode, writeBootstrapMode } from './fsBootstrap';
+import {
+  readStorageStatusProjection,
+  writeStorageStatusProjection,
+} from './fsBootstrap';
 import type {
   ReloadableStorageAdapter,
   StorageAdapter,
   StorageMode,
 } from './storageAdapter';
+import {
+  BROWSER_STORAGE_STATUS,
+  fileStorageStatus,
+  type StorageStatusProjection,
+} from './settingsProjection';
 import {
   subscribeFilePing,
   subscribeStorageFallback,
@@ -74,6 +82,12 @@ export function _setActiveAdapterModuleLoadersForTests(
   fsDirectoryModulePromise = null;
 }
 
+export function _setActiveAdapterModuleLoadersForWorker(
+  loaders: ActiveAdapterModuleLoaders,
+): void {
+  _setActiveAdapterModuleLoadersForTests(loaders);
+}
+
 function loadFileStorageModule(): Promise<FileStorageModule> {
   fileStorageModulePromise ??= moduleLoaders.loadFileStorageModule();
   return fileStorageModulePromise;
@@ -85,6 +99,13 @@ function loadFsDirectoryModule(): Promise<FsDirectoryModule> {
 }
 
 const fallbackListeners = new Set<(reason: string) => void>();
+export const WORKER_PRELOAD_FALLBACK_REASON = 'File storage error: document is not defined';
+export const WORKER_DYNAMIC_IMPORT_FALLBACK_REASON = 'File storage error: window is not defined';
+
+export function isWorkerModuleFallbackReason(reason: string | null): boolean {
+  return reason === WORKER_PRELOAD_FALLBACK_REASON
+    || reason === WORKER_DYNAMIC_IMPORT_FALLBACK_REASON;
+}
 
 function emitFallback(reason: string): void {
   logWarning('file-storage: fallback', reason);
@@ -172,8 +193,12 @@ class StorageAuthority implements StorageAdapter {
   }
 
   private async initializeBackend(): Promise<AuthorityBackend> {
-    const mode = await readBootstrapMode();
-    if (mode === 'browser') {
+    const storageStatus = await readStorageStatusProjection();
+    const mode = storageStatus.activeBackend;
+    const shouldRecoverWorkerPreloadFallback = storageStatus.configuredTarget === 'file'
+      && mode === 'browser'
+      && isWorkerModuleFallbackReason(storageStatus.fallbackReason);
+    if (mode === 'browser' && !shouldRecoverWorkerPreloadFallback) {
       const adapter = createChromeStorageAdapter();
       this.installBackend({ mode, adapter });
       logBreadcrumb('file-storage: init', 'browser storage active');
@@ -191,6 +216,10 @@ class StorageAuthority implements StorageAdapter {
       }
       const { createFileStorageAdapter } = await loadFileStorageModule();
       const adapter = await createFileStorageAdapter(root);
+      await writeStorageStatusProjection(fileStorageStatus({
+        folderName: root.name || storageStatus.folderName,
+        fileUpdatedAt: adapter.getFileUpdatedAt() ?? storageStatus.fileUpdatedAt,
+      }));
       this.installBackend({ mode: 'file', adapter });
       logBreadcrumb('file-storage: init', 'file adapter active');
       return { mode: 'file', adapter };
@@ -201,7 +230,7 @@ class StorageAuthority implements StorageAdapter {
         : fallbackReason(error);
       const adapter = createChromeStorageAdapter();
       this.installBackend({ mode: 'browser', adapter });
-      await this.publishFallback(reason);
+      await this.publishFallback(reason, storageStatus);
       return { mode: 'browser', adapter };
     }
   }
@@ -258,8 +287,19 @@ class StorageAuthority implements StorageAdapter {
     }
   }
 
-  private async publishFallback(reason: string): Promise<void> {
+  private async publishFallback(
+    reason: string,
+    currentStatus?: StorageStatusProjection,
+  ): Promise<void> {
     emitFallback(reason);
+    const status = currentStatus ?? await readStorageStatusProjection();
+    if (status.configuredTarget === 'file') {
+      await writeStorageStatusProjection({
+        ...status,
+        activeBackend: 'browser',
+        fallbackReason: reason,
+      });
+    }
     const event: StorageFallbackEvent = {
       eventId: createId('storage-fallback'),
       reason,
@@ -297,6 +337,14 @@ class StorageAuthority implements StorageAdapter {
     if (broadcast) {
       await this.publishFallback(reason);
     } else {
+      const status = await readStorageStatusProjection();
+      if (status.configuredTarget === 'file') {
+        await writeStorageStatusProjection({
+          ...status,
+          activeBackend: 'browser',
+          fallbackReason: reason,
+        });
+      }
       emitFallback(reason);
     }
   }
@@ -401,6 +449,7 @@ function getAuthority(): StorageAuthority {
 
 async function commitFileHandleAndBootstrap(
   root: FileSystemDirectoryHandle,
+  fileUpdatedAt: string | null,
 ): Promise<void> {
   const {
     clearRootHandle,
@@ -410,7 +459,10 @@ async function commitFileHandleAndBootstrap(
   const previousRoot = await loadRootHandle(testIdbFactory);
   await saveRootHandle(root, testIdbFactory);
   try {
-    await writeBootstrapMode('file');
+    await writeStorageStatusProjection(fileStorageStatus({
+      folderName: root.name || null,
+      fileUpdatedAt,
+    }));
   } catch (error: unknown) {
     if (previousRoot) {
       await saveRootHandle(previousRoot, testIdbFactory);
@@ -480,6 +532,10 @@ export async function isFileModeActive(): Promise<boolean> {
   return getAuthority().isFileMode();
 }
 
+export function getStorageStatus(): Promise<StorageStatusProjection> {
+  return readStorageStatusProjection();
+}
+
 /**
  * Subscribe to fallback events. Fires when file mode fails (no handle,
  * permission denied, corrupt) and the adapter drops back to browser storage.
@@ -510,7 +566,7 @@ export async function switchToFileMode(
     shouldPublishPing: () => committed,
   });
   await adapter.setState(initialState);
-  await commitFileHandleAndBootstrap(root);
+  await commitFileHandleAndBootstrap(root, initialState.updatedAt);
   committed = true;
   await getAuthority().install('file', adapter, initialState);
   await writeFilePing(initialState.mutationRevision, initialState.updatedAt);
@@ -541,7 +597,7 @@ export async function switchToBrowserMode(copyFileData: boolean): Promise<void> 
     await chromeAdapter.setState(fileStateToCopy);
   }
   const state = await chromeAdapter.getState();
-  await writeBootstrapMode('browser');
+  await writeStorageStatusProjection({ ...BROWSER_STORAGE_STATUS });
   try {
     const { clearRootHandle } = await loadFsDirectoryModule();
     await clearRootHandle(testIdbFactory);
@@ -563,6 +619,6 @@ export async function reconnectFolder(root: FileSystemDirectoryHandle): Promise<
   const { createFileStorageAdapter } = await loadFileStorageModule();
   const adapter = await createFileStorageAdapter(root);
   const state = await adapter.getState();
-  await commitFileHandleAndBootstrap(root);
+  await commitFileHandleAndBootstrap(root, adapter.getFileUpdatedAt());
   await getAuthority().install('file', adapter, state);
 }
