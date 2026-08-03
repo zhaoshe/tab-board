@@ -4,7 +4,14 @@
 
 TabBoard is a local-first Chrome tab manager inspired by the OneTab and tabExtend workflows. It saves open tabs into searchable sessions, restores them later, supports workspaces, categories, notes, drag and drop, import/export, right-click capture actions, keyboard commands, and omnibox search.
 
+![TabBoard manager](docs/images/manager.png)
+
 TabBoard is a React 18 + TypeScript app built with Vite and packaged with `@crxjs/vite-plugin`. The UI uses Mantine v7 and Lucide icons, state is managed with Zustand, and drag and drop uses `@dnd-kit`. Data is stored in `chrome.storage.local` by default or in a user-selected local folder as a substitute backend.
+
+## Requirements
+
+- Google Chrome (or a Chromium-based browser) version 115 or newer.
+- Node.js 18 or newer, only to build the extension from source.
 
 ## Build and Install in Chrome
 
@@ -20,6 +27,41 @@ For iterative development, run `npm run dev` to start the Vite dev server with h
 By default, clicking the TabBoard toolbar button opens the compact popup. In Options you can switch the toolbar button to save the current window directly.
 
 TabBoard also replaces Chrome's new tab page, so every new tab opens the TabBoard manager.
+
+## Keyboard Shortcuts and Omnibox
+
+- `Alt+Shift+B`: open the TabBoard manager.
+- `Alt+Shift+1`: save all tabs in the current window.
+- Type `tb` followed by a space in the address bar to search saved sessions from the omnibox.
+
+Chrome shortcut keys can be customized at `chrome://extensions/shortcuts`.
+
+## Permissions and Privacy
+
+TabBoard is local-first and does not make any network requests. All saved sessions
+stay on your machine in `chrome.storage.local` or in a local folder you select.
+
+It requests only the permissions it needs to manage tabs:
+
+- `tabs` and `tabGroups`: read and restore tabs and tab groups.
+- `storage` and `unlimitedStorage`: persist sessions locally without a size cap.
+- `contextMenus`: add right-click capture actions.
+- `clipboardWrite`: support copy/export actions.
+
+TabBoard requests no host permissions, so it cannot read the contents of any web page.
+
+## Screenshots
+
+TabBoard follows your system light or dark theme:
+
+![TabBoard manager in dark mode](docs/images/manager-dark.png)
+
+The compact popup for saving the current window, and the settings page:
+
+<p>
+  <img src="docs/images/popup.png" alt="TabBoard popup" width="360" />
+  <img src="docs/images/options.png" alt="TabBoard settings" width="360" />
+</p>
 
 ## Product Docs
 

@@ -1,16 +1,27 @@
 # TabBoard Docs
 
-这个目录用于记录 TabBoard 的功能变迁、产品决策和对外叙事，方便之后回溯、复盘和 sell。
+这个目录记录 TabBoard 的功能面、架构、产品决策和对外叙事，方便回溯与复盘。
 
-## 文档地图
+## 核心文档
 
-- [Project Overview](project-overview.md): 总结项目定位、目标、边界、当前状态和成功标准。
-- [Feature Spec](feature-spec.md): 描述当前功能面、入口、交互规则和 legacy 能力。
-- [Technical Architecture](technical-architecture.md): 描述 extension 架构、数据模型、关键流程和验证方式。
-- [Feature Evolution](feature-evolution.md): 记录功能从哪里来、什么时候变化、当前状态是什么。
-- [Product Decisions](product-decisions.md): 记录关键决策的背景、取舍、结果和后续观察点。
-- [Product Story](product-story.md): 记录面向用户或评审时怎么介绍 TabBoard。
-- [tabExtend Analysis](tabextend-analysis.md): 对 tabExtend 的功能/UI/UX 拆解，以及和 TabBoard 的对比与借鉴清单。
+面向使用者和贡献者，先看这些：
+
+- [Project Overview](project-overview.md): 项目定位、目标、边界、当前状态和成功标准。
+- [Feature Spec](feature-spec.md): 当前功能面、入口、交互规则和 legacy 能力。
+- [Technical Architecture](technical-architecture.md): extension 架构、数据模型、关键流程和验证方式。
+- [Feature Evolution](feature-evolution.md): 功能从哪里来、什么时候变化、当前状态是什么。
+- [Product Decisions](product-decisions.md): 关键决策的背景、取舍、结果和后续观察点。
+- [Product Story](product-story.md): 面向用户或评审时怎么介绍 TabBoard。
+
+## 内部过程记录
+
+以下是开发过程中的工作笔记，非必读，仅用于追溯当时的分析与实现路径：
+
+- [tabExtend Analysis](tabextend-analysis.md): 竞品拆解与借鉴清单。
+- `reviews/`: 各阶段的 UI/UX、性能和验收评审。
+- `superpowers/`: 分阶段实现计划与设计规格。
+- `architecture-analysis-*.md`、`architecture-optimization-completion-audit-*.md`、`performance-optimization-review.md`: 架构与性能专项记录。
+- `agent-sort-report.md`、`skills-inventory.md`: 早期整理与工具清单。
 
 ## 维护规则
 
