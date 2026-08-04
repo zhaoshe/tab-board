@@ -34,3 +34,23 @@ test('release workflow gates publication on validation and tests', async () => {
   }
   assert.doesNotMatch(source, /uses:\s*[^\n]*release-action/i);
 });
+
+test('README exposes binary installation and update limitations', async () => {
+  const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8');
+  assert.match(readme, /releases\/latest/);
+  assert.match(readme, /tabboard-vX\.Y\.Z\.zip/);
+  assert.match(readme, /Load unpacked/);
+  assert.match(readme, /does not update automatically/i);
+  assert.match(readme, /Chrome Web Store.*pending/i);
+});
+
+test('privacy policy states local storage and no network transfer', async () => {
+  const privacy = await readFile(
+    new URL('../PRIVACY.md', import.meta.url),
+    'utf8',
+  );
+  assert.match(privacy, /chrome\.storage\.local/);
+  assert.match(privacy, /local folder/i);
+  assert.match(privacy, /does not make network requests/i);
+  assert.match(privacy, /does not sell/i);
+});

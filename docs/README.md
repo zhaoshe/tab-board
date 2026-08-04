@@ -12,6 +12,8 @@
 - [Feature Evolution](feature-evolution.md): 功能从哪里来、什么时候变化、当前状态是什么。
 - [Product Decisions](product-decisions.md): 关键决策的背景、取舍、结果和后续观察点。
 - [Product Story](product-story.md): 面向用户或评审时怎么介绍 TabBoard。
+- [Privacy Policy](../PRIVACY.md): 对外公开的数据存储、网络访问和卸载行为说明。
+- [Chrome Web Store Listing](chrome-web-store-listing.md): 首次人工上架所需的文案、权限说明、素材和提交步骤。
 
 ## 内部过程记录
 

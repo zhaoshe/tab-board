@@ -1696,6 +1696,19 @@ acceptance 证据记录在
   protection 和成功后关闭 Popup 的行为不变。
 - 其他 destructive action 的确认策略不变。
 
+### 2026-08-04: GitHub Release 产物与 Chrome Web Store 首发准备
+
+- `vX.Y.Z` tag 成为唯一发布入口；tag、`package.json`、`package-lock.json` 和
+  `manifest.json` 版本不一致时停止发布。
+- GitHub Actions 在 check、unit 和串行 Chromium E2E 通过后，生成根目录包含
+  `manifest.json` 的 ZIP 和 SHA-256 文件。用户无需安装 Node.js 或在本地构建。
+- README 将 GitHub Release 作为当前二进制安装入口，并明确解压安装不会自动更新。
+- 新增公开隐私政策、Chrome Web Store 首发文案、权限说明和 1280x800 合成数据截图。
+- 首次 Web Store 提交使用 GitHub Release 的同一份 ZIP；API 自动上传等待首个条目
+  审核通过并获得 item ID 后再实现。
+
+当前状态：实现中；首个目标版本为 `v0.1.0`。
+
 ## 待观察问题
 
 - 右键菜单触发筛选是否足够容易被发现。

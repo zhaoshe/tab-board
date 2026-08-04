@@ -1922,6 +1922,37 @@ Status:
 
 Accepted。
 
+## D065: Release 使用 tag 单入口和同一份跨渠道产物
+
+Context:
+
+公开仓库原先只提供源码构建安装。用户需要安装 Node.js、执行 npm 构建，再从
+`dist/` 加载扩展；Chrome Web Store 首个条目也尚未创建。
+
+Decision:
+
+- 仅 `vX.Y.Z` tag 触发正式发布，四处版本源必须与 tag 一致。
+- GitHub Release 发布 `tabboard-vX.Y.Z.zip` 和对应 SHA-256；ZIP 内直接以
+  `manifest.json` 为根，不额外套 `dist/`。
+- Chrome Web Store 首次人工上传使用 GitHub Release 的同一份 ZIP，不重新构建。
+- Web Store API 自动上传推迟到首个条目审核通过并获得 item ID 之后。
+
+Rationale:
+
+一个 tag 对应一个不可变产物，用户下载、GitHub Release 和 Web Store 审核看到的是
+同一组字节，避免本地重建造成版本和内容漂移。先发布 GitHub ZIP 可以立即降低安装
+门槛，不需要等待商店注册与审核。
+
+Trade-offs:
+
+- GitHub 解压安装仍需开启开发者模式，且不会自动更新；一键安装和自动更新只能由
+  Chrome Web Store 提供。
+- 首次商店提交保留人工步骤，后续才需要维护 item ID 和 OAuth secrets。
+
+Status:
+
+Accepted。
+
 ```md
 ## D00X: Title
 

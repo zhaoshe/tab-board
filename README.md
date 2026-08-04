@@ -13,14 +13,29 @@ TabBoard is a React 18 + TypeScript app built with Vite and packaged with `@crxj
 - Google Chrome (or a Chromium-based browser) version 115 or newer.
 - Node.js 18 or newer, only to build the extension from source.
 
-## Build and Install in Chrome
+## Install
 
-1. Run `npm install` once to install dependencies.
-2. Run `npm run build` to produce the extension bundle in `dist/`.
+### GitHub Release
+
+Chrome Web Store: pending first public review.
+
+1. Download `tabboard-vX.Y.Z.zip` from the [latest release](https://github.com/zhaoshe/tab-board/releases/latest).
+2. Extract the ZIP.
 3. Open `chrome://extensions`.
 4. Enable Developer mode.
-5. Click Load unpacked.
-6. Select the generated `dist/` folder.
+5. Click **Load unpacked** and select the extracted directory.
+
+This installation method does not update automatically. Download and load the
+new extracted directory when a newer release is available.
+
+### Build From Source
+
+1. Run `npm ci`.
+2. Run `npm run build`.
+3. Open `chrome://extensions`.
+4. Enable Developer mode.
+5. Click **Load unpacked**.
+6. Select `dist/`.
 
 For iterative development, run `npm run dev` to start the Vite dev server with hot reload.
 
@@ -113,3 +128,5 @@ git diff --check
 ## License
 
 TabBoard is released under the [MIT License](LICENSE).
+
+See the [Privacy Policy](PRIVACY.md) for data-handling details.
