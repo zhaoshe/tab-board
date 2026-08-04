@@ -1717,6 +1717,20 @@ dev server 在 E2E 阶段覆盖了 `dist/`，导致 ZIP 包含 CRXJS dev loader�
 已标记为不可用 prerelease。`v0.1.4` 在打包脚本中拒绝 dev loader，并在 E2E 后重新
 production build/check 再打包。
 
+发布结果：
+
+- Release：`https://github.com/zhaoshe/tab-board/releases/tag/v0.1.4`。
+- Workflow：`https://github.com/zhaoshe/tab-board/actions/runs/30877302356`，
+  全部步骤通过。
+- 产物：`tabboard-v0.1.4.zip` 和 `tabboard-v0.1.4.sha256`。
+- ZIP SHA-256：
+  `582778e8611bb371dd9bad412a85f672c74ccd6b7ed4624939e6bae4e145b81b`。
+- 下载后复算摘要一致，ZIP 根目录与 production HTML 检查通过。
+- 使用下载后的 ZIP 运行真实 MV3 empty Manager/Options benchmark 通过；
+  Manager 发起一次 Open Tabs worker 调用，页面和 worker 启动正常。
+
+当前状态：`v0.1.4` 是首个可安装 Release，可用于 Chrome Web Store 首次人工上传。
+
 ## 待观察问题
 
 - 右键菜单触发筛选是否足够容易被发现。
