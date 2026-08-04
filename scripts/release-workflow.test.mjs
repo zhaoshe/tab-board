@@ -54,3 +54,13 @@ test('privacy policy states local storage and no network transfer', async () => 
   assert.match(privacy, /does not make network requests/i);
   assert.match(privacy, /does not sell/i);
 });
+
+test('release dependencies resolve from the public npm registry', async () => {
+  const lockfile = await readFile(
+    new URL('../package-lock.json', import.meta.url),
+    'utf8',
+  );
+  const npmrc = await readFile(new URL('../.npmrc', import.meta.url), 'utf8');
+  assert.doesNotMatch(lockfile, /bnpm\.byted\.org|bytedance\.net/);
+  assert.equal(npmrc.trim(), 'registry=https://registry.npmjs.org/');
+});

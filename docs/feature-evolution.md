@@ -1707,7 +1707,9 @@ acceptance 证据记录在
 - 首次 Web Store 提交使用 GitHub Release 的同一份 ZIP；API 自动上传等待首个条目
   审核通过并获得 item ID 后再实现。
 
-当前状态：实现中；首个目标版本为 `v0.1.0`。
+当前状态：`v0.1.0` 因历史 lockfile 中残留内网 registry 地址而在 `npm ci`
+阶段失败，未创建 Release；公开 registry 修复使用不可变的新 patch 版本
+`v0.1.1` 重新发布。
 
 ## 待观察问题
 
