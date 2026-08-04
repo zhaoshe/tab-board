@@ -12,6 +12,7 @@
     "check:cycles": "node --test scripts/check-import-cycles.test.mjs && node scripts/check-import-cycles.mjs --deny-imports src/shared/store/authoritativePublication.ts,zustand,react,src/manager/components,src/shared/store/chromeStorage.ts,src/shared/store/activeAdapter.ts --deny-imports src/shared/model/drop-operations.ts,src/manager --deny-imports src/shared/store/stateMutations.ts,src/manager --deny-imports src/background/statePersistence.ts,src/manager --deny-imports src/manager/core/searchQueryStore.ts,react,zustand,src/shared/store --deny-imports src/shared/applicationFeedback.ts,react,zustand,src/shared/store,src/manager",
     "check:architecture": "node --test scripts/check-search-architecture.test.mjs && node scripts/check-search-architecture.mjs",
     "icons": "node scripts/generate-icons.mjs",
+    "release:package": "node scripts/package-release.mjs",
     "release:validate": "node scripts/release-version.mjs",
     "test": "npm run test:react",
     "test:react": "vitest run",
