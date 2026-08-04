@@ -259,6 +259,7 @@ test.describe('Options approved O2/A2 geometry', () => {
   });
 
   test('keeps configured Local Folder context in ready and fallback states', async ({ page }) => {
+    const fileUpdatedAt = '2026-08-02T14:08:32.000+08:00';
     await page.setViewportSize({ width: 1024, height: 900 });
     await page.goto(`${PREVIEW_PATH}?advanced=1`);
     await page.waitForFunction(() => typeof (
@@ -274,12 +275,19 @@ test.describe('Options approved O2/A2 geometry', () => {
       activeBackend: 'file',
       folderName: 'TabBoard',
       fallbackReason: null,
-      fileUpdatedAt: '2026-08-02T14:08:32.000+08:00',
+      fileUpdatedAt,
     });
 
     const storage = page.locator('.options-storage-panel');
+    const expectedUpdatedTime = await page.evaluate((value) =>
+      new Intl.DateTimeFormat(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }).format(new Date(value)), fileUpdatedAt);
     await expect(storage).toContainText('Local folder name: TabBoard');
-    await expect(storage).toContainText('updated: 14:08:32');
+    await expect(storage).toContainText(`updated: ${expectedUpdatedTime}`);
     await expect(storage.getByRole('button', { name: /Use browser storage/ }))
       .toBeVisible();
     await expect(storage.getByRole('button', { name: /Change folder/ }))
@@ -313,20 +321,20 @@ test.describe('Options approved O2/A2 geometry', () => {
     expect(readyGeometry.folderUpdatedGap).toBeGreaterThanOrEqual(8);
     expect(readyGeometry.overflow).toBe(0);
 
-    await page.evaluate(async () => {
+    await page.evaluate(async (value) => {
       await chrome.storage.local.set({
         tabboardStorageConfig: {
           configuredTarget: 'file',
           activeBackend: 'browser',
           folderName: 'TabBoard',
           fallbackReason: 'Permission to access the storage folder was denied.',
-          fileUpdatedAt: '2026-08-02T14:08:32.000+08:00',
+          fileUpdatedAt: value,
         },
       });
-    });
+    }, fileUpdatedAt);
     const fallback = page.locator('.options-storage-panel');
     await expect(fallback).toContainText('Local folder name: TabBoard');
-    await expect(fallback).toContainText('updated: 14:08:32');
+    await expect(fallback).toContainText(`updated: ${expectedUpdatedTime}`);
     await expect(fallback).toContainText(
       'New writes are temporarily stored in browser storage.',
     );

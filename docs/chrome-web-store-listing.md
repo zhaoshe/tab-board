@@ -65,10 +65,10 @@ TabBoard 不申请 host permissions，不读取网页正文，也不向远端服
 
 1. 使用 `zhaoshe` 注册 Chrome Web Store 开发者账号并支付一次性费用。
 2. 创建名为 **TabBoard** 的公开条目。
-3. 确认 GitHub Actions 已成功发布 `v0.1.1`。
-4. 下载 `tabboard-v0.1.1.zip` 和 `tabboard-v0.1.1.sha256`。
+3. 确认 GitHub Actions 已成功发布 `v0.1.2`。
+4. 下载 `tabboard-v0.1.2.zip` 和 `tabboard-v0.1.2.sha256`。
 5. 复算 SHA-256，确认与校验文件一致。
-6. 上传同一份 `tabboard-v0.1.1.zip`，不要重新构建或修改 ZIP。
+6. 上传同一份 `tabboard-v0.1.2.zip`，不要重新构建或修改 ZIP。
 7. 填写本页中的名称、描述、权限说明、隐私地址和素材。
 8. 提交审核。
 9. 审核通过后，将公开商店地址添加到 README 的 GitHub 安装备选方案之前。

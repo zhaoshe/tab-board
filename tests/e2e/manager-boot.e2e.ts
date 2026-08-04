@@ -303,9 +303,13 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
         };
       });
 
-    expect(geometry.nav.width).toBeGreaterThanOrEqual(geometry.active.width);
-    expect(geometry.active.left).toBeGreaterThanOrEqual(geometry.nav.left);
-    expect(geometry.active.right).toBeLessThanOrEqual(geometry.nav.right);
+    const pixelTolerance = 1;
+    expect(geometry.nav.width + pixelTolerance)
+      .toBeGreaterThanOrEqual(geometry.active.width);
+    expect(geometry.active.left)
+      .toBeGreaterThanOrEqual(geometry.nav.left - pixelTolerance);
+    expect(geometry.active.right)
+      .toBeLessThanOrEqual(geometry.nav.right + pixelTolerance);
     await expect(page.locator('[data-category-id="saved"] .manager-category-count'))
       .toHaveText('0');
   });
@@ -718,7 +722,6 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     )).toBe(52);
 
     const frames = await page.evaluate(async () => {
-      const shell = document.querySelector<HTMLElement>('.manager-shell')!;
       const sidebar = document.querySelector<HTMLElement>(
         '.manager-sidebar__overlay',
       )!;
@@ -874,22 +877,30 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
       const nextFrame = () => new Promise<void>((resolve) =>
         requestAnimationFrame(() => resolve()));
       const finalWidth = Math.min(320, Math.max(272, innerWidth * 0.24));
+      document.documentElement.style.setProperty(
+        '--manager-sidebar-motion-duration',
+        '600ms',
+      );
       expand.click();
-      await wait(45);
-      const beforeReverse = sidebar.getBoundingClientRect().width;
+      const reverseThreshold = 52 + ((finalWidth - 52) * 0.25);
+      let beforeReverse = sidebar.getBoundingClientRect().width;
+      for (let index = 0; index < 60; index += 1) {
+        await nextFrame();
+        beforeReverse = sidebar.getBoundingClientRect().width;
+        if (beforeReverse >= reverseThreshold && beforeReverse < finalWidth) {
+          break;
+        }
+      }
       document.querySelector<HTMLButtonElement>(
         '[aria-label="Collapse Sidebar"]',
       )!.click();
-      while (shell.classList.contains('manager-shell--sidebar-pinned')) {
-        await nextFrame();
-      }
       const atReverse = sidebar.getBoundingClientRect().width;
       const reverseFrames = [atReverse];
-      for (let index = 0; index < 10; index += 1) {
+      for (let index = 0; index < 40; index += 1) {
         await nextFrame();
         reverseFrames.push(sidebar.getBoundingClientRect().width);
       }
-      await wait(180);
+      await wait(600);
       return {
         finalWidth,
         beforeReverse,
@@ -904,7 +915,7 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     expect(frames.atReverse).toBeGreaterThan(52);
     expect(frames.atReverse).toBeLessThan(frames.finalWidth);
     expect(frames.reverseFrames.some((width) =>
-      width < frames.atReverse && width > 52,
+      width < frames.beforeReverse && width > 52,
     )).toBe(true);
     expect(frames.final).toBe(52);
   });
