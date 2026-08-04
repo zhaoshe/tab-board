@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tag
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate release version
+        run: npm run release:validate -- --tag "$GITHUB_REF_NAME"
+
+      - name: Check production build
+        run: npm run check
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: npx playwright test --workers=1
+
+      - name: Package release
+        run: npm run release:package -- --tag "$GITHUB_REF_NAME"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --generate-notes \
+            --title "TabBoard $GITHUB_REF_NAME" \
+            "release/tabboard-$GITHUB_REF_NAME.zip" \
+            "release/tabboard-$GITHUB_REF_NAME.sha256"
