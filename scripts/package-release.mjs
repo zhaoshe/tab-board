@@ -35,6 +35,19 @@ async function requireDistFiles(rootDir) {
   }));
 }
 
+async function requireProductionHtml(rootDir) {
+  for (const file of ['manager.html', 'popup.html', 'options.html']) {
+    const source = await readFile(path.join(rootDir, 'dist', file), 'utf8');
+    if (
+      source.includes('CRXJS DEV MODE')
+      || source.includes('localhost:5173')
+      || source.includes('/assets/loading-page-')
+    ) {
+      throw new Error(`Expected production build for dist/${file}`);
+    }
+  }
+}
+
 async function sha256(filePath) {
   const hash = createHash('sha256');
   hash.update(await readFile(filePath));
@@ -51,6 +64,7 @@ export async function packageRelease({
     versions: await readReleaseVersions(rootDir),
   });
   await requireDistFiles(rootDir);
+  await requireProductionHtml(rootDir);
 
   const distDir = path.join(rootDir, 'dist');
   const archiveName = `tabboard-v${version}.zip`;

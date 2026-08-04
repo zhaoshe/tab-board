@@ -15,7 +15,10 @@ import { packageRelease } from './package-release.mjs';
 
 const execFileAsync = promisify(execFile);
 
-async function fixture({ includeManifest = true } = {}) {
+async function fixture({
+  includeManifest = true,
+  managerHtml = 'manager.html',
+} = {}) {
   const rootDir = await mkdtemp(path.join(tmpdir(), 'tabboard-package-'));
   const outputDir = path.join(rootDir, 'release');
   const distDir = path.join(rootDir, 'dist');
@@ -35,9 +38,9 @@ async function fixture({ includeManifest = true } = {}) {
       '{"version":"0.1.0"}',
     );
   }
-  for (const file of ['manager.html', 'popup.html', 'options.html']) {
-    await writeFile(path.join(distDir, file), file);
-  }
+  await writeFile(path.join(distDir, 'manager.html'), managerHtml);
+  await writeFile(path.join(distDir, 'popup.html'), 'popup.html');
+  await writeFile(path.join(distDir, 'options.html'), 'options.html');
   return { rootDir, outputDir };
 }
 
@@ -57,6 +60,16 @@ test('refuses to package without dist/manifest.json', async () => {
   await assert.rejects(
     packageRelease({ rootDir, outputDir, tag: 'v0.1.0' }),
     /dist\/manifest\.json/,
+  );
+});
+
+test('refuses to package a CRXJS development loader', async () => {
+  const { rootDir, outputDir } = await fixture({
+    managerHtml: '<title>CRXJS DEV MODE</title><script src="http://localhost:5173"></script>',
+  });
+  await assert.rejects(
+    packageRelease({ rootDir, outputDir, tag: 'v0.1.0' }),
+    /production build.*manager\.html/i,
   );
 });
 

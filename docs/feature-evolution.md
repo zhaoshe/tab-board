@@ -1712,7 +1712,10 @@ acceptance 证据记录在
 runner 暴露三处本地时区、字体子像素和固定动画采样的 E2E 假设，同样未创建 Release。
 `v0.1.2` 修复上述合同，但提交前清理误删了相邻动画测试实际使用的局部声明，线上
 91/92 后停止，未创建 Release。恢复声明后使用不可变的新 patch 版本 `v0.1.3`
-重新发布。
+重新发布。`v0.1.3` 的 CI 全部通过并创建了 Release，但发布后验收发现 Playwright
+dev server 在 E2E 阶段覆盖了 `dist/`，导致 ZIP 包含 CRXJS dev loader；该 Release
+已标记为不可用 prerelease。`v0.1.4` 在打包脚本中拒绝 dev loader，并在 E2E 后重新
+production build/check 再打包。
 
 ## 待观察问题
 

@@ -39,6 +39,9 @@ jobs:
       - name: Run browser tests
         run: npx playwright test --workers=1
 
+      - name: Rebuild production extension
+        run: npm run check
+
       - name: Package release
         run: npm run release:package -- --tag "$GITHUB_REF_NAME"
 

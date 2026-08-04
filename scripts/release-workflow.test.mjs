@@ -33,6 +33,17 @@ test('release workflow gates publication on validation and tests', async () => {
     assert.ok(source.includes(command), `missing command: ${command}`);
   }
   assert.doesNotMatch(source, /uses:\s*[^\n]*release-action/i);
+  const browserIndex = source.indexOf('npx playwright test --workers=1');
+  const rebuildIndex = source.indexOf(
+    'npm run check',
+    browserIndex + 'npx playwright test --workers=1'.length,
+  );
+  const packageIndex = source.indexOf(
+    'npm run release:package -- --tag "$GITHUB_REF_NAME"',
+  );
+  assert.ok(browserIndex >= 0);
+  assert.ok(rebuildIndex > browserIndex);
+  assert.ok(packageIndex > rebuildIndex);
 });
 
 test('README exposes binary installation and update limitations', async () => {
