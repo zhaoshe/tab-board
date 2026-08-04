@@ -1710,7 +1710,9 @@ acceptance 证据记录在
 当前状态：`v0.1.0` 因历史 lockfile 中残留内网 registry 地址而在 `npm ci`
 阶段失败，未创建 Release；`v0.1.1` 已通过公开 registry、check 和 unit，但 Linux
 runner 暴露三处本地时区、字体子像素和固定动画采样的 E2E 假设，同样未创建 Release。
-跨平台 E2E 合同修复使用不可变的新 patch 版本 `v0.1.2` 重新发布。
+`v0.1.2` 修复上述合同，但提交前清理误删了相邻动画测试实际使用的局部声明，线上
+91/92 后停止，未创建 Release。恢复声明后使用不可变的新 patch 版本 `v0.1.3`
+重新发布。
 
 ## 待观察问题
 

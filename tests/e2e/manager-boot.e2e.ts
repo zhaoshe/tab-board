@@ -722,6 +722,7 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     )).toBe(52);
 
     const frames = await page.evaluate(async () => {
+      const shell = document.querySelector<HTMLElement>('.manager-shell')!;
       const sidebar = document.querySelector<HTMLElement>(
         '.manager-sidebar__overlay',
       )!;
