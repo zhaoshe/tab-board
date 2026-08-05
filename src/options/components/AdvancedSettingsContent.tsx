@@ -33,6 +33,13 @@ export function AdvancedSettingsContent({
     updateSettings(DEFAULT_SETTINGS);
     setResetConfirmOpen(false);
   };
+  const handleResetAction = () => {
+    if (!settings.confirmBeforeDestructive) {
+      handleResetSettings();
+      return;
+    }
+    setResetConfirmOpen(true);
+  };
 
   return (
     <>
@@ -43,15 +50,15 @@ export function AdvancedSettingsContent({
           <Group justify="space-between" align="flex-start" wrap="nowrap">
             <div className="options-advanced-row__copy">
               <Title order={2} size="h5">
-                Confirm before deleting saved items
+                Confirm before dangerous operations
               </Title>
               <Text size="sm" c="dimmed">
-                Session and saved-item deletion can skip confirmation. Closing browser tabs and permanent deletion always require confirmation.
+                Ask before closing browser tabs, deleting saved data or structure, permanently deleting Trash items, and resetting settings.
               </Text>
             </div>
             <Switch
               name="confirm-before-destructive"
-              aria-label="Confirm before deleting saved items"
+              aria-label="Confirm before dangerous operations"
               checked={settings.confirmBeforeDestructive}
               onChange={(event) => updateSettings({
                 confirmBeforeDestructive: event.currentTarget.checked,
@@ -92,7 +99,7 @@ export function AdvancedSettingsContent({
               variant="outline"
               color="red"
               leftSection={<IconRefresh size={16} aria-hidden="true" />}
-              onClick={() => setResetConfirmOpen(true)}
+              onClick={handleResetAction}
             >
               Reset to Defaults
             </Button>

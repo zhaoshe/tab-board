@@ -728,18 +728,32 @@ Context:
 
 Decision:
 
-新增 `confirmBeforeDestructive` 设置项，默认开启。用户可在 Options > Basic 中关闭该选项，跳过删除、永久删除等危险操作的二次确认弹窗。
+新增 `confirmBeforeDestructive` 设置项，默认开启。用户可在 Options > Advanced
+中通过 `Confirm before dangerous operations` 统一控制危险操作确认。覆盖范围包括：
+
+- Session、Saved Tab、Saved Note、Saved Item note 和批量 Saved Item 删除；
+- 浏览器 Tab 关闭；
+- Workspace 和 Category 删除；
+- Trash 单项永久删除和 Empty Trash；
+- Reset Settings。
+
+关闭后直接执行同一个 mutation/runtime command，不改变数据去向、错误反馈或重试
+语义。
 
 Rationale:
 
-- 默认开启保证了新用户和普通用户的安全，避免误删。
-- 高级用户可以关闭，提升整理效率——Bin 已经提供了撤销删除的安全网。
-- 配置项放在 Basic 设置中，容易找到，同时不影响其他设置的组织结构。
+- 默认开启保证了新用户和普通用户的安全，避免误删、误关浏览器 Tab 或误重置设置。
+- 高级用户可以关闭，减少整理和管理过程中的弹窗中断。可恢复删除仍由 Bin 兜底；
+  永久删除等不可恢复操作则由用户显式选择承担风险。
+- 一个开关覆盖所有危险操作，避免出现“有些删除可关闭确认，有些永远确认”的规则
+  分裂。
 
 Trade-offs:
 
-- 关闭确认后，用户可能更快操作但也更容易误删；但 Bin 的存在降低了这个风险。
-- 增加了一个设置项，让 Options 稍微变长，但这个开关的价值足够高，值得增加。
+- 关闭确认后，用户更容易误关浏览器 Tab、永久删除 Trash 或重置设置；这些操作没有
+  Bin 兜底。
+- Storage migration 的 Use/Overwrite/Merge 和 Stop Using File Storage 仍保留
+  对话框，因为它们用于选择迁移策略，不属于可跳过的危险操作确认。
 
 Status:
 

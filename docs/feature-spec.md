@@ -101,7 +101,10 @@ Options 分为 Basic 和 Advanced：
 - Advanced：Storage location、删除确认、Keyboard shortcuts、Reset settings 四个直接 setting rows。
 - Capture 默认开启 tab 去重；Options 提供自定义 URL 过滤规则，命中的 open tabs 不展示、不可保存也不可拖拽。
 - Favicons 始终展示，不再是设置项。
-- 危险操作默认识别，可在设置中关闭二次确认。
+- `Confirm before dangerous operations` 默认开启，可关闭 Session/Saved Item
+  删除、浏览器 Tab 关闭、Workspace/Category 删除、Trash 永久删除/清空和
+  Reset Settings 的二次确认。关闭后操作直接执行；既有 mutation/runtime 错误反馈
+  和重试路径保持不变。
 - Switch/radio/theme 立即保存；自定义过滤文本在停止输入 500ms 或 blur 后提交。标题旁状态由 authoritative mutation queue 驱动：commit 前保持 `Saving…`，成功后显示 `Saved`，失败时显示 `Could not save` 并提供 Retry。Reset confirmation 关闭后显式回到 Reset to Defaults。
 - Session card 外露动作不再可配置。
 - Options 跟随 system / light / dark 主题。
@@ -112,7 +115,8 @@ Options 分为 Basic 和 Advanced：
 - Advanced Settings 展开状态同步到 `?advanced=1`；刷新和浏览器 Back/Forward 保持同一 disclosure context。
 - Basic 从轻量 settings projection 启动，不读取与页面无关的 sessions/folders/bin。Advanced 关闭时不挂载 storage UI、migration dialogs 或 file backend；首次展开时再异步加载，并在 chunk 加载失败时提供 Reload。
 - Options header、Open Manager 和 Basic shell 不等待 projection I/O；hydration 完成前 Basic fieldset 保持 disabled + `aria-busy`，save status 显示 `Loading settings…`，Advanced 暂不显示。真实 settings 到达后原地启用 controls。
-- Reset to Defaults 需要确认；确认文案明确 saved data 保留不变。
+- Reset to Defaults 在危险操作确认开启时显示确认；关闭时直接恢复默认设置。Saved
+  data 和本地文件始终保留不变。
 - Popup、Options 和 Manager 的动态计数统一使用当前 locale 的 `Intl.NumberFormat`；异步按钮在执行期间暴露以 `…` 结尾的进行中名称。
 
 ### Context menu

@@ -117,6 +117,7 @@ export function WorkspaceHeader({
       updateFolder: currentState.updateFolder,
       deleteFolder: currentState.deleteFolder,
       updateCategoryOrder: currentState.updateCategoryOrder,
+      confirmBeforeDestructive: currentState.settings.confirmBeforeDestructive,
     })),
   );
   const { closeOverlays } = useManagerOverlayCommands();
@@ -148,6 +149,7 @@ export function WorkspaceHeader({
     >
       <WorkspaceMenu
         activeWorkspaceId={state.activeWorkspaceId}
+        confirmBeforeDestructive={state.confirmBeforeDestructive}
         workspaces={state.workspaces}
         groups={state.groups}
         folders={state.folders}
@@ -182,6 +184,7 @@ export function WorkspaceHeader({
         {workspace && (
           <CategoryManager
             workspaceId={workspace.id}
+            confirmBeforeDestructive={state.confirmBeforeDestructive}
             categories={categories}
             folders={folders}
             groups={state.groups}

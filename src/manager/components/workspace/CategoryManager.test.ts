@@ -143,6 +143,7 @@ async function mountManager(
     onUpdateFolder: vi.fn(),
     onDeleteFolder: vi.fn(),
     onUpdateOrder: vi.fn(),
+    confirmBeforeDestructive: true,
     ...overrides,
   };
   root = createRoot(container);
@@ -590,6 +591,39 @@ describe('CategoryManager delete safety', () => {
     await act(async () => buttonWithText('Delete Category').click());
     expect(props.onDeleteFolder).toHaveBeenCalledTimes(1);
     expect(props.onDeleteFolder).toHaveBeenCalledWith('folder-work');
+  });
+
+  it('deletes directly when dangerous-operation confirmation is off', async () => {
+    const props = await mountManager({ confirmBeforeDestructive: false });
+    await openManager();
+    await act(async () => action('Delete Work').click());
+
+    expect(props.onDeleteFolder).toHaveBeenCalledWith('folder-work');
+    expect([...document.querySelectorAll<HTMLElement>('[role="dialog"]')]
+      .some((dialog) => dialog.textContent?.includes('Delete Category')))
+      .toBe(false);
+  });
+
+  it('shows direct-delete errors and retries without opening confirmation', async () => {
+    const onDeleteFolder = vi.fn()
+      .mockRejectedValueOnce(new Error('Category changed before deletion.'))
+      .mockResolvedValueOnce(undefined);
+    await mountManager({
+      confirmBeforeDestructive: false,
+      onDeleteFolder,
+    });
+    await openManager();
+
+    await act(async () => action('Delete Work').click());
+    expect(onDeleteFolder).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[role="alert"]')?.textContent)
+      .toContain('Category changed before deletion.');
+    expect([...document.querySelectorAll<HTMLElement>('[role="dialog"]')]
+      .some((dialog) => dialog.textContent?.includes('Delete Category')))
+      .toBe(false);
+
+    await act(async () => action('Delete Work').click());
+    expect(onDeleteFolder).toHaveBeenCalledTimes(2);
   });
 
   it('returns focus to the exact Delete trigger on cancel', async () => {

@@ -36,6 +36,7 @@ import { WorkspaceManagerModal } from './WorkspaceManagerModal';
 
 interface WorkspaceMenuProps {
   activeWorkspaceId: string;
+  confirmBeforeDestructive: boolean;
   workspaces: readonly Workspace[];
   groups: readonly TabBoardGroup[];
   folders: readonly Folder[];
@@ -58,6 +59,7 @@ function savedSessionCountDescription(count: number): string {
 
 export function WorkspaceMenu({
   activeWorkspaceId,
+  confirmBeforeDestructive,
   workspaces,
   groups,
   folders,
@@ -229,6 +231,7 @@ export function WorkspaceMenu({
 
       <WorkspaceManagerModal
         opened={managerOpen}
+        confirmBeforeDestructive={confirmBeforeDestructive}
         activeWorkspaceId={activeWorkspaceId}
         workspaces={workspaces}
         groups={groups}

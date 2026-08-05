@@ -1731,6 +1731,18 @@ production build/check 再打包。
 
 当前状态：`v0.1.4` 是首个可安装 Release，可用于 Chrome Web Store 首次人工上传。
 
+### 2026-08-05: 危险操作确认开关覆盖全部危险入口
+
+- Options Advanced 文案改为 `Confirm before dangerous operations`。
+- 保留 `confirmBeforeDestructive` 持久化字段和默认开启值，不做 schema migration。
+- 开关现在统一控制 Session/Saved Item 删除、浏览器 Tab 关闭、Workspace/Category
+  删除、Trash 永久删除/清空和 Reset Settings。
+- 关闭后直接执行原 mutation/runtime command；Workspace/Category 删除失败继续在
+  manager 内显示错误，并可再次点击 Delete 重试。
+- Storage migration 策略对话框继续保留；Popup duplicate Remove 继续直接执行。
+
+当前状态：Current。
+
 ## 待观察问题
 
 - 右键菜单触发筛选是否足够容易被发现。

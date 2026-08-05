@@ -102,6 +102,7 @@ async function mountManager(
     onUpdateWorkspaceOrder: vi.fn(),
     onDeleteWorkspace: vi.fn(),
     onActiveWorkspaceDeleted: vi.fn(),
+    confirmBeforeDestructive: true,
     ...overrides,
   };
   root = createRoot(container);
@@ -387,6 +388,38 @@ describe('WorkspaceManagerModal edit and delete safety', () => {
     expect(props.onDeleteWorkspace).toHaveBeenCalledTimes(1);
     expect(props.onDeleteWorkspace).toHaveBeenCalledWith('workspace-personal');
     expect(props.onActiveWorkspaceDeleted).toHaveBeenCalledWith('workspace-work');
+  });
+
+  it('deletes directly when dangerous-operation confirmation is off', async () => {
+    const props = await mountManager({ confirmBeforeDestructive: false });
+    await act(async () => action('Delete Personal').click());
+
+    expect(props.onDeleteWorkspace).toHaveBeenCalledWith('workspace-personal');
+    expect(props.onActiveWorkspaceDeleted).toHaveBeenCalledWith('workspace-work');
+    expect([...document.querySelectorAll<HTMLElement>('[role="dialog"]')]
+      .some((dialog) => dialog.textContent?.includes('Delete Workspace')))
+      .toBe(false);
+  });
+
+  it('shows direct-delete errors and retries without opening confirmation', async () => {
+    const onDeleteWorkspace = vi.fn()
+      .mockRejectedValueOnce(new Error('Unable to enqueue Workspace deletion.'))
+      .mockResolvedValueOnce(undefined);
+    await mountManager({
+      confirmBeforeDestructive: false,
+      onDeleteWorkspace,
+    });
+
+    await act(async () => action('Delete Personal').click());
+    expect(onDeleteWorkspace).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[role="alert"]')?.textContent)
+      .toContain('Unable to enqueue Workspace deletion.');
+    expect([...document.querySelectorAll<HTMLElement>('[role="dialog"]')]
+      .some((dialog) => dialog.textContent?.includes('Delete Workspace')))
+      .toBe(false);
+
+    await act(async () => action('Delete Personal').click());
+    expect(onDeleteWorkspace).toHaveBeenCalledTimes(2);
   });
 
   it('locks confirmation and keeps the manager inert until delete enqueue resolves', async () => {

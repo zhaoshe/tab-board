@@ -242,7 +242,7 @@ test.describe('Options approved O2/A2 geometry', () => {
     expect(geometry.sections.paddingInline).toBe(0);
     expect(geometry.rows.map(({ title }) => title)).toEqual([
       'Storage location',
-      'Confirm before deleting saved items',
+      'Confirm before dangerous operations',
       'Keyboard shortcuts',
       'Reset settings',
     ]);

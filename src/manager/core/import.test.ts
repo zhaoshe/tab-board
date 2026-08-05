@@ -279,7 +279,7 @@ describe('import commands', () => {
     expect(header).toContain('onUpdateFolder(');
     expect(header).toContain('{ name: value, color: selectedColor },');
     expect(header).toContain('runCategoryMutation');
-    expect(header).toContain('onDeleteFolder(deletedId)');
+    expect(header).toContain('onDeleteFolder(folderId)');
     expect(sidebar).not.toContain('addFolder');
     expect(sidebar).not.toContain('renameFolder');
     expect(sidebar).not.toContain('deleteFolder');

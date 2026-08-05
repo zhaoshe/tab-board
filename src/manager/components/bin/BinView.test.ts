@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MantineProvider } from '@mantine/core';
 import { BinView } from './BinView';
 
@@ -15,17 +15,34 @@ const bin = [{
   item: {},
 }];
 
+const harness = vi.hoisted(() => ({
+  confirmBeforeDestructive: true,
+  restoreFromBin: vi.fn(),
+  deleteBinEntry: vi.fn(),
+  clearBin: vi.fn(),
+}));
+
 vi.mock('../../../shared/store/useTabBoardStore', () => ({
   useTabBoardStore: (selector: (state: unknown) => unknown) => selector({
     bin,
-    restoreFromBin: vi.fn(),
-    deleteBinEntry: vi.fn(),
-    clearBin: vi.fn(),
+    settings: {
+      confirmBeforeDestructive: harness.confirmBeforeDestructive,
+    },
+    restoreFromBin: harness.restoreFromBin,
+    deleteBinEntry: harness.deleteBinEntry,
+    clearBin: harness.clearBin,
   }),
 }));
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
+
+beforeEach(() => {
+  harness.confirmBeforeDestructive = true;
+  harness.restoreFromBin.mockReset();
+  harness.deleteBinEntry.mockReset();
+  harness.clearBin.mockReset();
+});
 
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
@@ -48,5 +65,43 @@ describe('BinView actions', () => {
     expect(document.querySelector('.manager-bin-entry')).not.toBeNull();
     expect(document.querySelector('button[aria-label="Restore Deleted Session"]')).not.toBeNull();
     expect(document.querySelector('button[aria-label="Delete Deleted Session Permanently"]')).not.toBeNull();
+  });
+
+  it('deletes a Trash item directly when dangerous-operation confirmation is off', async () => {
+    harness.confirmBeforeDestructive = false;
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(createElement(MantineProvider, null, createElement(BinView)));
+    });
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>(
+        '[aria-label="Delete Deleted Session Permanently"]',
+      )?.click();
+    });
+
+    expect(harness.deleteBinEntry).toHaveBeenCalledWith('bin-1');
+    expect(document.body.textContent).not.toContain('Are you sure you want to permanently delete');
+  });
+
+  it('empties Trash directly when dangerous-operation confirmation is off', async () => {
+    harness.confirmBeforeDestructive = false;
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(createElement(MantineProvider, null, createElement(BinView)));
+    });
+
+    const emptyTrash = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === 'Empty Trash');
+    await act(async () => emptyTrash?.click());
+
+    expect(harness.clearBin).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).not.toContain(
+      'Are you sure you want to permanently delete all',
+    );
   });
 });

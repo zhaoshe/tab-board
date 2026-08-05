@@ -149,6 +149,7 @@ function restoreFinalFocus(finalFocusRef?: RefObject<HTMLElement>): void {
 
 interface CategoryManagerProps {
   workspaceId: string;
+  confirmBeforeDestructive: boolean;
   categories: readonly CategoryStripItem[];
   folders: readonly Folder[];
   groups: readonly TabBoardGroup[];
@@ -169,6 +170,7 @@ interface CategoryManagerProps {
 
 export function CategoryManager({
   workspaceId,
+  confirmBeforeDestructive,
   categories,
   folders,
   groups,
@@ -343,19 +345,26 @@ export function CategoryManager({
       setFocusedRowId((current) => current === categoryId ? null : current);
     }
   };
-  const confirmDelete = async () => {
-    if (!deletingFolder || submitting) return;
-    const deletedId = deletingFolder.id;
+  const performDelete = async (folderId: string) => {
+    if (submitting) return;
     const success = await runCategoryMutation(
       lock,
-      () => onDeleteFolder(deletedId),
+      () => onDeleteFolder(folderId),
       setDeleteError,
       setSubmitting,
     );
     if (!success) return;
     setDeletingFolderId(null);
     setDeleteError(null);
-    if (selectedCategory === `folder:${deletedId}`) onSelectCategory('inbox');
+    if (selectedCategory === `folder:${folderId}`) onSelectCategory('inbox');
+  };
+  const requestDelete = (folderId: string) => {
+    setDeleteError(null);
+    if (confirmBeforeDestructive) {
+      setDeletingFolderId(folderId);
+      return;
+    }
+    void performDelete(folderId);
   };
   const validation = editorMode
     ? validateFolderName(
@@ -595,8 +604,7 @@ export function CategoryManager({
                         tabIndex={actionsAvailable ? 0 : -1}
                         onClick={(event) => {
                           deleteTriggerRef.current = event.currentTarget;
-                          setDeleteError(null);
-                          setDeletingFolderId(item.folderId!);
+                          requestDelete(item.folderId!);
                         }}
                       >
                         <TabBoardIcon icon={Trash} />
@@ -608,6 +616,9 @@ export function CategoryManager({
             })}
           </Stack>
           {error ? <Text c="red" size="sm">{error}</Text> : null}
+          {deleteError && !deletingFolder ? (
+            <Text c="red" size="sm" role="alert">{deleteError}</Text>
+          ) : null}
           <Group
             className="manager-management-footer"
             justify="flex-end"
@@ -753,7 +764,9 @@ export function CategoryManager({
           setDeletingFolderId(null);
           setDeleteError(null);
         }}
-        onConfirm={confirmDelete}
+        onConfirm={() => deletingFolder
+          ? performDelete(deletingFolder.id)
+          : undefined}
       />
     </>
   );

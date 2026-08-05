@@ -176,7 +176,9 @@ describe('OptionsApp information architecture', () => {
     )?.closest('.mantine-Switch-root')?.textContent)
       .toContain('Bring focus to the first newly opened tab.');
     await openAdvanced();
-    expect(document.querySelector<HTMLInputElement>('input[name="confirm-before-destructive"]')).not.toBeNull();
+    expect(document.querySelector<HTMLInputElement>(
+      'input[name="confirm-before-destructive"]',
+    )?.getAttribute('aria-label')).toBe('Confirm before dangerous operations');
   });
 
   it('aligns Capture switch controls on the right in stable setting rows', async () => {
@@ -334,13 +336,13 @@ describe('OptionsApp information architecture', () => {
     const advanced = document.querySelector<HTMLDetailsElement>('details');
     expect(advanced?.querySelector('summary')?.textContent).toBe('Advanced Settings');
     expect(advanced?.textContent).not.toContain('Storage location');
-    expect(advanced?.textContent).not.toContain('Confirm before deleting saved items');
+    expect(advanced?.textContent).not.toContain('Confirm before dangerous operations');
 
     await openAdvanced();
     expect(advanced?.textContent).toContain('Storage location');
-    expect(advanced?.textContent).toContain('Confirm before deleting saved items');
+    expect(advanced?.textContent).toContain('Confirm before dangerous operations');
     expect(advanced?.textContent)
-      .toContain('Session and saved-item deletion can skip confirmation. Closing browser tabs and permanent deletion always require confirmation.');
+      .toContain('Ask before closing browser tabs, deleting saved data or structure, permanently deleting Trash items, and resetting settings.');
     expect(advanced?.textContent).toContain('Open Keyboard Shortcuts');
     expect(advanced?.textContent).toContain('Reset to Defaults');
     expect(advanced?.textContent)
@@ -362,7 +364,7 @@ describe('OptionsApp information architecture', () => {
     expect([...rows].map((row) => row.querySelector('h2')?.textContent))
       .toEqual([
         'Storage location',
-        'Confirm before deleting saved items',
+        'Confirm before dangerous operations',
         'Keyboard shortcuts',
         'Reset settings',
       ]);
@@ -402,6 +404,21 @@ describe('OptionsApp information architecture', () => {
       .find((button) => button.textContent?.trim() === 'Reset Settings');
     await act(async () => confirm?.click());
     expect(harness.updateSettings).toHaveBeenCalledWith(DEFAULT_SETTINGS);
+  });
+
+  it('resets settings directly when dangerous-operation confirmation is off', async () => {
+    harness.settings = {
+      ...DEFAULT_SETTINGS,
+      confirmBeforeDestructive: false,
+    };
+    await mountOptions();
+    await openAdvanced();
+    const reset = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === 'Reset to Defaults');
+    await act(async () => reset?.click());
+
+    expect(harness.updateSettings).toHaveBeenCalledWith(DEFAULT_SETTINGS);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it('restores focus to Reset to Defaults after cancelling confirmation', async () => {

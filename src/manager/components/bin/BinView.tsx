@@ -31,14 +31,24 @@ function formatDeletedAt(deletedAt: string): string {
 
 interface BinEntryItemProps {
   entry: BinEntry;
+  confirmBeforeDestructive: boolean;
   onRestore: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
-function BinEntryItem({ entry, onRestore, onDelete }: BinEntryItemProps) {
+function BinEntryItem({
+  entry,
+  confirmBeforeDestructive,
+  onRestore,
+  onDelete,
+}: BinEntryItemProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const handleDelete = () => {
+    if (!confirmBeforeDestructive) {
+      onDelete(entry.id);
+      return;
+    }
     setConfirmOpen(true);
   };
 
@@ -161,9 +171,16 @@ export function BinView() {
   const restoreFromBin = useTabBoardStore((state) => state.restoreFromBin);
   const deleteBinEntry = useTabBoardStore((state) => state.deleteBinEntry);
   const clearBin = useTabBoardStore((state) => state.clearBin);
+  const confirmBeforeDestructive = useTabBoardStore(
+    (state) => state.settings.confirmBeforeDestructive,
+  );
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
 
   const handleClearBin = () => {
+    if (!confirmBeforeDestructive) {
+      clearBin();
+      return;
+    }
     setClearConfirmOpen(true);
   };
 
@@ -229,6 +246,7 @@ export function BinView() {
               <BinEntryItem
                 key={entry.id}
                 entry={entry}
+                confirmBeforeDestructive={confirmBeforeDestructive}
                 onRestore={restoreFromBin}
                 onDelete={deleteBinEntry}
               />

@@ -55,6 +55,7 @@ async function mountMenu(groups: Group[] = []) {
   root = createRoot(container);
   const props = {
     activeWorkspaceId: 'workspace-a',
+    confirmBeforeDestructive: true,
     workspaces,
     groups,
     folders: [],

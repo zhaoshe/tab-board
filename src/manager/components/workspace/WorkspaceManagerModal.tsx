@@ -37,6 +37,7 @@ const WORKSPACE_DRAG_MIME = 'application/x-tabboard-workspace';
 
 export interface WorkspaceManagerModalProps {
   opened: boolean;
+  confirmBeforeDestructive: boolean;
   activeWorkspaceId: string;
   workspaces: readonly Workspace[];
   groups: readonly TabBoardGroup[];
@@ -105,6 +106,7 @@ function restoreFinalFocus(finalFocusRef?: RefObject<HTMLElement>): void {
 
 export function WorkspaceManagerModal({
   opened,
+  confirmBeforeDestructive,
   activeWorkspaceId,
   workspaces,
   groups,
@@ -219,10 +221,12 @@ export function WorkspaceManagerModal({
     ? `${deleteMessage} ${deleteError}`
     : deleteMessage;
 
-  const confirmDelete = async () => {
-    if (!deletingWorkspace || deleting) return;
-    const deletedWorkspaceId = deletingWorkspace.id;
-    const replacementId = replacementWorkspace?.id;
+  const performDelete = async (workspace: Workspace) => {
+    if (deleting) return;
+    const deletedWorkspaceId = workspace.id;
+    const replacementId = workspace.id === activeWorkspaceId
+      ? workspaces.find(({ id }) => id !== workspace.id)?.id
+      : undefined;
     setDeleting(true);
     setDeleteError(null);
     try {
@@ -238,6 +242,15 @@ export function WorkspaceManagerModal({
     } finally {
       setDeleting(false);
     }
+  };
+
+  const requestDelete = (workspace: Workspace) => {
+    setDeleteError(null);
+    if (confirmBeforeDestructive) {
+      setDeletingWorkspace(workspace);
+      return;
+    }
+    void performDelete(workspace);
   };
 
   return (
@@ -279,7 +292,7 @@ export function WorkspaceManagerModal({
               const locked = groups.some(
                 (group) => group.workspaceId === workspace.id && group.locked,
               );
-              const deleteDisabled = workspaces.length <= 1 || locked;
+              const deleteDisabled = deleting || workspaces.length <= 1 || locked;
               const actionsAvailable = focusedRowId === workspace.id;
 
               return (
@@ -385,8 +398,7 @@ export function WorkspaceManagerModal({
                       tabIndex={actionsAvailable ? 0 : -1}
                       onClick={(event) => {
                         deleteTriggerRef.current = event.currentTarget;
-                        setDeleteError(null);
-                        setDeletingWorkspace(workspace);
+                        requestDelete(workspace);
                       }}
                     >
                       <TabBoardIcon icon={Trash} />
@@ -396,6 +408,9 @@ export function WorkspaceManagerModal({
               );
             })}
           </Stack>
+          {deleteError && !deletingWorkspace ? (
+            <Text c="red" size="sm" role="alert">{deleteError}</Text>
+          ) : null}
           <Group
             className="manager-management-footer"
             justify="flex-end"
@@ -447,7 +462,9 @@ export function WorkspaceManagerModal({
           setDeleteError(null);
           setDeletingWorkspace(null);
         }}
-        onConfirm={confirmDelete}
+        onConfirm={() => deletingWorkspace
+          ? performDelete(deletingWorkspace)
+          : undefined}
       />
     </>
   );

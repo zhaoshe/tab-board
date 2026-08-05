@@ -968,7 +968,7 @@ describe('OpenTabsPanel drag constraints', () => {
     await vi.waitFor(() => expect(props.workflow.commands.closeTab).toHaveBeenCalledWith(41));
   });
 
-  it('still confirms irreversible browser-tab closing when saved-item confirmation is off', async () => {
+  it('closes a browser tab directly when dangerous-operation confirmation is off', async () => {
     testHarness.confirmBeforeDestructive = false;
     const props = createProps();
     await mountPanel(props);
@@ -976,9 +976,7 @@ describe('OpenTabsPanel drag constraints', () => {
     const closeButton = document.querySelector<HTMLButtonElement>('[aria-label="Close Regular"]');
     await act(async () => closeButton?.click());
 
-    expect(testHarness.confirmDestructive).toHaveBeenCalledWith(expect.objectContaining({
-      title: 'Close Browser Tab',
-    }));
+    expect(testHarness.confirmDestructive).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(props.workflow.commands.closeTab).toHaveBeenCalledWith(41));
   });
 });

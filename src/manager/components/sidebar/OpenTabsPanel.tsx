@@ -20,6 +20,7 @@ import { OpenTabsFilterFooter } from './OpenTabsFilterFooter';
 import type { OpenSessionTargetPickerInput } from '../shell/SessionTargetPicker';
 import type { SidebarDisclosureState } from '../../hooks/useSidebarDisclosure';
 import { getSelectableOpenTabIds } from '../../core/open-tabs';
+import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 
 export const OPEN_TABS_FILTER_INPUT_ID = 'open-tabs-filter-input';
 
@@ -83,6 +84,9 @@ export function OpenTabsPanel({
     restoreFocusAfterMutation,
   } = useManagerOverlayCommands();
   const confirmDestructive = useDestructiveConfirmation();
+  const confirmBeforeDestructive = useTabBoardStore(
+    (state) => state.settings.confirmBeforeDestructive,
+  );
   const openTabsOverflow = useOverflowCues<HTMLDivElement>();
   const sourceSnapshot = useMemo(
     () => ({ selectedWindowId, filteredTabs }),
@@ -130,12 +134,14 @@ export function OpenTabsPanel({
           };
         })()
       : undefined;
-    const confirmed = await confirmDestructive({
-      title: 'Close Browser Tab',
-      message: 'Close this browser tab? This action cannot be undone from TabBoard.',
-      confirmLabel: 'Close Tab',
-    });
-    if (!confirmed) return;
+    if (confirmBeforeDestructive) {
+      const confirmed = await confirmDestructive({
+        title: 'Close Browser Tab',
+        message: 'Close this browser tab? This action cannot be undone from TabBoard.',
+        confirmLabel: 'Close Tab',
+      });
+      if (!confirmed) return;
+    }
     try {
       await commands.closeTab(tabId);
     } finally {

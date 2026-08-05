@@ -74,3 +74,5 @@ runtime command。
 
 完成后运行 focused Vitest、`npm run check`、完整 `npm test`、串行 Playwright 和
 `git diff --check`。
+
+状态：已确认并实现。
