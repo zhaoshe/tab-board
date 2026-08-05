@@ -21,9 +21,8 @@ import {
   classifyWindowDuplicates,
   isWindowDedupeUrl,
 } from '../shared/model/window-dedupe';
-import { useTabBoardStore } from '../shared/store/useTabBoardStore';
-import { useStoreHydration } from '../shared/hooks/useStoreHydration';
-import { useColorScheme } from '../shared/hooks/useColorScheme';
+import { usePopupSettings } from './usePopupSettings';
+import { usePreferredColorScheme } from '../shared/hooks/usePreferredColorScheme';
 import { usePageTheme } from '../shared/hooks/usePageTheme';
 import { AccessibleIconAction } from '../shared/components/AccessibleIconAction';
 import { formatNumber } from '../shared/utils/formatters';
@@ -35,6 +34,29 @@ interface TabInfo {
   pinned: boolean;
   active: boolean;
   groupId?: number;
+}
+
+let inFlightTabQuery: Promise<TabInfo[]> | null = null;
+
+function queryCurrentWindowTabsOnce(): Promise<TabInfo[]> {
+  if (inFlightTabQuery) return inFlightTabQuery;
+  const request = chrome.tabs.query({ currentWindow: true }).then(
+    (currentTabs): TabInfo[] => currentTabs
+      .filter((tab) => tab.id !== undefined && tab.url)
+      .map((tab) => ({
+        id: tab.id!,
+        url: tab.url!,
+        pinned: tab.pinned || false,
+        active: tab.active || false,
+        groupId: tab.groupId,
+      })),
+  );
+  let shared!: Promise<TabInfo[]>;
+  shared = request.finally(() => {
+    if (inFlightTabQuery === shared) inFlightTabQuery = null;
+  });
+  inFlightTabQuery = shared;
+  return shared;
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -50,11 +72,15 @@ export function popupSaveHelper(closeTabsAfterSave: boolean): string {
 }
 
 export function PopupApp() {
-  const { hydrated } = useStoreHydration();
-  const settings = useTabBoardStore((state) => state.settings);
-  const colorScheme = useColorScheme();
+  const {
+    hydrated: settingsLoaded,
+    error: settingsError,
+    settings,
+  } = usePopupSettings();
+  const colorScheme = usePreferredColorScheme(settings.theme);
   usePageTheme(colorScheme);
   const [tabs, setTabs] = useState<TabInfo[]>([]);
+  const [tabsLoaded, setTabsLoaded] = useState(false);
   const [savingTabs, setSavingTabs] = useState(false);
   const [deduping, setDeduping] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -64,10 +90,27 @@ export function PopupApp() {
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (hydrated) {
-      void loadTabs();
-    }
-  }, [hydrated]);
+    let active = true;
+    void queryCurrentWindowTabsOnce()
+      .then((tabList) => {
+        if (!active) return;
+        setTabs(tabList);
+        setLoadError(null);
+        setTabsLoaded(true);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setTabs([]);
+        setLoadError(errorMessage(
+          error,
+          'Unable to load current tabs. Reopen the popup and try again.',
+        ));
+        setTabsLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => () => {
     if (closeTimerRef.current !== null) {
@@ -75,32 +118,12 @@ export function PopupApp() {
     }
   }, []);
 
-  const loadTabs = async (): Promise<void> => {
-    try {
-      const currentTabs = await chrome.tabs.query({ currentWindow: true });
-      const tabList: TabInfo[] = currentTabs
-        .filter((tab) => tab.id !== undefined && tab.url)
-        .map((tab) => ({
-          id: tab.id!,
-          url: tab.url!,
-          pinned: tab.pinned || false,
-          active: tab.active || false,
-          groupId: tab.groupId,
-        }));
-      setTabs(tabList);
-      setLoadError(null);
-    } catch (error: unknown) {
-      setLoadError(errorMessage(error, 'Unable to load current tabs. Reopen the popup and try again.'));
-    }
-  };
-
   const filteredTabs = useMemo(() => {
-    if (!hydrated) return tabs;
     const extensionBaseUrl = import.meta.env.DEV
       ? `${window.location.origin}/dev/`
       : chrome.runtime.getURL('');
     return tabs.filter((tab) => isStorableCaptureCandidate(tab, settings, extensionBaseUrl));
-  }, [tabs, settings, hydrated]);
+  }, [tabs, settings]);
 
   const duplicateClassification = useMemo(() => {
     const extensionBaseUrl = import.meta.env.DEV
@@ -168,7 +191,7 @@ export function PopupApp() {
     chrome.runtime.openOptionsPage();
   };
 
-  if (!hydrated) {
+  if (!settingsLoaded || !tabsLoaded) {
     return (
       <MantineProvider theme={theme} forceColorScheme={colorScheme}>
         <Paper component="main" className="popup-app popup-app--loading">
@@ -184,7 +207,7 @@ export function PopupApp() {
     );
   }
 
-  const feedbackError = loadError || saveError;
+  const feedbackError = loadError || settingsError || saveError;
   const pinnedTabCount = filteredTabs.filter((tab) => tab.pinned).length;
   const selectedCount = selectedTabs.length;
   const saveButtonText = savingTabs

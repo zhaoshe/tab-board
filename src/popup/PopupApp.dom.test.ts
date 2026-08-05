@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement } from 'react';
+import { StrictMode, act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PopupApp } from './PopupApp';
@@ -29,31 +29,21 @@ const queryTabs = vi.fn();
 const sendMessage = vi.fn();
 const getExtensionUrl = vi.fn(() => 'chrome-extension://test/');
 let activeMount: MountedPopup | null = null;
-const hydrationState = vi.hoisted(() => ({ hydrated: true }));
-const settingsState = vi.hoisted(() => ({
-  value: {
+const popupSettingsState = vi.hoisted(() => ({
+  hydrated: true,
+  error: null as string | null,
+  settings: {
     customUrlFilter: '',
     excludePinned: false,
     includeChromeUrls: true,
     includeFileUrls: true,
     closeTabsAfterSave: true,
+    theme: 'system' as const,
   },
 }));
 
-vi.mock('../shared/hooks/useStoreHydration', () => ({
-  useStoreHydration: () => ({ hydrated: hydrationState.hydrated }),
-}));
-
-vi.mock('../shared/store/useTabBoardStore', () => ({
-  useTabBoardStore: (selector: (state: { settings: {
-    customUrlFilter: string;
-    excludePinned: boolean;
-    includeChromeUrls: boolean;
-    includeFileUrls: boolean;
-    closeTabsAfterSave: boolean;
-  } }) => unknown) => selector({
-    settings: settingsState.value,
-  }),
+vi.mock('./usePopupSettings', () => ({
+  usePopupSettings: () => popupSettingsState,
 }));
 
 function getSaveButton(): HTMLButtonElement {
@@ -81,12 +71,16 @@ async function mountPopup(expectedButtonText: string): Promise<MountedPopup> {
   return mounted;
 }
 
-async function mountPopupWithoutWaiting(): Promise<MountedPopup> {
+async function mountPopupWithoutWaiting(strict = false): Promise<MountedPopup> {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
   await act(async () => {
-    root.render(createElement(PopupApp));
+    root.render(
+      strict
+        ? createElement(StrictMode, null, createElement(PopupApp))
+        : createElement(PopupApp),
+    );
   });
   const mounted = { container, root };
   activeMount = mounted;
@@ -100,13 +94,15 @@ async function clickSave(): Promise<void> {
 }
 
 beforeEach(() => {
-  hydrationState.hydrated = true;
-  settingsState.value = {
+  popupSettingsState.hydrated = true;
+  popupSettingsState.error = null;
+  popupSettingsState.settings = {
     customUrlFilter: '',
     excludePinned: false,
     includeChromeUrls: true,
     includeFileUrls: true,
     closeTabsAfterSave: true,
+    theme: 'system',
   };
   queryTabs.mockReset().mockResolvedValue(tabs);
   sendMessage.mockReset();
@@ -149,7 +145,7 @@ describe('PopupApp save response protocol', () => {
   });
 
   it('renders a main landmark, page heading, and visible hydration status', async () => {
-    hydrationState.hydrated = false;
+    popupSettingsState.hydrated = false;
     await mountPopupWithoutWaiting();
 
     expect(document.querySelector('main')).not.toBeNull();
@@ -233,8 +229,8 @@ describe('PopupApp save response protocol', () => {
     await act(async () => activeMount?.root.unmount());
     activeMount?.container.remove();
     activeMount = null;
-    settingsState.value = {
-      ...settingsState.value,
+    popupSettingsState.settings = {
+      ...popupSettingsState.settings,
       closeTabsAfterSave: false,
     };
     await mountPopup('Save');
@@ -450,6 +446,34 @@ describe('PopupApp save response protocol', () => {
 
     expect(unhandledRejection).not.toHaveBeenCalled();
     window.removeEventListener('unhandledrejection', unhandledRejection);
+  });
+
+  it('starts the current-window tab query before settings hydration settles', async () => {
+    popupSettingsState.hydrated = false;
+
+    await mountPopupWithoutWaiting();
+
+    expect(queryTabs).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('.popup-app--loading')).not.toBeNull();
+    expect(document.querySelector('[data-popup-save]')).toBeNull();
+  });
+
+  it('queries the current window once under Strict Mode', async () => {
+    await mountPopupWithoutWaiting(true);
+
+    await waitForDom(() => expect(getSaveButton().textContent).toContain('Save'));
+    expect(queryTabs).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders default-settings content with a settings read error after tabs load', async () => {
+    popupSettingsState.error = 'Settings unavailable.';
+
+    await mountPopup('Save');
+
+    expect(document.querySelector('[role="alert"]')?.textContent)
+      .toContain('Settings unavailable.');
+    expect(document.querySelector('.popup-app__save-helper')?.textContent)
+      .toBe('Save and close tabs');
   });
 
   it('clears the delayed close timer when the popup unmounts', async () => {
