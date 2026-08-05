@@ -8,6 +8,8 @@ import {
   FolderPlus,
   Inbox,
   PanelLeftOpen,
+  PanelLeftClose,
+  Pin,
   SquareCheckBig,
   X,
 } from 'lucide-react';
@@ -24,12 +26,16 @@ export function OpenTabsSelectionBar({
   selectedCount,
   selectionMode,
   sidebarCollapsed,
+  sidebarState,
   allVisibleSelected,
   updatingSelection,
+  canEnterSelection,
   onEnterSelection,
   onExpand,
+  onCollapse,
   onSaveAll,
   expandRef,
+  collapseRef,
   onCapture,
   onClear,
   onSaveTo,
@@ -43,17 +49,32 @@ export function OpenTabsSelectionBar({
   selectedCount: number;
   selectionMode: boolean;
   sidebarCollapsed: boolean;
+  sidebarState: 'collapsed' | 'peek' | 'pinned' | 'drawer';
   allVisibleSelected: boolean;
   updatingSelection: boolean;
+  canEnterSelection: boolean;
   onEnterSelection: () => void;
   onExpand: () => void;
+  onCollapse: () => void;
   onSaveAll: () => void;
   expandRef: RefObject<HTMLButtonElement>;
+  collapseRef: RefObject<HTMLButtonElement>;
   onCapture: () => void;
   onClear: () => void;
   onSaveTo: (trigger: HTMLButtonElement) => void;
   onSelectAll: () => void;
 }) {
+  const collapseLabel = sidebarState === 'peek'
+    ? 'Pin Sidebar'
+    : sidebarState === 'drawer'
+      ? 'Close Sidebar'
+      : 'Collapse Sidebar';
+  const CollapseIcon = sidebarState === 'peek'
+    ? Pin
+    : sidebarState === 'drawer'
+      ? X
+      : PanelLeftClose;
+
   return (
     <div
       className="manager-open-tabs-selection-bar"
@@ -113,6 +134,15 @@ export function OpenTabsSelectionBar({
               >
                 <TabBoardIcon icon={X} />
               </AccessibleIconAction>
+              <AccessibleIconAction
+                ref={collapseRef}
+                label={collapseLabel}
+                className="manager-sidebar-collapse-toggle manager-sidebar-utility-action"
+                aria-controls="manager-sidebar"
+                onClick={onCollapse}
+              >
+                <TabBoardIcon icon={CollapseIcon} />
+              </AccessibleIconAction>
             </div>
           </Group>
         ) : (
@@ -131,6 +161,7 @@ export function OpenTabsSelectionBar({
             <div className="manager-open-tabs-context-actions__tools">
               <AccessibleIconAction
                 label="Enter Tab Selection Mode"
+                disabled={!canEnterSelection}
                 onClick={onEnterSelection}
               >
                 <TabBoardIcon icon={SquareCheckBig} />
@@ -142,6 +173,15 @@ export function OpenTabsSelectionBar({
                 onClick={onSaveAll}
               >
                 <TabBoardIcon icon={Inbox} />
+              </AccessibleIconAction>
+              <AccessibleIconAction
+                ref={collapseRef}
+                label={collapseLabel}
+                className="manager-sidebar-collapse-toggle manager-sidebar-utility-action"
+                aria-controls="manager-sidebar"
+                onClick={onCollapse}
+              >
+                <TabBoardIcon icon={CollapseIcon} />
               </AccessibleIconAction>
             </div>
           </Group>

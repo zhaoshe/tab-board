@@ -1,14 +1,6 @@
-import type { RefObject } from 'react';
 import { ActionIcon, Group } from '@mantine/core';
-import {
-  PanelLeftClose,
-  Pin,
-  X,
-} from 'lucide-react';
 import type { OpenWindowInfo } from '../../../shared/openTabs';
 import { formatNumber } from '../../../shared/utils/formatters';
-import { AccessibleIconAction } from '../../../shared/components/AccessibleIconAction';
-import { TabBoardIcon } from '../../../shared/components/TabBoardIcon';
 import { TabBoardTooltip } from '../../../shared/components/TabBoardTooltip';
 import type { SidebarDisclosureState } from '../../hooks/useSidebarDisclosure';
 
@@ -20,18 +12,12 @@ export function OpenTabsWindowBar({
   windows,
   selectedWindow,
   sidebarState,
-  sidebarToggleRef,
   onSelectWindow,
-  onToggleSidebar,
-  onPinSidebar,
 }: {
   windows: readonly OpenWindowInfo[];
   selectedWindow: OpenWindowInfo | null;
   sidebarState: SidebarDisclosureState;
-  sidebarToggleRef: RefObject<HTMLButtonElement>;
   onSelectWindow: (windowId: number) => void;
-  onToggleSidebar: (expanded: boolean) => void;
-  onPinSidebar: () => void;
 }) {
   const visibleWindows = windows.filter((window) => !window.incognito);
 
@@ -85,43 +71,6 @@ export function OpenTabsWindowBar({
             </ActionIcon>
           </TabBoardTooltip>
         )}
-      </Group>
-      <Group
-        className="manager-sidebar-utilities manager-sidebar__expanded-content"
-        gap={2}
-        ml="auto"
-        wrap="nowrap"
-        aria-hidden={sidebarState === 'collapsed' || undefined}
-        {...(sidebarState === 'collapsed' ? { inert: '' } : {})}
-      >
-        <AccessibleIconAction
-          ref={sidebarToggleRef}
-          label={sidebarState === 'peek'
-            ? 'Pin Sidebar'
-            : sidebarState === 'drawer'
-              ? 'Close Sidebar'
-              : 'Collapse Sidebar'}
-          className="manager-sidebar-collapse-toggle manager-sidebar-header-action manager-sidebar-utility-action"
-          variant="subtle"
-          aria-controls="manager-sidebar"
-          disabled={sidebarState === 'collapsed'}
-          tabIndex={sidebarState === 'collapsed' ? -1 : undefined}
-          onClick={() => {
-            if (sidebarState === 'peek') {
-              onPinSidebar();
-            } else {
-              onToggleSidebar(false);
-            }
-          }}
-        >
-          <TabBoardIcon
-            icon={sidebarState === 'peek'
-              ? Pin
-              : sidebarState === 'drawer'
-                ? X
-                : PanelLeftClose}
-          />
-        </AccessibleIconAction>
       </Group>
     </Group>
   );

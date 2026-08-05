@@ -764,8 +764,13 @@ describe('OpenTabsPanel drag constraints', () => {
     const saveAll = document.querySelector<HTMLButtonElement>(
       '[aria-label="Save All 3 Tabs"]',
     );
+    const collapse = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Collapse Sidebar"]',
+    );
     expect(enterSelection).not.toBeNull();
     expect(saveAll).not.toBeNull();
+    expect(collapse?.closest('.manager-open-tabs-selection-bar')).not.toBeNull();
+    expect(collapse?.closest('.manager-open-tabs-window-bar')).toBeNull();
     expect(document.querySelector('[aria-label="Exit Tab Selection Mode"]')).toBeNull();
 
     await act(async () => enterSelection?.click());
@@ -775,6 +780,39 @@ describe('OpenTabsPanel drag constraints', () => {
 
     await act(async () => saveAll?.click());
     expect(props.onCaptureSelectedWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the empty Open Tabs area blank and disables selection entry', async () => {
+    const emptyWindow = {
+      ...selectedWindow,
+      tabCount: 0,
+      tabs: [],
+    };
+    const props = createProps({
+      workflow: {
+        ...createProps().workflow,
+        model: {
+          ...createProps().workflow.model,
+          windows: [emptyWindow],
+          selectedWindow: emptyWindow,
+          filteredTabs: [],
+        },
+      },
+      selectionScope: {
+        ...createProps().selectionScope,
+        scope: null,
+      },
+    });
+    await mountPanel(props);
+
+    expect(document.body.textContent).not.toContain('No open tabs');
+    const enterSelection = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Enter Tab Selection Mode"]',
+    );
+    expect(enterSelection?.disabled).toBe(true);
+
+    await act(async () => enterSelection?.click());
+    expect(props.selectionScope.commands.enterOpenTabs).not.toHaveBeenCalled();
   });
 
   it('uses the confirmed Inbox glyph for every Manager save action', async () => {
@@ -819,7 +857,7 @@ describe('OpenTabsPanel drag constraints', () => {
     expect(document.querySelector('[aria-label="Pin 2 Selected Tabs"]')).toBeNull();
     expect(document.querySelectorAll(
       '.manager-open-tabs-selection-actions__tools button',
-    )).toHaveLength(4);
+    )).toHaveLength(5);
   });
 
   it('keeps row Close progressive during selection while the checkbox stays visible', async () => {

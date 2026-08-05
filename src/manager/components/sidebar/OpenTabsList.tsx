@@ -26,7 +26,6 @@ export function OpenTabsList({
   selectedWindow,
   selectionMode,
   sidebarCollapsed,
-  windows,
   workspaceId,
   onClearQuery,
   onCloseTabAction,
@@ -45,7 +44,6 @@ export function OpenTabsList({
   selectedWindow: OpenWindowInfo | null;
   selectionMode: boolean;
   sidebarCollapsed: boolean;
-  windows: OpenWindowInfo[];
   workspaceId: string;
   onClearQuery: () => void;
   onCloseTabAction: (
@@ -76,9 +74,6 @@ export function OpenTabsList({
         data-open-window-id={selectedWindow?.id ?? undefined}
         style={{ alignItems: 'stretch' }}
       >
-        {(windows.length === 0 || selectedWindow?.tabs.length === 0) && (
-          <Text size="xs" c="dimmed" px="xs" py="xs">No open tabs</Text>
-        )}
         {selectedWindow && filteredTabs.length === 0 && selectedWindow.tabs.length > 0 && (
           <Group justify="space-between" gap="xs" px="xs" py="xs" wrap="nowrap">
             <Text size="xs" c="dimmed">No tabs match “{query}”</Text>

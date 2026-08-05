@@ -172,10 +172,7 @@ export function OpenTabsPanel({
         windows={windows}
         selectedWindow={selectedWindow}
         sidebarState={sidebarState}
-        sidebarToggleRef={sidebarToggleRef}
         onSelectWindow={commands.selectWindow}
-        onToggleSidebar={onToggleSidebar}
-        onPinSidebar={onPinSidebar}
       />
 
       <OpenTabsSelectionBar
@@ -187,17 +184,27 @@ export function OpenTabsPanel({
         selectedCount={selectedCount}
         selectionMode={selectionMode}
         sidebarCollapsed={sidebarState === 'collapsed'}
+        sidebarState={sidebarState}
         allVisibleSelected={allVisibleSelected}
         updatingSelection={updatingSelection}
+        canEnterSelection={openTabCount > 0}
         onEnterSelection={() => {
-          if (selectedWindowId === null) return;
+          if (selectedWindowId === null || openTabCount === 0) return;
           commands.clearSelection();
           selectionScope.commands.enterOpenTabs(selectedWindowId);
           if (sidebarState === 'peek') onPromoteSidebar();
         }}
         onExpand={() => onToggleSidebar(true)}
+        onCollapse={() => {
+          if (sidebarState === 'peek') {
+            onPinSidebar();
+          } else {
+            onToggleSidebar(false);
+          }
+        }}
         onSaveAll={() => void onCaptureSelectedWindow()}
         expandRef={sidebarCompactToggleRef}
+        collapseRef={sidebarToggleRef}
         onCapture={() => void onCaptureSelectedTabs()}
         onClear={selectionScope.commands.exit}
         onSaveTo={(trigger) => {
@@ -240,7 +247,6 @@ export function OpenTabsPanel({
         selectedWindow={selectedWindow}
         selectionMode={selectionMode}
         sidebarCollapsed={sidebarState === 'collapsed'}
-        windows={windows}
         workspaceId={workspaceId}
         onClearQuery={commands.clearQuery}
         onCloseTabAction={(event, tabId) => void closeTabFromAction(event, tabId)}
