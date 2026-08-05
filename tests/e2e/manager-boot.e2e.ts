@@ -857,6 +857,49 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     for (const frame of frames) expect(frame.mainLeft).toBe(52);
   });
 
+  test('keeps Peek-to-Pin animation above the session board', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${PREVIEW_PATH}?workspace=workspace_default&category=saved&view=board`);
+    await page.getByRole('button', { name: 'Collapse Sidebar' }).click();
+    await page.mouse.move(800, 400);
+    await page.mouse.move(20, 300);
+    await expect(page.locator('.manager-shell')).toHaveClass(/manager-shell--sidebar-peek/);
+
+    const frames = await page.evaluate(async () => {
+      const sidebar = document.querySelector<HTMLElement>('.manager-sidebar')!;
+      const overlay = document.querySelector<HTMLElement>('.manager-sidebar__overlay')!;
+      const pin = document.querySelector<HTMLButtonElement>('[aria-label="Pin Sidebar"]')!;
+      const nextFrame = () => new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()));
+      const sample = () => {
+        const overlayBox = overlay.getBoundingClientRect();
+        const topElement = document.elementFromPoint(
+          overlayBox.right - 24,
+          overlayBox.top + 150,
+        ) as HTMLElement | null;
+        return {
+          sidebarWidth: overlayBox.width,
+          topSelector: topElement?.className,
+          topInSidebar: Boolean(topElement?.closest('.manager-sidebar')),
+          topInMain: Boolean(topElement?.closest('.manager-main')),
+        };
+      };
+      pin.click();
+      await nextFrame();
+      const frames = [sample()];
+      for (let index = 0; index < 8; index += 1) {
+        await nextFrame();
+        frames.push(sample());
+      }
+      return frames;
+    });
+
+    expect(frames.some(({ sidebarWidth }) => sidebarWidth > 52 && sidebarWidth < 272))
+      .toBe(true);
+    expect(frames.every(({ topInSidebar }) => topInSidebar)).toBe(true);
+    expect(frames.every(({ topInMain }) => !topInMain)).toBe(true);
+  });
+
   test('reverses an interrupted pinned transition from its current geometry', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(PREVIEW_PATH);
@@ -1061,7 +1104,7 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     })).toHaveValue('duplicate');
   });
 
-  test('keeps only the four confirmed Open Tabs selection actions', async ({ page }) => {
+  test('keeps the confirmed Open Tabs selection and disclosure actions', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(PREVIEW_PATH);
     await page.getByRole('button', {
@@ -1071,7 +1114,7 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     const toolbar = page.locator(
       '.manager-open-tabs-selection-actions__tools',
     );
-    await expect(toolbar.locator('button')).toHaveCount(4);
+    await expect(toolbar.locator('button')).toHaveCount(5);
     await expect(toolbar.getByRole('button', {
       name: 'Select All Visible Tabs',
     })).toBeVisible();
@@ -1083,6 +1126,9 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     })).toBeDisabled();
     await expect(toolbar.getByRole('button', {
       name: 'Exit Tab Selection Mode',
+    })).toBeVisible();
+    await expect(toolbar.getByRole('button', {
+      name: 'Collapse Sidebar',
     })).toBeVisible();
     await expect(page.getByRole('button', {
       name: /Close \d+ Selected Tabs/,
