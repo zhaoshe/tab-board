@@ -5,9 +5,107 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#ffffff" />
     <title>TabBoard</title>
+    <style>
+      html,
+      body,
+      #root {
+        width: 320px;
+        min-height: 180px;
+        margin: 0;
+      }
+
+      body {
+        background: #f3f5f8;
+      }
+
+      .popup-boot-shell {
+        box-sizing: border-box;
+        width: 320px;
+        min-height: 180px;
+        color: #20242a;
+        background: #ffffff;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+
+      .popup-boot-shell__brand {
+        display: flex;
+        min-height: 52px;
+        padding: 0 16px;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+      }
+
+      .popup-boot-shell__brand img {
+        display: block;
+      }
+
+      .popup-boot-shell__status {
+        display: flex;
+        min-height: 128px;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        color: #69717c;
+        font-size: 14px;
+      }
+
+      .popup-boot-shell__spinner {
+        box-sizing: border-box;
+        width: 16px;
+        height: 16px;
+        border: 2px solid #d9dee6;
+        border-top-color: #315ec9;
+        border-radius: 50%;
+        animation: popup-boot-spin 700ms linear infinite;
+      }
+
+      @keyframes popup-boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #1a1e24;
+        }
+
+        .popup-boot-shell {
+          color: #f0f2f5;
+          background: #1f242b;
+        }
+
+        .popup-boot-shell__status {
+          color: #aab1bb;
+        }
+
+        .popup-boot-shell__spinner {
+          border-color: #3b424c;
+          border-top-color: #5a80dd;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .popup-boot-shell__spinner {
+          animation: none;
+        }
+      }
+    </style>
   </head>
   <body style="margin: 0; padding: 0; width: 320px; overflow: hidden;">
-    <div id="root"></div>
+    <div id="root">
+      <main class="popup-boot-shell" data-popup-boot-shell>
+        <div class="popup-boot-shell__brand">
+          <img src="/icons/icon-32.png" alt="" width="22" height="22" />
+          <strong><span translate="no">TabBoard</span></strong>
+        </div>
+        <div class="popup-boot-shell__status" role="status" aria-live="polite">
+          <span class="popup-boot-shell__spinner" aria-hidden="true"></span>
+          <span>Loading current window…</span>
+        </div>
+      </main>
+    </div>
     <script type="module" src="/src/popup/main.tsx"></script>
   </body>
 </html>
