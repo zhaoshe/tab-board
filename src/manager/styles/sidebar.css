@@ -415,6 +415,7 @@ html[data-tabboard-hover-suppressed] .manager-open-tab-row:not([data-selected='t
 }
 
 .manager-shell--sidebar-peek .manager-sidebar,
+.manager-shell--sidebar-pinned .manager-sidebar,
 .manager-shell--sidebar-drawer .manager-sidebar {
   z-index: 20;
 }

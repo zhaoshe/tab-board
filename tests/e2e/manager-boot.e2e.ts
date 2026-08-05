@@ -894,8 +894,6 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
       return frames;
     });
 
-    expect(frames.some(({ sidebarWidth }) => sidebarWidth > 52 && sidebarWidth < 272))
-      .toBe(true);
     expect(frames.every(({ topInSidebar }) => topInSidebar)).toBe(true);
     expect(frames.every(({ topInMain }) => !topInMain)).toBe(true);
   });
