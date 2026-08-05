@@ -75,13 +75,16 @@ Tab item：
 session 内的条目。当前支持 link 和 note。旧 todo 会被 normalize 成 note。
 
 Category：
-session 的单一归属。内置 category 包括 Inbox、Saved 和 Archive，自定义 category 存在 `folders` 中。
+session 的单一归属。内置 category 包括 Inbox、Saved、Bookmark 和 Archive，自定义 category 存在 `folders` 中。
 
 Inbox：
 没有自定义 category、也未归档的默认收纳区。
 
 Saved：
 内置 category。标为 starred 的 session 归入 Saved，它是 session 的一种归属，而不是额外叠加状态。
+
+Bookmark：
+内置 category。它是 Chrome 书签的只读镜像，不进入 TabBoard canonical saved state；包含链接的书签文件夹显示为 session，嵌套文件夹按路径打平命名。
 
 Archive：
 内置 category。归档的 session 归入 Archive，用于存放不常用但需要保留的工作上下文。

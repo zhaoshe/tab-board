@@ -135,6 +135,7 @@ function createSavedGroup(id = 'target', overrides: Partial<Group> = {}): Group 
 interface ChromeHarnessOptions {
   tabs?: chrome.tabs.Tab[];
   windows?: chrome.windows.Window[];
+  bookmarks?: chrome.bookmarks.BookmarkTreeNode[];
   getTab?: (tabId: number) => chrome.tabs.Tab | undefined | Promise<chrome.tabs.Tab | undefined>;
   getTabGroup?: (groupId: number) => chrome.tabGroups.TabGroup | Promise<chrome.tabGroups.TabGroup>;
 }
@@ -180,6 +181,7 @@ function createChromeHarness(initialState: TabBoardState, options: ChromeHarness
       onInstalled: createEvent(),
       onStartup: startup,
       onMessage: runtimeMessage,
+      sendMessage: vi.fn(async () => undefined),
       openOptionsPage: vi.fn(),
     },
     storage: {
@@ -222,6 +224,14 @@ function createChromeHarness(initialState: TabBoardState, options: ChromeHarness
         color: 'blue',
         collapsed: false,
       }),
+    },
+    bookmarks: {
+      getTree: vi.fn(async () => options.bookmarks ?? []),
+      onCreated: createEvent(),
+      onChanged: createEvent(),
+      onMoved: createEvent(),
+      onRemoved: createEvent(),
+      onImportEnded: createEvent(),
     },
   };
 
@@ -631,6 +641,60 @@ describe('Task194 runtime sender allowlist', () => {
       tabCount: 1,
       tabs: [{ id: externalTab.id, url: externalTab.url }],
     });
+  });
+
+  it('lists Chrome bookmarks as read-only flattened sessions', async () => {
+    const harness = createChromeHarness(createState(), {
+      bookmarks: [{
+        id: '0',
+        title: '',
+        children: [{
+          id: '10',
+          title: '一级文件夹',
+          children: [{
+            id: '11',
+            title: '一级链接',
+            url: 'https://one.example/',
+          }, {
+            id: '12',
+            title: '二级文件夹',
+            children: [{
+              id: '13',
+              title: '二级链接',
+              url: 'https://two.example/',
+            }],
+          }],
+        }],
+      }],
+    });
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    const response = await sendMessage(harness.runtimeMessage.getListener(), {
+      type: 'list-bookmarks',
+      workspaceId: 'workspace-a',
+    }) as {
+      ok: boolean;
+      result: { groups: Array<{ id: string; title: string; locked: boolean; tabs: Array<{ id: string; url: string }> }> };
+    };
+
+    expect(response.ok).toBe(true);
+    expect(response.result.groups.map(({ id, title, locked }) => ({ id, title, locked }))).toEqual([{
+      id: 'bookmark-folder-10',
+      title: '一级文件夹',
+      locked: true,
+    }, {
+      id: 'bookmark-folder-12',
+      title: '一级文件夹/二级文件夹',
+      locked: true,
+    }]);
+    expect(response.result.groups.flatMap(({ tabs }) => tabs.map(({ id, url }) => ({ id, url })))).toEqual([{
+      id: 'bookmark-11',
+      url: 'https://one.example/',
+    }, {
+      id: 'bookmark-13',
+      url: 'https://two.example/',
+    }]);
   });
 
   it.each([

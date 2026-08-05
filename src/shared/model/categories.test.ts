@@ -139,6 +139,7 @@ describe('shared session categories', () => {
       'folder:folder-a',
       'saved',
       'inbox',
+      'bookmarks',
       'archive',
     ]);
   });
@@ -226,11 +227,11 @@ describe('shared session categories', () => {
 
   it('reorders categories and inserts new sessions through the same semantics', () => {
     expect(reorderCategoryIds(
-      ['inbox', 'folder:folder-a', 'saved'],
+      ['inbox', 'folder:folder-a', 'saved', 'bookmarks'],
       'saved',
       'folder:folder-a',
       'before',
-    )).toEqual(['inbox', 'saved', 'folder:folder-a']);
+    )).toEqual(['inbox', 'saved', 'folder:folder-a', 'bookmarks']);
 
     const board = state({
       groups: [
@@ -259,5 +260,16 @@ describe('shared session categories', () => {
       archived: false,
       folderId: null,
     });
+  });
+
+  it('orders Bookmark between Saved and Archive by default', () => {
+    const board = state();
+
+    expect(categoryOrder(board, 'workspace-a').slice(0, 4)).toEqual([
+      'inbox',
+      'saved',
+      'bookmarks',
+      'archive',
+    ]);
   });
 });

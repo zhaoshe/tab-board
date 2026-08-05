@@ -118,6 +118,39 @@ describe('preview Chrome fixture', () => {
     ]));
   });
 
+  it('lists preview bookmarks through the runtime harness', async () => {
+    const harness = install({
+      bookmarks: [{
+        id: '0',
+        title: '',
+        children: [{
+          id: '10',
+          title: 'Folder',
+          children: [{
+            id: '11',
+            title: 'Bookmark',
+            url: 'https://bookmark.example/',
+          }],
+        }],
+      }],
+    });
+
+    const response = await harness.chrome.runtime.sendMessage({
+      type: 'list-bookmarks',
+      workspaceId: 'workspace_default',
+    }) as PreviewResponse<{ groups: Array<{ title: string; tabs: Array<{ url: string }> }> }>;
+
+    expect(response).toMatchObject({
+      ok: true,
+      result: {
+        groups: [{
+          title: 'Folder',
+          tabs: [{ url: 'https://bookmark.example/' }],
+        }],
+      },
+    });
+  });
+
   it('replaces invalid custom tab identity and index values with safe defaults', () => {
     const harness = install({
       tabs: [

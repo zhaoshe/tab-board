@@ -4,12 +4,14 @@ import type { Group, TabBoardState } from './types';
 export type CategoryFilter =
   | 'inbox'
   | 'saved'
+  | 'bookmarks'
   | 'archive'
   | `folder:${string}`;
 
 export const BUILT_IN_CATEGORIES: readonly CategoryFilter[] = [
   'inbox',
   'saved',
+  'bookmarks',
   'archive',
 ];
 

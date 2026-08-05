@@ -23,6 +23,7 @@ import {
   parseRestoreRefs,
   restoreRefKey,
   restoredRefOutcome,
+  createBookmarkSessions,
   type CaptureCandidateReason,
   type RestoreRef,
   type RestoreRefsResult,
@@ -113,6 +114,16 @@ chrome.runtime.onStartup.addListener(async () => {
   await refreshContextMenus();
   await applyActionPopup();
 });
+
+function notifyBookmarkProjectionChanged(): void {
+  void chrome.runtime.sendMessage({ type: 'tabboard-bookmarks-changed' }).catch(() => undefined);
+}
+
+chrome.bookmarks?.onCreated?.addListener(notifyBookmarkProjectionChanged);
+chrome.bookmarks?.onChanged?.addListener(notifyBookmarkProjectionChanged);
+chrome.bookmarks?.onMoved?.addListener(notifyBookmarkProjectionChanged);
+chrome.bookmarks?.onRemoved?.addListener(notifyBookmarkProjectionChanged);
+chrome.bookmarks?.onImportEnded?.addListener(notifyBookmarkProjectionChanged);
 
 chrome.action.onClicked.addListener(async (tab) => {
   await enqueueRestore(() => captureTabs('current-window', tab));
@@ -484,6 +495,8 @@ async function handleMessage(message: { type?: string; action?: string; [key: st
     }
     case 'list-open-tabs':
       return listOpenTabs();
+    case 'list-bookmarks':
+      return listBookmarks(message.workspaceId as string | undefined);
     case 'create-window':
       return createWindow();
     case 'close-open-tab':
@@ -1402,6 +1415,22 @@ async function focusOpenTab(tabId: number, windowId: number) {
   await chrome.tabs.update(normalizedTabId, { active: true });
   await chrome.windows.update(normalizedWindowId, { focused: true });
   return { tabId: normalizedTabId, windowId: normalizedWindowId };
+}
+
+async function listBookmarks(workspaceId?: string) {
+  if (!chrome.bookmarks?.getTree) {
+    throw new Error('Chrome bookmarks permission is unavailable.');
+  }
+  const targetWorkspaceId = typeof workspaceId === 'string' && workspaceId.trim()
+    ? workspaceId
+    : (await getState()).activeWorkspaceId;
+  const tree = await chrome.bookmarks.getTree();
+  return {
+    groups: createBookmarkSessions(tree, {
+      timestamp: nowIso(),
+      workspaceId: targetWorkspaceId,
+    }),
+  };
 }
 
 async function listOpenTabs(): Promise<OpenTabsListResult> {

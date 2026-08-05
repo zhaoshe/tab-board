@@ -10,6 +10,7 @@ import { useCaptureReveal } from '../../hooks/useCaptureReveal';
 import { useManagerPageState } from '../../hooks/useManagerPageState';
 import { useManagerRuntime } from '../../hooks/useManagerRuntime';
 import { useManagerSelectionScope } from '../../hooks/useManagerSelectionScope';
+import { useBookmarkSessions } from '../../hooks/useBookmarkSessions';
 import {
   ManagerOverlayPortal,
   ManagerOverlaysProvider,
@@ -90,6 +91,7 @@ export function ManagerLayout() {
   const showBin = pageState.state.view === 'bin';
   const groups = useFilteredGroups(showBin ? 'inbox' : selectedCategory);
   const workspace = useCurrentWorkspace();
+  const bookmarkGroups = useBookmarkSessions(workspace?.id ?? activeWorkspaceId);
   const runtime = useManagerRuntime();
   const openTabsWorkflow = useOpenTabsRuntime();
   const selectionScope = useManagerSelectionScope();
@@ -221,6 +223,7 @@ export function ManagerLayout() {
           <WorkspaceHeader
             selectedCategory={selectedCategory}
             showBin={showBin}
+            bookmarkGroups={bookmarkGroups}
             dragMarker={dnd.dragUiState.marker}
             onSelectCategory={(category: CategoryFilter) =>
               pageState.navigate({ category, view: 'board' })}
@@ -266,6 +269,7 @@ export function ManagerLayout() {
             <BinView />
           ) : (
             <WorkspaceContent
+              bookmarkGroups={bookmarkGroups}
               category={selectedCategory}
               workspaceName={workspace?.name || 'Workspace'}
               runtime={runtime}

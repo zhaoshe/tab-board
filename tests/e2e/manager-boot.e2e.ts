@@ -1028,6 +1028,36 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     await expect(page.locator('.manager-shell')).not.toHaveClass(/manager-shell--drag-active/);
   });
 
+  test('renders Chrome bookmarks between Saved and Archive as read-only sessions', async ({ page }) => {
+    await page.goto(PREVIEW_PATH);
+    await expect(page.locator('.manager-category-nav')).toBeVisible();
+
+    const categoryOrder = await page.locator('[data-category-trigger="label"]').evaluateAll(
+      (buttons) => buttons.map((button) => button.getAttribute('data-category-id')),
+    );
+    expect(categoryOrder.slice(0, 4)).toEqual([
+      'inbox',
+      'saved',
+      'bookmarks',
+      'archive',
+    ]);
+
+    await page.locator('[data-category-id="bookmarks"]').click();
+    await expect(page).toHaveURL(/category=bookmarks/);
+    await expect(page.getByRole('button', { name: 'Preview Bookmarks', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Preview Bookmarks/Nested', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Bookmark preview link' })).toBeVisible();
+    await expect(page.locator('.tab-item-row__select')).toHaveCount(0);
+
+    await page.locator('#session-card-bookmark-folder-10')
+      .getByRole('button', { name: 'More' })
+      .focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('menuitem', { name: 'Copy Links' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Delete Session' })).toHaveCount(0);
+    await expect(page.getByRole('menuitem', { name: 'Rename Session' })).toHaveCount(0);
+  });
+
   test('promotes peek for selection without replacing the explicit collapsed preference', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(PREVIEW_PATH);

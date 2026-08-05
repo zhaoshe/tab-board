@@ -1,5 +1,6 @@
 import {
   STATE_KEY,
+  createBookmarkSessions,
   createEmptyState,
   createFolder,
   createGroupFromTabRecords,
@@ -37,6 +38,8 @@ type StoredPreviewWindow = Omit<PreviewWindow, 'tabs'> & {
   tabs: PreviewTab[];
 };
 
+type PreviewBookmarkNode = chrome.bookmarks.BookmarkTreeNode;
+
 export type PreviewWindowOptions = Omit<Partial<PreviewWindow>, 'tabs'> & {
   tabs?: readonly Partial<PreviewTab>[];
 };
@@ -50,6 +53,7 @@ export interface PreviewChromeOptions {
   state?: unknown;
   tabs?: readonly Partial<PreviewTab>[];
   windows?: readonly PreviewWindowOptions[];
+  bookmarks?: readonly PreviewBookmarkNode[];
   extensionBaseUrl?: string;
   storagePersistence?: PreviewStoragePersistence;
 }
@@ -80,6 +84,7 @@ export interface PreviewChromeApi {
   runtime: {
     id: string;
     sendMessage<T = unknown>(message: unknown): Promise<PreviewResponse<T>>;
+    onMessage: PreviewEventHub;
     openOptionsPage(): Promise<void>;
     getURL(path?: string): string;
   };
@@ -108,6 +113,14 @@ export interface PreviewChromeApi {
     onRemoved: PreviewEventHub;
     onFocusChanged: PreviewEventHub;
   };
+  bookmarks: {
+    getTree(): Promise<PreviewBookmarkNode[]>;
+    onCreated: PreviewEventHub;
+    onChanged: PreviewEventHub;
+    onMoved: PreviewEventHub;
+    onRemoved: PreviewEventHub;
+    onImportEnded: PreviewEventHub;
+  };
 }
 
 export interface PreviewChromeHarness {
@@ -127,6 +140,7 @@ export interface PreviewChromeHarness {
 type Listener = (...args: never[]) => unknown;
 type EventName =
   | 'storage.onChanged'
+  | 'runtime.onMessage'
   | 'tabs.onActivated'
   | 'tabs.onCreated'
   | 'tabs.onRemoved'
@@ -137,10 +151,16 @@ type EventName =
   | 'tabs.onUpdated'
   | 'windows.onCreated'
   | 'windows.onRemoved'
-  | 'windows.onFocusChanged';
+  | 'windows.onFocusChanged'
+  | 'bookmarks.onCreated'
+  | 'bookmarks.onChanged'
+  | 'bookmarks.onMoved'
+  | 'bookmarks.onRemoved'
+  | 'bookmarks.onImportEnded';
 
 const EVENT_NAMES: readonly EventName[] = [
   'storage.onChanged',
+  'runtime.onMessage',
   'tabs.onActivated',
   'tabs.onCreated',
   'tabs.onRemoved',
@@ -152,6 +172,11 @@ const EVENT_NAMES: readonly EventName[] = [
   'windows.onCreated',
   'windows.onRemoved',
   'windows.onFocusChanged',
+  'bookmarks.onCreated',
+  'bookmarks.onChanged',
+  'bookmarks.onMoved',
+  'bookmarks.onRemoved',
+  'bookmarks.onImportEnded',
 ];
 
 class EventHub implements PreviewEventHub {
@@ -329,6 +354,32 @@ function fixtureTabs(): PreviewTab[] {
       favIconUrl: 'http://second-window.example/favicon.ico',
     }),
   ];
+}
+
+function fixtureBookmarks(): PreviewBookmarkNode[] {
+  return [{
+    id: '0',
+    title: '',
+    children: [{
+      id: '10',
+      title: 'Preview Bookmarks',
+      children: [{
+        id: '11',
+        title: 'Bookmark preview link',
+        url: 'https://bookmark-preview.example/',
+        dateAdded: Date.parse('2026-08-05T00:00:00.000Z'),
+      }, {
+        id: '12',
+        title: 'Nested',
+        children: [{
+          id: '13',
+          title: 'Nested bookmark link',
+          url: 'https://nested-bookmark.example/',
+          dateAdded: Date.parse('2026-08-05T00:01:00.000Z'),
+        }],
+      }],
+    }],
+  }] as PreviewBookmarkNode[];
 }
 
 function fixtureWindows(tabs: readonly PreviewTab[]): StoredPreviewWindow[] {
@@ -574,6 +625,7 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
   );
   let tabs: PreviewTab[];
   let windows: StoredPreviewWindow[];
+  const bookmarks: PreviewBookmarkNode[] = clone([...options.bookmarks ?? fixtureBookmarks()]);
   if (options.windows) {
     const custom = makeCustomWindows(options.windows, options.tabs);
     tabs = custom.tabs;
@@ -921,6 +973,17 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
     onFocusChanged: getHub('windows.onFocusChanged'),
   };
 
+  const bookmarksApi = {
+    async getTree(): Promise<PreviewBookmarkNode[]> {
+      return clone(bookmarks);
+    },
+    onCreated: getHub('bookmarks.onCreated'),
+    onChanged: getHub('bookmarks.onChanged'),
+    onMoved: getHub('bookmarks.onMoved'),
+    onRemoved: getHub('bookmarks.onRemoved'),
+    onImportEnded: getHub('bookmarks.onImportEnded'),
+  };
+
   const api: PreviewChromeApi = {
     storage: { local: storageLocal, onChanged: getHub('storage.onChanged') },
     runtime: {
@@ -933,10 +996,12 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
       async openOptionsPage(): Promise<void> {
         openedOptionsCount += 1;
       },
+      onMessage: getHub('runtime.onMessage'),
       getURL: extensionUrl,
     },
     tabs: tabsApi,
     windows: windowsApi,
+    bookmarks: bookmarksApi,
   };
 
   const removeRestoredRefs = async (refs: readonly { source: string; groupId: string; tabId: string }[]) => {
@@ -1084,6 +1149,15 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
       }
       case 'list-open-tabs':
         return listOpenTabs();
+      case 'list-bookmarks':
+        return {
+          groups: createBookmarkSessions(bookmarks, {
+            timestamp: nowIso(),
+            workspaceId: typeof message.workspaceId === 'string' && message.workspaceId.trim()
+              ? message.workspaceId
+              : state.activeWorkspaceId,
+          }),
+        };
       case 'saveSelectedTabs':
         return saveSelectedTabs(message);
       case 'dedupe-window':

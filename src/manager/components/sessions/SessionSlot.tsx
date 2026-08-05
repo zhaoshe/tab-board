@@ -28,6 +28,7 @@ export function SessionSlot({
   runtime,
   searchQuery,
   selectionScope,
+  readOnly = false,
   onOpenSessionTargetPicker,
   sourceRect,
 }: {
@@ -44,6 +45,7 @@ export function SessionSlot({
   selectionScope: ManagerSelectionScope;
   onOpenSessionTargetPicker: (input: OpenSessionTargetPickerInput) => void;
   sourceRect: DragSourceRect | null;
+  readOnly?: boolean;
 }) {
   const {
     listeners,
@@ -72,6 +74,7 @@ export function SessionSlot({
         groupCategory,
       },
     },
+    disabled: readOnly,
   });
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -105,6 +108,7 @@ export function SessionSlot({
       runtime={runtime}
       searchQuery={searchQuery}
       selectionScope={selectionScope}
+      readOnly={readOnly}
       onOpenSessionTargetPicker={onOpenSessionTargetPicker}
       sortable={sortable}
       sourceRect={sourceRect}
@@ -113,6 +117,7 @@ export function SessionSlot({
     <SessionCardShell
       activate={activate}
       group={group}
+      readOnly={readOnly}
       sortable={sortable}
     />
   );

@@ -11,25 +11,35 @@ import { filterGroupsByQuery, type CategoryFilter } from '../../core/selectors';
 import { normalizeSearch } from '../../../shared/model';
 import { formatNumber } from '../../../shared/utils/formatters';
 import { TabBoardTooltip } from '../../../shared/components/TabBoardTooltip';
+import type { Group as SessionGroup } from '../../../shared/model';
 
 interface SearchBarProps {
   autoFocus?: boolean;
   inputId?: string;
   category?: CategoryFilter;
+  bookmarkGroups?: readonly SessionGroup[];
   fullWidth?: boolean;
   onEscape?: () => void;
 }
 
-export function SearchBar({ autoFocus = false, inputId, category = 'inbox', fullWidth = false, onEscape }: SearchBarProps) {
+export function SearchBar({
+  autoFocus = false,
+  inputId,
+  category = 'inbox',
+  bookmarkGroups = [],
+  fullWidth = false,
+  onEscape,
+}: SearchBarProps) {
   const query = useSearchQuery();
   const setQuery = useSetSearchQuery();
   const [localValue, setLocalValue] = useState(query);
   const inputRef = useRef<HTMLInputElement>(null);
   const { categoryGroups } = useBoardProjection(category);
+  const searchableGroups = category === 'bookmarks' ? bookmarkGroups : categoryGroups;
 
   const normalized = normalizeSearch(localValue);
   const matchCount = normalized
-    ? filterGroupsByQuery(categoryGroups, localValue).length
+    ? filterGroupsByQuery([...searchableGroups], localValue).length
     : 0;
 
   useEffect(() => {

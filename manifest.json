@@ -8,6 +8,7 @@
   "permissions": [
     "tabs",
     "tabGroups",
+    "bookmarks",
     "storage",
     "unlimitedStorage",
     "contextMenus",

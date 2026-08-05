@@ -82,6 +82,7 @@ interface TabItemRowProps {
   selectedRefs: SavedTabRef[];
   runtime: ManagerRuntime;
   locked?: boolean;
+  readOnly?: boolean;
   selectionMode?: boolean;
   selected?: boolean;
   dropMarker?: DragMarker | null;
@@ -110,6 +111,7 @@ export function TabItemRow({
   selectedRefs,
   runtime,
   locked = false,
+  readOnly = false,
   selectionMode = false,
   selected = false,
   dropMarker = null,
@@ -155,7 +157,7 @@ export function TabItemRow({
         }],
       },
     },
-    disabled: isDragOverlay,
+    disabled: isDragOverlay || readOnly,
   });
 
   const style = {
@@ -255,14 +257,16 @@ export function TabItemRow({
   }, [registerInfoTrigger]);
   const menuItems = (
     <>
-      <ManagerMenuItem
-        description={tab.itemType === ITEM_LINK && !tab.note
-          ? 'Attach context to this saved tab'
-          : 'Edit saved tab context'}
-        icon={FilePenLine}
-        label={tab.itemType === ITEM_LINK && !tab.note ? 'Add Note' : 'Edit Note'}
-        onClick={handleEditNote}
-      />
+      {!readOnly && (
+        <ManagerMenuItem
+          description={tab.itemType === ITEM_LINK && !tab.note
+            ? 'Attach context to this saved tab'
+            : 'Edit saved tab context'}
+          icon={FilePenLine}
+          label={tab.itemType === ITEM_LINK && !tab.note ? 'Add Note' : 'Edit Note'}
+          onClick={handleEditNote}
+        />
+      )}
       {tab.itemType === ITEM_LINK ? (
         <ManagerMenuItem
           description="Copy the saved address"
@@ -278,17 +282,19 @@ export function TabItemRow({
           onClick={handleCopy}
         />
       )}
-      <ManagerMenuItem
-        description="Move this item to Bin"
-        icon={Trash}
-        label={tab.itemType === ITEM_LINK
-          ? 'Delete Saved Tab'
-          : 'Delete Saved Note'}
-        danger
-        disabled={locked}
-        lifecycleAllowance="saved-tab-removal"
-        onClick={handleDelete}
-      />
+      {!readOnly && (
+        <ManagerMenuItem
+          description="Move this item to Bin"
+          icon={Trash}
+          label={tab.itemType === ITEM_LINK
+            ? 'Delete Saved Tab'
+            : 'Delete Saved Note'}
+          danger
+          disabled={locked}
+          lifecycleAllowance="saved-tab-removal"
+          onClick={handleDelete}
+        />
+      )}
     </>
   );
   const openSavedTabMenu = (
@@ -408,6 +414,7 @@ export function TabItemRow({
         onPointerDown={(event) => {
           if (
             isDragOverlay
+            || readOnly
             || event.pointerType === 'touch'
             || (
               event.target instanceof Element
@@ -421,6 +428,7 @@ export function TabItemRow({
         onTouchStart={(event) => {
           if (
             isDragOverlay
+            || readOnly
             || (
               event.target instanceof Element
               && event.target.closest('button, input, textarea, a, [data-no-drag]')
@@ -449,7 +457,10 @@ export function TabItemRow({
             );
             return;
           }
-          if (event.target instanceof Element && event.target.closest('button, input, textarea, a, [data-no-drag]')) {
+          if (
+            readOnly
+            || (event.target instanceof Element && event.target.closest('button, input, textarea, a, [data-no-drag]'))
+          ) {
             return;
           }
           listeners?.onKeyDown?.(event);
@@ -467,7 +478,7 @@ export function TabItemRow({
             )
             : <IconFileText size={16} aria-hidden="true" />}
           </span>
-          {!isDragOverlay && (
+          {!isDragOverlay && !readOnly && (
             <Checkbox
               size="sm"
               name="saved-tab-selection"
@@ -524,7 +535,7 @@ export function TabItemRow({
             </Text>
           )}
         </div>
-        {!isDragOverlay ? (
+        {!isDragOverlay && !readOnly ? (
           <AccessibleIconAction
             label="Delete"
             danger

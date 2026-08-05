@@ -54,6 +54,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 
 - `tabs`: 查询、创建、关闭 tabs。
 - `tabGroups`: 读取和恢复 Chrome tab group 元数据。
+- `bookmarks`: 读取 Chrome 书签树并投影为只读 Bookmark category。
 - `storage`: 本地持久化。
 - `unlimitedStorage`: 避免 sessions 较多时过早触达 quota。
 - `contextMenus`: 右键菜单保存入口。
@@ -124,7 +125,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - core modules 提供 selectors、capture snapshot ownership、Open Tabs workflow reducer/projection、typed DnD interaction resolution、overlay/focus contracts；这些模块可在无 Chrome DOM 的测试中执行。
 - `core/searchQueryStore.ts` 是 framework-neutral saved-session query owner，只暴露 `getSnapshot()` / `subscribe()` / `set()`，通过注入 ports 初始化 URL/session storage；它不依赖 React、Zustand、DOM global 或 TabBoard store。
 - `hooks/useSearchQuery.ts` 是 browser/React adapter，唯一持有 `tabboardSearch` storage key，并用 `useSyncExternalStore` 把同一 snapshot 提供给 React consumers。Open Tabs capture/filter 的 imperative path直接读该 owner，不依赖 effect-updated ref。
-- `core/selectors.ts` 的 `getBoardProjection()` 先复用 shared `groupsForCategory()` 得到 canonical `categoryGroups`，再得到 query-filtered `visibleGroups`；`hooks/useBoardProjection.ts` 保持 query变化时未过滤 category projection引用稳定。
+- `core/selectors.ts` 的 `getBoardProjection()` 先复用 shared `groupsForCategory()` 得到 canonical `categoryGroups`，再得到 query-filtered `visibleGroups`；`hooks/useBoardProjection.ts` 保持 query变化时未过滤 category projection引用稳定。Bookmark category 是例外：`useBookmarkSessions()` 从 service worker 读取 Chrome bookmarks runtime projection，Manager 将其作为 read-only groups 注入 Header/Search/Board，不写入 canonical state。
 - `WorkspaceContent` 只消费 board projection；Zustand selector仅用于当前自定义 category标题，不再读取全部 groups或手写 `starred` / `archived` / `folderId` membership。render、card insertion index和end target因此共享 orphan-folder → Inbox语义。
 - `src/shared/applicationFeedback.ts` 是 page-local application feedback owner，提供typed `publish()` / `subscribe()`；channel无DOM/React/Zustand/Chrome依赖、同步且不replay，listener异常被隔离。
 - `useToastNotifications.ts` 只把 `ApplicationFeedback` discriminated union映射为现有toast copy；Store与Manager不再通过window event names通信。
@@ -251,6 +252,7 @@ State canonical key 在浏览器存储后端下是 `chrome.storage.local["tabboa
 
 - Inbox。
 - Saved。
+- Bookmark（Chrome bookmarks runtime projection）。
 - Archive。
 
 ### Tab Items
@@ -539,6 +541,7 @@ Session category 推导规则：
 ```text
 archived true      -> Archive
 starred true       -> Saved
+Bookmark           -> runtime projection only
 folderId exists    -> folder:<folderId>
 otherwise          -> Inbox
 ```

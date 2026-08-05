@@ -59,6 +59,7 @@ stay on your machine in `chrome.storage.local` or in a local folder you select.
 It requests only the permissions it needs to manage tabs:
 
 - `tabs` and `tabGroups`: read and restore tabs and tab groups.
+- `bookmarks`: show Chrome bookmark folders as a read-only Bookmark category.
 - `storage` and `unlimitedStorage`: persist sessions locally without a size cap.
 - `contextMenus`: add right-click capture actions.
 - `clipboardWrite`: support copy/export actions.
@@ -97,6 +98,7 @@ The compact popup for saving the current window, and the settings page:
 - Keep restored records when a group is locked.
 - Preserve Chrome tab group metadata where Chrome allows it.
 - Organize saved groups in a tabExtend-style manager with workspace/category controls in the top bar, a collapsible full-height Open Tabs sidebar, and horizontal session columns.
+- Browse Chrome bookmark folders in a read-only Bookmark category, with nested folders flattened as `Parent/Child` sessions.
 - Switch Chrome windows from sidebar chips and window actions, or create a new browser window without leaving the manager.
 - Review one selected window in a single vertical Open Tabs list; pinned tabs stay inline with a badge.
 - Attempt to save every tab with a URL except extension pages, including pinned tabs.

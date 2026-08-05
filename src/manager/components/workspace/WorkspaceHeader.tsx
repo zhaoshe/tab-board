@@ -7,6 +7,7 @@ import {
 import { Group } from '@mantine/core';
 import { useShallow } from 'zustand/react/shallow';
 import type { Workspace } from '../../../shared/model';
+import type { Group as SessionGroup } from '../../../shared/model';
 import type { DragMarker } from '../../core/dnd';
 import {
   getCategoryStrip,
@@ -46,6 +47,7 @@ export {
 export interface WorkspaceHeaderProps {
   selectedCategory: CategoryFilter;
   showBin: boolean;
+  bookmarkGroups?: readonly SessionGroup[];
   dragMarker?: DragMarker | null;
   onSelectCategory: (category: CategoryFilter) => void;
   onSelectWorkspace: (
@@ -95,6 +97,7 @@ export function usePendingCreatedWorkspaceNavigation({
 export function WorkspaceHeader({
   selectedCategory,
   showBin,
+  bookmarkGroups = [],
   dragMarker,
   onSelectCategory,
   onSelectWorkspace,
@@ -134,6 +137,7 @@ export function WorkspaceHeader({
     workspaces: state.workspaces,
     folders: state.folders,
     groups: state.groups,
+    bookmarkGroups,
     categoryOrderByWorkspace: state.categoryOrderByWorkspace,
   });
 
@@ -205,6 +209,7 @@ export function WorkspaceHeader({
 
       <ManagerSearchCommand
         category={showBin ? 'inbox' : selectedCategory}
+        bookmarkGroups={bookmarkGroups}
         onExpandedChange={setSearchExpanded}
       />
 

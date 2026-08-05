@@ -12,14 +12,16 @@ export type CategoryStripItem = {
   id: CategoryFilter;
   label: string;
   count: number;
-  kind: 'inbox' | 'saved' | 'archive' | 'folder';
+  kind: 'inbox' | 'saved' | 'bookmarks' | 'archive' | 'folder';
   folderId?: string;
 };
 
 export type CategoryStripState = Pick<
   TabBoardState,
   'activeWorkspaceId' | 'workspaces' | 'folders' | 'groups' | 'categoryOrderByWorkspace'
->;
+> & {
+  bookmarkGroups?: readonly Group[];
+};
 
 export function getCategoryStrip(state: CategoryStripState): CategoryStripItem[] {
   const { workspaceId, folders } = getActiveWorkspaceState(state);
@@ -34,6 +36,7 @@ export function getCategoryStrip(state: CategoryStripState): CategoryStripItem[]
   const items: CategoryStripItem[] = [
     { id: 'inbox', label: 'Inbox', count: counts.get('inbox') ?? 0, kind: 'inbox' },
     { id: 'saved', label: 'Saved', count: counts.get('saved') ?? 0, kind: 'saved' },
+    { id: 'bookmarks', label: 'Bookmark', count: state.bookmarkGroups?.length ?? 0, kind: 'bookmarks' },
     { id: 'archive', label: 'Archive', count: counts.get('archive') ?? 0, kind: 'archive' },
     ...folders.map((folder) => ({
       id: `folder:${folder.id}` as const,
