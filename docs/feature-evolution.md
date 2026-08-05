@@ -21,6 +21,29 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-08-05: Popup 静态首帧与并行轻量启动
+
+问题：
+
+- Chrome 窗口中 Tab 较多时，点击工具栏图标后 Popup 长时间没有可见反馈。
+- `popup.html` 在 React 执行前没有内容和稳定高度；Popup 为读取少量设置却先加载完整 Zustand/Storage Authority 并读取 canonical state，随后才查询当前窗口 Tab。
+- 生产对照中，150 个稳定 Tab 的 `chrome.tabs.query()` 只需约 5–7ms；2.30MB canonical state 会在查询开始前额外增加约 59ms。
+
+变化：
+
+- `popup.html` 增加 320×180、明暗主题兼容且不可交互的静态 loading shell，应用 JavaScript 执行前即可绘制。
+- 新增只读 `usePopupSettings()`，正常路径只读 `tabboardSettingsProjection`；缺失或损坏时才动态加载 canonical repair。
+- settings projection 与 current-window Tab query 并行启动，并在 Strict Mode replay 中复用同一在途请求。
+- 设置或 Tab 查询失败后不再永久停在 loading：分别使用默认设置或 0 tabs 渲染并展示错误。
+- 生产 `check` 和 startup benchmark 固化静态首帧、禁止完整 Store/Authority preload、零 canonical read、单次 projection/Tab query 和并行时序。
+
+判断：
+
+- 当前窗口 Tab 数不是应用侧主要瓶颈，不引入 Service Worker 快照缓存或 Tab 事件同步。
+- 绝对启动耗时受 Chrome 冷启动和机器状态影响；稳定门禁使用调用次数、依赖边界和并行区间。
+
+当前状态：Current。
+
 ### 2026-08-03: Open Tab 拖拽命中与 Popup P2 Checkbox 修复
 
 问题：

@@ -24,6 +24,7 @@ test('benchmarkPagePath pins Manager measurements to the heavy Inbox view', () =
     'manager.html?workspace=workspace_default&category=inbox&view=board',
   );
   assert.equal(benchmarkPagePath('options'), 'options.html');
+  assert.equal(benchmarkPagePath('popup'), 'popup.html');
 });
 
 test('createBenchmarkSchedule interleaves pages and rotates every round', () => {

@@ -1,6 +1,7 @@
 import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { isAbsolute, join, relative, sep } from "node:path";
+import { assertPopupStartupBuild } from "./popup-startup-contract.mjs";
 
 const PROJECT_ROOT = realpathSync(".");
 const DIST_ROOT = "dist";
@@ -124,6 +125,10 @@ if (builtAssetFiles.length === 0) {
 for (const page of ["manager.html", "popup.html", "options.html"]) {
   assertBuiltPage(page, { requireModuleScript: page === "manager.html" });
 }
+assertPopupStartupBuild({
+  sourceHtml: readFileSync("popup.html", "utf8"),
+  builtHtml: readFileSync(join(DIST_ROOT, "popup.html"), "utf8"),
+});
 
 const builtManifestPath = join(DIST_ROOT, "manifest.json");
 assertRegularProjectFile(builtManifestPath);

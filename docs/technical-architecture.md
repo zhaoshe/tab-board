@@ -154,6 +154,13 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `OptionsApp` 只在 Advanced disclosure 打开时 lazy-load `AdvancedSettingsContent`。Storage location、file migration、disconnect/reset dialogs 和 Storage Authority 都不进入默认 Options preload graph；Advanced 打开后直接渲染 Storage、deletion confirmation、Keyboard shortcuts 和 Reset 四个 A2 setting rows，不增加单项二级 section。
 - `DataStorageCard` 只读取/订阅 `StorageStatusProjection`，不读取 canonical state、Zustand 或 IndexedDB handle。Fallback 时 configured target 仍是 File，active backend 才是 Browser；UI 保留 folder identity、reason 和 `meta.json.updatedAt` freshness。
 
+### `src/popup/`
+
+- `popup.html` 在 React 执行前直接提供 320×180 的不可交互静态 loading shell，让 Chrome 能立即确定原生 Popup 尺寸并绘制启动反馈；React 首次 commit 后替换该内容。
+- `usePopupSettings()` 只读并订阅 `tabboardSettingsProjection`。投影有效时不导入 Zustand application store、Authoritative Publication 或 Storage Authority；投影缺失或损坏时才动态导入 `activeAdapter` 执行一次 canonical repair。
+- `PopupApp` 首次挂载时并行启动 settings projection 和 `chrome.tabs.query({ currentWindow: true })`。同一在途读取和查询在 Strict Mode effect replay 中复用；新的 Popup page generation 仍重新读取当前窗口。
+- 两项输入 settle 前保持 loading；settings 失败时使用 `DEFAULT_SETTINGS` 并显示错误，Tab 查询失败时以 0 tabs 渲染并显示错误。Save/Remove 继续使用既有 worker actions。
+
 ### 图标
 
 - 使用 `lucide-react`；`TabBoardIcon` 固定 18px toolbar / 16px menu / 48px empty glyph 与 1.75 stroke。
@@ -469,6 +476,10 @@ Manager 启动由 `useStoreHydration()` 委托 Authoritative Publication。publi
 `useOpenTabsRuntime()` 与 hydration 并行发起一次 initial request。focus、visibility、tab/window lifecycle event 经过 75ms coalescer：同一时刻只有一个 active run，in-flight burst 最多生成一个 trailing run；Manager 自己的 extension page created/updated event 被忽略。UI 不提供手动 Refresh。
 
 `releaseHydration()` 只使当前 UI generation 和旧 subscription callback 失效，不 teardown Storage Authority backend，也不破坏正在持久化的 mutation。页面或测试 context 整体替换时，publication generation 会拒绝旧 waiter、取消旧 timer、回滚真正未完成的 optimistic projection，并让旧 RPC continuation 无法覆盖新 context。错误按阶段降级：popover 失败只关闭信息浮层，storage 失败保留默认 normalized state，migration 失败保留已加载 sessions，shell 失败停止后续启动，Open Tabs 失败保留空面板并提示；loaded/render 失败则保留已启动的基础界面并提示。
+
+### Popup 启动
+
+Popup 正常启动不进入 Manager 的 Authoritative Publication。`popup.html` 先绘制静态首帧，随后 `usePopupSettings()` 与 current-window Tab query 并行。设置投影是可修复 read model，不是第二写入真相；只有缺失或损坏时才读取 canonical state。生产门禁要求正常路径 canonical read 为 0、projection read 为 1、current-window query 为 1，并禁止 `popup.html` 同步 preload `useTabBoardStore` 或 `activeAdapter`。
 
 ### Restore
 

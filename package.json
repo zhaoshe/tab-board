@@ -16,7 +16,7 @@
     "release:validate": "node scripts/release-version.mjs",
     "test": "npm run test:react",
     "test:react": "vitest run",
-    "test:release": "node --test scripts/release-version.test.mjs scripts/package-release.test.mjs scripts/release-workflow.test.mjs",
+    "test:release": "node --test scripts/release-version.test.mjs scripts/package-release.test.mjs scripts/release-workflow.test.mjs scripts/popup-startup-contract.test.mjs",
     "test:run": "npm run test:react",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",

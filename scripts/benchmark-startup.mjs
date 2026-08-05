@@ -10,6 +10,10 @@ import {
   createBenchmarkState,
   summarizeRuns,
 } from './startup-benchmark-core.mjs';
+import {
+  assertPopupStartupBuild,
+  assertPopupStartupSample,
+} from './popup-startup-contract.mjs';
 
 const DIST_PATH = resolve('dist');
 const DEFAULT_RUNS = 5;
@@ -20,7 +24,7 @@ const SCENARIOS = {
       tabsPerGroup: 0,
       folderCount: 0,
     }),
-    pages: ['manager', 'options'],
+    pages: ['manager', 'options', 'popup'],
   },
   medium: {
     state: createBenchmarkState({
@@ -36,7 +40,7 @@ const SCENARIOS = {
       tabsPerGroup: 20,
       folderCount: 24,
     }),
-    pages: ['manager', 'options'],
+    pages: ['manager', 'options', 'popup'],
   },
   'large-empty-inbox': {
     state: createBenchmarkState({
@@ -51,22 +55,32 @@ const SCENARIOS = {
 
 async function assertProductionBuild() {
   const managerHtml = await readFile(resolve(DIST_PATH, 'manager.html'), 'utf8');
+  const sourcePopupHtml = await readFile(resolve('popup.html'), 'utf8');
+  const builtPopupHtml = await readFile(resolve(DIST_PATH, 'popup.html'), 'utf8');
   if (managerHtml.includes('localhost:5173') || managerHtml.includes('CRXJS DEV MODE')) {
     throw new Error(
       'dist contains the CRXJS development loader. Run npm run build before benchmarking.',
     );
   }
+  assertPopupStartupBuild({
+    sourceHtml: sourcePopupHtml,
+    builtHtml: builtPopupHtml,
+  });
 }
 
 function parseArguments(argv) {
   let runs = DEFAULT_RUNS;
   let scenario = null;
+  let page = null;
   for (let index = 0; index < argv.length; index += 1) {
     if (argv[index] === '--runs') {
       runs = Number(argv[index + 1]);
       index += 1;
     } else if (argv[index] === '--scenario') {
       scenario = argv[index + 1];
+      index += 1;
+    } else if (argv[index] === '--page') {
+      page = argv[index + 1];
       index += 1;
     }
   }
@@ -76,7 +90,10 @@ function parseArguments(argv) {
   if (scenario && !Object.hasOwn(SCENARIOS, scenario)) {
     throw new Error(`Unknown scenario: ${scenario}`);
   }
-  return { runs, scenario };
+  if (page && !['manager', 'options', 'popup'].includes(page)) {
+    throw new Error(`Unknown page: ${page}`);
+  }
+  return { runs, scenario, page };
 }
 
 function extensionIdForPath(path) {
@@ -160,6 +177,8 @@ function startupProbe() {
     `runtime:${message?.type || 'unknown'}`);
   wrap(chrome.storage?.local, 'get', (keys) =>
     `storage:get:${Array.isArray(keys) ? keys.join(',') : String(keys)}`);
+  wrap(chrome.tabs, 'query', (query) =>
+    `tabs:query:${query?.currentWindow === true ? 'current-window' : 'other'}`);
 
   for (const method of ['pushState', 'replaceState']) {
     const original = history[method].bind(history);
@@ -193,7 +212,9 @@ function startupProbe() {
     }
     if (
       record.firstUsefulUi === null
-      && document.querySelector('.manager-shell, .options-header')
+      && document.querySelector(
+        '.manager-shell, .options-header, .popup-app:not(.popup-app--loading)',
+      )
     ) {
       record.firstUsefulUi = performance.now();
     }
@@ -202,6 +223,7 @@ function startupProbe() {
     childList: true,
     subtree: true,
   });
+  inspect();
 }
 
 async function seedProfile(profilePath, extensionId, state) {
@@ -232,17 +254,52 @@ async function seedProfile(profilePath, extensionId, state) {
   }
 }
 
+async function preparePopupTabs(page) {
+  await page.evaluate(async (count) => {
+    const prefix = 'about:blank#tabboard-popup-benchmark-';
+    await Promise.all(Array.from({ length: count }, (_, index) =>
+      chrome.tabs.create({
+        url: `${prefix}${index}`,
+        active: false,
+      })));
+
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const current = await chrome.tabs.query({ currentWindow: true });
+      const benchmarkTabs = current.filter((tab) => tab.url?.startsWith(prefix));
+      if (
+        benchmarkTabs.length === count
+        && benchmarkTabs.every((tab) => tab.status === 'complete')
+      ) {
+        return;
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+    }
+    throw new Error(`Timed out waiting for ${count} Popup benchmark tabs.`);
+  }, 150);
+  await page.waitForTimeout(200);
+}
+
 async function measure(profilePath, extensionId, pageName) {
   const context = await launch(profilePath);
   try {
     await context.addInitScript(startupProbe);
     const page = context.pages()[0] ?? await context.newPage();
+    if (pageName === 'popup') {
+      await gotoExtensionPage(page, extensionId, 'options');
+      await page.waitForLoadState('load');
+      await preparePopupTabs(page);
+    }
     await gotoExtensionPage(
       page,
       extensionId,
       benchmarkPagePath(pageName),
     );
-    const selector = pageName === 'manager' ? '.manager-shell' : '.options-header';
+    const selector = pageName === 'manager'
+      ? '.manager-shell'
+      : pageName === 'options'
+        ? '.options-header'
+        : '.popup-app:not(.popup-app--loading)';
     await page.locator(selector).waitFor({ state: 'attached', timeout: 30_000 });
     const result = await page.evaluate(() => {
       const record = globalThis.__TABBOARD_STARTUP_BENCHMARK__;
@@ -252,6 +309,10 @@ async function measure(profilePath, extensionId, pageName) {
         label === 'storage:get:tabboardSettingsProjection' && end !== null);
       const listCalls = record.calls.filter(({ label }) =>
         label === 'runtime:list-open-tabs');
+      const currentWindowTabQueries = record.calls.filter(({ label, end }) =>
+        label === 'tabs:query:current-window' && end !== null);
+      const firstProjectionRead = projectionReads[0] ?? null;
+      const firstTabQuery = currentWindowTabQueries[0] ?? null;
       return {
         initialLocation: record.initialLocation,
         historyCalls: record.historyCalls,
@@ -271,21 +332,46 @@ async function measure(profilePath, extensionId, pageName) {
         slots: document.querySelectorAll('[data-session-slot-id]').length,
         rows: document.querySelectorAll('.tab-item-row').length,
         listOpenTabsCalls: listCalls.length,
+        stateReadCount: stateReads.length,
+        projectionReadCount: projectionReads.length,
+        tabQueryCount: currentWindowTabQueries.length,
+        projectionReadStartMs: firstProjectionRead?.start ?? 0,
+        tabQueryStartMs: firstTabQuery?.start ?? 0,
+        tabQueryEndMs: firstTabQuery?.end ?? 0,
         longestTaskMs: record.longTasks.length
           ? Math.max(...record.longTasks.map(({ duration }) => duration))
           : 0,
       };
     });
+    if (pageName === 'popup') {
+      assertPopupStartupSample(result);
+    }
     return result;
   } finally {
     await context.close();
   }
 }
 
-const { runs, scenario } = parseArguments(process.argv.slice(2));
+const { runs, scenario, page } = parseArguments(process.argv.slice(2));
 await assertProductionBuild();
 const extensionId = extensionIdForPath(DIST_PATH);
-const selected = scenario ? [[scenario, SCENARIOS[scenario]]] : Object.entries(SCENARIOS);
+const selectedScenarios = scenario
+  ? [[scenario, SCENARIOS[scenario]]]
+  : Object.entries(SCENARIOS);
+const selected = selectedScenarios
+  .map(([name, configuration]) => [
+    name,
+    {
+      ...configuration,
+      pages: page
+        ? configuration.pages.filter((candidate) => candidate === page)
+        : configuration.pages,
+    },
+  ])
+  .filter(([, configuration]) => configuration.pages.length > 0);
+if (page && selected.length === 0) {
+  throw new Error(`Page ${page} is not configured for the selected scenario.`);
+}
 const sampleGroups = new Map();
 
 for (const {
@@ -318,7 +404,13 @@ const results = [...sampleGroups.values()].map((group) => ({
   summary: summarizeRuns(group.samples),
 }));
 
-console.table(results.map(({ scenario: name, page, bytes, summary }) => ({
+console.table(results.map(({
+  scenario: name,
+  page,
+  bytes,
+  samples,
+  summary,
+}) => ({
   scenario: name,
   page,
   bytes,
@@ -328,6 +420,10 @@ console.table(results.map(({ scenario: name, page, bytes, summary }) => ({
   slots: summary.medianSlots,
   rows: summary.medianRows,
   listCalls: summary.maxListOpenTabsCalls,
+  stateReads: Math.max(...samples.map(({ stateReadCount }) => stateReadCount)),
+  projectionReads: Math.max(...samples.map(({ projectionReadCount }) =>
+    projectionReadCount)),
+  tabQueries: Math.max(...samples.map(({ tabQueryCount }) => tabQueryCount)),
   longestTaskMs: summary.maxLongestTaskMs,
 })));
 console.log(JSON.stringify({ extensionId, results }, null, 2));

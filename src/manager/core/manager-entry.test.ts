@@ -214,7 +214,10 @@ describe('Manager production entry', () => {
       chrome_url_overrides?: { newtab?: string };
     };
 
-    expect(popupHtml).toMatch(/<div\s+id=["']root["']\s*>\s*<\/div>/);
+    expect(popupHtml).toMatch(
+      /<div\s+id=["']root["']\s*>[\s\S]*data-popup-boot-shell[\s\S]*<\/div>/,
+    );
+    expect(popupHtml).toContain('Loading current window…');
     expect(popupScriptTags).toHaveLength(1);
     expect(popupScriptTags[0][1]).toMatch(/\btype=["']module["']/);
     expect(popupScriptSources).toEqual(['/src/popup/main.tsx']);
