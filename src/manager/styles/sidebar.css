@@ -39,12 +39,12 @@
 .manager-open-tab-row {
   position: relative;
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 32px;
+  grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   gap: 6px;
   min-height: 44px;
-  margin-inline: 9.5px 0;
-  padding-inline: 4px;
+  margin-inline: 9.5px;
+  padding-inline: 4px 6px;
   border-radius: 6px;
   background: transparent;
   content-visibility: auto;
@@ -220,8 +220,14 @@
 }
 
 .manager-open-tab-close.accessible-icon-action {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: 6px;
+  z-index: 1;
+  background: var(--tabboard-surface-hover);
   opacity: 0;
   pointer-events: none;
+  transform: translateY(-50%);
 }
 
 .manager-open-tab-favicon {
@@ -539,6 +545,12 @@ html[data-tabboard-hover-suppressed] .manager-open-tabs:not(.manager-open-tabs--
     pointer-events: auto;
   }
 
+  .manager-open-tab-close.accessible-icon-action {
+    position: static;
+    background: transparent;
+    transform: none;
+  }
+
   .manager-open-tab-close.accessible-icon-action--disabled {
     opacity: var(--tabboard-action-disabled-opacity);
   }
@@ -586,6 +598,9 @@ html[data-tabboard-hover-suppressed] .manager-open-tabs:not(.manager-open-tabs--
 
   .manager-open-tab-close.accessible-icon-action {
     --tabboard-action-size: var(--tabboard-action-touch-size) !important;
+    position: static;
+    background: transparent;
+    transform: none;
   }
 
   .manager-open-tab-close.accessible-icon-action--disabled {

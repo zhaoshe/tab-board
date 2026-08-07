@@ -208,7 +208,7 @@ button.session-card__note {
 .tab-item-row__content {
   position: relative;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) 32px;
+  grid-template-columns: 20px minmax(0, 1fr);
   gap: 6px;
   align-items: center;
   min-width: 0;
@@ -243,6 +243,15 @@ button.session-card__note {
 .tab-item-row__delete.accessible-icon-action {
   opacity: 0;
   pointer-events: none;
+}
+
+.tab-item-row__delete.accessible-icon-action {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: 6px;
+  z-index: 1;
+  background: var(--tabboard-surface-hover);
+  transform: translateY(-50%);
 }
 
 .tab-item-row__owner-slot {
@@ -374,6 +383,10 @@ html[data-tabboard-hover-suppressed] .session-card__actions {
 }
 
 @media (hover: none), (pointer: coarse) {
+  .tab-item-row__content {
+    grid-template-columns: 20px minmax(0, 1fr) 32px;
+  }
+
   .session-card__actions {
     opacity: 1;
     pointer-events: auto;
@@ -389,12 +402,22 @@ html[data-tabboard-hover-suppressed] .session-card__actions {
     opacity: var(--tabboard-action-disabled-opacity);
   }
 
+  .tab-item-row__delete.accessible-icon-action {
+    position: static;
+    background: transparent;
+    transform: none;
+  }
+
   .tab-item-row__icon {
     opacity: 0;
   }
 }
 
 @media (max-width: 760px) {
+  .tab-item-row__content {
+    grid-template-columns: 20px minmax(0, 1fr) 44px;
+  }
+
   .session-card__actions .mantine-ActionIcon-root,
   .tab-item-row__select,
   .tab-item-row__delete {
@@ -406,6 +429,9 @@ html[data-tabboard-hover-suppressed] .session-card__actions {
 
   .tab-item-row__delete.accessible-icon-action {
     --tabboard-action-size: var(--tabboard-action-touch-size) !important;
+    position: static;
+    background: transparent;
+    transform: none;
   }
 
   .tab-item-row__delete.accessible-icon-action--disabled {

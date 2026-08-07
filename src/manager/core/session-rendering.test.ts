@@ -264,7 +264,16 @@ describe('Task108 session rendering contracts', () => {
     expect(row).toContain('className="tab-item-row__delete"');
     expect(row).toContain('label="Delete"');
     expect(cssBlock('.tab-item-row__content'))
-      .toContain('grid-template-columns: 20px minmax(0, 1fr) 32px');
+      .toContain('grid-template-columns: 20px minmax(0, 1fr)');
+    expect(css).toMatch(
+      /\.tab-item-row__delete\.accessible-icon-action\s*\{[\s\S]*?position: absolute;[\s\S]*?inset-inline-end: 6px;/,
+    );
+    expect(css).toMatch(
+      /@media \(hover: none\), \(pointer: coarse\)[\s\S]*?\.tab-item-row__content\s*\{[\s\S]*?grid-template-columns: 20px minmax\(0, 1fr\) 32px;/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 760px\)[\s\S]*?\.tab-item-row__content\s*\{[\s\S]*?grid-template-columns: 20px minmax\(0, 1fr\) 44px;/,
+    );
     expect(css).toMatch(
       /\.tab-item-row__delete\.accessible-icon-action\s*\{[\s\S]*?opacity: 0;[\s\S]*?pointer-events: none;/,
     );

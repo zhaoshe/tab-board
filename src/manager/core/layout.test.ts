@@ -90,16 +90,19 @@ describe('Task105 manager layout contracts', () => {
     expect(css).not.toContain('.manager-open-tabs .mantine-ScrollArea-root');
   });
 
-  it('keeps expanded Open Tabs compact while preserving explicit non-overlapping columns', () => {
+  it('keeps expanded Open Tabs compact while overlaying the progressive Close action', () => {
     const row = cssBlock('.manager-open-tab-row');
     const select = cssBlock('.manager-open-tab-select');
     const content = cssBlock('.manager-open-tab-content');
     const favicon = cssBlock('.manager-open-tab-favicon');
+    const close = cssBlock('.manager-open-tab-close.accessible-icon-action');
 
-    expect(row).toContain('grid-template-columns: 24px minmax(0, 1fr) 32px');
+    expect(row).toContain('grid-template-columns: 24px minmax(0, 1fr)');
     expect(select).toContain('position: absolute');
     expect(select).toContain('width: 20px');
     expect(content).toContain('z-index: 0');
+    expect(close).toContain('position: absolute');
+    expect(close).toContain('inset-inline-end: 6px');
     expect(favicon).toContain('width: 16px');
     expect(favicon).toContain('height: 16px');
     expect(sharedCss).toMatch(
@@ -146,7 +149,7 @@ describe('Task105 manager layout contracts', () => {
       'utf8',
     );
 
-    expect(row).toContain('margin-inline: 9.5px 0');
+    expect(row).toContain('margin-inline: 9.5px');
     expect(css).toMatch(
       /\.manager-shell--sidebar-collapsed:not\(\.manager-shell--sidebar-peek\):not\(\.manager-shell--sidebar-drawer\) \.manager-open-tab-row\s*\{[\s\S]*?margin-inline-start: 0;/,
     );
