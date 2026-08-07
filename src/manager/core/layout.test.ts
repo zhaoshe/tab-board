@@ -395,12 +395,15 @@ describe('Task105 manager layout contracts', () => {
   });
 
   it('skips layout/paint for off-screen session slots without removing them from the DOM', () => {
-    const slot = cssBlock('.session-board__group-slot');
+    const groupSlot = cssBlock('.session-board__group-slot');
+    const sessionSlot = cssBlock('.session-slot');
 
     // content-visibility keeps large boards cheap while preserving @dnd-kit
-    // measurement, find-in-page, and scrollIntoView (unlike JS virtualization).
-    expect(slot).toContain('content-visibility: auto');
-    expect(slot).toContain('contain-intrinsic-size:');
+    // measurement, find-in-page, and scrollIntoView without clipping sibling
+    // gap anchors that extend beyond the group slot.
+    expect(groupSlot).not.toContain('content-visibility: auto');
+    expect(sessionSlot).toContain('content-visibility: auto');
+    expect(sessionSlot).toContain('contain-intrinsic-size:');
   });
 
   it('skips layout and paint for off-screen Trash entries', () => {
