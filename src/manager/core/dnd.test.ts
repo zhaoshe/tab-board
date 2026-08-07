@@ -837,6 +837,7 @@ describe('resolveDrop', () => {
       expectedCategoryOrder: [
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
         'folder:folder-a',
       ],
@@ -847,6 +848,7 @@ describe('resolveDrop', () => {
       expectedCategoryOrder: [
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
         'folder:folder-a',
       ],
@@ -866,7 +868,7 @@ describe('resolveDrop', () => {
 
     expect(result).toMatchObject({ kind: 'reorder-category', categoryId: 'saved' });
     expect(executeDropIntent(state, result! ).categoryOrderByWorkspace['workspace-a']).toEqual([
-      'saved', 'folder:folder-a', 'inbox', 'archive',
+      'saved', 'folder:folder-a', 'inbox', 'bookmarks', 'archive',
     ]);
   });
 });
@@ -988,7 +990,7 @@ describe('executeDropIntent', () => {
         targetCategoryId: 'saved',
         placement: 'before',
         workspaceId: 'workspace-b',
-        expectedCategoryOrder: ['inbox', 'saved', 'archive'],
+        expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'],
       },
       {
         kind: 'copy-open-tabs',
@@ -1038,7 +1040,7 @@ describe('executeDropIntent', () => {
 
     expect(movedSession).not.toBe(before);
     expect(movedSession.groups.find((item) => item.id === 'source')).toMatchObject({ folderId: 'folder-a' });
-    expect(reordered.categoryOrderByWorkspace['workspace-a']).toEqual(['inbox', 'folder:folder-a', 'saved', 'archive']);
+    expect(reordered.categoryOrderByWorkspace['workspace-a']).toEqual(['inbox', 'folder:folder-a', 'saved', 'bookmarks', 'archive']);
     expect(movedTabs.groups.find((item) => item.id === 'target')?.tabs.map((item) => item.id)).toEqual([
       'target-1', 'b', 'c', 'target-2',
     ]);

@@ -666,7 +666,7 @@ describe('authoritative publication persistence outcomes', () => {
       ...createEmptyState(),
       folders: [custom],
       categoryOrderByWorkspace: {
-        workspace_default: ['inbox', 'saved', 'archive', custom.id],
+        workspace_default: ['inbox', 'saved', 'bookmarks', 'archive', custom.id],
       },
     };
     const harness = createHarness(initial);
@@ -688,6 +688,7 @@ describe('authoritative publication persistence outcomes', () => {
       expectedCategoryOrder: [
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
         `folder:${custom.id}`,
       ],
@@ -695,6 +696,7 @@ describe('authoritative publication persistence outcomes', () => {
         `folder:${custom.id}`,
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
       ],
       updatedAt: '2026-01-02T00:00:00.000Z',
@@ -715,13 +717,13 @@ describe('authoritative publication persistence outcomes', () => {
       ...createEmptyState(),
       folders: [custom],
       categoryOrderByWorkspace: {
-        workspace_default: ['inbox', 'saved', 'archive', custom.id],
+        workspace_default: ['inbox', 'saved', 'bookmarks', 'archive', custom.id],
       },
     };
     const newer: TabBoardState = {
       ...initial,
       categoryOrderByWorkspace: {
-        workspace_default: ['saved', 'inbox', 'archive', custom.id],
+        workspace_default: ['saved', 'inbox', 'bookmarks', 'archive', custom.id],
       },
       mutationRevision: initial.mutationRevision + 1,
       updatedAt: '2026-01-03T00:00:00.000Z',
@@ -745,6 +747,7 @@ describe('authoritative publication persistence outcomes', () => {
       expectedCategoryOrder: [
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
         `folder:${custom.id}`,
       ],
@@ -752,6 +755,7 @@ describe('authoritative publication persistence outcomes', () => {
         `folder:${custom.id}`,
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
       ],
       updatedAt: '2026-01-02T00:00:00.000Z',
@@ -766,7 +770,7 @@ describe('authoritative publication persistence outcomes', () => {
       code: 'CATEGORY_MUTATION_CONFLICT',
     });
     expect(harness.getProjection().state.categoryOrderByWorkspace.workspace_default)
-      .toEqual(['saved', 'inbox', 'archive', custom.id]);
+      .toEqual(['saved', 'inbox', 'bookmarks', 'archive', custom.id]);
   });
 
   it('settles drop waiters by partial-commit indexes and publishes committed siblings', async () => {

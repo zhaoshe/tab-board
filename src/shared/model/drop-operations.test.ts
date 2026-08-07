@@ -162,6 +162,7 @@ describe('shared drop operations', () => {
         expectedCategoryOrder: [
           'inbox',
           'saved',
+          'bookmarks',
           'archive',
           'folder:folder-a',
         ],
@@ -256,6 +257,7 @@ describe('shared drop operations', () => {
       'inbox',
       'folder:folder-a',
       'saved',
+      'bookmarks',
       'archive',
     ]);
     expect(movedTabs.groups.find(({ id }) => id === 'target')?.tabs

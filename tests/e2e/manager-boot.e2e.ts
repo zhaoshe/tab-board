@@ -543,7 +543,7 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     await page.getByText('Manage Categories', { exact: true }).click();
 
     const rows = page.locator('[data-category-manager-id]');
-    await expect(rows).toHaveCount(3);
+    await expect(rows).toHaveCount(4);
     const geometry = await rows.evaluateAll((elements) => elements.map(
       (element, index) => {
         const name = element.querySelector<HTMLElement>(

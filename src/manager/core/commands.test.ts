@@ -898,6 +898,7 @@ describe('store category mutation lock', () => {
         'folder:folder-a',
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
       ],
       {
@@ -905,6 +906,7 @@ describe('store category mutation lock', () => {
           'inbox',
           'saved',
           'folder:folder-a',
+          'bookmarks',
           'archive',
           'folder:folder-c',
         ],
@@ -916,6 +918,7 @@ describe('store category mutation lock', () => {
       'folder-a',
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
     ]);
     vi.runAllTimers();
@@ -960,6 +963,7 @@ describe('store category mutation lock', () => {
         'folder:folder-b',
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
       ],
       {
@@ -968,6 +972,7 @@ describe('store category mutation lock', () => {
           'folder:folder-a',
           'inbox',
           'saved',
+          'bookmarks',
           'archive',
         ],
       },
@@ -978,6 +983,7 @@ describe('store category mutation lock', () => {
       'folder-b',
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
     ]);
     const updatedExport = exportToText(useTabBoardStore.getState());

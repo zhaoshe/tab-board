@@ -40,7 +40,8 @@ function isSavedTabRef(value: unknown): value is SavedTabRef {
     && isEntityId(value.tabId);
 }
 
-function isCategory(value: unknown): boolean {
+function isCategory(value: unknown, allowBookmarks = false): boolean {
+  if (value === 'bookmarks') return allowBookmarks;
   if (value === 'inbox' || value === 'saved' || value === 'archive') {
     return true;
   }
@@ -65,7 +66,7 @@ function isCategoryOrder(value: unknown): value is string[] {
     && value.length > 0
     && value.length <= MAX_REFS
     && new Set(value).size === value.length
-    && value.every(isCategory);
+    && value.every((category) => isCategory(category, true));
 }
 
 export function isDropIntentShape(value: unknown): value is DropIntent {

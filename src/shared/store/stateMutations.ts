@@ -27,6 +27,7 @@ import {
   isDropIntentAlreadyApplied,
 } from '../model/drop-operations';
 import {
+  BUILT_IN_CATEGORIES,
   categoryOrder as getCanonicalCategoryOrder,
   moveSessionToCategory,
   type CategoryFilter,
@@ -1542,9 +1543,7 @@ function categoryOrder(
   requested: string[],
 ): string[] {
   const available = [
-    'inbox',
-    'saved',
-    'archive',
+    ...BUILT_IN_CATEGORIES,
     ...state.folders.filter((folder) => folder.workspaceId === workspaceId).map(({ id }) => id),
   ];
   const availableSet = new Set(available);

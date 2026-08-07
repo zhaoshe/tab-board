@@ -346,6 +346,7 @@ function categoryDragState(): PreviewChromeOptions {
         workspace_default: [
           'inbox',
           'saved',
+          'bookmarks',
           'folder-work',
           'archive',
         ],
@@ -1103,13 +1104,13 @@ test.describe('Category drag lifecycle (@dnd-kit pointer sensor)', () => {
     await expect.poll(() => page.locator('[data-category-id]').evaluateAll(
       (elements) => elements.map((element) =>
         element.getAttribute('data-category-id')),
-    )).toEqual(['inbox', 'saved', 'archive', 'folder:folder-work']);
+    )).toEqual(['inbox', 'saved', 'bookmarks', 'archive', 'folder:folder-work']);
     await page.getByRole('button', { name: 'Category Options' }).click();
     await page.getByText('Manage Categories', { exact: true }).click();
     await expect.poll(() => page.locator('[data-category-manager-id]').evaluateAll(
       (elements) => elements.map((element) =>
         element.getAttribute('data-category-manager-id')),
-    )).toEqual(['inbox', 'saved', 'archive', 'folder:folder-work']);
+    )).toEqual(['inbox', 'saved', 'bookmarks', 'archive', 'folder:folder-work']);
   });
 
   test('reorders native manager rows while adjacent drops remain no-ops', async ({ page }) => {
@@ -1122,12 +1123,13 @@ test.describe('Category drag lifecycle (@dnd-kit pointer sensor)', () => {
     await expect.poll(order).toEqual([
       'inbox',
       'saved',
+      'bookmarks',
       'folder:folder-work',
       'archive',
     ]);
 
     await page.locator('[data-category-manager-id="saved"]').dragTo(
-      page.locator('[data-category-manager-id="folder:folder-work"]'),
+      page.locator('[data-category-manager-id="bookmarks"]'),
       {
         targetPosition: { x: 40, y: 2 },
       },
@@ -1135,6 +1137,7 @@ test.describe('Category drag lifecycle (@dnd-kit pointer sensor)', () => {
     await expect.poll(order).toEqual([
       'inbox',
       'saved',
+      'bookmarks',
       'folder:folder-work',
       'archive',
     ]);
@@ -1148,6 +1151,7 @@ test.describe('Category drag lifecycle (@dnd-kit pointer sensor)', () => {
     await expect.poll(order).toEqual([
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
       'folder:folder-work',
     ]);

@@ -300,6 +300,7 @@ describe('state mutations', () => {
     const expectedCategoryOrder = [
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
       `folder:${existing.id}`,
     ];
@@ -307,6 +308,7 @@ describe('state mutations', () => {
       `folder:${existing.id}`,
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
     ];
     const mutation: StateMutation = {
@@ -326,7 +328,7 @@ describe('state mutations', () => {
     const newer: TabBoardState = {
       ...base,
       categoryOrderByWorkspace: {
-        workspace_default: ['saved', 'inbox', 'archive', existing.id],
+        workspace_default: ['saved', 'inbox', 'bookmarks', 'archive', existing.id],
       },
       mutationRevision: base.mutationRevision + 1,
       updatedAt: '2026-01-03T00:00:00.000Z',
@@ -349,6 +351,7 @@ describe('state mutations', () => {
       expectedCategoryOrder: [
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
         `folder:${existing.id}`,
       ],
@@ -356,6 +359,7 @@ describe('state mutations', () => {
         `folder:${existing.id}`,
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
       ],
       updatedAt: '2026-01-02T00:00:00.000Z',
@@ -367,6 +371,7 @@ describe('state mutations', () => {
           existing.id,
           'inbox',
           'saved',
+        'bookmarks',
           'archive',
         ],
       },
@@ -400,7 +405,7 @@ describe('state mutations', () => {
     expect(() => applyStateMutation(currentTarget, {
       type: 'set-category-order',
       workspaceId: 'workspace_default',
-      expectedCategoryOrder: ['inbox', 'saved', 'archive'],
+      expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'],
       categoryOrder: [
         `folder:${existing.id}`,
         'inbox',
@@ -415,8 +420,8 @@ describe('state mutations', () => {
     const mutation = {
       type: 'set-category-order',
       workspaceId: 'workspace_default',
-      expectedCategoryOrder: ['inbox', 'saved', 'archive'],
-      categoryOrder: ['saved', 'inbox', 'archive'],
+      expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'],
+      categoryOrder: ['saved', 'inbox', 'bookmarks', 'archive'],
       updatedAt: timestamp,
     };
     expect(isStateMutation(mutation)).toBe(true);
@@ -446,6 +451,7 @@ describe('state mutations', () => {
     const expectedCategoryOrder = [
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
       'folder:folder-a',
     ];
@@ -453,7 +459,7 @@ describe('state mutations', () => {
       type: 'set-category-order',
       workspaceId: 'workspace_default',
       expectedCategoryOrder,
-      categoryOrder: ['folder:folder-a', 'inbox', 'saved', 'archive'],
+      categoryOrder: ['folder:folder-a', 'inbox', 'saved', 'bookmarks', 'archive'],
       updatedAt: timestamp,
     });
 
@@ -461,6 +467,7 @@ describe('state mutations', () => {
       'folder-a',
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
     ]);
   });
@@ -2871,14 +2878,14 @@ describe('state mutations', () => {
         targetCategoryId: 'inbox',
         placement: 'before',
         workspaceId: 'workspace_default',
-        expectedCategoryOrder: ['inbox', 'saved', 'archive'],
+        expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'],
       },
       openTabs: [],
       updatedAt: timestamp,
     };
     const reorderBefore = {
       ...createEmptyState(),
-      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved', 'archive'] },
+      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved', 'bookmarks', 'archive'] },
     };
     const reorderOnce = applyStateMutations(reorderBefore, [reorderMutation]);
     expect(applyStateMutations(reorderOnce, [reorderMutation])).toEqual(reorderOnce);
@@ -3078,7 +3085,7 @@ describe('state mutations', () => {
         targetCategoryId: 'inbox',
         placement: 'before',
         workspaceId: 'workspace_default',
-        expectedCategoryOrder: ['inbox', 'saved', 'archive'],
+        expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'],
       },
       openTabs: [],
       updatedAt: timestamp,
@@ -3093,14 +3100,14 @@ describe('state mutations', () => {
         targetCategoryId: 'saved',
         placement: 'before',
         workspaceId: 'workspace_default',
-        expectedCategoryOrder: ['saved', 'inbox', 'archive'],
+        expectedCategoryOrder: ['saved', 'inbox', 'bookmarks', 'archive'],
       },
       openTabs: [],
       updatedAt: timestamp,
     };
     const reordered = applyStateMutation({
       ...createEmptyState(),
-      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved'] },
+      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved', 'bookmarks', 'archive'] },
     }, reorder);
     const orderAfterIntervening = applyStateMutation(reordered, reorderBack);
     expect(applyStateMutation(orderAfterIntervening, reorder)).toEqual(orderAfterIntervening);
