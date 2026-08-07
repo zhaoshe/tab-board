@@ -11,11 +11,19 @@ interface BookmarkListResult {
   groups: Group[];
 }
 
+function bookmarkRuntime(): typeof chrome.runtime | null {
+  return typeof chrome === 'undefined' || !chrome.runtime
+    ? null
+    : chrome.runtime;
+}
+
 export function useBookmarkSessions(workspaceId: string): Group[] {
   const [groups, setGroups] = useState<Group[]>([]);
 
   const refresh = useCallback(async () => {
-    const response = await chrome.runtime.sendMessage({
+    const runtime = bookmarkRuntime();
+    if (!runtime) return;
+    const response = await runtime.sendMessage({
       type: 'list-bookmarks',
       workspaceId,
     }) as RuntimeResponse<BookmarkListResult> | undefined;
@@ -36,13 +44,15 @@ export function useBookmarkSessions(workspaceId: string): Group[] {
   }, [refresh]);
 
   useEffect(() => {
+    const runtime = bookmarkRuntime();
+    if (!runtime) return undefined;
     const listener = (message: { type?: string }) => {
       if (message?.type === 'tabboard-bookmarks-changed') {
         void refresh().catch(() => setGroups([]));
       }
     };
-    chrome.runtime.onMessage.addListener(listener);
-    return () => chrome.runtime.onMessage.removeListener(listener);
+    runtime.onMessage.addListener(listener);
+    return () => runtime.onMessage.removeListener(listener);
   }, [refresh]);
 
   return groups;
