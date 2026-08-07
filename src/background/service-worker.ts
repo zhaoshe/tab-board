@@ -65,6 +65,7 @@ import {
   isDropIntentAlreadyApplied,
 } from '../shared/model/drop-operations';
 import { readSettingsProjection } from '../shared/store/settingsProjection';
+import { isBoundedString, MAX_FAVICON_URL_BYTES } from '../shared/validation';
 
 _setActiveAdapterModuleLoadersForWorker({
   loadFileStorageModule: async () => fileStorageModule,
@@ -284,7 +285,7 @@ async function getVerifiedLiveOpenTabs(
       windowId: request.windowId,
       title: String(tab.title || url || 'Untitled'),
       url,
-      favIconUrl: String(tab.favIconUrl || ''),
+      favIconUrl: boundedFavIconUrl(tab.favIconUrl),
       pinned: Boolean(tab.pinned),
       index: Number.isSafeInteger(tab.index) ? tab.index : 0,
       browserGroup: await readBrowserGroup(tab),
@@ -782,6 +783,11 @@ async function captureTabs(
 
 function resolveTabUrl(tab: chrome.tabs.Tab): string {
   return String(tab?.pendingUrl || tab?.url || '').trim();
+}
+
+function boundedFavIconUrl(value: unknown): string {
+  const favIconUrl = typeof value === 'string' ? value : '';
+  return isBoundedString(favIconUrl, MAX_FAVICON_URL_BYTES) ? favIconUrl : '';
 }
 
 function dedupeSourceTabs(tabs: chrome.tabs.Tab[], settings: Settings) {
@@ -1461,7 +1467,7 @@ async function listOpenTabs(): Promise<OpenTabsListResult> {
         windowId: tab.windowId,
         title: tab.title || url || 'Untitled',
         url,
-        favIconUrl: tab.favIconUrl || '',
+        favIconUrl: boundedFavIconUrl(tab.favIconUrl),
         pinned: Boolean(tab.pinned),
         index: tab.index || 0,
         browserGroup: await getBrowserGroup(tab),
@@ -1529,7 +1535,7 @@ function createTabRecord(tab: chrome.tabs.Tab, overrides: { browserGroup?: Brows
     itemType: ITEM_LINK,
     title: tab.title || url,
     url,
-    favIconUrl: tab.favIconUrl ?? '',
+    favIconUrl: boundedFavIconUrl(tab.favIconUrl),
     pinned: Boolean(tab.pinned),
     incognito: Boolean(tab.incognito),
     sourceWindowId: tab.windowId ?? null,

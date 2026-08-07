@@ -981,6 +981,30 @@ describe('window dedupe', () => {
 });
 
 describe('Task112 live Open Tabs validation', () => {
+  it('lists Chrome favicons within the 4KB boundary unchanged', async () => {
+    const favIconUrl = `data:image/png;base64,${'a'.repeat(3_000)}`;
+    const tab = createTab(1, 'Known', {
+      favIconUrl,
+    });
+    const harness = createChromeHarness(createState(), {
+      tabs: [tab],
+      windows: [{ id: 1, type: 'normal', incognito: false, focused: true, alwaysOnTop: false, tabs: [tab] }],
+    });
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    const response = await sendMessage(harness.runtimeMessage.getListener(), {
+      type: 'list-open-tabs',
+    }) as {
+      ok: boolean;
+      result?: { windows: Array<{ tabs: Array<{ favIconUrl: string }> }> };
+      error?: string;
+    };
+
+    expect(response.ok, response.error).toBe(true);
+    expect(response.result?.windows[0]?.tabs[0]?.favIconUrl).toBe(favIconUrl);
+  });
+
   it('uses live Chrome tab fields instead of caller-supplied OpenTabInfo', async () => {
     const liveTab = createTab(1, 'Live title', { url: 'https://live.test/1', windowId: 1 });
     const initial = createState();
@@ -2017,6 +2041,33 @@ describe('Task107 selected capture boundary', () => {
 });
 
 describe('Task107 capture request validation', () => {
+  it('saves Chrome favicons within the 4KB boundary unchanged', async () => {
+    const favIconUrl = `data:image/png;base64,${'a'.repeat(3_000)}`;
+    const tab = createTab(1, 'Known', {
+      favIconUrl,
+      windowId: 1,
+      active: true,
+    });
+    const state = createState();
+    state.settings = { ...state.settings, closeTabsAfterSave: false, openManagerAfterSave: false };
+    const harness = createChromeHarness(state, {
+      tabs: [tab],
+      windows: [{ id: 1, type: 'normal', incognito: false, focused: true, alwaysOnTop: false, tabs: [tab] }],
+    });
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    const response = await sendMessage(harness.runtimeMessage.getListener(), {
+      type: 'saveSelectedTabs',
+      selectedWindowId: 1,
+      tabIds: [1],
+    }) as { ok: boolean; result?: { storedTabs: number }; error?: string };
+
+    expect(response.ok, response.error).toBe(true);
+    expect(response).toMatchObject({ result: { storedTabs: 1 } });
+    expect(harness.state.current.groups[0]?.tabs[0]?.favIconUrl).toBe(favIconUrl);
+  });
+
   it('rejects unknown and malformed capture modes without falling back to current-window', async () => {
     const harness = createChromeHarness(createState());
     vi.stubGlobal('chrome', harness.chromeMock);
