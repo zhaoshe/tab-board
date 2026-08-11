@@ -4806,7 +4806,7 @@ describe('state mutations', () => {
       { type: 'delete-group', id: locked.id, binEntry: deleteGroupEntry, updatedAt: timestamp },
       { type: 'move-group', groupId: locked.id, targetFolderId: null, starred: true, archived: false, index: 0, updatedAt: timestamp },
       { type: 'add-tab', groupId: locked.id, tab: tab('new-locked-tab'), updatedAt: timestamp },
-      { type: 'update-tab', groupId: locked.id, tabId: lockedTab.id, updates: { title: 'changed' }, updatedAt: timestamp },
+      { type: 'update-tab', groupId: locked.id, tabId: lockedTab.id, updates: { note: 'changed' }, updatedAt: timestamp },
       { type: 'delete-tab', groupId: locked.id, tabId: lockedTab.id, binEntry: deleteTabEntry, updatedAt: timestamp },
       { type: 'move-tab', groupId: locked.id, tabId: lockedTab.id, targetGroupId: target.id, targetIndex: 0, updatedAt: timestamp },
       { type: 'move-tab', groupId: target.id, tabId: unlockedTab.id, targetGroupId: locked.id, targetIndex: 0, updatedAt: timestamp },
@@ -4824,6 +4824,45 @@ describe('state mutations', () => {
       type: 'update-group', id: target.id, updates: { title: 'updated' }, updatedAt: timestamp,
     });
     expect(updated.groups.find(({ id }) => id === target.id)?.title).toBe('updated');
+  });
+
+  it('allows only title-only tab updates in locked groups', () => {
+    const lockedTab = tab('locked-title-tab');
+    const locked = {
+      ...group('locked-title-group', 'workspace_default', [lockedTab]),
+      locked: true,
+    };
+    const state = { ...createEmptyState(), groups: [locked] };
+
+    const updated = applyStateMutation(state, {
+      type: 'update-tab',
+      groupId: locked.id,
+      tabId: lockedTab.id,
+      updates: { title: 'Final loaded title' },
+      updatedAt: timestamp,
+    });
+
+    expect(updated.groups[0]?.tabs[0]).toMatchObject({
+      id: lockedTab.id,
+      title: 'Final loaded title',
+      note: lockedTab.note,
+      url: lockedTab.url,
+    });
+
+    for (const updates of [
+      { note: 'changed' },
+      { url: 'https://changed.test' },
+      { favIconUrl: 'https://changed.test/icon.png' },
+      { title: 'Changed', note: 'changed' },
+    ]) {
+      expect(() => applyStateMutation(state, {
+        type: 'update-tab',
+        groupId: locked.id,
+        tabId: lockedTab.id,
+        updates,
+        updatedAt: timestamp,
+      })).toThrowError(expect.objectContaining({ code: 'GROUP_LOCKED' }));
+    }
   });
 
   it('rejects cascading mutations that would change locked groups', () => {

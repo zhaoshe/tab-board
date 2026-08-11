@@ -640,6 +640,7 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
   let nextTabId = Math.max(0, ...tabs.map((tab) => tab.id)) + 1;
   let nextWindowId = Math.max(0, ...windows.map((window) => window.id)) + 1;
   let openedOptionsCount = 0;
+  let nextTitleRefreshOperationId = 0;
   let storageData: Record<string, unknown> = persistedStorage
     ? clone(persistedStorage)
     : { [STATE_KEY]: clone(state) };
@@ -1050,6 +1051,52 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
     return created;
   };
 
+  const syncRestoredTabTitles = async (
+    created: readonly { tab: PreviewTab; record: TabItem }[],
+    refs: readonly RestoreRef[],
+  ): Promise<void> => {
+    const refByTabId = new Map(refs.map((ref) => [ref.tabId, ref]));
+    const updates = [];
+    for (const { tab, record } of created) {
+      const ref = refByTabId.get(record.id);
+      const group = ref
+        ? state.groups.find(({ id }) => id === ref.groupId)
+        : undefined;
+      const saved = group?.tabs.find(({ id }) => id === ref?.tabId);
+      if (!ref
+        || !group
+        || !saved
+        || saved.itemType !== 'link'
+        || saved.url !== record.url) {
+        continue;
+      }
+      const title = await withTitleRefreshActivity(
+        ref.groupId,
+        ref.tabId,
+        async () => {
+          const finalTitle = new URL(record.url).hostname || record.url;
+          await tabsApi.update(tab.id, {
+            status: 'complete',
+            title: finalTitle,
+          });
+          return finalTitle;
+        },
+      );
+      if (title !== saved.title) {
+        updates.push({
+          type: 'update-tab' as const,
+          groupId: group.id,
+          tabId: saved.id,
+          updates: { title },
+          updatedAt: nowIso(),
+        });
+      }
+    }
+    if (updates.length) {
+      await setStoredState(normalizeState(applyStateMutations(state, updates)));
+    }
+  };
+
   let restoreQueue: Promise<unknown> = Promise.resolve();
   const enqueueRestore = <T>(operation: () => Promise<T>): Promise<T> => {
     const run = restoreQueue.then(operation);
@@ -1135,6 +1182,57 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
     return { removedTabs: duplicateIds.length };
   };
 
+  const refreshSavedTabTitle = async (rawUrl: unknown): Promise<string> => {
+    if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
+      throw new Error('A valid saved tab URL is required.');
+    }
+    const openTab = tabs.find((tab) => tab.url === rawUrl);
+    if (openTab?.title) return openTab.title;
+
+    let windowId: number | undefined;
+    try {
+      const created = await windowsApi.create({
+        url: rawUrl,
+        focused: false,
+        state: 'minimized',
+        type: 'popup',
+      });
+      windowId = created.id;
+      const tab = created.tabs?.[0];
+      if (!tab) throw new Error('Unable to open the saved tab.');
+      const title = new URL(rawUrl).hostname || rawUrl;
+      await tabsApi.update(tab.id, { status: 'complete', title });
+      return title;
+    } finally {
+      if (windowId !== undefined) await windowsApi.remove(windowId);
+    }
+  };
+
+  const withTitleRefreshActivity = async <T,>(
+    groupId: string,
+    tabId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    const operationId = `preview-title-refresh-${++nextTitleRefreshOperationId}`;
+    const publish = (status: 'start' | 'finish') => {
+      const message = {
+        type: 'tabboard-title-refresh-activity',
+        groupId,
+        tabId,
+        operationId,
+        status,
+      };
+      sentMessages.push(clone(message));
+      getHub('runtime.onMessage').emit(clone(message), {}, () => undefined);
+    };
+    publish('start');
+    try {
+      return await operation();
+    } finally {
+      publish('finish');
+    }
+  };
+
   const handleMessage = async (rawMessage: unknown): Promise<unknown> => {
     const message = isRecord(rawMessage) ? rawMessage : {};
     const action = message.type || message.action;
@@ -1149,6 +1247,73 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
       }
       case 'list-open-tabs':
         return listOpenTabs();
+      case 'refresh-saved-tab-title':
+        return typeof message.groupId === 'string'
+          && typeof message.tabId === 'string'
+          ? withTitleRefreshActivity(
+            message.groupId,
+            message.tabId,
+            () => refreshSavedTabTitle(message.url),
+          )
+          : refreshSavedTabTitle(message.url);
+      case 'refresh-saved-group-titles': {
+        const groupId = String(message.groupId || '');
+        const group = state.groups.find(({ id }) => id === groupId);
+        if (!group) throw new Error('Saved group not found');
+        const links = group.tabs.filter(
+          (tab) => tab.itemType === 'link' && Boolean(tab.url),
+        );
+        const results: Array<PromiseSettledResult<string> | undefined> =
+          Array(links.length);
+        let nextIndex = 0;
+        const worker = async (): Promise<void> => {
+          while (nextIndex < links.length) {
+            const index = nextIndex++;
+            try {
+              results[index] = {
+                status: 'fulfilled',
+                value: await withTitleRefreshActivity(
+                  groupId,
+                  links[index].id,
+                  () => refreshSavedTabTitle(links[index].url),
+                ),
+              };
+            } catch (reason: unknown) {
+              results[index] = { status: 'rejected', reason };
+            }
+          }
+        };
+        await Promise.all(
+          Array.from({ length: Math.min(3, links.length) }, worker),
+        );
+        const latest = state.groups.find(({ id }) => id === groupId);
+        let refreshed = 0;
+        let failed = 0;
+        const updates = results.flatMap((result, index) => {
+          const original = links[index];
+          const current = latest?.tabs.find(({ id }) => id === original.id);
+          if (result?.status !== 'fulfilled'
+            || current?.itemType !== 'link'
+            || current.url !== original.url) {
+            failed += 1;
+            return [];
+          }
+          refreshed += 1;
+          return current.title === result.value
+            ? []
+            : [{
+              type: 'update-tab' as const,
+              groupId,
+              tabId: current.id,
+              updates: { title: result.value },
+              updatedAt: nowIso(),
+            }];
+        });
+        if (updates.length) {
+          await setStoredState(normalizeState(applyStateMutations(state, updates)));
+        }
+        return { refreshed, failed };
+      }
       case 'list-bookmarks':
         return {
           groups: createBookmarkSessions(bookmarks, {
@@ -1208,6 +1373,14 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
           if (state.settings.deleteRestoredTabs && !group.locked && created.length) {
             await removeRestoredRefs(created.map(({ record }) => ({ source: 'group', groupId, tabId: record.id })));
           }
+          await syncRestoredTabTitles(
+            created,
+            group.tabs.map((tab) => ({
+              source: 'group',
+              groupId,
+              tabId: tab.id,
+            })),
+          );
           return { restoredTabs: created.length };
         });
       case 'restore-tab':
@@ -1221,6 +1394,11 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
           if (state.settings.deleteRestoredTabs && !group.locked && created.length) {
             await removeRestoredRefs([{ source: 'group', groupId, tabId }]);
           }
+          await syncRestoredTabTitles(created, [{
+            source: 'group',
+            groupId,
+            tabId,
+          }]);
           return { restoredTabs: created.length };
         });
       case 'restore-refs':
@@ -1269,11 +1447,46 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
           if (state.settings.deleteRestoredTabs && removableRefs.length) {
             await removeRestoredRefs(removableRefs);
           }
+          await syncRestoredTabTitles(
+            created,
+            restorable.map(({ ref }) => ref),
+          );
           return {
             restoredTabs: outcomes.filter(({ status }) =>
               status === 'restored').length,
             outcomes,
           };
+        });
+      case 'restore-all':
+        return enqueueRestore(async () => {
+          const restorable = state.groups.flatMap((group) =>
+            group.tabs
+              .filter((record) => record.itemType === 'link' && Boolean(record.url))
+              .map((record) => ({ group, record })));
+          const created = await createRestoredTabs(
+            restorable.map(({ record }) => record),
+            state.settings.restoreGroupsInNewWindow,
+          );
+          if (state.settings.deleteRestoredTabs && created.length) {
+            const createdIds = new Set(created.map(({ record }) => record.id));
+            await removeRestoredRefs(restorable
+              .filter(({ group, record }) =>
+                createdIds.has(record.id) && !group.locked)
+              .map(({ group, record }) => ({
+                source: 'group',
+                groupId: group.id,
+                tabId: record.id,
+              })));
+          }
+          await syncRestoredTabTitles(
+            created,
+            restorable.map(({ group, record }) => ({
+              source: 'group',
+              groupId: group.id,
+              tabId: record.id,
+            })),
+          );
+          return { restoredTabs: created.length };
         });
       default:
         throw new Error(`Unknown message type: ${String(action)}`);

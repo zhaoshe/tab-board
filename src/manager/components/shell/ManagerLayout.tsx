@@ -18,6 +18,7 @@ import {
 import { useOpenTabsRuntime } from '../../hooks/useOpenTabsRuntime';
 import { useSidebarDisclosure } from '../../hooks/useSidebarDisclosure';
 import { useToast } from '../../hooks/useToast';
+import { useTitleRefreshActivityListener } from '../../hooks/useTitleRefreshActivity';
 import { useCurrentWorkspace } from '../../hooks/useWorkspaceState';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import { BinView } from '../bin/BinView';
@@ -57,6 +58,7 @@ export function shouldSyncActiveWorkspace(
 }
 
 export function ManagerLayout() {
+  useTitleRefreshActivityListener();
   const sidebar = useSidebarDisclosure();
   const [importModalOpened, setImportModalOpened] = useState(false);
   const [exportModalOpened, setExportModalOpened] = useState(false);

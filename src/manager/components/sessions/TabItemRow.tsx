@@ -12,6 +12,7 @@ import {
   FilePenLine,
   FileText as IconFileText,
   Link as IconLink,
+  RefreshCw,
   Trash,
   Trash as IconTrash,
   X,
@@ -40,6 +41,7 @@ import { useDestructiveConfirmation } from '../../../shared/components/Destructi
 import { AccessibleIconAction } from '../../../shared/components/AccessibleIconAction';
 import { Favicon } from '../../../shared/components/Favicon';
 import { TabBoardIcon } from '../../../shared/components/TabBoardIcon';
+import { useIsTitleRefreshing } from '../../hooks/useTitleRefreshActivity';
 
 export function getTabDropMarkerPlacement(
   marker: DragMarker | null | undefined,
@@ -127,6 +129,7 @@ export function TabItemRow({
   const titleTriggerRef = useRef<HTMLButtonElement | null>(null);
   const { closeOverlays, openMenu } = useManagerOverlayCommands();
   const infoKey = `saved:${groupId}:${tab.id}`;
+  const isTitleRefreshing = useIsTitleRefreshing(groupId, tab.id);
   const { showError, showSuccess } = useToast();
   const confirmDestructive = useDestructiveConfirmation();
   const displayText = tab.note || tab.title;
@@ -179,7 +182,8 @@ export function TabItemRow({
       event.stopPropagation();
       if (event.detail !== 0) event.currentTarget.blur();
       closeOverlays();
-      void runtime.openSavedTab(tab.url);
+      if (readOnly) void runtime.openSavedTab(tab.url);
+      else void runtime.restoreTab(groupId, tab.id);
     }
   };
 
@@ -242,6 +246,21 @@ export function TabItemRow({
     }
   };
 
+  const handleRefreshTitle = async () => {
+    if (tab.itemType !== ITEM_LINK || !commands) return;
+    closeOverlays();
+    try {
+      const title = await runtime.refreshSavedTabTitle(
+        tab.url,
+        groupId,
+        tab.id,
+      );
+      if (title !== tab.title) commands.updateTab(groupId, tab.id, { title });
+    } catch {
+      return;
+    }
+  };
+
   const registerInfoTrigger = useManagerInfoTrigger(infoKey, {
     kind: 'saved',
     model: {
@@ -268,12 +287,22 @@ export function TabItemRow({
         />
       )}
       {tab.itemType === ITEM_LINK ? (
-        <ManagerMenuItem
-          description="Copy the saved address"
-          icon={Copy}
-          label="Copy URL"
-          onClick={handleCopy}
-        />
+        <>
+          {!readOnly && (
+            <ManagerMenuItem
+              description="Reload the page title"
+              icon={RefreshCw}
+              label="Refresh Title"
+              onClick={handleRefreshTitle}
+            />
+          )}
+          <ManagerMenuItem
+            description="Copy the saved address"
+            icon={Copy}
+            label="Copy URL"
+            onClick={handleCopy}
+          />
+        </>
       ) : (
         <ManagerMenuItem
           description="Copy the saved text"
@@ -537,9 +566,13 @@ export function TabItemRow({
         </div>
         {!isDragOverlay && !readOnly ? (
           <AccessibleIconAction
-            label="Delete"
-            danger
-            className="tab-item-row__delete"
+            label={isTitleRefreshing ? 'Refreshing title' : 'Delete'}
+            danger={!isTitleRefreshing}
+            loading={isTitleRefreshing}
+            className={[
+              'tab-item-row__delete',
+              isTitleRefreshing ? 'tab-item-row__delete--loading' : '',
+            ].filter(Boolean).join(' ')}
             disabled={locked}
             onClick={handleDelete}
           >

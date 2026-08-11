@@ -10,6 +10,7 @@ import {
   Lock,
   LockOpen,
   Pencil,
+  RefreshCw,
   SquareCheckBig,
   Trash,
 } from 'lucide-react';
@@ -307,6 +308,22 @@ export const SessionCard = memo(function SessionCard({
     void copyText(text);
   };
 
+  const handleRefreshAllTitles = async () => {
+    closeOverlays();
+    try {
+      const result = await runtime.refreshSavedGroupTitles(group.id);
+      if (result.failed === 0) {
+        showSuccess('Titles refreshed');
+      } else {
+        showError(
+          `${result.refreshed} titles refreshed, ${result.failed} failed`,
+        );
+      }
+    } catch {
+      return;
+    }
+  };
+
   const startSelection = (tabId: string) => {
     selectionScope?.commands.enterSavedTabs(group.id);
     setSelectedTabIds(new Set([tabId]));
@@ -449,6 +466,15 @@ export const SessionCard = memo(function SessionCard({
             onClick={handleToggleLock}
           />
         </>
+      )}
+      {!readOnly && (
+        <ManagerMenuItem
+          icon={RefreshCw}
+          label="Refresh All Titles"
+          disabled={tabMetadata.linkCount === 0}
+          description="Reload every saved link title"
+          onClick={handleRefreshAllTitles}
+        />
       )}
       <ManagerMenuItem
         icon={Copy}

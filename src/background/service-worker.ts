@@ -65,7 +65,11 @@ import {
   isDropIntentAlreadyApplied,
 } from '../shared/model/drop-operations';
 import { readSettingsProjection } from '../shared/store/settingsProjection';
-import { isBoundedString, MAX_FAVICON_URL_BYTES } from '../shared/validation';
+import {
+  isBoundedString,
+  MAX_FAVICON_URL_BYTES,
+  MAX_TITLE_BYTES,
+} from '../shared/validation';
 
 _setActiveAdapterModuleLoadersForWorker({
   loadFileStorageModule: async () => fileStorageModule,
@@ -74,6 +78,8 @@ _setActiveAdapterModuleLoadersForWorker({
 
 const MANAGER_PAGE = 'manager.html';
 const POPUP_PAGE = 'popup.html';
+const TITLE_SETTLE_MS = 400;
+const TITLE_LOAD_TIMEOUT_MS = 15_000;
 
 async function getSettings(): Promise<Settings> {
   return (await readSettingsProjection({
@@ -496,6 +502,15 @@ async function handleMessage(message: { type?: string; action?: string; [key: st
     }
     case 'list-open-tabs':
       return listOpenTabs();
+    case 'refresh-saved-tab-title':
+      return refreshSavedTabTitle(
+        message.url,
+        typeof message.groupId === 'string' && typeof message.tabId === 'string'
+          ? { groupId: message.groupId, tabId: message.tabId }
+          : undefined,
+      );
+    case 'refresh-saved-group-titles':
+      return refreshSavedGroupTitles(message.groupId);
     case 'list-bookmarks':
       return listBookmarks(message.workspaceId as string | undefined);
     case 'create-window':
@@ -531,6 +546,231 @@ async function handleMessage(message: { type?: string; action?: string; [key: st
     default:
       throw new Error(`Unknown message type: ${action}`);
   }
+}
+
+function requireRefreshTitleUrl(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.trim() !== value) {
+    throw new Error('A valid saved tab URL is required.');
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error('A valid saved tab URL is required.');
+  }
+  if (!['http:', 'https:', 'chrome:', 'file:'].includes(parsed.protocol)) {
+    throw new Error('Saved tab URL uses an unsupported protocol.');
+  }
+  return value;
+}
+
+function usablePageTitle(title: string | undefined, url: string): string {
+  const trimmed = title?.trim() || '';
+  if (!trimmed || trimmed === url) return '';
+  if (!isBoundedString(trimmed, MAX_TITLE_BYTES)) {
+    throw new Error('Loaded page title is too long.');
+  }
+  return trimmed;
+}
+
+function waitForStableTabTitle(
+  tab: chrome.tabs.Tab,
+  url: string,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (tab.id === undefined) {
+      reject(new Error('Unable to load a page title.'));
+      return;
+    }
+    const tabId = tab.id;
+    let settled = false;
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutTimer = setTimeout(() => {
+      settled = true;
+      cleanup();
+      reject(new Error('Unable to load a page title.'));
+    }, TITLE_LOAD_TIMEOUT_MS);
+
+    const cleanup = () => {
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
+      clearTimeout(timeoutTimer);
+      chrome.tabs.onUpdated.removeListener(handleUpdated);
+    };
+    const consider = (candidate: chrome.tabs.Tab) => {
+      if (settled) return;
+      let title: string;
+      try {
+        title = usablePageTitle(candidate.title, url);
+      } catch (error: unknown) {
+        settled = true;
+        cleanup();
+        reject(error);
+        return;
+      }
+      if (candidate.status !== 'complete' || !title) {
+        if (settleTimer !== undefined) {
+          clearTimeout(settleTimer);
+          settleTimer = undefined;
+        }
+        return;
+      }
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => {
+        settled = true;
+        cleanup();
+        resolve(title);
+      }, TITLE_SETTLE_MS);
+    };
+    const handleUpdated = (
+      updatedTabId: number,
+      _changeInfo: chrome.tabs.TabChangeInfo,
+      updatedTab: chrome.tabs.Tab,
+    ) => {
+      if (updatedTabId === tabId) consider(updatedTab);
+    };
+
+    chrome.tabs.onUpdated.addListener(handleUpdated);
+    consider(tab);
+    void chrome.tabs.get(tabId)
+      .then((current) => {
+        if (current) consider(current);
+      })
+      .catch(() => undefined);
+  });
+}
+
+interface TitleRefreshRef {
+  groupId: string;
+  tabId: string;
+}
+
+async function publishTitleRefreshActivity(
+  ref: TitleRefreshRef,
+  operationId: string,
+  status: 'start' | 'finish',
+): Promise<void> {
+  await chrome.runtime.sendMessage({
+    type: 'tabboard-title-refresh-activity',
+    ...ref,
+    operationId,
+    status,
+  }).catch(() => undefined);
+}
+
+async function withTitleRefreshActivity<T>(
+  ref: TitleRefreshRef,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const operationId = createId('title_refresh');
+  await publishTitleRefreshActivity(ref, operationId, 'start');
+  try {
+    return await operation();
+  } finally {
+    await publishTitleRefreshActivity(ref, operationId, 'finish');
+  }
+}
+
+async function refreshSavedTabTitle(
+  rawUrl: unknown,
+  ref?: TitleRefreshRef,
+): Promise<string> {
+  const resolveTitle = async (): Promise<string> => {
+  const url = requireRefreshTitleUrl(rawUrl);
+  const openTabs = (await chrome.tabs.query({}))
+    .filter((tab) => tab.url === url);
+  const completeTab = openTabs.find((tab) =>
+    tab.status === 'complete' && usablePageTitle(tab.title, url));
+  if (completeTab) return usablePageTitle(completeTab.title, url);
+  const openTab = openTabs[0];
+  if (openTab) return waitForStableTabTitle(openTab, url);
+
+  let windowId: number | undefined;
+  try {
+    const created = await chrome.windows.create({
+      url,
+      focused: false,
+      state: 'minimized',
+      type: 'popup',
+    });
+    windowId = created.id;
+    const tab = created.tabs?.[0];
+    if (!tab?.id || windowId === undefined) {
+      throw new Error('Unable to open the saved tab.');
+    }
+    return await waitForStableTabTitle(tab, url);
+  } finally {
+    if (windowId !== undefined) {
+      await chrome.windows.remove(windowId).catch(() => undefined);
+    }
+  }
+  };
+  return ref
+    ? withTitleRefreshActivity(ref, resolveTitle)
+    : resolveTitle();
+}
+
+async function refreshSavedGroupTitles(
+  rawGroupId: unknown,
+): Promise<{ refreshed: number; failed: number }> {
+  if (typeof rawGroupId !== 'string' || !rawGroupId.trim()) {
+    throw new Error('A valid saved group ID is required.');
+  }
+  const state = await getState();
+  const group = state.groups.find(({ id }) => id === rawGroupId);
+  if (!group) throw new Error('Saved group not found');
+  const links = group.tabs.filter(isRestorableTab);
+  const results: Array<PromiseSettledResult<string> | undefined> = Array(
+    links.length,
+  );
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    while (nextIndex < links.length) {
+      const index = nextIndex++;
+      try {
+        results[index] = {
+          status: 'fulfilled',
+          value: await refreshSavedTabTitle(links[index].url, {
+            groupId: group.id,
+            tabId: links[index].id,
+          }),
+        };
+      } catch (reason: unknown) {
+        results[index] = { status: 'rejected', reason };
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(3, links.length) }, worker),
+  );
+
+  const latest = await getState();
+  const latestGroup = latest.groups.find(({ id }) => id === group.id);
+  const updatedAt = nowIso();
+  let refreshed = 0;
+  let failed = 0;
+  const mutations = results.flatMap((result, index): StateMutation[] => {
+    const original = links[index];
+    const current = latestGroup?.tabs.find(({ id }) => id === original.id);
+    if (result?.status !== 'fulfilled'
+      || current?.itemType !== ITEM_LINK
+      || current.url !== original.url) {
+      failed += 1;
+      return [];
+    }
+    refreshed += 1;
+    if (current.title === result.value) return [];
+    return [{
+      type: 'update-tab',
+      groupId: group.id,
+      tabId: current.id,
+      updates: { title: result.value },
+      updatedAt,
+    }];
+  });
+  if (mutations.length) {
+    await (await getPersistence()).applyMutations(mutations);
+  }
+  return { refreshed, failed };
 }
 
 async function refreshContextMenus() {
@@ -975,6 +1215,7 @@ async function restoreTabInternal({ source = 'group', groupId = '', tabId = '' }
   if (settings.deleteRestoredTabs && !found.group?.locked && created.length) {
     await removeRestoredRefs([{ source, groupId, tabId }]);
   }
+  await syncRestoredTabTitles(created, [{ source, groupId, tabId }]);
   return { restoredTabs: created.length };
 }
 
@@ -994,6 +1235,10 @@ async function restoreGroupInternal(groupId: string) {
       created.map(({ record }) => ({ source: 'group', groupId, tabId: record.id }))
     );
   }
+  await syncRestoredTabTitles(
+    created,
+    tabs.map((tab) => ({ source: 'group', groupId, tabId: tab.id })),
+  );
   return { restoredTabs: created.length };
 }
 
@@ -1036,6 +1281,10 @@ async function restoreRefsInternal(rawRefs: unknown): Promise<RestoreRefsResult>
   if (settings.deleteRestoredTabs && removableRefs.length) {
     await removeRestoredRefs(removableRefs);
   }
+  await syncRestoredTabTitles(
+    created,
+    restorable.map(({ ref }) => ref),
+  );
   return {
     restoredTabs: outcomes.filter(({ status }) =>
       status === 'restored').length,
@@ -1059,6 +1308,14 @@ async function restoreAllInternal() {
       .map(({ group, tab }) => ({ source: 'group', groupId: group.id, tabId: tab.id }));
     await removeRestoredRefs(refs);
   }
+  await syncRestoredTabTitles(
+    created,
+    restorable.map(({ group, tab }) => ({
+      source: 'group',
+      groupId: group.id,
+      tabId: tab.id,
+    })),
+  );
   return { restoredTabs: created.length };
 }
 
@@ -1081,6 +1338,62 @@ function restoreAll() {
 interface CreatedTab {
   tab: chrome.tabs.Tab;
   record: TabItem;
+}
+
+interface RestoredTitleCandidate extends CreatedTab {
+  ref: TabRefWithSource;
+}
+
+async function syncRestoredTabTitles(
+  created: readonly CreatedTab[],
+  refs: readonly TabRefWithSource[],
+): Promise<void> {
+  try {
+    const refByTabId = new Map(refs.map((ref) => [ref.tabId, ref]));
+    const state = await getState();
+    const candidates = created.flatMap((item): RestoredTitleCandidate[] => {
+      const ref = refByTabId.get(item.record.id);
+      const found = ref ? findTabRef(state, ref) : null;
+      return ref
+        && found
+        && found.tab.itemType === ITEM_LINK
+        && found.tab.url === item.record.url
+        ? [{ ...item, ref }]
+        : [];
+    });
+    if (!candidates.length) return;
+
+    const settled = await Promise.allSettled(
+      candidates.map(({ tab, record, ref }) =>
+        withTitleRefreshActivity(ref, () =>
+          waitForStableTabTitle(tab, record.url))),
+    );
+    const latest = await getState();
+    const updatedAt = nowIso();
+    const mutations = settled.flatMap((result, index): StateMutation[] => {
+      if (result.status !== 'fulfilled') return [];
+      const candidate = candidates[index];
+      const found = findTabRef(latest, candidate.ref);
+      if (!found
+        || found.tab.itemType !== ITEM_LINK
+        || found.tab.url !== candidate.record.url
+        || found.tab.title === result.value) {
+        return [];
+      }
+      return [{
+        type: 'update-tab',
+        groupId: found.group.id,
+        tabId: found.tab.id,
+        updates: { title: result.value },
+        updatedAt,
+      }];
+    });
+    if (mutations.length) {
+      await (await getPersistence()).applyMutations(mutations);
+    }
+  } catch {
+    // Restoring the browser tab succeeds even when title synchronization fails.
+  }
 }
 
 async function createChromeTabs(

@@ -29,8 +29,9 @@ import * as tabItemRowModule from '../components/sessions/TabItemRow';
 import { TabItemRow } from '../components/sessions/TabItemRow';
 import { ToastProvider } from './useToast';
 import { DestructiveConfirmationProvider } from '../../shared/components/DestructiveConfirmation';
-import { ITEM_NOTE, type TabItem } from '../../shared/model';
+import { ITEM_LINK, ITEM_NOTE, type TabItem } from '../../shared/model';
 import type { ManagerRuntime } from './useManagerRuntime';
+import { titleRefreshActivityStore } from '../core/titleRefreshActivity';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -269,21 +270,46 @@ const savedNote: TabItem = {
   updatedAt: '2026-07-31T12:00:00.000Z',
 };
 
+const savedLink: TabItem = {
+  ...savedNote,
+  id: 'saved-link',
+  itemType: ITEM_LINK,
+  title: 'Temporary title',
+  url: 'https://refresh.example/article',
+  note: '',
+};
+
 const runtimeStub: ManagerRuntime = {
   openSavedTab: vi.fn(async () => undefined),
   openSavedTabs: vi.fn(async () => undefined),
+  refreshSavedTabTitle: vi.fn(async () => 'Loaded article title'),
+  refreshSavedGroupTitles: vi.fn(async () => ({ refreshed: 0, failed: 0 })),
   restoreGroup: vi.fn(async () => undefined),
   restoreTab: vi.fn(async () => undefined),
   restoreTabs: vi.fn(async () => ({ restoredTabs: 0, outcomes: [] })),
 };
 
+interface SavedRowHarnessProps {
+  parentContextMenu: () => void;
+  parentKeyDown: (key: string) => void;
+  tab?: TabItem;
+  runtime?: ManagerRuntime;
+  locked?: boolean;
+  updateTab?: (
+    groupId: string,
+    tabId: string,
+    updates: Partial<TabItem>,
+  ) => void;
+}
+
 function SavedRowParentOverwriteHarness({
   parentContextMenu,
   parentKeyDown,
-}: {
-  parentContextMenu: () => void;
-  parentKeyDown: (key: string) => void;
-}): ReactNode {
+  tab = savedNote,
+  runtime = runtimeStub,
+  locked = false,
+  updateTab = vi.fn(),
+}: SavedRowHarnessProps): ReactNode {
   const controller = useManagerOverlayController();
   const openParentMenu = (trigger: HTMLElement): void => {
     controller.openMenu({
@@ -317,20 +343,72 @@ function SavedRowParentOverwriteHarness({
       },
     },
     createElement(TabItemRow, {
-      tab: savedNote,
+      tab,
       groupId: 'group-a',
       workspaceId: 'workspace-a',
       tabIndex: 0,
       selectedRefs: [],
-      runtime: runtimeStub,
+      runtime,
+      locked,
       commands: {
         confirmBeforeDestructive: false,
         deleteTab: vi.fn(),
-        updateTab: vi.fn(),
+        updateTab,
       },
     }),
     createElement(ManagerOverlayPortal),
   );
+}
+
+async function mountSavedRow(
+  overrides: Partial<SavedRowHarnessProps> = {},
+): Promise<{ container: HTMLDivElement; root: Root }> {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(createElement(
+      MantineProvider,
+      null,
+      createElement(
+        DndContext,
+        null,
+        createElement(
+          ToastProvider,
+          null,
+          createElement(
+            DestructiveConfirmationProvider,
+            null,
+            createElement(
+              ManagerOverlaysProvider,
+              null,
+              createElement(SavedRowParentOverwriteHarness, {
+                parentContextMenu: vi.fn(),
+                parentKeyDown: vi.fn(),
+                ...overrides,
+              }),
+            ),
+          ),
+        ),
+      ),
+    ));
+  });
+  return { container, root };
+}
+
+async function openSavedRowMenu(container: HTMLElement): Promise<HTMLButtonElement | undefined> {
+  const title = container.querySelector<HTMLButtonElement>('.tab-item-row__title');
+  await act(async () => {
+    title?.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 12,
+      clientY: 18,
+    }));
+  });
+  return [...document.querySelectorAll<HTMLButtonElement>(
+    '.manager-overlay-menu button',
+  )].find((button) => button.textContent?.includes('Refresh Title'));
 }
 
 async function mountOverlay(onCommandRender?: () => void): Promise<MountedOverlay> {
@@ -576,6 +654,186 @@ describe('mounted manager overlay behavior', () => {
       }
     },
   );
+
+  it('refreshes a saved link title through the runtime and existing update-tab command', async () => {
+    const refreshSavedTabTitle = vi.fn(async () => 'Loaded article title');
+    const updateTab = vi.fn();
+    const { container, root } = await mountSavedRow({
+      tab: savedLink,
+      runtime: {
+        ...runtimeStub,
+        refreshSavedTabTitle,
+      },
+      updateTab,
+    });
+
+    try {
+      const refresh = await openSavedRowMenu(container);
+      expect(refresh?.disabled).toBe(false);
+
+      await act(async () => refresh?.click());
+
+      expect(refreshSavedTabTitle).toHaveBeenCalledWith(
+        savedLink.url,
+        'group-a',
+        savedLink.id,
+      );
+      expect(updateTab).toHaveBeenCalledWith(
+        'group-a',
+        savedLink.id,
+        { title: 'Loaded article title' },
+      );
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('keeps the saved title unchanged when title refresh fails', async () => {
+    const updateTab = vi.fn();
+    const { container, root } = await mountSavedRow({
+      tab: savedLink,
+      runtime: {
+        ...runtimeStub,
+        refreshSavedTabTitle: vi.fn(async () => {
+          throw new Error('Unable to load a page title.');
+        }),
+      },
+      updateTab,
+    });
+
+    try {
+      const refresh = await openSavedRowMenu(container);
+      await act(async () => refresh?.click());
+
+      expect(updateTab).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('does not write an update when Refresh Title returns the saved title', async () => {
+    const updateTab = vi.fn();
+    const { container, root } = await mountSavedRow({
+      tab: savedLink,
+      runtime: {
+        ...runtimeStub,
+        refreshSavedTabTitle: vi.fn(async () => savedLink.title),
+      },
+      updateTab,
+    });
+
+    try {
+      const refresh = await openSavedRowMenu(container);
+      await act(async () => refresh?.click());
+
+      expect(updateTab).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('allows Refresh Title for links in locked sessions', async () => {
+    const refreshSavedTabTitle = vi.fn(async () => 'Locked final title');
+    const updateTab = vi.fn();
+    const { container, root } = await mountSavedRow({
+      tab: savedLink,
+      locked: true,
+      runtime: {
+        ...runtimeStub,
+        refreshSavedTabTitle,
+      },
+      updateTab,
+    });
+
+    try {
+      const refresh = await openSavedRowMenu(container);
+
+      expect(refresh?.disabled).toBe(false);
+      await act(async () => refresh?.click());
+      expect(refreshSavedTabTitle).toHaveBeenCalledWith(
+        savedLink.url,
+        'group-a',
+        savedLink.id,
+      );
+      expect(updateTab).toHaveBeenCalledWith(
+        'group-a',
+        savedLink.id,
+        { title: 'Locked final title' },
+      );
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('restores persisted saved links through the worker when their title is opened', async () => {
+    const restoreTab = vi.fn(async () => undefined);
+    const openSavedTab = vi.fn(async () => undefined);
+    const { container, root } = await mountSavedRow({
+      tab: savedLink,
+      runtime: {
+        ...runtimeStub,
+        restoreTab,
+        openSavedTab,
+      },
+    });
+
+    try {
+      const title = container.querySelector<HTMLButtonElement>('.tab-item-row__title');
+      await act(async () => title?.click());
+
+      expect(restoreTab).toHaveBeenCalledWith('group-a', savedLink.id);
+      expect(openSavedTab).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('replaces Delete with a visible loading action while that saved title refreshes', async () => {
+    const { container, root } = await mountSavedRow({ tab: savedLink });
+
+    try {
+      const deleteAction = () => container.querySelector<HTMLButtonElement>(
+        '.tab-item-row__delete',
+      );
+      expect(deleteAction()?.getAttribute('aria-label')).toBe('Delete');
+      expect(deleteAction()?.hasAttribute('data-loading')).toBe(false);
+
+      await act(async () => {
+        titleRefreshActivityStore.apply({
+          groupId: 'group-a',
+          tabId: savedLink.id,
+          operationId: 'loading-test',
+          status: 'start',
+        });
+      });
+
+      expect(deleteAction()?.getAttribute('aria-label')).toBe('Refreshing title');
+      expect(deleteAction()?.getAttribute('data-loading')).toBe('true');
+      expect(deleteAction()?.classList).toContain(
+        'tab-item-row__delete--loading',
+      );
+
+      await act(async () => {
+        titleRefreshActivityStore.apply({
+          groupId: 'group-a',
+          tabId: savedLink.id,
+          operationId: 'loading-test',
+          status: 'finish',
+        });
+      });
+
+      expect(deleteAction()?.getAttribute('aria-label')).toBe('Delete');
+      expect(deleteAction()?.hasAttribute('data-loading')).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
 
   it('places the tooltip 6px above its trigger and flips below near the viewport top', () => {
     expect(getTabHoverTooltipPosition(

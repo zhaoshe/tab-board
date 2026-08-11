@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createGroupFromTabRecords,
   createTabRecord,
@@ -65,6 +65,150 @@ describe('preview Chrome fixture', () => {
     message.groupId = 'mutated-after-send';
 
     await expect(request).resolves.toMatchObject({ ok: true, result: { restoredTabs: 1 } });
+  });
+
+  it('refreshes a saved title from an exact-URL preview tab', async () => {
+    const harness = install({
+      tabs: [{
+        id: 71,
+        url: 'https://refresh.example/article',
+        title: 'Loaded article title',
+        status: 'complete',
+      }],
+    });
+
+    await expect(harness.chrome.runtime.sendMessage({
+      type: 'refresh-saved-tab-title',
+      url: 'https://refresh.example/article',
+    })).resolves.toEqual({
+      ok: true,
+      result: 'Loaded article title',
+    });
+  });
+
+  it('uses a popup helper that stays out of Open Tabs and removes it when title loading finishes', async () => {
+    const harness = install({ tabs: [] });
+    const windowsBefore = harness.windows.map(({ id }) => id);
+    let resolveTabUpdate: (() => void) | undefined;
+    const originalUpdate = harness.chrome.tabs.update;
+    harness.chrome.tabs.update = async (...args) => {
+      await new Promise<void>((resolve) => {
+        resolveTabUpdate = resolve;
+      });
+      return originalUpdate(...args);
+    };
+
+    const refresh = harness.chrome.runtime.sendMessage({
+      type: 'refresh-saved-tab-title',
+      url: 'https://refresh.example/article',
+    });
+    await vi.waitFor(() => {
+      expect(resolveTabUpdate).toBeTypeOf('function');
+    });
+    const duringRefresh = await harness.chrome.runtime.sendMessage({
+      type: 'list-open-tabs',
+    }) as PreviewResponse<{ windows: Array<{ id: number }> }>;
+
+    expect(harness.windows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'popup', focused: false }),
+    ]));
+    expect(duringRefresh.result?.windows.map(({ id }) => id))
+      .toEqual(windowsBefore);
+
+    resolveTabUpdate?.();
+    await expect(refresh).resolves.toEqual({
+      ok: true,
+      result: 'refresh.example',
+    });
+    expect(harness.windows.map(({ id }) => id)).toEqual(windowsBefore);
+  });
+
+  it('refreshes all persisted Session link titles while skipping Notes', async () => {
+    const harness = install();
+    const locked = harness.state.groups.find((group) => group.locked)!;
+    const link = locked.tabs.find((tab) => tab.itemType === 'link')!;
+    const note = locked.tabs.find((tab) => tab.itemType === 'note')!;
+
+    await expect(harness.chrome.runtime.sendMessage({
+      type: 'refresh-saved-group-titles',
+      groupId: locked.id,
+    })).resolves.toEqual({
+      ok: true,
+      result: { refreshed: 1, failed: 0 },
+    });
+    expect(harness.state.groups.find(({ id }) => id === locked.id)?.tabs)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: link.id,
+          title: new URL(link.url).hostname,
+        }),
+        expect.objectContaining({
+          id: note.id,
+          title: note.title,
+        }),
+      ]));
+    const activities = harness.sentMessages.filter((message) =>
+      (message as { type?: string }).type
+        === 'tabboard-title-refresh-activity');
+    expect(activities).toEqual([
+      expect.objectContaining({
+        groupId: locked.id,
+        tabId: link.id,
+        status: 'start',
+      }),
+      expect.objectContaining({
+        groupId: locked.id,
+        tabId: link.id,
+        status: 'finish',
+      }),
+    ]);
+  });
+
+  it('starts only three Session title refresh activities before the next queued link', async () => {
+    const seed = install();
+    const state = structuredClone(seed.state);
+    const group = state.groups.find((item) => item.locked)!;
+    const link = group.tabs.find((tab) => tab.itemType === 'link')!;
+    group.tabs = [
+      link,
+      ...[2, 3, 4].map((index) => ({
+        ...link,
+        id: `preview-loading-${index}`,
+        title: `Loading ${index}`,
+        url: `https://preview-loading-${index}.example/`,
+      })),
+    ];
+    seed.uninstall();
+    installed.pop();
+    const harness = install({ state });
+    const pending: Array<() => void> = [];
+    const originalUpdate = harness.chrome.tabs.update;
+    harness.chrome.tabs.update = async (...args) => {
+      await new Promise<void>((resolve) => pending.push(resolve));
+      return originalUpdate(...args);
+    };
+
+    const refresh = harness.chrome.runtime.sendMessage({
+      type: 'refresh-saved-group-titles',
+      groupId: group.id,
+    });
+    await vi.waitFor(() => {
+      expect(pending).toHaveLength(3);
+    });
+    const starts = () => harness.sentMessages.filter((message) =>
+      (message as {
+        type?: string;
+        status?: string;
+      }).type === 'tabboard-title-refresh-activity'
+      && (message as { status?: string }).status === 'start');
+    expect(starts()).toHaveLength(3);
+
+    pending.shift()?.();
+    await vi.waitFor(() => {
+      expect(starts()).toHaveLength(4);
+    });
+    pending.forEach((resolve) => resolve());
+    await expect(refresh).resolves.toMatchObject({ ok: true });
   });
 
   it('uninstalls nested harnesses in LIFO order', () => {
@@ -379,7 +523,10 @@ describe('preview Chrome fixture', () => {
     expect(harness.state.groups.find(({ id }) => id === unlocked.id)?.tabs)
       .not.toContainEqual(expect.objectContaining({ id: unlockedLink.id }));
     expect(harness.state.groups.find(({ id }) => id === locked.id)?.tabs)
-      .toContainEqual(expect.objectContaining({ id: lockedLink.id }));
+      .toContainEqual(expect.objectContaining({
+        id: lockedLink.id,
+        title: new URL(lockedLink.url).hostname,
+      }));
   });
 
   it('keeps successful source refs when deleteRestoredTabs is disabled', async () => {
@@ -417,13 +564,39 @@ describe('preview Chrome fixture', () => {
     });
 
     expect(harness.state.groups.find(({ id }) => id === source.id)?.tabs)
-      .toContainEqual(expect.objectContaining({ id: success.id }));
+      .toContainEqual(expect.objectContaining({
+        id: success.id,
+        title: new URL(success.url).hostname,
+      }));
     const removeMutations = harness.sentMessages.filter((message) =>
       (message as {
         type?: string;
         mutations?: Array<{ type?: string }>;
       }).mutations?.some(({ type }) => type === 'remove-restored-refs'));
     expect(removeMutations).toEqual([]);
+  });
+
+  it('restores all links, removes unlocked records, and refreshes retained locked titles', async () => {
+    const harness = install();
+    const unlocked = harness.state.groups[0];
+    const locked = harness.state.groups[1];
+    const unlockedLink = unlocked.tabs.find((tab) => tab.itemType === 'link')!;
+    const lockedLink = locked.tabs.find((tab) => tab.itemType === 'link')!;
+
+    await expect(harness.chrome.runtime.sendMessage({
+      type: 'restore-all',
+    })).resolves.toMatchObject({
+      ok: true,
+      result: { restoredTabs: 2 },
+    });
+
+    expect(harness.state.groups.find(({ id }) => id === unlocked.id)?.tabs)
+      .not.toContainEqual(expect.objectContaining({ id: unlockedLink.id }));
+    expect(harness.state.groups.find(({ id }) => id === locked.id)?.tabs)
+      .toContainEqual(expect.objectContaining({
+        id: lockedLink.id,
+        title: new URL(lockedLink.url).hostname,
+      }));
   });
 
   it('reports one ordered outcome per valid restore ref and rejects duplicate requests atomically', async () => {

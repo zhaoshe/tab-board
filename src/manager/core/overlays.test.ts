@@ -520,11 +520,13 @@ describe('centralized manager overlay contracts', () => {
     expect(row).toContain('onContextMenu');
     expect(row).toContain('isContextMenuKey');
     expect(row).toContain("label={tab.itemType === ITEM_LINK && !tab.note ? 'Add Note' : 'Edit Note'}");
+    expect(row).toContain('label="Refresh Title"');
     expect(row).toContain('label="Copy URL"');
     expect(row).toContain('label="Copy Text"');
-    expect(row).toContain('label="Delete"');
+    expect(row).toContain("label={isTitleRefreshing ? 'Refreshing title' : 'Delete'}");
     expect(row).toContain('restoreFocusOnClose: true');
-    expect(row).toMatch(/label="Delete"[\s\S]*disabled=\{locked\}[\s\S]*onClick=\{handleDelete\}/);
+    expect(row).toMatch(/label="Refresh Title"[\s\S]*onClick=\{handleRefreshTitle\}/);
+    expect(row).toMatch(/label=\{isTitleRefreshing \? 'Refreshing title' : 'Delete'\}[\s\S]*disabled=\{locked\}[\s\S]*onClick=\{handleDelete\}/);
     expect(row).not.toContain('aria-label="More"');
     expect(row).not.toContain('manager-info-card-action');
     expect(openTabs).not.toContain('aria-haspopup="menu"');
@@ -669,7 +671,7 @@ describe('centralized manager overlay contracts', () => {
     expect(hook).toContain('.session-board .session-card');
     expect(hook).toContain('.session-board');
     expect(card).toContain('lifecycleAllowance="session-removal"');
-    expect(row).toContain('label="Delete"');
+    expect(row).toContain("label={isTitleRefreshing ? 'Refreshing title' : 'Delete'}");
   });
 
   it('keeps saved-tab removal valid when its group key stays stable or disappears', () => {

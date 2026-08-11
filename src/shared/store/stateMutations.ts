@@ -926,6 +926,11 @@ function assertGroupUnlocked(group: Group | undefined): void {
   }
 }
 
+function isTitleOnlyTabUpdate(updates: Partial<TabItem>): boolean {
+  const keys = Object.keys(updates);
+  return keys.length === 1 && keys[0] === 'title';
+}
+
 function assertGroupsUnlocked(groups: readonly Group[]): void {
   assertGroupUnlocked(groups.find((group) => group.locked));
 }
@@ -1073,7 +1078,7 @@ function assertOrdinaryMutationSafety(state: TabBoardState, mutation: StateMutat
       return;
     case 'update-tab': {
       const group = state.groups.find((item) => item.id === mutation.groupId);
-      assertGroupUnlocked(group);
+      if (!isTitleOnlyTabUpdate(mutation.updates)) assertGroupUnlocked(group);
       const tab = group?.tabs.find((item) => item.id === mutation.tabId);
       if (tab) assertValidTabUrl({ ...tab, ...clone(mutation.updates) });
       return;

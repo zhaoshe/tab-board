@@ -8,10 +8,22 @@ import {
 import { useToast } from './useToast';
 
 export type RestoreTabsResult = RestoreRefsResult;
+export type RefreshSavedGroupTitlesResult = {
+  refreshed: number;
+  failed: number;
+};
 
 export type ManagerRuntime = {
   openSavedTab: (url: string) => Promise<void>;
   openSavedTabs: (urls: string[]) => Promise<void>;
+  refreshSavedTabTitle: (
+    url: string,
+    groupId: string,
+    tabId: string,
+  ) => Promise<string>;
+  refreshSavedGroupTitles: (
+    groupId: string,
+  ) => Promise<RefreshSavedGroupTitlesResult>;
   restoreGroup: (groupId: string) => Promise<void>;
   restoreTab: (groupId: string, tabId: string) => Promise<void>;
   restoreTabs: (refs: readonly SavedTabRef[]) => Promise<RestoreTabsResult>;
@@ -80,6 +92,24 @@ export function useManagerRuntime(): ManagerRuntime {
       await chrome.tabs.create({ url: urls[0] });
       await Promise.all(urls.slice(1).map((url) => chrome.tabs.create({ url, active: false })));
     }),
+    refreshSavedTabTitle: (
+      url: string,
+      groupId: string,
+      tabId: string,
+    ) => runChecked(async () => {
+      validateSavedUrl(url);
+      return sendMessage<string>({
+        type: 'refresh-saved-tab-title',
+        url,
+        groupId,
+        tabId,
+      });
+    }),
+    refreshSavedGroupTitles: (groupId: string) => runChecked(async () =>
+      sendMessage<RefreshSavedGroupTitlesResult>({
+        type: 'refresh-saved-group-titles',
+        groupId,
+      })),
     restoreGroup: (groupId: string) => run(async () => {
       await sendMessage({ type: 'restore-group', groupId });
     }),

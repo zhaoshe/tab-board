@@ -170,3 +170,72 @@ describe('useManagerRuntime restoreTabs', () => {
     );
   });
 });
+
+describe('useManagerRuntime refreshSavedTabTitle', () => {
+  it('requests a fresh title through the worker and returns it', async () => {
+    const sendMessage = vi.fn(async () => ({
+      ok: true,
+      result: 'Loaded article title',
+    }));
+    vi.stubGlobal('chrome', {
+      runtime: { sendMessage },
+      tabs: { create: vi.fn() },
+    });
+    const managerRuntime = await mountRuntime();
+
+    await expect(managerRuntime.refreshSavedTabTitle(
+      'https://refresh.example/article',
+      'session-a',
+      'tab-a',
+    )).resolves.toBe('Loaded article title');
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'refresh-saved-tab-title',
+      url: 'https://refresh.example/article',
+      groupId: 'session-a',
+      tabId: 'tab-a',
+    });
+    expect(testHarness.showError).not.toHaveBeenCalled();
+  });
+
+  it('shows the worker error and rejects without changing the saved tab', async () => {
+    const sendMessage = vi.fn(async () => ({
+      ok: false,
+      error: 'Unable to load a page title.',
+    }));
+    vi.stubGlobal('chrome', {
+      runtime: { sendMessage },
+      tabs: { create: vi.fn() },
+    });
+    const managerRuntime = await mountRuntime();
+
+    await expect(managerRuntime.refreshSavedTabTitle(
+      'https://refresh.example/article',
+      'session-a',
+      'tab-a',
+    )).rejects.toThrow('Unable to load a page title.');
+    expect(testHarness.showError).toHaveBeenCalledWith(
+      'Unable to load a page title.',
+    );
+  });
+});
+
+describe('useManagerRuntime refreshSavedGroupTitles', () => {
+  it('requests a batch title refresh and returns the worker counts', async () => {
+    const sendMessage = vi.fn(async () => ({
+      ok: true,
+      result: { refreshed: 8, failed: 2 },
+    }));
+    vi.stubGlobal('chrome', {
+      runtime: { sendMessage },
+      tabs: { create: vi.fn() },
+    });
+    const managerRuntime = await mountRuntime();
+
+    await expect(managerRuntime.refreshSavedGroupTitles('session-a'))
+      .resolves.toEqual({ refreshed: 8, failed: 2 });
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'refresh-saved-group-titles',
+      groupId: 'session-a',
+    });
+  });
+});

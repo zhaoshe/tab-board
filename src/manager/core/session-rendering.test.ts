@@ -253,7 +253,8 @@ describe('Task108 session rendering contracts', () => {
     expect(css).not.toContain(
       '.tab-item-row__content[data-selection-mode] .tab-item-row__delete',
     );
-    expect(row).toContain('className="tab-item-row__delete"');
+    expect(row).toContain("'tab-item-row__delete'");
+    expect(row).toContain("'tab-item-row__delete--loading'");
     expect(row).toContain('disabled={locked}');
   });
 
@@ -261,8 +262,9 @@ describe('Task108 session rendering contracts', () => {
     expect(row).toContain("from '../../../shared/components/AccessibleIconAction'");
     expect(row).not.toContain('<ActionIcon');
     expect(row).toContain('<AccessibleIconAction');
-    expect(row).toContain('className="tab-item-row__delete"');
-    expect(row).toContain('label="Delete"');
+    expect(row).toContain("'tab-item-row__delete'");
+    expect(row).toContain("label={isTitleRefreshing ? 'Refreshing title' : 'Delete'}");
+    expect(row).toContain('loading={isTitleRefreshing}');
     expect(cssBlock('.tab-item-row__content'))
       .toContain('grid-template-columns: 20px minmax(0, 1fr)');
     expect(css).toMatch(
@@ -403,6 +405,8 @@ describe('Task108 session rendering contracts', () => {
     expect(row).not.toMatch(/\bchrome\./);
     expect(runtime).toContain('openSavedTab');
     expect(runtime).toContain('openSavedTabs');
+    expect(runtime).toContain('refreshSavedTabTitle');
+    expect(runtime).toContain("type: 'refresh-saved-tab-title'");
     expect(runtime).toContain('restoreGroup');
     expect(runtime).toContain('restoreTab');
     expect(runtime).toContain('restoreTabs');
@@ -413,9 +417,15 @@ describe('Task108 session rendering contracts', () => {
   });
 
   it('keeps the approved session and tab action surfaces', () => {
-    for (const label of ['Add Link', 'Add Note', 'Rename Session', 'Edit Session Note', 'Move Session', 'Lock Session', 'Unlock Session', 'Copy Links', 'Select Tabs', 'Delete Session']) {
+    for (const label of ['Add Link', 'Add Note', 'Rename Session', 'Edit Session Note', 'Move Session', 'Lock Session', 'Unlock Session', 'Refresh All Titles', 'Copy Links', 'Select Tabs', 'Delete Session']) {
       expect(card).toContain(label);
     }
+    expect(card).toContain('runtime.refreshSavedGroupTitles(group.id)');
+    expect(card).toContain("showSuccess('Titles refreshed')");
+    expect(card).toContain('`${result.refreshed} titles refreshed, ${result.failed} failed`');
+    expect(card).toMatch(
+      /\{!readOnly && \(\s*<ManagerMenuItem[\s\S]*?label="Refresh All Titles"/,
+    );
     expect(card).not.toContain('Move to Category');
     expect(card).not.toContain('categoryOptions');
     expect(card).not.toContain('handleMoveToCategory');
@@ -433,9 +443,13 @@ describe('Task108 session rendering contracts', () => {
     expect(cardHeader).toContain('tooltipDisabled={isMenuOpen}');
     expect(card).toContain('icon={Trash}');
     expect(card).not.toContain('icon={Trash2}');
-    for (const label of ['Add Note', 'Edit Note', 'Copy URL', 'Copy Text', 'Delete Saved Tab', 'Delete Saved Note']) {
+    for (const label of ['Add Note', 'Edit Note', 'Refresh Title', 'Copy URL', 'Copy Text', 'Delete Saved Tab', 'Delete Saved Note']) {
       expect(row).toContain(label);
     }
+    expect(row).toMatch(
+      /label="Refresh Title"[\s\S]*?onClick=\{handleRefreshTitle\}/,
+    );
+    expect(row).toContain('else void runtime.restoreTab(groupId, tab.id)');
     expect(row).toContain('icon={Trash}');
     expect(row).not.toContain('icon={Trash2}');
     expect(row).toContain("ariaLabel: 'Saved Tab Actions'");

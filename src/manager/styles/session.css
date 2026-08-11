@@ -301,6 +301,11 @@ button.session-card__note {
   opacity: var(--tabboard-action-disabled-opacity);
 }
 
+.tab-item-row__delete--loading.accessible-icon-action {
+  opacity: 1;
+  pointer-events: none;
+}
+
 .tab-item-row__content:hover .tab-item-row__icon,
 .tab-item-row__content:focus-within .tab-item-row__icon,
 .tab-item-row__content[data-selection-mode] .tab-item-row__icon {
