@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createEmptyState } from './schema';
+import { createEmptyState, normalizeState } from './schema';
 import type { DropIntent } from './drop-intent';
 import type {
   Folder,
@@ -272,6 +272,99 @@ describe('shared drop operations', () => {
     )).toMatchObject({ starred: true, folderId: null });
     expect(before.groups.find(({ id }) => id === 'source')?.tabs
       .map(({ id }) => id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('keeps the existing saved tab but replaces its title from a duplicate saved-tab drop', () => {
+    const existing = {
+      ...tab('existing'),
+      title: 'Temporary title',
+      url: 'https://duplicate.test',
+      note: 'Keep this note',
+      favIconUrl: 'https://duplicate.test/old.ico',
+    };
+    const incoming = {
+      ...tab('incoming'),
+      title: 'Loaded title',
+      url: existing.url,
+      note: 'Discard this note',
+      favIconUrl: 'https://duplicate.test/new.ico',
+    };
+    const before = state({
+      groups: [
+        group('source', 'workspace-a', {
+          tabs: [tab('source-before'), incoming, tab('source-after')],
+        }),
+        group('target', 'workspace-a', {
+          tabs: [tab('target-before'), existing, tab('target-after')],
+        }),
+      ],
+    });
+    const result = normalizeState(executeDropIntent(before, {
+      kind: 'move-tabs',
+      refs: [{ groupId: 'source', tabId: incoming.id }],
+      targetGroupId: 'target',
+      targetIndex: 0,
+      workspaceId: 'workspace-a',
+    }, [], 'saved-duplicate', timestamp));
+    const target = result.groups.find(({ id }) => id === 'target');
+
+    expect(target?.tabs.map(({ id }) => id)).toEqual([
+      'target-before',
+      existing.id,
+      'target-after',
+    ]);
+    expect(target?.tabs[1]).toEqual({
+      ...existing,
+      title: incoming.title,
+    });
+  });
+
+  it('uses the first dragged open-tab title while preserving a duplicate saved tab', () => {
+    const existing = {
+      ...tab('existing'),
+      title: 'Temporary title',
+      url: 'https://duplicate.test',
+      note: 'Keep this note',
+      favIconUrl: 'https://duplicate.test/old.ico',
+    };
+    const first = {
+      ...openTab(101),
+      title: 'First loaded title',
+      url: existing.url,
+      favIconUrl: 'https://duplicate.test/first.ico',
+    };
+    const second = {
+      ...openTab(102),
+      title: 'Second loaded title',
+      url: existing.url,
+      favIconUrl: 'https://duplicate.test/second.ico',
+    };
+    const before = state({
+      groups: [
+        group('target', 'workspace-a', {
+          tabs: [tab('target-before'), existing, tab('target-after')],
+        }),
+      ],
+    });
+    const result = normalizeState(executeDropIntent(before, {
+      kind: 'copy-open-tabs',
+      tabIds: [first.id!, second.id!],
+      windowId: first.windowId!,
+      targetGroupId: 'target',
+      targetIndex: 0,
+      workspaceId: 'workspace-a',
+    }, [first, second], 'open-duplicate', timestamp));
+    const target = result.groups.find(({ id }) => id === 'target');
+
+    expect(target?.tabs.map(({ id }) => id)).toEqual([
+      'target-before',
+      existing.id,
+      'target-after',
+    ]);
+    expect(target?.tabs[1]).toEqual({
+      ...existing,
+      title: first.title,
+    });
   });
 
   it('rejects forged workspace intents and partial source references', () => {
