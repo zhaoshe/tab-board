@@ -215,6 +215,9 @@ Options > Capture 默认开启 capture 时 tab 去重。
 
 - 只有 `itemType: "link"` 且有 URL 的条目可恢复。
 - Note 不可恢复。
+- Persisted Saved Tab 点击通过 worker restore；新页面 `status=complete` 且非 URL
+  title 稳定 400ms 后，若原记录仍存在且 URL 未变，只更新其 title。
+- Read-only Bookmark projection 只打开 URL，不写入 canonical state。
 
 ### Session restore
 
@@ -222,6 +225,7 @@ Options > Capture 默认开启 capture 时 tab 去重。
 
 - Session card 的 Restore。
 - Popup recent sessions 的 restore。
+- Session More > Refresh All Titles。
 
 规则：
 
@@ -229,6 +233,14 @@ Options > Capture 默认开启 capture 时 tab 去重。
 - 可配置是否在新窗口恢复。
 - 可配置是否恢复到当前 tab 旁边。
 - 可配置是否 focus 第一个恢复 tab。
+- 每个成功创建的 tab 并行等待最终稳定 title；一次 restore 最多等待 15s。单个
+  title 失败或超时不影响其它 tab，也不改变 restore 成功结果。
+- `Refresh All Titles` 不打开可见 tabs：复用已打开的同 URL tab，其余使用隐藏
+  popup helper；Note 跳过，最多 3 个 Link 并发。成功项一次性回写，部分失败提示
+  refreshed/failed 数量。Locked Session 可用，Bookmark Session 隐藏。
+- 任一 title resolver 实际开始后，对应 Saved Tab 行右侧 Delete 槽原位显示 spinner；
+  Session 批量刷新中仍在队列等待的行不显示。完成、失败或超时后恢复 Delete，不改变
+  行宽。Spinner 无需 hover 即可见，accessible name 为 `Refreshing title`。
 
 ### Restore 后删除
 
@@ -239,6 +251,7 @@ Options > Capture 默认开启 capture 时 tab 去重。
 - 恢复后从 saved session 中移除已恢复 link。
 - 如果 session 被 lock，则恢复后保留记录。
 - 如果 session 恢复后没有 tabs、没有 note、也没有 lock，会被清掉。
+- 已删除的 link 不再等待或回写 title；仍保留的 link 会同步最终 title。
 
 ## Workspaces
 
@@ -375,6 +388,10 @@ Link：
 
 - 点击 title 直接打开 URL。
 - Saved title 保持单行，过长时省略；URL 显示在副标题行。
+- 右键菜单可 Refresh Title：优先读取同 URL 的已打开 tab；若不存在，则在
+  minimized/unfocused popup 临时窗口中加载页面。Popup window 不进入 Open Tabs
+  的 normal-window selector；标题稳定后自动关闭窗口并只更新 saved item 的 title。
+  失败保留旧 title；Locked Session 也允许手动 Refresh Title。
 - 支持复制 URL、编辑 note、删除、进入 select mode。
 
 Note：
@@ -427,6 +444,8 @@ Selection mode：
 语义：
 
 - Open tab 拖拽是 copy，不会关闭浏览器中的 tab。
+- 若目标 Session 已有同 URL link，保留旧 link 的 ID、位置、note、favicon 和其它
+  metadata，只用第一个 dragged tab 的 title 刷新它；不新增重复 link。
 
 ### Saved tab 拖拽
 
@@ -441,6 +460,8 @@ Selection mode：
 - 当前 session selection mode 下可批量拖动。
 - 顺序按源 session 内原顺序保留。
 - 若所选项等于一个源 Session 的全部 tabs，则隐藏全部 New Session anchors，但仍允许明确合并到已有 Session。
+- 若目标 Session 已有同 URL link，沿用同一 dedupe 规则：移除 dragged duplicate，
+  保留目标中的旧 link，并只刷新其 title；多个同 URL incoming items 以第一个为准。
 
 ### Session 拖拽
 

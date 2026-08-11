@@ -10,8 +10,8 @@ produce an evidence-ranked React performance refactor plan.
 
 ## Current Phase
 
-Phase 20 complete - the confirmed C1 Hybrid Rail motion is restored and
-verified across preview and unpacked production.
+Phase 26 complete - every title refresh shows row-level loading in the Delete
+slot.
 
 ## Phases
 
@@ -282,6 +282,75 @@ Status: complete
   audits. Report any browser-native or manual-only boundary explicitly instead
   of claiming total UI acceptance.
 
+### Phase 22 - Saved-tab title repair
+
+Status: complete
+
+- Preserve duplicate URL dedupe while replacing the existing saved link title
+  with the title from a dragged saved or open tab.
+- Add a locked-session-safe Refresh Title action for saved links.
+- Resolve titles from an already-open exact-URL tab first; otherwise use a
+  minimized, unfocused temporary window and always remove it after success or
+  failure.
+- Keep the existing tab identity, position, note, favicon, and other metadata;
+  persist only the refreshed title through the existing `update-tab` mutation.
+- Mirror the worker runtime behavior in the preview Chrome harness.
+- Update current behavior and architecture documentation, then run focused and
+  full verification.
+
+### Phase 23 - Hide refresh helper windows
+
+Status: complete
+
+- Reproduce the temporary title-refresh window appearing in the Open Tabs
+  normal-window selector.
+- Create helper windows as minimized/unfocused popup windows so the existing
+  normal-window projection excludes them without adding shared hidden IDs.
+- Mirror the window type in preview tests and update current behavior docs.
+- Re-run focused tests and fresh repository gates.
+
+### Phase 24 - Restore final-title synchronization
+
+Status: complete
+
+- Route persisted Saved Tab title clicks through the canonical worker restore
+  path while keeping read-only Bookmark links as direct opens.
+- Wait for each newly-created Chrome tab's stable final title and update every
+  still-persisted exact group/tab/URL record.
+- Skip unlocked records removed by `deleteRestoredTabs`; update retained
+  records, including Locked Sessions.
+- Allow only title-only `update-tab` mutations in Locked Sessions and enable
+  their manual Refresh Title command.
+- Mirror restore title synchronization in preview and update current behavior,
+  architecture, evolution, and decision docs.
+- Run focused tests, full Vitest, production check, and rendered verification.
+
+### Phase 25 - Session Refresh All Titles
+
+Status: complete
+
+- Add `Refresh All Titles` to persisted Session menus, including Locked
+  Sessions; hide it for read-only Bookmark Sessions.
+- Resolve Link titles with the existing stable-title owner and a maximum of
+  three concurrent refreshes.
+- Skip Notes; re-read canonical records before one title-only mutation batch.
+- Report full success or refreshed/failed counts in existing toast surfaces.
+- Mirror the action in preview and update product/architecture docs.
+- Run focused, rendered, and full repository verification.
+
+### Phase 26 - Title refresh row loading
+
+Status: complete
+
+- Broadcast per-record start/finish lifecycle events from manual, Session
+  batch, and automatic restore title resolvers.
+- Keep overlap-safe operation IDs in a page-local, non-persistent Manager store.
+- Subscribe each Saved Tab row only to its own activity key.
+- Replace the trailing Delete action in place with the existing Mantine loading
+  spinner, visible without hover and named `Refreshing title`.
+- Mirror lifecycle messages in preview and update docs.
+- Run focused, rendered, and complete repository verification.
+
 ## Decisions
 
 | Decision | Reason |
@@ -339,10 +408,14 @@ Status: complete
 | Agent-browser Session probe opened a restricted `about:blank` page | 1 | Discard the sample and use deterministic Playwright preview fixtures for Session/Popup timing and geometry. |
 | First Saved Note E2E selector matched the second Saved Link | 1 | Seed a dedicated Note record and locate it by its exact title button before asserting its metadata. |
 | Progressive checkbox click was intercepted by the resting favicon | 1 | Hover the row first, matching the confirmed disclosure interaction, then click the revealed checkbox. |
+| Browser DnD probe waited for a nonexistent `Moved` toast after a successful Open Tab drop | 1 | Use the saved row URL/title and item count as the completion condition; the first drop had already committed. |
+| Popup-helper browser probe used top-level `await` in `agent-browser eval` | 1 | Re-read the still-frozen helper state with an async IIFE; product behavior was unaffected. |
+| First Phase 23 full Vitest run had one unrelated authoritative batch-delete test resolve instead of reject | 1 | Confirmed no diff in store/mutation owners; the exact test passed alone and the full 92-test store file passed. Treat as existing suite state/concurrency fluctuation and rerun the full suite without changing unrelated code. |
+| Vitest focused retry combined `--pool=forks --maxWorkers=1` with the repository's default minimum worker count | 1 | Vitest rejected the conflicting pool bounds before running tests; rerun with the repository's normal pool settings. |
+| Bookmark rendered probe waited for `Preview Bookmarks`, but the retained fixture/category route exposed different visible copy | 1 | Saved Session menu and toast evidence completed; use the existing `!readOnly` source/DOM contract for Bookmark exclusion instead of retrying a guessed label. |
+| Phase 26 rendered retry attempted to start a second Vite server on port 5173 | 1 | Reuse the still-running preview server from the prior probe instead of creating another process. |
 
 ## Next Step
 
-Phase 21 is complete. Keep native touch long-press and real
-`showDirectoryPicker()` permission/persisted-handle behavior as explicit
-manual acceptance boundaries; do not convert overlay-related axe incomplete
-results into automatic 0/0 claims.
+Phase 26 is complete. Title refresh activity is overlap-safe, page-local, and
+fully verified.

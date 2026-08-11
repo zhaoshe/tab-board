@@ -2283,3 +2283,97 @@ Full review: `docs/reviews/2026-07-28-design-taste-review.md`.
   Options also initializes that recovery when opened directly. Permission,
   corruption, missing-folder, and offline fallbacks keep their explicit
   Reconnect path.
+
+## Phase 22 - Saved-tab title repair
+
+- Capture can persist a temporary page title because Chrome may report the tab
+  before the final document title is available.
+- Duplicate saved/open tab drops currently append the incoming link and rely on
+  `normalizeState()` to dedupe by URL. The normalizer keeps the existing first
+  link, so it also discards the incoming, newer title.
+- The minimal duplicate fix belongs in `moveSavedTabsToSession()` and
+  `copyOpenTabsToSession()`: update the first existing target link with the
+  incoming title before normal dedupe, without replacing its identity or other
+  fields.
+- Manual Refresh Title will reuse an exact-URL open tab when available. If none
+  exists, the worker will open the URL in a minimized, unfocused temporary
+  window, wait for a usable title, and remove the window in `finally`.
+- The existing `update-tab` mutation already persists title-only updates. No
+  schema, dependency, manifest permission, or new persistence operation is
+  needed.
+- Stable-title resolution must handle more than the happy path: prefer an
+  already-complete exact-URL tab, register `tabs.onUpdated` before rereading
+  `tabs.get()`, cancel a candidate if loading resumes, ignore late async
+  results after settlement, bound titles to the existing 512-byte contract,
+  and keep temporary-window removal from masking a valid title when Chrome has
+  already closed the window.
+- Exact-URL duplicate drops cannot rely on post-insert normalization because an
+  insertion before the existing item would preserve the new generated ID.
+  Filtering incoming duplicates before insertion makes identity preservation
+  independent of target index.
+- The preview harness originally returned the URL as the temporary page title,
+  which would reproduce the original bad-title bug in development. It now
+  deterministically simulates a loaded hostname title and removes its
+  temporary window.
+
+## Phase 23 - Hide refresh helper windows
+
+- The extra Open Tabs window was not a stale UI artifact. The title resolver
+  created a minimized window without an explicit type, so Chrome made it a
+  `normal` window; `list-open-tabs` intentionally projects every normal window.
+- The narrow fix is to create the helper as `type: 'popup'`. Existing
+  `windowTypes: ['normal']` filtering then excludes it automatically, without
+  sharing temporary IDs between worker and Manager or adding UI-specific
+  suppression state.
+- Preview now verifies the popup exists while title loading is paused but the
+  concurrent `list-open-tabs` result still contains only the original normal
+  windows.
+
+## Phase 24 - Restore final-title synchronization
+
+- Persisted Saved Tab title clicks were the only Manager path still bypassing
+  worker restore via direct `chrome.tabs.create`; routing them to
+  `restore-tab(groupId, tabId)` makes single-click behavior share Session,
+  selected, Popup, Omnibox, and Restore All semantics. Bookmark/read-only rows
+  remain direct opens.
+- The safest ordering is create tabs -> optional delete restored refs -> read
+  latest state -> wait only for still-live exact group/tab/URL candidates.
+  Deleted unlocked records therefore do not pay the 15s title timeout.
+- Stable titles can resolve concurrently with `Promise.allSettled`; one timeout
+  preserves that record's old title while successful siblings update in one
+  mutation batch.
+- Locked Sessions need a narrow mutation exception. Exact own-key `{ title }`
+  patches are safe and required for automatic/manual refresh; note, URL,
+  favicon, mixed patches, moves, and deletes continue to reject.
+- `restore-all` tests must preserve locked sibling placement when removing an
+  unlocked group; placing the locked group first avoids an unrelated, correct
+  `GROUP_LOCKED` placement rejection.
+
+## Phase 25 - Session Refresh All Titles
+
+- The batch action should reuse `refreshSavedTabTitle(url)` rather than call
+  `waitForStableTabTitle()` directly, so exact-URL open-tab reuse and hidden
+  popup creation remain single-owned.
+- A fixed three-worker loop is enough: one shared monotonic index, three async
+  workers, and one results array. No queue dependency or persistent mapping is
+  needed.
+- Result counts describe attempts, not writes: a successfully resolved,
+  still-matching record counts as refreshed even if its title was already
+  current; missing, URL-changed, or resolver-failed records count as failed.
+- Canonical re-read before one mutation batch preserves race safety. Notes
+  never enter the resolver queue.
+
+## Phase 26 - Title refresh row loading
+
+- Local component state cannot cover Popup/Omnibox/automatic restore title
+  sync. Worker lifecycle messages are required to identify the exact Saved
+  record regardless of initiator.
+- Activity must wrap actual resolver execution, not Session queue admission;
+  otherwise every row would spin immediately and hide the three-concurrency
+  behavior.
+- A record-keyed Set of operation IDs is the smallest overlap-safe model.
+  Listeners need notification only when active changes false/true, not when the
+  Set count changes while remaining active.
+- `AccessibleIconAction loading` already guarantees equal geometry and a
+  Mantine spinner. A scoped loading class only needs to override the row's
+  progressive opacity/pointer rules.

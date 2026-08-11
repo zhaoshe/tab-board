@@ -1967,6 +1967,125 @@ Status:
 
 Accepted。
 
+## D066: Saved title refresh uses a minimized temporary browser context
+
+Context:
+
+Capture 可能在最终 document title 可用前完成。直接 `fetch` 不能可靠处理登录态、
+SPA、脚本生成 title 和无 host permission 的页面；把普通 background tab 插入现有
+窗口又会被用户看到并扰动 tab strip。
+
+Decision:
+
+- 手动 Refresh Title 先复用精确 URL 的已打开 tab。
+- 没有匹配时创建 `type: popup`、`focused: false`、`state: minimized` 的临时窗口，
+  等待 complete 且非 URL title 稳定后返回，并无条件关闭临时窗口。Open Tabs 只
+  投影 normal windows，因此不显示该 helper。
+- 失败保留旧 title；Locked Session 不允许刷新。
+- 同 URL drag dedupe 保留目标旧 item，只从第一个 incoming item 复制 title。
+
+Rationale:
+
+真实浏览器 context 能执行页面脚本并复用用户会话；minimized/unfocused window 比插入
+用户当前窗口更不可见。复用现有 item 与 `update-tab` 避免 schema/mutation 扩展，并
+保留用户 note、位置和记录 identity。
+
+Trade-offs:
+
+- 首次刷新未打开的页面可能产生网络请求、短暂 worker 工作和最多 15s 等待。
+- Chrome/OS 仍可能在任务栏或窗口管理器中短暂记录该 minimized window；产品保证是
+  不抢焦点、不展开可见页面，并在成功或失败后清理，而不是完全无系统级痕迹。
+- 自动 capture 不增加后台加载；隐藏加载只在用户显式 Refresh Title 时发生。
+
+Status:
+
+Accepted。
+
+## D067: Restore synchronizes final titles through the worker pipeline
+
+Context:
+
+Saved Tab/Session 打开后，Chrome 创建 API 先返回 URL 或 loading title。若 UI 立即写回，
+会把占位值当成正确 title；若每个 UI 入口自行监听，又会造成重复 lifecycle owner。
+
+Decision:
+
+- 所有 persisted Saved restore 入口在 worker 创建 tab 后，按 tab ID 等待 stable final
+  title，并一次性回写仍存在、URL 未变的 Saved records。
+- `deleteRestoredTabs` 已删除的记录跳过；Locked/保留记录自动更新。
+- Locked Session 放行 title-only `update-tab`，其它 mutation lock 不变。
+- title 同步是 best-effort：单页或整批同步失败不改变 restore 成功。
+- Bookmark runtime projection 不参与 canonical title write。
+
+Rationale:
+
+Worker 已拥有 restore queue、Chrome tab IDs、稳定 title waiter 和 authoritative
+persistence，能在一个边界解决所有 UI/Popup/Omnibox 入口，并保持最终 title 规则一致。
+
+Trade-offs:
+
+- 保留 Saved records 的 restore response 最多延后 15s；已删除 records 不等待。
+- 自动同步只更新 title，不更新 favicon 或其它 captured metadata。
+
+Status:
+
+Accepted。
+
+## D068: Session title refresh uses a bounded worker queue
+
+Context:
+
+Session 可能包含大量 Link。若批量刷新同时为所有未打开 URL 创建 helper window，会造成
+突发窗口、网络和内存压力；串行执行又会让大 Session 过慢。
+
+Decision:
+
+- Session menu 批量刷新复用单 URL resolver，固定最多 3 个并发。
+- Note 跳过；成功项一次性写回；失败/竞态只进入结果计数。
+- Manager 不持有 URL queue 或 helper IDs，只显示 worker 返回的
+  `{refreshed,failed}`。
+
+Rationale:
+
+固定小并发避免新依赖和复杂调度，同时保留 open-tab reuse、popup 隐藏、稳定 title、
+cleanup 和 Locked title-only 规则的单一 owner。
+
+Trade-offs:
+
+- 大 Session 的总耗时随 Link 数量增长。
+- 结果只报告数量，不逐条列出失败 URL；需要逐条处理时仍可使用 Tab 级 Refresh Title。
+
+Status:
+
+Accepted。
+
+## D069: Title refresh activity is page-local and operation-counted
+
+Context:
+
+Title refresh 可由 Manager、Popup、Omnibox 或 restore worker path 发起。组件本地 loading
+无法覆盖非 Manager 入口；持久化 loading 又会污染 canonical state。并发操作还可能
+让较早 finish 提前清掉后开始的 spinner。
+
+Decision:
+
+- Worker 为每条实际 resolver 广播带 operation ID 的 start/finish。
+- Manager 用 page-local record-key -> operation-ID Set 保存 activity，每行独立订阅。
+- loading 原位复用 Delete 的 32px action slot；不 hover 也可见。
+
+Rationale:
+
+该模型覆盖所有入口、支持重叠、保持 row geometry，并把瞬时 UI 状态留在正确边界。
+
+Trade-offs:
+
+- Manager 未打开时 activity 消息无人消费，这是预期行为；下次打开无需恢复历史 spinner。
+- Runtime message 增加两条/每次 resolver，但只携带小型 identity payload。
+
+Status:
+
+Accepted。
+
 ```md
 ## D00X: Title
 

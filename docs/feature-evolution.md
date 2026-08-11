@@ -21,6 +21,74 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-08-11: Title 刷新显示逐行 loading
+
+- 手动单 Tab、Session 批量和 restore 自动同步统一广播逐条 start/finish。
+- 正在解析的 Saved Tab 用 spinner 原位替换右侧 Delete；无需 hover 可见，不改变行宽。
+- Session 批量中排队项不提前显示，最多只有当前 3 个 resolver 转动。
+- operation ID 支持重叠刷新；全部 operation 结束后才恢复 Delete。
+- Activity 只存在 Manager page memory，不持久化，不进入 canonical state。
+
+当前状态：Current。
+
+### 2026-08-11: Session 菜单批量刷新全部 Link 标题
+
+- Persisted Session More 新增 `Refresh All Titles`，Locked Session 也可用；
+  Bookmark/read-only Session 不显示。
+- 复用已打开的同 URL tab；缺失 URL 使用 minimized/unfocused popup helper。
+- 一个 Session 最多 3 个并发，Note 跳过；稳定 title 规则仍为 complete + 400ms，
+  单页最长 15s。
+- 成功项在一次 mutation batch 中回写；失败、删除或 URL 变化不覆盖旧记录。
+- 全部成功提示 `Titles refreshed`；部分失败提示 refreshed/failed 数量。
+
+当前状态：Current。
+
+### 2026-08-10: Restore 后自动同步最终网页标题
+
+问题：
+
+- 手动 Refresh Title 可以修复旧记录，但每次打开 Saved Tab/Session 后仍可能继续保留
+  capture 时的临时 title。
+- Chrome 创建 tab 时返回的 title 常是 URL 或 loading 占位，不能直接持久化。
+
+变化：
+
+- 单个 Saved Tab 点击、Session Restore、Restore Selected 和 Restore All 统一在
+  worker restore pipeline 中等待新 tab 的最终稳定 title。
+- 每个 title 必须在 `status=complete` 后保持 400ms；同批并行等待、总上限 15s。
+  单页失败或超时不影响 restore，也不覆盖旧 title。
+- `deleteRestoredTabs` 已删除的 unlocked 记录直接跳过；仍保留的记录自动回写，
+  包括 Locked Session。
+- Locked Session 现在允许手动/自动 title-only 更新，其它编辑、移动和删除保护不变。
+- Read-only Bookmark 仍只打开 URL，不写入 Saved state。
+
+当前状态：Current。
+
+### 2026-08-09: Saved Tab 标题刷新与重复拖拽修复
+
+问题：
+
+- Save 可能发生在网页最终 title 加载前，导致 Saved Tab 长期保留 URL、loading
+  文案或临时 title。
+- 将同 URL 的 Saved/Open Tab 拖入已有 Session 时，旧实现先插入 incoming item，
+  再由 normalize 去重；旧 item 通常被保留，但 incoming 的正确 title 同时被丢弃。
+  若落点在旧 item 前，甚至可能反向保留 incoming ID。
+
+变化：
+
+- Saved Link 右键菜单新增 Refresh Title。优先复用同 URL 的已打开 tab；没有匹配时
+  在 minimized/unfocused popup 临时窗口加载，标题稳定后自动关闭。Popup helper
+  不进入只展示 normal windows 的 Open Tabs selector。失败不修改旧 title；Locked
+  Session 禁用。
+- 重复 URL 拖入已有 Session 时，不再依赖插入顺序决定去重结果。目标旧 link 的
+  ID、位置、note、favicon 和其它 metadata 保持不变，仅采用第一个 incoming title；
+  同 URL incoming item 不插入。
+- Manager、MV3 worker 与 preview harness 使用同一 runtime action；持久化复用既有
+  `update-tab`，没有 schema、permission 或 dependency 变化。
+
+当前状态：Current。纯模型、worker、preview、runtime 和真实 Saved Tab menu DOM
+回归均已覆盖。
+
 ### 2026-08-05: Popup 静态首帧与并行轻量启动
 
 问题：

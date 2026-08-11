@@ -112,6 +112,11 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 
 - `service-worker.ts` 处理 install/startup、toolbar action、context menu、commands、runtime message、omnibox、capture、restore 和 Chrome tab-group metadata。
 - runtime message 先验证 extension sender id 与内部 extension URL；不可信 sender 在 storage 或 Chrome side effect 前拒绝。
+- `refresh-saved-tab-title` 先查询精确 URL 的已打开 tab；无匹配时创建
+  minimized/unfocused `popup` 临时窗口。Open Tabs 只通过
+  `windows.getAll({ windowTypes: ['normal'] })` 投影 normal windows，因此 helper
+  不进入 window selector。Worker 监听 `tabs.onUpdated`，在 complete + 非 URL title
+  保持 400ms 后返回，15s 无结果则失败；临时窗口始终在 `finally` 中删除。
 - `statePersistence.ts` 串行化 mutation batch，使用可用的 Web Locks，执行 normalized atomic writes，并返回 committed/invalid/replay evidence。
 
 ### `src/manager/`
@@ -136,6 +141,34 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `ManagerLayout` 也是唯一 `SessionTargetPicker` owner。Open Tabs `Save to` 和 Session toolbar `Move` 只上报 typed source/trigger；picker从 active workspace canonical category/session order生成choices，只保留能通过当前 DropIntent execution/locked/no-op语义的目标。展示label单独从Session title、Category name与before/between/after位置派生，不进入persistent wire。
 - Target picker的preview index和`aria-live` announcement只属于portaled modal UI，不创建或修改Dnd `DropTarget`、collision geometry、Gap Anchor、auto-scroll或persistent state。Existing/New commit分别映射到既有 `move-tabs` / `copy-open-tabs` / `create-session` intents并统一调用 `applyDropIntent`；Saved All Source Tabs只抑制New choices。
 - `useManagerRuntime.restoreTabs(refs)`只发送一次background `restore-refs`，并把`restoredTabs`成功证据返回给Session toolbar；runtime失败走现有toast并继续reject。Preview Chrome harness实现同一批量语义。
+- `useManagerRuntime.refreshSavedTabTitle(url)` 发送一次
+  `refresh-saved-tab-title`；Saved row 成功后通过既有 `update-tab` 只持久化 title，
+  失败由 runtime toast 处理且不修改 canonical state。Preview Chrome harness 实现同一
+  action，并清理其临时 window fixture。
+- Persisted Saved Tab title click 不再由 Manager 直接 `tabs.create`，而是发送
+  `restore-tab`；read-only Bookmark row 保留 direct open。
+- `restore-tab` / `restore-group` / `restore-refs` / `restore-all` 在创建 Chrome tabs
+  并完成可选的 `remove-restored-refs` 后统一调用 `syncRestoredTabTitles()`。Helper
+  先从最新 canonical state 筛出仍存在且 group/tab/URL 精确匹配的记录，再对创建的
+  Chrome tab IDs 并发复用 `waitForStableTabTitle()`，最后一次性提交 title-only
+  `update-tab` mutation batch。`Promise.allSettled()` 隔离单页超时/失败，整个同步
+  失败也不改变 restore 结果。
+- Locked Session 的 mutation safety 仅对 own keys 恰好为 `{ title }` 的
+  `update-tab` 放行；URL、note、favicon、mixed patch 和其它 group/tab mutation
+  继续返回 `GROUP_LOCKED`。
+- `refresh-saved-group-titles` 是 Session menu 的批量 action。Worker 从 canonical
+  group 快照提取 Links，用固定 3-worker queue 复用 `refreshSavedTabTitle(url)`，
+  然后重读 group/tab/URL identity。成功解析且仍匹配的记录计入 `refreshed`，失败、
+  删除或 URL 变化计入 `failed`；只有变化 title 进入一次 `update-tab` mutation
+  batch。Manager 根据 `{refreshed,failed}` 显示 success 或 partial-failure toast。
+- 所有实际 title resolver 通过 `withTitleRefreshActivity()` 广播
+  `tabboard-title-refresh-activity` start/finish，payload 包含 group/tab/operation
+  identity；finish 位于 `finally`。ManagerLayout 只安装一个 runtime listener，
+  `titleRefreshActivityStore` 用 `Map<recordKey,Set<operationId>>` 维护 page-local
+  activity；TabItemRow 通过 `useSyncExternalStore` 只订阅自己的 key。该状态不进入
+  Zustand/Storage Authority。重叠 operation 必须全部 finish 后才恢复 Delete。
+- 行尾使用 `AccessibleIconAction loading`，因此 spinner 复用现有 32px geometry 与
+  Mantine reduced-motion/accessibility 行为；loading class 强制在 resting 状态可见。
 - Selected item批量删除使用单一`delete-tabs` mutation。Store facade在调用时复制refs与Bin snapshots，先拒绝locked/missing/duplicate输入，再由Authoritative Publication `commitChecked()`无optimistic地直接等待worker authority。worker在任何写入前验证整个batch；成功一次性更新groups/Bin，reject不产生部分删除，exact replay不重复Bin entries。
 - `SessionSlot` 是普通 session 唯一的 group `useSortable` owner；`useSessionActivation` 保留所有 slot/insertion target，但只为初始、近视口、搜索/高亮或显式激活的 session 挂载完整 `SessionCard`。远端 `SessionCardShell` 不挂载 tab rows、tab sortables、per-row overlays 或 overflow observers。
 - `CategoryNav` 让整个 category tab 同时拥有 navigation click 和 pointer/touch `useDraggable` activator，并持续挂载 `category-column` 与 before/after reorder targets；PointerSensor 的 5px activation constraint区分点击和mouse drag，TouchSensor提供200ms/5px long-press contract，不增加drag-handle focus stop。Keyboard排序由`CategoryManager`的Move Up / Move Down命令拥有。
@@ -596,6 +629,10 @@ Intent 解析与提交：
 - session body 不会产出 merge intent：拖 session 只能落到 `group-insert` / `category-column`，不能落进另一张 session 内部，从根本上排除"把 A 合并进 B"的误操作。
 - `new-session-insert` 只接受 `tab` / `tabs` / `open-tabs`。若 `tabs` 是一个源 Session 的全部 canonical tabs，`isAllSourceTabs()` 同时从 pointer Gap Anchors 与 keyboard New choices移除创建路径，但保留 Existing Session merge。
 - 提交走 `useTabBoardStore.applyDropIntent(intent, openTabs)` → `AuthoritativePublication.commitDrop()`（带 `operationId` 与 `expectedRevision`）。publication 的 Promise 等待 worker authoritative commit；worker `statePersistence` 调用 shared `stateMutations`，最终由 `drop-operations.ts` 执行 intent并生成replay evidence。`persistDropWithFeedback()` 统一 success/error toast。
+- `move-tabs` / `copy-open-tabs` 写入已有 Session 时，`drop-operations.ts` 在插入前
+  合并 exact-URL links：目标中第一个旧 link 保持 identity、位置和除 title 外的全部
+  字段，title 取第一个 incoming link；同 URL incoming links 不再插入。该规则与
+  target insertion index 无关，之后仍经过现有 normalize/dedupe。
 
 拖拽期间的一致性保护：
 

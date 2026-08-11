@@ -1498,3 +1498,162 @@
   `/tmp/tabboard-options-file-ready-20260803.png`.
 - A fresh Chromium profile registered the real MV3 service worker with zero
   console errors and no `window` / `document` / dynamic-import failure.
+
+## Phase 22 - Saved-tab title repair
+
+- Restored the approved design after compaction and rechecked the worker,
+  manager runtime, saved-row, drop-operation, and preview-harness seams.
+- Confirmed the duplicate-title root cause: the incoming item is appended, then
+  URL normalization keeps the old first item and drops the incoming title.
+- Started TDD with duplicate Saved/Open drop regressions before production
+  changes.
+- Duplicate Saved/Open regressions failed only on the stale title, then passed
+  after the shared drop owner updated the first existing target link from the
+  first incoming same-URL title. Existing ID, position, note, favicon, and
+  metadata remain unchanged.
+- Strengthened duplicate tests with insertion before the existing item; this
+  exposed and fixed the incoming-ID takeover that post-insert normalization
+  would otherwise allow.
+- Added the `refresh-saved-tab-title` worker/runtime/preview action and Saved
+  Link context command. Locked Sessions disable the command; failure and
+  unchanged title paths do not emit `update-tab`.
+- Worker RED/GREEN coverage now includes exact-URL reuse, completed-tab
+  preference, minimized/unfocused creation, stable-title quiet period,
+  loading restart, listener-before-read race, timeout, oversized UTF-8 title,
+  late `tabs.get()` settlement, and best-effort cleanup of already-closed
+  windows.
+- Rendered Manager preview exposed `Refresh Title` as a named menuitem with
+  axe 0 violations / 0 incomplete. The action updated the preview title through
+  runtime + `update-tab`, and the corrected fixture now yields
+  `preview.example` rather than the URL itself.
+- Browser DnD evidence: first drop created
+  `drop_drop-operation_mslhjmjw_94fba078fb2f_tab_103` at index 2 with title
+  `Duplicate URL one`; dropping the same URL again kept that exact ID/index,
+  kept three total items, and changed only its title to `Duplicate URL two`.
+- Pre-final gates before the last cleanup refinements passed:
+  - focused: 8 files / 267 tests;
+  - full Vitest: 108 files / 1,552 tests;
+  - `npm run check`: 2,672-module build, 251-source cycle/import scan,
+    143-production architecture scan, and 17 release tests.
+- The final gates must be rerun because preview parity, failure/no-op DOM
+  coverage, late-result cleanup, and best-effort window removal changed after
+  those results.
+- Final fresh gates after all refinements:
+  - `npm test`: 108 files / 1,556 tests;
+  - `npm run check`: 2,672-module production build, extension sanity,
+    251-source import/cycle scan, 143-production architecture scan, and
+    17 release tests;
+  - `git diff --check` and `tsc --noEmit` passed;
+  - rendered Saved Tab menu axe: 0 violations / 0 incomplete;
+  - rendered duplicate Open Tab DnD preserved ID/index and replaced only title.
+
+## Phase 23 - Hide refresh helper windows
+
+- Screenshot reproduction matched the code path: an unspecified Chrome window
+  type defaults to `normal`, so the minimized title-refresh helper appeared as
+  an extra empty Open Tabs window.
+- Added RED worker and preview regressions. Both failed because the helper was
+  normal; after adding `type: 'popup'`, worker creation and concurrent preview
+  Open Tabs projection tests pass.
+- No Manager filtering state or cross-context temporary-window ID was added;
+  the existing normal-window boundary remains the single owner.
+- Rendered preview evidence while title loading was deliberately paused:
+  `chrome.windows.getAll()` contained normal window IDs 1-6 plus popup helper
+  ID 7; `list-open-tabs` returned only IDs 1-6 and the visible window selector
+  remained at six buttons. Resolving the paused load removed popup ID 7.
+- The first full Vitest run had one unrelated `useTabBoardStore` batch-delete
+  expectation resolve instead of reject. No store/mutation owner changed; the
+  exact test passed alone and the complete store file passed 92/92. No
+  unrelated product fix was made; a fresh full-suite rerun is required.
+- Final Phase 23 verification:
+  - worker + preview focused files: 111/111;
+  - clean full Vitest rerun: 108 files / 1,556 tests;
+  - `npm run check`: 2,672-module build, extension sanity, 251-source
+    import/cycle scan, 143-production architecture scan, and 17 release tests;
+  - `tsc --noEmit` and `git diff --check` passed.
+
+## Phase 24 - Restore final-title synchronization
+
+- Wrote and approved the restore title sync design/implementation plan under
+  `docs/superpowers/`.
+- Added RED/GREEN mutation coverage: Locked Sessions accept title-only
+  `update-tab`; note, URL, favicon, mixed patches, and other mutations stay
+  locked.
+- Added worker synchronization across single, group, selected, and Restore All
+  paths. Tests prove final event title beats create-time URL/loading title,
+  siblings wait concurrently, deleted records skip waiting, Locked records
+  update, partial timeout preserves old title, and restore still succeeds.
+- Persisted Saved Tab title clicks now call worker `restore-tab`; Bookmark
+  read-only rows keep direct URL open.
+- Locked manual Refresh Title is enabled and covered by mounted DOM tests.
+- Preview restore now simulates final hostname titles and updates retained
+  records while leaving deleted records absent.
+- Added Restore All parity in production and preview. Mixed Locked/unlocked
+  tests prove unlocked records are removed before title waiting while Locked
+  records wait for and receive the final title.
+- Added URL-race coverage: if a Saved record's URL changes while the restored
+  page loads, the old restore result cannot overwrite the changed record.
+- Focused owner verification before final gates: 7 files / 398 tests, plus
+  Restore All and URL-race focused tests, all passing; `tsc --noEmit` and
+  `git diff --check` pass.
+- Latest focused owner verification after Restore All parity: 7 files /
+  400 tests passing.
+- Rendered preview verification: restoring a Locked saved link kept the
+  two-item Locked group and changed its link title to `locked.example`.
+- Final Phase 24 verification:
+  - focused owners: 7 files / 400 tests;
+  - `npm test`: 108 files / 1,565 tests;
+  - `npm run check`: 2,672-module production build, extension sanity,
+    251-source import/cycle scan, 143-production architecture scan, and
+    17 release tests;
+  - `tsc --noEmit` and `git diff --check` passed.
+
+## Phase 25 - Session Refresh All Titles
+
+- Approved bounded-concurrency design and wrote spec/plan under
+  `docs/superpowers/`.
+- Worker RED/GREEN covers five Links + Note, concurrency ceiling 3, one
+  mutation batch, partial resolver failure, Locked Session, missing group, and
+  canonical delete/URL-change races.
+- Added `ManagerRuntime.refreshSavedGroupTitles(groupId)` and Session menu
+  `Refresh All Titles`; read-only Sessions hide it and zero-Link Sessions
+  disable it.
+- Feedback is `Titles refreshed` for zero failures, otherwise
+  `<refreshed> titles refreshed, <failed> failed`.
+- Preview action mirrors result shape, Link-only behavior, and Locked updates.
+- Rendered Saved Session menu exposes `Refresh All Titles` as a named menuitem;
+  activation showed `Titles refreshed`. Read-only exclusion remains guarded by
+  the `!readOnly` menu owner contract.
+- Final Phase 25 verification:
+  - focused owners: 7 files / 277 tests;
+  - `npm test`: 108 files / 1,570 tests;
+  - `npm run check`: 2,672-module production build, extension sanity,
+    251-source import/cycle scan, 143-production architecture scan, and
+    17 release tests;
+  - `tsc --noEmit` and `git diff --check` passed.
+
+## Phase 26 - Title refresh row loading
+
+- Added worker lifecycle RED/GREEN for manual, Session queue, and restore
+  deletion skip. Start/finish share operation IDs and finish runs in `finally`.
+- Added page-local title refresh activity store with overlap and keyed
+  subscription tests; Manager runtime adapter installs one listener.
+- Saved Tab rows subscribe by group/tab ID and reuse the existing Delete
+  `AccessibleIconAction` slot with `loading`, `Refreshing title`, and a
+  resting-visible loading class.
+- Manual runtime requests now include group/tab identity; Preview mirrors
+  activity broadcasts for manual, batch, and restore paths.
+- Focused activity/DOM/worker/preview tests pass; TypeScript and diff checks
+  pass after Preview ref narrowing.
+- Rendered frozen-queue evidence: active Link rows showed `Refreshing title`
+  with `data-loading=true`; Note and the fourth queued Link retained `Delete`.
+  Every trailing slot measured 32px. Releasing one resolver restored its Delete
+  action and started the queued fourth Link. Screenshot:
+  `/tmp/tabboard-title-refresh-loading-final.png`.
+- Final Phase 26 verification:
+  - focused owners: 10 files / 351 tests;
+  - `npm test`: 110 files / 1,578 tests;
+  - `npm run check`: 2,674-module production build, extension sanity,
+    255-source import/cycle scan, 145-production architecture scan, and
+    17 release tests;
+  - `tsc --noEmit` and `git diff --check` passed.
