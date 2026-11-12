@@ -56,8 +56,17 @@
   cursor: grab;
 }
 
+.session-card__header[data-selection-mode] > :is(
+  .session-card__actions,
+  .session-card__meta
+) {
+  visibility: hidden;
+}
+
 .session-selection-toolbar {
   display: flex;
+  grid-column: 1 / -1;
+  grid-row: 2;
   min-width: 0;
   align-items: center;
   gap: 4px;
@@ -173,8 +182,11 @@ button.session-card__note {
 
 .session-card__meta {
   grid-column: 1 / -1;
+  grid-row: 2;
   display: flex;
   flex-wrap: wrap;
+  min-height: 32px;
+  align-items: center;
   gap: 8px;
   color: var(--mantine-color-dimmed);
   font-size: 12px;

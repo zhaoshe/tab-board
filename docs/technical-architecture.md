@@ -141,6 +141,10 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `ManagerLayout` 也是唯一 `SessionTargetPicker` owner。Open Tabs `Save to` 和 Session toolbar `Move` 只上报 typed source/trigger；picker从 active workspace canonical category/session order生成choices，只保留能通过当前 DropIntent execution/locked/no-op语义的目标。展示label单独从Session title、Category name与before/between/after位置派生，不进入persistent wire。
 - Target picker的preview index和`aria-live` announcement只属于portaled modal UI，不创建或修改Dnd `DropTarget`、collision geometry、Gap Anchor、auto-scroll或persistent state。Existing/New commit分别映射到既有 `move-tabs` / `copy-open-tabs` / `create-session` intents并统一调用 `applyDropIntent`；Saved All Source Tabs只抑制New choices。
 - `useManagerRuntime.restoreTabs(refs)`只发送一次background `restore-refs`，并把`restoredTabs`成功证据返回给Session toolbar；runtime失败走现有toast并继续reject。Preview Chrome harness实现同一批量语义。
+- `SessionCardHeader` 始终保留 Session title，并把 owner-local
+  `SessionSelectionToolbar` 放到与 `SessionCardMeta` 相同的第二个 grid row；
+  selection mode 只隐藏普通 actions/meta，不卸载 title。Meta 与 toolbar 共享 32px
+  行高，因此进入/退出 selection scope 不改变 header 或首条 tab 的几何。
 - `useManagerRuntime.refreshSavedTabTitle(url)` 发送一次
   `refresh-saved-tab-title`；Saved row 成功后通过既有 `update-tab` 只持久化 title，
   失败由 runtime toast 处理且不修改 canonical state。Preview Chrome harness 实现同一
@@ -192,7 +196,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 
 - `popup.html` 在 React 执行前直接提供 320×180 的不可交互静态 loading shell，让 Chrome 能立即确定原生 Popup 尺寸并绘制启动反馈；React 首次 commit 后替换该内容。
 - `usePopupSettings()` 只读并订阅 `tabboardSettingsProjection`。投影有效时不导入 Zustand application store、Authoritative Publication 或 Storage Authority；投影缺失或损坏时才动态导入 `activeAdapter` 执行一次 canonical repair。
-- `PopupApp` 首次挂载时并行启动 settings projection 和 `chrome.tabs.query({ currentWindow: true })`。同一在途读取和查询在 Strict Mode effect replay 中复用；新的 Popup page generation 仍重新读取当前窗口。
+- `PopupApp` 首次挂载时并行启动 settings projection 和 `chrome.tabs.query({ currentWindow: true })`。同一在途读取和查询在 Strict Mode effect replay 中复用；新的 Popup page generation 仍重新读取当前窗口。Save 请求携带这份快照的 `selectedWindowId`，避免 worker 把 tab IDs 校验到另一个 focused normal window。
 - 两项输入 settle 前保持 loading；settings 失败时使用 `DEFAULT_SETTINGS` 并显示错误，Tab 查询失败时以 0 tabs 渲染并显示错误。Save/Remove 继续使用既有 worker actions。
 
 ### 图标

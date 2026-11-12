@@ -3033,6 +3033,43 @@ describe('Task112 live Open Tabs validation', () => {
 });
 
 describe('Task107 selected capture boundary', () => {
+  it('records privacy-safe evidence when worker policy rejects a selected tab', async () => {
+    const tab = createTab(1, 'Navigating', {
+      active: true,
+      pendingUrl: `chrome-extension://${TRUSTED_EXTENSION_ID}/manager.html`,
+    });
+    const harness = createChromeHarness(createState(), {
+      tabs: [tab],
+      windows: [{ id: 1, type: 'normal', incognito: false, focused: true, alwaysOnTop: false, tabs: [tab] }],
+    });
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+
+    const response = await sendMessage(harness.runtimeMessage.getListener(), {
+      type: 'saveSelectedTabs',
+      tabIds: [1],
+    }) as { ok: boolean; error?: string };
+
+    expect(response.ok).toBe(false);
+    expect(consoleWarn).toHaveBeenCalledWith(
+      '[tabboard:capture] selected tab rejected',
+      {
+        requestedWindowId: null,
+        resolvedWindowId: 1,
+        requestedTabCount: 1,
+        tabId: 1,
+        listedInResolvedWindow: true,
+        tabFound: true,
+        actualWindowId: 1,
+        windowMatches: true,
+        incognito: false,
+        captureCandidateReason: 'Cannot save this extension tab',
+      },
+    );
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain('manager.html');
+  });
+
   it('ignores selected and focused incognito windows during normal-window fallback', async () => {
     const normalTab = createTab(1, 'Normal', { windowId: 1, active: true });
     const selectedIncognitoTab = createTab(2, 'Selected incognito', { windowId: 2, active: false, incognito: true });

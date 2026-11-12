@@ -412,7 +412,7 @@ Selection mode：
 - 显式 Exit 或 scope replacement 会退出 mode 并清空 IDs；sidebar collapse 还会退出 Open Tabs scope。
 - 当前 Session 自己持有 saved item IDs；Manager scope 不进入 Zustand、canonical state 或任何持久化后端。
 - Active saved scope 的 Session 在仍属于当前 board 时，activation context reset 会保持 full card 挂载，避免 owner-local IDs 因降级为 shell 而丢失；若 filter/category 让 owner 真正离开 render tree，则同步 exit scope。
-- Active Session header 原位替换为一个 icon toolbar：selected count、Select/Unselect All Visible、Restore Selected Links、Copy Selected URLs、Move Selected Items、Delete Selected Items 和 Exit。不会额外增加第二条 toolbar。
+- Active Session 保留原 Session title；原 links/notes/date 元信息行替换为 icon toolbar：selected count、Select/Unselect All Visible、Restore Selected Links、Copy Selected URLs、Move Selected Items、Delete Selected Items 和 Exit。普通态元信息行与多选 toolbar 使用同一 32px 行高，切换时 header 和 tab list 不位移。
 - Restore/Copy 只处理 selected restorable Links；Notes 仍可 Move/Delete。Locked Session 禁用 Restore/Move/Delete，但 Copy 保持可用。
 - Select/Unselect All Visible 保留 hidden IDs。Restore/Delete 仅在实际成功后清 IDs并保持 `0 selected` scope；Copy 保留 IDs；任何 async reject 保留 IDs/mode。
 - Restore Selected 通过一次 background `restore-refs` batch 执行。Copy Selected URLs 只调用一次 clipboard write。Delete Selected Items 使用单一 atomic `delete-tabs` mutation并等待 authoritative commit，不循环 fire-and-forget `deleteTab`。

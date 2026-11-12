@@ -21,6 +21,24 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-09-14: Popup 保存绑定来源窗口
+
+- Popup Save 把查询 tab 时得到的 window ID 随 `saveSelectedTabs` 请求提交，不再让
+  worker 用点击时的 focused window 猜测来源。
+- worker 拒绝 selected capture 时写入不含 URL/title 的结构化 diagnostics，区分 tab
+  缺失、跨窗口和 capture policy 拒绝。
+
+当前状态：Current。
+
+### 2026-08-18: Session 多选工具栏覆盖元信息行
+
+- 多选态继续显示最多两行的 Session title，不再用工具栏替换整个 header。
+- selected count 与批量 actions 覆盖原 links/notes/date 元信息行。
+- 普通 meta 与多选 toolbar 共用 32px 第二行；进入/退出多选时 header 与 tab list
+  坐标保持不变。
+
+当前状态：Current。
+
 ### 2026-08-11: Title 刷新显示逐行 loading
 
 - 手动单 Tab、Session 批量和 restore 自动同步统一广播逐条 start/finish。

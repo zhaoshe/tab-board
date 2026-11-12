@@ -65,6 +65,7 @@ import {
   isDropIntentAlreadyApplied,
 } from '../shared/model/drop-operations';
 import { readSettingsProjection } from '../shared/store/settingsProjection';
+import { logWarning } from '../shared/utils/diagnostics';
 import {
   isBoundedString,
   MAX_FAVICON_URL_BYTES,
@@ -1993,12 +1994,31 @@ async function saveSelectedTabs(
     } catch {
       currentTab = null;
     }
+    const captureCandidateReason = currentTab
+      ? getCaptureCandidateReason(
+          { id: currentTab.id, url: resolveTabUrl(currentTab), pinned: currentTab.pinned },
+          settings,
+          chrome.runtime.getURL(''),
+        )
+      : null;
     if (
       !listedTab
       || !currentTab
       || currentTab.windowId !== resolvedWindowId
-      || !canCaptureTab(currentTab, settings)
+      || captureCandidateReason !== null
     ) {
+      logWarning('capture', 'selected tab rejected', {
+        requestedWindowId: selectedWindowId ?? null,
+        resolvedWindowId,
+        requestedTabCount: requestedTabIds.length,
+        tabId,
+        listedInResolvedWindow: Boolean(listedTab),
+        tabFound: Boolean(currentTab),
+        actualWindowId: currentTab?.windowId ?? null,
+        windowMatches: currentTab?.windowId === resolvedWindowId,
+        incognito: currentTab?.incognito ?? null,
+        captureCandidateReason,
+      });
       throw new Error(`Selected tab ${tabId} is not available in the selected normal window or cannot be saved.`);
     }
     validatedTabs.push({ ...currentTab });

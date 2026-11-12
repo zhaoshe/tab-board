@@ -26,6 +26,7 @@ import { usePreferredColorScheme } from '../shared/hooks/usePreferredColorScheme
 import { usePageTheme } from '../shared/hooks/usePageTheme';
 import { AccessibleIconAction } from '../shared/components/AccessibleIconAction';
 import { formatNumber } from '../shared/utils/formatters';
+import { logBreadcrumb } from '../shared/utils/diagnostics';
 import './popup.css';
 
 interface TabInfo {
@@ -33,6 +34,7 @@ interface TabInfo {
   url: string;
   pinned: boolean;
   active: boolean;
+  windowId: number;
   groupId?: number;
 }
 
@@ -48,6 +50,7 @@ function queryCurrentWindowTabsOnce(): Promise<TabInfo[]> {
         url: tab.url!,
         pinned: tab.pinned || false,
         active: tab.active || false,
+        windowId: tab.windowId,
         groupId: tab.groupId,
       })),
   );
@@ -147,8 +150,13 @@ export function PopupApp() {
     setSavingTabs(true);
     setSaveError(null);
     try {
+      logBreadcrumb('capture', 'popup save requested', {
+        selectedWindowId: selectedTabs[0]?.windowId ?? null,
+        tabCount: selectedTabs.length,
+      });
       const response = await chrome.runtime.sendMessage({
         action: 'saveSelectedTabs',
+        selectedWindowId: selectedTabs[0].windowId,
         tabIds: selectedTabs.map((tab) => tab.id),
       });
       if (response?.ok !== true) {

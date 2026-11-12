@@ -566,52 +566,51 @@ export const SessionCard = memo(function SessionCard({
       onPointerDown={handleSessionPointerDown}
       onTouchStart={handleSessionTouchStart}
     >
-      {selectionMode ? (
-        <SessionSelectionToolbar
-          groupId={group.id}
-          locked={group.locked}
-          selectedItems={tabMetadata.selectedItems}
-          selectedTabIds={selectedTabIds}
-          visibleTabIds={tabMetadata.visibleTabs.map(({ id }) => id)}
-          onChangeVisibleSelection={changeVisibleSelection}
-          onRestore={restoreSelectedTabs}
-          onCopy={copySelectedUrls}
-          onMove={(trigger) => onOpenSessionTargetPicker?.({
-            mode: 'move-saved-tabs',
-            source: {
-              kind: 'saved-tabs',
-              refs: tabMetadata.selectedRefs,
-            },
-            trigger,
-          })}
-          onDelete={deleteSelectedTabs}
-          onRemoveSelection={removeSelection}
-          onClearSelection={() => setSelectedTabIds(new Set())}
-          onExit={() => selectionScope?.commands.exit()}
-        />
-      ) : (
-        <SessionCardHeader
-          createdAt={group.createdAt}
-          isDragOverlay={isDragOverlay}
-          isEditingTitle={isEditingTitle}
-          isMenuOpen={isSessionMenuOpen}
-          linkCount={tabMetadata.linkCount}
-          locked={group.locked}
-          moreActionRef={moreActionRef}
-          noteCount={tabMetadata.noteCount}
-          onOpenMenu={openSessionMenu}
-          onRestore={handleRestore}
-          onTitleActivationKeyDown={handleTitleActivationKeyDown}
-          onTitleBlur={handleTitleSubmit}
-          onTitleChange={setTitleValue}
-          onTitleDoubleClick={handleTitleDoubleClick}
-          onTitleInputKeyDown={handleTitleKeyDown}
-          restorableTabCount={tabMetadata.restorableTabCount}
-          title={group.title}
-          titleInputRef={titleInputRef}
-          titleValue={titleValue}
-        />
-      )}
+      <SessionCardHeader
+        createdAt={group.createdAt}
+        isDragOverlay={isDragOverlay}
+        isEditingTitle={isEditingTitle}
+        isMenuOpen={isSessionMenuOpen}
+        linkCount={tabMetadata.linkCount}
+        locked={group.locked}
+        moreActionRef={moreActionRef}
+        noteCount={tabMetadata.noteCount}
+        onOpenMenu={openSessionMenu}
+        onRestore={handleRestore}
+        onTitleActivationKeyDown={handleTitleActivationKeyDown}
+        onTitleBlur={handleTitleSubmit}
+        onTitleChange={setTitleValue}
+        onTitleDoubleClick={handleTitleDoubleClick}
+        onTitleInputKeyDown={handleTitleKeyDown}
+        restorableTabCount={tabMetadata.restorableTabCount}
+        selectionToolbar={selectionMode ? (
+          <SessionSelectionToolbar
+            groupId={group.id}
+            locked={group.locked}
+            selectedItems={tabMetadata.selectedItems}
+            selectedTabIds={selectedTabIds}
+            visibleTabIds={tabMetadata.visibleTabs.map(({ id }) => id)}
+            onChangeVisibleSelection={changeVisibleSelection}
+            onRestore={restoreSelectedTabs}
+            onCopy={copySelectedUrls}
+            onMove={(trigger) => onOpenSessionTargetPicker?.({
+              mode: 'move-saved-tabs',
+              source: {
+                kind: 'saved-tabs',
+                refs: tabMetadata.selectedRefs,
+              },
+              trigger,
+            })}
+            onDelete={deleteSelectedTabs}
+            onRemoveSelection={removeSelection}
+            onClearSelection={() => setSelectedTabIds(new Set())}
+            onExit={() => selectionScope?.commands.exit()}
+          />
+        ) : undefined}
+        title={group.title}
+        titleInputRef={titleInputRef}
+        titleValue={titleValue}
+      />
 
       <SessionCardEditor
         editing={isEditingNote}

@@ -463,11 +463,22 @@ describe('Task108 session rendering contracts', () => {
     expect(row).not.toContain('preview');
   });
 
-  it('replaces the Session header in place with the shared selection toolbar', () => {
+  it('replaces Session metadata with selection actions without changing header height', () => {
     expect(card).toContain('<SessionSelectionToolbar');
-    expect(card).toMatch(/selectionMode\s*\?\s*\(\s*<SessionSelectionToolbar/);
-    expect(card).not.toMatch(
-      /<SessionCardHeader[\s\S]*?<SessionSelectionToolbar/,
+    expect(card).toMatch(
+      /<SessionCardHeader[\s\S]*?selectionToolbar=\{selectionMode\s*\?\s*\(\s*<SessionSelectionToolbar/,
+    );
+    expect(css).toMatch(
+      /\.session-card__meta\s*\{[\s\S]*?grid-row: 2;[\s\S]*?min-height: 32px;/,
+    );
+    expect(css).toMatch(
+      /\.session-selection-toolbar\s*\{[\s\S]*?grid-column: 1 \/ -1;[\s\S]*?grid-row: 2;/,
+    );
+    expect(css).toMatch(
+      /\.session-card__header\[data-selection-mode\] > :is\([\s\S]*?\.session-card__actions,[\s\S]*?\.session-card__meta[\s\S]*?\)[\s\S]*?visibility: hidden;/,
+    );
+    expect(css).not.toContain(
+      '.session-card__header[data-selection-mode] > .session-card__heading',
     );
     expect(selectionToolbar).toContain('Restore Selected Links');
     expect(selectionToolbar).toContain('Copy Selected URLs');
