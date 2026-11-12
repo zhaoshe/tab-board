@@ -183,6 +183,25 @@ describe('complete backup restore', () => {
     expect(warnings.mock.calls.map(([message]) => message)).toEqual(Array(2).fill(expect.stringContaining('Corrupt session file')));
     expect((await initFileStorageDirectory(root)).state?.groups).toEqual(source.groups);
   });
+  it('failed raw-byte backup prevents full restore from replacing the unread original', async () => {
+    const warnings = captureUnreadWarnings();
+    const root = createMemoryDirectory('Unread backup failure');
+    const adapter = await createFileStorageAdapter(root);
+    const old = createEmptyState();
+    await adapter.setState(old);
+    const source = backup();
+    const sessions = await root.getDirectoryHandle('sessions');
+    const name = `${source.groups[0].id}.json`;
+    const bytes = new Uint8Array([123, 255, 254, 125]);
+    await atomicWriteFile(sessions, name, bytes);
+    await adapter.reloadFromDisk();
+    const preserved = await root.getDirectoryHandle('.tabboard-unread-before-restore', { create: true });
+    vi.spyOn(preserved, 'getFileHandle').mockRejectedValue(new Error('byte backup failed'));
+    await expect(adapter.setState(source, { backupBeforeRestore: old })).rejects.toThrow('byte backup failed');
+    expect(new Uint8Array(await (await (await sessions.getFileHandle(name)).getFile()).arrayBuffer())).toEqual(bytes);
+    expect(await adapter.getState()).toEqual(old);
+    expect(warnings).toHaveBeenCalledTimes(1);
+  });
   it('saving the current file snapshot failing prevents replacement', async () => {
     const root = createMemoryDirectory('Restore failure');
     const old = createEmptyState();

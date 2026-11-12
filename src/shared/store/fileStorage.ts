@@ -584,20 +584,27 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
 
     if (options) {
       await atomicWriteFile(this.root, '.tabboard-before-restore.json', serializeJson(normalizeState(options.backupBeforeRestore)));
-      if (this.unreadSessionFiles.length) {
-        const preserved = await this.root.getDirectoryHandle('.tabboard-unread-before-restore', { create: true });
-        const sessions = await this.root.getDirectoryHandle(SESSIONS_DIR);
-        for (const name of this.unreadSessionFiles) {
-          let backupName = name;
+    }
+    // Preserve unread bytes before any same-ID replacement, including reconnect.
+    const unreadToPreserve = options
+      ? this.unreadSessionFiles
+      : this.unreadSessionFiles.filter(name => toWrite.some(({ id }) => name === `${id}.json`));
+    if (unreadToPreserve.length) {
+      const preserved = await this.root.getDirectoryHandle('.tabboard-unread-before-restore', { create: true });
+      const sessions = await this.root.getDirectoryHandle(SESSIONS_DIR);
+      for (const name of unreadToPreserve) {
+        let backupName = name;
+        while (true) {
           try {
-            await preserved.getFileHandle(name);
+            await preserved.getFileHandle(backupName);
             backupName = `${createId('unread')}-${name}`;
           } catch (error) {
             if (!isNotFoundError(error)) throw error;
+            break;
           }
-          const original = await (await sessions.getFileHandle(name)).getFile();
-          await atomicWriteFile(preserved, backupName, await original.arrayBuffer());
         }
+        const original = await (await sessions.getFileHandle(name)).getFile();
+        await atomicWriteFile(preserved, backupName, await original.arrayBuffer());
       }
     }
 

@@ -645,6 +645,22 @@ describe('createFileStorageAdapter', () => {
     expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).not.toHaveProperty('unreadSessionCount');
   });
 
+  it('ordinary writes preserve colliding unread bytes before replacing a session', async () => {
+    const root = createMemoryDirectory('root');
+    const state = knownState();
+    const adapter = await createFileStorageAdapter(root);
+    await adapter.setState(state);
+    const sessions = await root.getDirectoryHandle('sessions');
+    const name = `${state.groups[0].id}.json`;
+    const bytes = new Uint8Array([123, 255, 254, 125]);
+    await atomicWriteFile(sessions, name, bytes);
+    await adapter.reloadFromDisk();
+    await adapter.setState({ ...state, mutationRevision: 8 });
+    const preserved = await root.getDirectoryHandle('.tabboard-unread-before-restore');
+    expect(new Uint8Array(await (await (await preserved.getFileHandle(name)).getFile()).arrayBuffer())).toEqual(bytes);
+    expect((await initFileStorageDirectory(root)).state?.groups).toEqual(state.groups);
+  });
+
   it('preserves unread files during recovery rather than deleting them as orphan sessions', async () => {
     const root = createMemoryDirectory('root');
     withPermission(root);

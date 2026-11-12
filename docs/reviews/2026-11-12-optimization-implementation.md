@@ -1,6 +1,6 @@
 # 2026-11-12 优化实施记录
 
-基线评审见 [2026-11-12-project-optimization-review.md](2026-11-12-project-optimization-review.md)。本记录只汇总 1-14 项优化的最终落地、提交和验证证据，保留原评审历史，不改写其问题背景。
+基线评审见 [2026-11-12-project-optimization-review.md](2026-11-12-project-optimization-review.md)。本记录汇总 1-14 项优化及最终集成修复的落地、提交和验证证据，保留原评审历史，不改写其问题背景。
 
 ## 最终基线
 
@@ -12,9 +12,21 @@
 - 运行 / 构建基线：Chrome `115+`，Node.js `20+`
 - 工具链：Vite `6.4.6`、`@crxjs/vite-plugin` `2.7.1`、Vitest `4.1.12`、happy-dom `21.0.4`
 - 最终默认全量门禁：`npm test`、`npm run check`、`git diff --check`
-- 当前最终全量结果：`npm test` `117 files / 1695 tests` 通过；`npm run check` 通过，含 cycle `6/6`、architecture `8/8`、release `19/19`
+- 当前最终全量结果：`npm test` `117 files / 1702 tests` 通过；`npm run check` 通过，含 cycle `6/6`、architecture `8/8`、release `19/19`
 - Task 8 安全门禁：`npm audit --json` 与 `npm audit --omit=dev --json` 均为 `0`
 - 原始 14 文件保护：见 [final-parent-protection.json](../../.agents/optimization/final-parent-protection.json)，其中 `originalHeadMatches=true`、`statusMatches=true`、`changedFiles=[]`、`checkedFileCount=14`
+
+## 最终集成修复
+
+最终分支审查发现重连会漏存同 ID 未读原件，并持续关闭候选的投影发布。修复起点为 `6d76038a69e2af47db0a6b453d38e4ea6be262e6`；最终修复提交由父任务完成，不在本记录写自引用 hash。
+
+- `fileStorage` 在任何已识别未读文件的同名替换前，用现有 `.tabboard-unread-before-restore/` 保留精确字节并检查唯一名称；备份失败阻止替换。重连未冲突原件继续留在 `sessions/`，完整 Restore 继续备份全部未读原件。
+- `activeAdapter` 仅在重连准备阶段保持静默；数据和 handle 提交后，通过一次 storage 写入发布选定设置、状态和 ping，提交失败继续恢复旧 handle。安装后的直接提交与修复重读恢复正常发布。
+- 架构文档改为进入/离开 viewport + overscan 的有界激活，并对齐现有 60 slots、首屏及横向往返后 6–8 个完整 cards 断言。
+- 聚焦 RED 为 `7 failed / 76 passed`，两次 GREEN 均为 `83 passed`。最终完整 `npm test` 为 `117 files / 1702 tests`；`npm run check` 包含 build、extension sanity、cycle `6/6`、architecture `8/8`、release `19/19`，均通过；`git diff --check` 通过。
+- 本修复波次未运行浏览器、未新增依赖、未提交。原有物理证据仍有其记录边界；新增重连契约的 Native/review 收口由父任务完成。
+
+逐次输出与范围见 [最终集成修复报告](../../.superpowers/sdd/2026-11-12-optimization/final-integration-fix-report.md)，全量日志见 [final-fix-npm-test.log](../../.superpowers/sdd/2026-11-12-optimization/final-fix-npm-test.log) 与 [final-fix-npm-check.log](../../.superpowers/sdd/2026-11-12-optimization/final-fix-npm-check.log)。
 
 ## 物理验证边界
 
@@ -60,4 +72,4 @@
 - 保留历史评审与决策上下文，但当前规格只描述最终行为，不回写已移除的 Todo、Quick list 或 `All items` 导航。
 - 默认 Import 继续向当前 workspace/category 追加 sessions，以保留现有兼容行为；完整 Restore 仍是显式选择。
 - Bookmark 仍是只读运行时投影，不进入 canonical saved state。
-- 最终收口只做文档与交付记录对齐，不引入新的运行时依赖、浏览器自动化范围宣称或额外源代码行为变化。
+- Task 14 对齐当前文档与交付记录；最终集成修复补齐重连原字节保留与发布生命周期，不引入新的运行时依赖或扩大浏览器验证宣称。

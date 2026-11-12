@@ -442,7 +442,7 @@ Storage Authority 把 bootstrap/handle 当作 mode-switch commit point：
 
 - 切到 File：先创建并验证 File adapter、写入完整目标 state（暂不广播 ping），再保存 handle、写完整 File status projection，最后安装 File backend 并广播 committed ping。
 - 切回 Browser：如需 copy-back，先完成 Chrome state 写入，再写 Browser status projection、清 handle，最后安装 Chrome backend。
-- Reconnect：先验证目录权限并读取 File state，再保存 handle 与包含 folder name / file freshness 的 File projection，最后安装 File backend。
+- Reconnect：先验证目录权限并读取、必要时提交选定 state，再保存 handle；用一次 Chrome storage 写入发布选定 settings projection、完整 File status 与 committed ping，最后安装 File backend。候选仅在准备阶段静默，安装后的提交和重读恢复正常发布。
 
 任何 pre-commit 步骤失败都会保留原 backend、bootstrap 和 handle；UI 不会把半完成切换显示为成功。
 
@@ -457,7 +457,7 @@ File backend 的初始化、读取、写入或 `reloadFromDisk()` 抛出错误�
 5. 触发失败的 File 写仍 reject；现有 mutation retry 负责在新 Chrome backend 上重试，避免误报 commit。
 6. Manager toast提示降级；Options 仍把 Local Folder 作为主上下文，并提供 `Reconnect folder` 与 `Use browser storage`。
 
-降级状态下，`Reconnect folder` 重新授权并比较 File 与 Browser state；忽略时间戳、revision 和 legacy backend settings 的差异。数据相同直接重连，数据不同抛出 typed conflict，由 Options 明确选择。选择前在目录中写入 `.tabboard-reconnect-browser.json` 和 `.tabboard-reconnect-file.json`，再将选定 state 推进到大于两侧 revision 的新版本并提交。整个重连共享 `tabboard-state-write` 锁，提交前不广播 ping。旧 worker 故障的自动恢复在浏览器数据有分歧时保留 Browser backend，等待显式选择。`Use browser storage` 走安全 copy-back 后正式把 configured target 改成 Browser。
+降级状态下，`Reconnect folder` 重新授权并比较 File 与 Browser state；忽略时间戳、revision 和 legacy backend settings 的差异。数据相同直接重连，数据不同抛出 typed conflict，由 Options 明确选择。选择前在目录中写入 `.tabboard-reconnect-browser.json` 和 `.tabboard-reconnect-file.json`，再将选定 state 推进到大于两侧 revision 的新版本并提交。重连写入若命中未读 session 的同名文件，先在 `.tabboard-unread-before-restore/` 唯一命名保存精确原字节，备份失败则不替换或切换；不冲突的未读原件仍留在 `sessions/`。整个重连共享 `tabboard-state-write` 锁，数据和 handle 提交前不广播 ping。旧 worker 故障的自动恢复在浏览器数据有分歧时保留 Browser backend，等待显式选择。`Use browser storage` 走安全 copy-back 后正式把 configured target 改成 Browser。
 
 ## 关键流程
 
@@ -714,9 +714,9 @@ Options 的 Advanced disclosure 使用页面 URL 中的 `advanced=1`，通过 `r
 
 ### 大 board 性能
 
-`WorkspaceContent` 为当前 category 的每个 session 保留一个稳定 `SessionSlot` 和全部 group insertion targets，维持 `@dnd-kit` horizontal collision/measurement 与 reorder geometry。`useSessionActivation()` 初始激活前 6 个 session，并以 board 为 root、左右 720px overscan 的 `IntersectionObserver` 单调激活接近视口的 slot；搜索/高亮/显式 shell title activation会强制升级目标，当前 active saved selection scope 的 group 也进入 forced set，避免仍在 board 中的 owner 因 activation context reset 被卸载。若 filter/category 使 active owner 真正离开 render tree，其 unregister cleanup 会同步 exit scope。active slot 渲染完整 `SessionCard`，inactive slot 渲染 `SessionCardShell`，后者保留 whole-surface pointer/touch drag、title与summary，但不创建 tab rows、tab sortables、row subscriptions 或 observers。缺少 IntersectionObserver 时退化为全部激活。
+`WorkspaceContent` 为当前 category 的每个 session 保留一个稳定 `SessionSlot` 和全部 group insertion targets，维持 `@dnd-kit` horizontal collision/measurement 与 reorder geometry。`useSessionActivation()` 初始激活前 6 个 session，并以 board 为 root、左右 720px overscan 的 `IntersectionObserver` 按进入/离开 viewport + overscan 激活或回退 slot；搜索/高亮/显式 shell title activation会强制升级目标，当前 active saved selection scope 的 group 也进入 forced set，避免仍在 board 中的 owner 因 activation context reset 被卸载。若 filter/category 使 active owner 真正离开 render tree，其 unregister cleanup 会同步 exit scope。active slot 渲染完整 `SessionCard`，inactive slot 渲染 `SessionCardShell`，后者保留 whole-surface pointer/touch drag、title与summary，但不创建 tab rows、tab sortables、row subscriptions 或 observers。缺少 IntersectionObserver 时退化为全部激活。
 
-所有 session slot 仍留在 DOM，完整 tab row 不再常驻。TabBoard search 继续扫描 canonical state并激活匹配 session；浏览器 find-in-page 只能看到已激活 tab rows和远端 shell summary，这是用初次 mount 上限换取的明确取舍。Trash 最多保留 80 项，并继续使用 `content-visibility`。该行为由 `useSessionActivation.test.ts`、session ownership tests 和 `tests/e2e/large-board.e2e.ts`（60 slots、6 initial cards、远端 shell upgrade）守护。
+所有 session slot 仍留在 DOM，完整 tab row 不再常驻。TabBoard search 继续扫描 canonical state并激活匹配 session；浏览器 find-in-page 只能看到已激活 tab rows和远端 shell summary，这是用初次 mount 上限换取的明确取舍。Trash 最多保留 80 项，并继续使用 `content-visibility`。该行为由 `useSessionActivation.test.ts`、session ownership tests 和 `tests/e2e/large-board.e2e.ts`（60 slots、首屏及横向往返后 6–8 个完整 cards、远端 shell upgrade）守护。
 
 Open Tabs 同样保留全部 rows 与每行的 DnD/focus/preview hooks。`useOpenTabsRuntime()` 用 `useDeferredValue` 延后 query，`openTabsWorkflow.ts` projection 统一派生 filtered rows 与 selection drag records；`.manager-open-tab-row` 使用 `content-visibility: auto` 与 intrinsic size 跳过 off-screen layout/paint。Overlay provider 的 document/window listeners 在生命周期内只绑定一次；commands 与 menu/preview observable state 分离，普通 row/card 只订阅自身 key 的 open boolean。
 

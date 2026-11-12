@@ -2099,8 +2099,8 @@ Accepted。
 - Problem: browser writes made during file fallback must not disappear behind older folder data.
 - Decision: compare content before reconnecting; when different, preserve both copies in the folder and explicitly choose the active copy. Matching data reconnects directly.
 - Reason: reuse the existing backend switch and file transaction mechanisms without silently merging conflicting same-ID data.
-- Tradeoff: one dialog for real divergence and two bounded local recovery JSON files; automatic worker recovery stays in browser mode when content differs.
-- Status: implemented with core, UI and Orca native filesystem verification.
+- Tradeoff: one dialog for real divergence and two bounded normalized recovery JSON files; colliding unread originals also retain exact bytes under unique names in `.tabboard-unread-before-restore/`, accumulating on repeated conflicts. Byte preservation must succeed before replacement. Automatic worker recovery stays in browser mode when content differs.
+- Status: implemented with core, UI and Orca native filesystem verification. Final integration regressions verify selected settings/status/ping publication after durable data/handle commit, restored publication on subsequent commits/rereads, and failed-transition handle rollback.
 
 ## D072: Complete restore is explicit and saves current data first
 

@@ -18,7 +18,12 @@ import {
   nowIso,
   type TabBoardState,
 } from '../model';
-import { STATE_KEY } from '../model/constants';
+import {
+  BOOTSTRAP_KEY,
+  FILE_PING_KEY,
+  SETTINGS_PROJECTION_KEY,
+  STATE_KEY,
+} from '../model/constants';
 import { logBreadcrumb, logError, logWarning } from '../utils/diagnostics';
 import { createChromeStorageAdapter } from './chromeStorageAdapter';
 import type { IdbFactory } from './fsDirectory';
@@ -35,6 +40,7 @@ import type {
 import {
   BROWSER_STORAGE_STATUS,
   fileStorageStatus,
+  projectionFromState,
   type StorageStatusProjection,
 } from './settingsProjection';
 import {
@@ -483,6 +489,7 @@ async function commitFileHandleAndBootstrap(
     fileUpdatedAt: string | null;
     unreadSessionCount?: number;
   },
+  selectedState?: TabBoardState,
 ): Promise<void> {
   const {
     clearRootHandle,
@@ -492,11 +499,23 @@ async function commitFileHandleAndBootstrap(
   const previousRoot = await loadRootHandle(testIdbFactory);
   await saveRootHandle(root, testIdbFactory);
   try {
-    await writeStorageStatusProjection(fileStorageStatus({
+    const status = fileStorageStatus({
       folderName: root.name || null,
       fileUpdatedAt: health.fileUpdatedAt,
       unreadSessionCount: health.unreadSessionCount,
-    }));
+    });
+    if (selectedState) {
+      await chrome.storage.local.set({
+        [BOOTSTRAP_KEY]: status,
+        [SETTINGS_PROJECTION_KEY]: projectionFromState(selectedState),
+        [FILE_PING_KEY]: {
+          mutationRevision: selectedState.mutationRevision,
+          updatedAt: selectedState.updatedAt,
+        },
+      });
+    } else {
+      await writeStorageStatusProjection(status);
+    }
   } catch (error: unknown) {
     if (previousRoot) {
       await saveRootHandle(previousRoot, testIdbFactory);
@@ -649,7 +668,8 @@ export async function reconnectFolder(root: FileSystemDirectoryHandle, choice?: 
   const reconnect = async () => {
     logBreadcrumb('file-storage: reconnect', 'reconnecting to file folder');
     const { createFileStorageAdapter, saveReconnectCopies } = await loadFileStorageModule();
-    const adapter = await createFileStorageAdapter(root, { shouldPublishPing: () => false });
+    let committed = false;
+    const adapter = await createFileStorageAdapter(root, { shouldPublishPing: () => committed });
     const fileState = await adapter.getState();
     const saved = (await chrome.storage.local.get(STATE_KEY))[STATE_KEY];
     const browserState = normalizeState(saved);
@@ -670,9 +690,9 @@ export async function reconnectFolder(root: FileSystemDirectoryHandle, choice?: 
     await commitFileHandleAndBootstrap(root, {
       fileUpdatedAt: adapter.getFileUpdatedAt(),
       unreadSessionCount: adapter.getUnreadSessionCount(),
-    });
+    }, state);
+    committed = true;
     await getAuthority().install('file', adapter, state);
-    await writeFilePing(state.mutationRevision, state.updatedAt);
   };
   const locks = globalThis.navigator?.locks;
   if (typeof locks?.request === 'function') {
