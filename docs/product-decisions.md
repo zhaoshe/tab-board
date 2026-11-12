@@ -2094,6 +2094,14 @@ Accepted。
 - Tradeoff: one additional snapshot write per commit; after successful publication keep the latest recovery file and clean older files. Interrupted legacy data without a recovery snapshot remains a limited compatibility path.
 - Status: implemented with interruption, concurrent-read and retry regressions.
 
+## D071: Reconnect data conflicts require an explicit source choice
+
+- Problem: browser writes made during file fallback must not disappear behind older folder data.
+- Decision: compare content before reconnecting; when different, preserve both copies in the folder and explicitly choose the active copy. Matching data reconnects directly.
+- Reason: reuse the existing backend switch and file transaction mechanisms without silently merging conflicting same-ID data.
+- Tradeoff: one dialog for real divergence and two bounded local recovery JSON files; automatic worker recovery stays in browser mode when content differs.
+- Status: implemented with core, UI and Orca native filesystem verification.
+
 ```md
 ## D00X: Title
 

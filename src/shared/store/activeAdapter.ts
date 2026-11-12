@@ -14,9 +14,11 @@
 
 import {
   createId,
+  normalizeState,
   nowIso,
   type TabBoardState,
 } from '../model';
+import { STATE_KEY } from '../model/constants';
 import { logBreadcrumb, logError, logWarning } from '../utils/diagnostics';
 import { createChromeStorageAdapter } from './chromeStorageAdapter';
 import type { IdbFactory } from './fsDirectory';
@@ -99,6 +101,23 @@ function loadFsDirectoryModule(): Promise<FsDirectoryModule> {
 }
 
 const fallbackListeners = new Set<(reason: string) => void>();
+
+export type ReconnectChoice = 'browser' | 'file';
+
+export class ReconnectDataConflict extends Error {
+  readonly code = 'RECONNECT_DATA_CONFLICT';
+  constructor(readonly browserState: TabBoardState, readonly fileState: TabBoardState) {
+    super('Browser and folder copies differ. Choose the data to reconnect with.');
+    this.name = 'ReconnectDataConflict';
+  }
+}
+
+function reconnectDataMatches(browser: TabBoardState, file: TabBoardState): boolean {
+  const data = (state: TabBoardState) => JSON.stringify(state, (key, value) =>
+    ['createdAt', 'updatedAt', 'mutationRevision', 'storageMode', 'storageFolderName'].includes(key)
+      ? undefined : value);
+  return data(browser) === data(file);
+}
 export const WORKER_PRELOAD_FALLBACK_REASON = 'File storage error: document is not defined';
 export const WORKER_DYNAMIC_IMPORT_FALLBACK_REASON = 'File storage error: window is not defined';
 
@@ -216,6 +235,15 @@ class StorageAuthority implements StorageAdapter {
       }
       const { createFileStorageAdapter } = await loadFileStorageModule();
       const adapter = await createFileStorageAdapter(root);
+      if (shouldRecoverWorkerPreloadFallback) {
+        const saved = (await chrome.storage.local.get(STATE_KEY))[STATE_KEY];
+        if (saved && !reconnectDataMatches(normalizeState(saved), await adapter.getState())) {
+          const browserAdapter = createChromeStorageAdapter();
+          this.installBackend({ mode: 'browser', adapter: browserAdapter });
+          await this.publishFallback('Browser and folder copies differ. Reconnect to choose which data to use.', storageStatus);
+          return { mode: 'browser', adapter: browserAdapter };
+        }
+      }
       await writeStorageStatusProjection(fileStorageStatus({
         folderName: root.name || storageStatus.folderName,
         fileUpdatedAt: adapter.getFileUpdatedAt() ?? storageStatus.fileUpdatedAt,
@@ -607,18 +635,37 @@ export async function switchToBrowserMode(copyFileData: boolean): Promise<void> 
   await activeAuthority.install('browser', chromeAdapter, state);
 }
 
-/**
- * Reconnect to a file-storage folder after a fallback (e.g. permission was
- * re-granted or the user re-selected the folder). Saves the root handle,
- * writes bootstrap='file', and tears down the current singleton so the next
- * getActiveAdapter() call rebuilds a fresh FileStorageAdapter from the folder.
- * Does NOT seed initial state (the folder is expected to already contain data).
- */
-export async function reconnectFolder(root: FileSystemDirectoryHandle): Promise<void> {
-  logBreadcrumb('file-storage: reconnect', 'reconnecting to file folder');
-  const { createFileStorageAdapter } = await loadFileStorageModule();
-  const adapter = await createFileStorageAdapter(root);
-  const state = await adapter.getState();
-  await commitFileHandleAndBootstrap(root, adapter.getFileUpdatedAt());
-  await getAuthority().install('file', adapter, state);
+/** Reconnect matching data directly; divergent data requires an explicit choice and local recovery copies. */
+export async function reconnectFolder(root: FileSystemDirectoryHandle, choice?: ReconnectChoice): Promise<void> {
+  const reconnect = async () => {
+    logBreadcrumb('file-storage: reconnect', 'reconnecting to file folder');
+    const { createFileStorageAdapter, saveReconnectCopies } = await loadFileStorageModule();
+    const adapter = await createFileStorageAdapter(root, { shouldPublishPing: () => false });
+    const fileState = await adapter.getState();
+    const saved = (await chrome.storage.local.get(STATE_KEY))[STATE_KEY];
+    const browserState = normalizeState(saved);
+    const differs = saved !== undefined && !reconnectDataMatches(browserState, fileState);
+    if (differs && !choice) throw new ReconnectDataConflict(browserState, fileState);
+    let state = fileState;
+    if (differs) {
+      await saveReconnectCopies(root, browserState, fileState);
+      const revision = Math.max(browserState.mutationRevision, fileState.mutationRevision);
+      if (revision === Number.MAX_SAFE_INTEGER) throw new Error('The saved state revision cannot be advanced.');
+      state = normalizeState({
+        ...(choice === 'browser' ? browserState : fileState),
+        mutationRevision: revision + 1,
+        updatedAt: nowIso(),
+      });
+      await adapter.setState(state);
+    }
+    await commitFileHandleAndBootstrap(root, adapter.getFileUpdatedAt());
+    await getAuthority().install('file', adapter, state);
+    await writeFilePing(state.mutationRevision, state.updatedAt);
+  };
+  const locks = globalThis.navigator?.locks;
+  if (typeof locks?.request === 'function') {
+    await locks.request('tabboard-state-write', { mode: 'exclusive' }, reconnect);
+  } else {
+    await reconnect();
+  }
 }

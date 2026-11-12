@@ -306,6 +306,17 @@ export async function initFileStorageDirectory(
   return readCommittedDirectory(root);
 }
 
+export async function saveReconnectCopies(
+  root: FileSystemDirectoryHandle,
+  browserState: TabBoardState,
+  fileState: TabBoardState,
+): Promise<void> {
+  await settleOperations([
+    atomicWriteFile(root, '.tabboard-reconnect-browser.json', serializeJson(normalizeState(browserState))),
+    atomicWriteFile(root, '.tabboard-reconnect-file.json', serializeJson(normalizeState(fileState))),
+  ]);
+}
+
 async function readCommittedDirectory(
   root: FileSystemDirectoryHandle,
   attempt = 0,

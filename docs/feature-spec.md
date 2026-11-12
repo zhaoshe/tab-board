@@ -646,6 +646,9 @@ Advanced：
 
 ### Data Storage
 
+- 文件降级后重连会比较浏览器与目录的数据；数据不同则明确选择 Keep browser data 或 Use folder data，Cancel 保留当前状态。两份原始数据先以完整 JSON 保存在目录中，再激活选定结果；写入失败保持对话框和错误，以便重试。
+- 重连对话框关闭按钮有可访问名称，触控模式下操作目标至少 44px，异步状态只显示在实际执行的选择上。
+
 TabBoard 默认把数据保存在浏览器内置的 `chrome.storage.local` 中；数据仅存在本机，卸载扩展会被浏览器清除。TabBoard 也支持把数据保存到你自己选择的本地文件夹，作为可选替代后端。
 
 Options 的 Storage location 读取一个轻量持久化状态投影：

@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Group,
+  Modal,
   Stack,
   Text,
   Title,
@@ -18,12 +19,13 @@ import {
   isWorkerModuleFallbackReason,
   reconnectFolder,
 } from '../../shared/store/activeAdapter';
+import type { ReconnectChoice, ReconnectDataConflict } from '../../shared/store/activeAdapter';
 import {
   readStorageStatusProjection,
   subscribeStorageStatusProjection,
 } from '../../shared/store/fsBootstrap';
 import type { StorageStatusProjection } from '../../shared/store/settingsProjection';
-import { formatTime } from '../../shared/utils/formatters';
+import { formatNumber, formatTime } from '../../shared/utils/formatters';
 import { FolderPickerDialog } from './FolderPickerDialog';
 import { DisconnectDialog } from './DisconnectDialog';
 
@@ -32,7 +34,12 @@ export function DataStorageCard() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [resolvingChoice, setResolvingChoice] = useState<ReconnectChoice | null>(null);
   const [reconnectError, setReconnectError] = useState<string | null>(null);
+  const [reconnectConflict, setReconnectConflict] = useState<{
+    root: FileSystemDirectoryHandle;
+    error: ReconnectDataConflict;
+  } | null>(null);
   const [legacyRecoveryAttempted, setLegacyRecoveryAttempted] = useState(false);
 
   useEffect(() => {
@@ -80,6 +87,27 @@ export function DataStorageCard() {
     window.location.reload();
   };
 
+  const finishReconnect = async (root: FileSystemDirectoryHandle, choice?: ReconnectChoice) => {
+    await reconnectFolder(root, choice);
+    await chrome.runtime.sendMessage({ type: 'tabboard-storage-switched' }).catch(() => undefined);
+    setReconnectConflict(null);
+  };
+
+  const resolveReconnect = async (choice: ReconnectChoice) => {
+    if (!reconnectConflict) return;
+    setReconnecting(true);
+    setResolvingChoice(choice);
+    setReconnectError(null);
+    try {
+      await finishReconnect(reconnectConflict.root, choice);
+    } catch (error) {
+      setReconnectError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setReconnecting(false);
+      setResolvingChoice(null);
+    }
+  };
+
   const handleReconnect = async () => {
     setReconnecting(true);
     setReconnectError(null);
@@ -91,11 +119,14 @@ export function DataStorageCard() {
         throw new Error('Folder access is not available in this context.');
       }
       const root = await picker({ mode: 'readwrite' });
-      await reconnectFolder(root);
       try {
-        await chrome.runtime.sendMessage({ type: 'tabboard-storage-switched' });
-      } catch {
-        // ignore
+        await finishReconnect(root);
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'RECONNECT_DATA_CONFLICT') {
+          setReconnectConflict({ root, error: error as ReconnectDataConflict });
+        } else {
+          throw error;
+        }
       }
     } catch (err) {
       if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'NotAllowedError')) {
@@ -112,6 +143,8 @@ export function DataStorageCard() {
   const updatedTime = status?.fileUpdatedAt
     ? formatTime(status.fileUpdatedAt)
     : null;
+  const browserSessionCount = reconnectConflict?.error.browserState.groups.length ?? 0;
+  const fileSessionCount = reconnectConflict?.error.fileState.groups.length ?? 0;
 
   return (
     <>
@@ -255,6 +288,26 @@ export function DataStorageCard() {
         onClose={() => setPickerOpen(false)}
         onComplete={reloadPage}
       />
+      <Modal
+        opened={reconnectConflict !== null}
+        onClose={() => { if (!reconnecting) setReconnectConflict(null); }}
+        title="Choose data to reconnect"
+        classNames={{ content: 'options-reconnect-dialog' }}
+        closeButtonProps={{ 'aria-label': 'Cancel reconnect' }}
+        centered
+      >
+        <Stack gap="sm">
+          <Text size="sm">Your browser and folder copies differ. Both copies will be saved in the folder before reconnecting.</Text>
+          <Text size="sm">Browser copy: {formatNumber(browserSessionCount)} {browserSessionCount === 1 ? 'session' : 'sessions'}</Text>
+          <Text size="sm">Folder copy: {formatNumber(fileSessionCount)} {fileSessionCount === 1 ? 'session' : 'sessions'}</Text>
+          {reconnectError && <Alert color="red">{reconnectError}</Alert>}
+          <Group justify="flex-end">
+            <Button variant="default" disabled={reconnecting} data-autofocus onClick={() => setReconnectConflict(null)}>Cancel</Button>
+            <Button variant="default" disabled={reconnecting} loading={resolvingChoice === 'file'} onClick={() => void resolveReconnect('file')}>{resolvingChoice === 'file' ? 'Using folder data…' : 'Use folder data'}</Button>
+            <Button disabled={reconnecting} loading={resolvingChoice === 'browser'} onClick={() => void resolveReconnect('browser')}>{resolvingChoice === 'browser' ? 'Keeping browser data…' : 'Keep browser data'}</Button>
+          </Group>
+        </Stack>
+      </Modal>
       <DisconnectDialog
         opened={disconnectOpen}
         onClose={() => setDisconnectOpen(false)}

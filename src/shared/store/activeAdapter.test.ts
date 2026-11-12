@@ -948,6 +948,84 @@ describe('activeAdapter', () => {
     expect((await authority.getState()).mutationRevision).toBe(44);
   });
 
+  it.each(['new-session', 'note-update', 'deletion'] as const)(
+    'requires a choice before reconnecting after browser %s', async (change) => {
+      const root = createMemoryDirectory('reconnect');
+      withPermission(root);
+      const fileState = knownState();
+      await (await createFileStorageAdapter(root)).setState(fileState);
+      const browserState = normalizeState({
+        ...fileState, mutationRevision: 8,
+        groups: change === 'deletion' ? [] : change === 'note-update'
+          ? fileState.groups.map((group) => ({ ...group, note: 'New browser note' }))
+          : [...fileState.groups, createGroupFromTabRecords(
+              [createTabRecord({ title: 'New browser tab', url: 'https://new-browser.example' } as chrome.tabs.Tab)],
+              { title: 'New browser session', workspaceId: fileState.activeWorkspaceId },
+            )],
+      });
+      chromeMock.storage.local.data[STATE_KEY] = browserState;
+      chromeMock.storage.local.data[BOOTSTRAP_KEY] = {
+        configuredTarget: 'file', activeBackend: 'browser', folderName: 'reconnect',
+        fallbackReason: 'Permission was denied.', fileUpdatedAt: fileState.updatedAt,
+      };
+      const authority = await getActiveAdapter();
+
+      await expect(reconnectFolder(root)).rejects.toMatchObject({ code: 'RECONNECT_DATA_CONFLICT' });
+      expect(await isFileModeActive()).toBe(false);
+      expect(await authority.getState()).toEqual(browserState);
+      expect(await (await createFileStorageAdapter(root)).getState()).toEqual(fileState);
+    },
+  );
+
+  it.each(['browser', 'file'] as const)('reconnects with the chosen %s copy and preserves both recovery copies', async (choice) => {
+    const root = createMemoryDirectory('reconnect');
+    withPermission(root);
+    const fileState = knownState();
+    await (await createFileStorageAdapter(root)).setState(fileState);
+    const browserState = normalizeState({
+      ...fileState, mutationRevision: 8,
+      groups: fileState.groups.map((group) => ({ ...group, note: 'New browser note' })),
+    });
+    chromeMock.storage.local.data[STATE_KEY] = browserState;
+    chromeMock.storage.local.data[BOOTSTRAP_KEY] = {
+      configuredTarget: 'file', activeBackend: 'browser', folderName: 'reconnect',
+      fallbackReason: 'Permission was denied.', fileUpdatedAt: fileState.updatedAt,
+    };
+    await getActiveAdapter();
+    await reconnectFolder(root, choice);
+
+    expect(await isFileModeActive()).toBe(true);
+    expect((await (await getActiveAdapter()).getState()).groups)
+      .toEqual(choice === 'browser' ? browserState.groups : fileState.groups);
+    const names: string[] = [];
+    for await (const [name] of root.entries()) names.push(name);
+    expect(names).toContain('.tabboard-reconnect-browser.json');
+    expect(names).toContain('.tabboard-reconnect-file.json');
+    const savedBrowser = JSON.parse(await (await (await root.getFileHandle('.tabboard-reconnect-browser.json')).getFile()).text());
+    const savedFile = JSON.parse(await (await (await root.getFileHandle('.tabboard-reconnect-file.json')).getFile()).text());
+    expect(savedBrowser.groups).toEqual(browserState.groups);
+    expect(savedFile.groups).toEqual(fileState.groups);
+  });
+
+  it('does not automatically recover a worker fallback when browser data has diverged', async () => {
+    const root = createMemoryDirectory('reconnect');
+    withPermission(root);
+    const fileState = knownState();
+    await (await createFileStorageAdapter(root)).setState(fileState);
+    const { saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(root, idbFactory);
+    const browserState = normalizeState({ ...fileState, mutationRevision: 8, groups: [] });
+    chromeMock.storage.local.data[STATE_KEY] = browserState;
+    chromeMock.storage.local.data[BOOTSTRAP_KEY] = {
+      configuredTarget: 'file', activeBackend: 'browser', folderName: 'reconnect',
+      fallbackReason: 'File storage error: document is not defined', fileUpdatedAt: fileState.updatedAt,
+    };
+    const authority = await getActiveAdapter();
+
+    expect(await isFileModeActive()).toBe(false);
+    expect((await authority.getState()).groups).toEqual([]);
+  });
+
   it('failed reconnect validation leaves browser authority and bootstrap unchanged', async () => {
     const authority = await getActiveAdapter();
     const root = createMemoryDirectory('denied');

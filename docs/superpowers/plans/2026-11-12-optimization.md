@@ -38,10 +38,10 @@
 
 **Implementation:** 重连前比较浏览器降级 snapshot 与文件 snapshot；无分歧直接重连；有分歧保留两侧并要求明确选择浏览器当前数据或文件数据，提交后安装 backend。
 
-- [ ] RED: 添加回归并确认因现有行为失败。Cases: 降级期间新增、改 note、删除后重连不会默默切回旧数据；取消不切 backend；失败保留当前 authority。
-- [ ] GREEN: 完成最小实现与相关当前规格更新。
-- [ ] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
-- [ ] Commit: `feat(storage): resolve reconnect data divergence`，只暂存本项文件。
+- [x] RED: 添加回归并确认因现有行为失败。Cases: 降级期间新增、改 note、删除后重连不会默默切回旧数据；取消不切 backend；失败保留当前 authority。
+- [x] GREEN: 完成最小实现与相关当前规格更新。
+- [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
+- [x] Commit: `feat(storage): resolve reconnect data divergence`，只暂存本项文件。
 
 ### Task 4: 呈现文件恢复线索
 

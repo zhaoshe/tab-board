@@ -446,7 +446,7 @@ File backend 的初始化、读取、写入或 `reloadFromDisk()` 抛出错误�
 5. 触发失败的 File 写仍 reject；现有 mutation retry 负责在新 Chrome backend 上重试，避免误报 commit。
 6. Manager toast提示降级；Options 仍把 Local Folder 作为主上下文，并提供 `Reconnect folder` 与 `Use browser storage`。
 
-降级状态下，`Reconnect folder` 重新授权并验证 File state；`Use browser storage` 走安全 copy-back 后正式把 configured target 改成 Browser。
+降级状态下，`Reconnect folder` 重新授权并比较 File 与 Browser state；忽略时间戳、revision 和 legacy backend settings 的差异。数据相同直接重连，数据不同抛出 typed conflict，由 Options 明确选择。选择前在目录中写入 `.tabboard-reconnect-browser.json` 和 `.tabboard-reconnect-file.json`，再将选定 state 推进到大于两侧 revision 的新版本并提交。整个重连共享 `tabboard-state-write` 锁，提交前不广播 ping。旧 worker 故障的自动恢复在浏览器数据有分歧时保留 Browser backend，等待显式选择。`Use browser storage` 走安全 copy-back 后正式把 configured target 改成 Browser。
 
 ## 关键流程
 
