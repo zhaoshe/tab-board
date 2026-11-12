@@ -248,7 +248,8 @@
 
   .manager-storage-notice .mantine-Notification-closeButton,
   .manager-first-saved-hint .mantine-Notification-closeButton,
-  .manager-storage-notice .mantine-Button-root {
+  .manager-storage-notice .mantine-Button-root,
+  .manager-bookmark-status__retry {
     min-width: 44px;
     min-height: 44px;
   }

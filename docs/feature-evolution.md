@@ -21,6 +21,13 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-13: Bookmark 请求状态改为保留旧列表并显式重试
+
+- 问题：Bookmark category 之前在请求失败时会清空已显示列表，多个并发刷新也可能让较旧响应覆盖较新结果，用户看不到明确的加载/失败状态。
+- 决定：Bookmark runtime projection 改为保留最后一次成功列表；topbar 在刷新时显示 `Loading bookmarks…`，失败时显示 `Could not load bookmarks` 和 `Retry`。请求按代次生效，旧的 resolve/reject/finally 以及 workspace 切换或 unmount 后的回调都被忽略。
+- 取舍：状态只存在 Manager page hook 内存，不进入 canonical state；Bookmark 仍然是只读 runtime projection，不增加持久化写入。
+- 状态：Current；hook 与 ManagerLayout 回归覆盖倒序响应、失败保留、显式重试、workspace 切换和 unmount 清理。
+
 ### 2026-11-13: 延后导入预览和搜索计数
 
 - 问题：逐字输入时同步解析导入文本，搜索计数也在既有 query debounce 前重新扫描数据。

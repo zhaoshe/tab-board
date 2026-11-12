@@ -148,10 +148,10 @@
 
 **Implementation:** 保留最后成功列表，暴露 loading/error/retry；用请求代次拒绝旧响应，清理后不发布。
 
-- [ ] RED: 添加回归并确认因现有行为失败。Cases: 响应倒序不覆盖最新列表；失败保留已显示内容并提示重试；workspace 切换和 unmount 清理。
-- [ ] GREEN: 完成最小实现与相关当前规格更新。
-- [ ] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
-- [ ] Commit: `fix(bookmarks): retain data and reject stale refreshes`，只暂存本项文件。
+- [x] RED: 添加回归并确认因现有行为失败。Cases: 响应倒序不覆盖最新列表；失败保留已显示内容并提示重试；workspace 切换和 unmount 清理。
+- [x] GREEN: 完成最小实现与相关当前规格更新。
+- [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
+- [x] Commit: `fix(bookmarks): retain data and reject stale refreshes`，只暂存本项文件。
 
 ### Task 14: 校准当前规范
 

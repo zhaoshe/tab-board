@@ -48,7 +48,7 @@ TabBoard 使用 `chrome_url_overrides.newtab` 替换 Chrome 新标签页。
 Manager 是 tabExtend-style visual board 主工作台，分为：
 
 - 左侧 Open Tabs sidebar：desktop pinned 展开时占据 grid column 并推动 board；collapsed 是固定 52px rail。Pinned 展开/收起同时对 shell track 与 sidebar width 使用 `180ms cubic-bezier(.2,.8,.2,1)` 连续过渡；Open Tab copy、context actions、header utilities 和 Filter 在容器展开 75ms 后用 80ms `ease-out` 淡入，收起时立即反向淡出。Fine pointer hover/focus rail 约 350ms 后进入 temporary peek，作为不阻塞 topbar/main 的 overlay，离开即关闭；Peek 只动画 sidebar width + shadow，Board 始终留在 52px offset。显式 Expand 会 pin 并 reflow。Selection 或 Filter 从 peek 开始时自动 pin。900px 及以下显式 Expand 打开阻塞 topbar/main 的 drawer，并由 Close Sidebar 关闭；Drawer 与 Peek 一样覆盖 Board、不改变 52px main offset。所有过渡支持中途反向，并在 `prefers-reduced-motion: reduce` 下关闭；peek/drawer 都不写入持久化偏好。
-- 右侧 48px toolbar：Workspace、Categories + Category Options、Search、Bin、More 按固定顺序排列；Import、Export、Options 只在 More 中。内置 category 顺序为 Inbox、Saved、Bookmark、Archive。桌面 workspace trigger 使用独立 emoji / name / chevron slots，emoji 与名称至少间隔 6px，名称与 chevron 至少间隔 4px；紧凑断点只显示居中的 emoji。Category label 与 count 使用独立间距，compact topbar 保留当前 count 并自动把 active Category 滚入可视区。全部 controls 对齐同一基线。Search 静止态无边框/底色，展开时独占 category 区域但不改变 toolbar 高度。
+- 右侧 48px toolbar：Workspace、Categories + Category Options、Search、Bin、More 按固定顺序排列；Import、Export、Options 只在 More 中。内置 category 顺序为 Inbox、Saved、Bookmark、Archive。桌面 workspace trigger 使用独立 emoji / name / chevron slots，emoji 与名称至少间隔 6px，名称与 chevron 至少间隔 4px；紧凑断点只显示居中的 emoji。Category label 与 count 使用独立间距，compact topbar 保留当前 count 并自动把 active Category 滚入可视区。全部 controls 对齐同一基线。Search 静止态无边框/底色，展开时独占 category 区域但不改变 toolbar 高度。Bookmark category 刷新期间在 topbar 显示 `Loading bookmarks…`；失败时保留上一份成功列表，并在 topbar 显示 `Could not load bookmarks` 与 `Retry`。
 - 右侧 active category board：只展示当前 category 的 saved sessions；sessions 直接位于 A1/D1 canvas 上，单行横向排列并滚动，不再有 category outer frame。
 - 第一次出现 saved session context 时，Manager 只显示一次可关闭的紧凑帮助提示：说明 Session/card body 是拖拽表面，更多次级动作在右键菜单里；dismiss 持久化后不会在后续 save/reload 中反复打扰。
 
@@ -292,7 +292,7 @@ Categories 是 session 的导航目录。
 
 - Inbox：没有 category 且未归档的 sessions。
 - Saved：被标为 starred 的 sessions。
-- Bookmark：Chrome 书签的只读镜像。每个包含链接的书签文件夹显示为一个 session；嵌套文件夹按 `一级文件夹/二级文件夹` 打平命名。Chrome 书签变化会实时刷新该 category；Bookmark sessions 不写入 TabBoard saved data，不支持重命名、删除、移动、拖拽或编辑。
+- Bookmark：Chrome 书签的只读镜像。每个包含链接的书签文件夹显示为一个 session；嵌套文件夹按 `一级文件夹/二级文件夹` 打平命名。Chrome 书签变化会实时刷新该 category；刷新请求按发起顺序分代，旧的 resolve/reject/finally 不得覆盖当前结果。失败时保留最后一次成功列表，允许从 topbar `Retry` 重试。Bookmark sessions 不写入 TabBoard saved data，不支持重命名、删除、移动、拖拽或编辑。
 - Archive：被归档的 sessions。
 
 自定义 categories：

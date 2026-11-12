@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Group } from '@mantine/core';
+import { Button, Group, Text } from '@mantine/core';
 import type { CategoryFilter } from '../../core/selectors';
 import {
   shouldExitForOpenTabsSource,
@@ -95,7 +95,8 @@ export function ManagerLayout() {
   const showBin = pageState.state.view === 'bin';
   const groups = useFilteredGroups(showBin ? 'inbox' : selectedCategory);
   const workspace = useCurrentWorkspace();
-  const bookmarkGroups = useBookmarkSessions(workspace?.id ?? activeWorkspaceId);
+  const bookmarkSessions = useBookmarkSessions(workspace?.id ?? activeWorkspaceId);
+  const bookmarkGroups = bookmarkSessions.groups;
   const runtime = useManagerRuntime();
   const openTabsWorkflow = useOpenTabsRuntime();
   const selectionScope = useManagerSelectionScope();
@@ -263,6 +264,33 @@ export function ManagerLayout() {
             onOpenImport={() => setImportModalOpened(true)}
             onOpenExport={() => setExportModalOpened(true)}
           />
+          {selectedCategory === 'bookmarks'
+            && (bookmarkSessions.loading || bookmarkSessions.error) && (
+              <Group className="manager-bookmark-status" gap="xs" wrap="nowrap">
+                <Text
+                  className="manager-bookmark-status__label"
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                  size="xs"
+                  c={bookmarkSessions.error ? 'red' : 'dimmed'}
+                >
+                  {bookmarkSessions.loading
+                    ? 'Loading bookmarks…'
+                    : 'Could not load bookmarks'}
+                </Text>
+                {bookmarkSessions.error && (
+                  <Button
+                    className="manager-bookmark-status__retry"
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={bookmarkSessions.retry}
+                  >
+                    Retry
+                  </Button>
+                )}
+              </Group>
+            )}
         </Group>
       )}
       sidebar={(

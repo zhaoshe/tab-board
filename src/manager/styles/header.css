@@ -567,6 +567,20 @@ body {
   padding-left: 0;
 }
 
+.manager-bookmark-status {
+  flex-shrink: 0;
+  align-self: center;
+  margin-left: 8px;
+}
+
+.manager-bookmark-status__label {
+  white-space: nowrap;
+}
+
+.manager-bookmark-status__retry {
+  min-height: 32px;
+}
+
 .manager-search-toggle,
 .manager-header-actions .mantine-ActionIcon-root {
   width: 32px;
