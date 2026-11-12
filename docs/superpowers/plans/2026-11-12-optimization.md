@@ -16,10 +16,10 @@
 
 **Implementation:** 采用 FileSystemWritableFileStream 的 close 发布语义，取消先删目标及依赖 move 的替换；失败 abort，既有内容仍可读。
 
-- [ ] RED: 添加回归并确认因现有行为失败。Cases: 替换阶段失败后旧内容不变；user-picked folder 无可用 move 仍可保存；新文件失败不留下伪成功文件。
-- [ ] GREEN: 完成最小实现与相关当前规格更新。
-- [ ] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
-- [ ] Commit: `fix(storage): preserve committed files on write failure`，只暂存本项文件。
+- [x] RED: 添加回归并确认因现有行为失败。Cases: 替换阶段失败后旧内容不变；user-picked folder 无可用 move 仍可保存；新文件失败不留下伪成功文件。
+- [x] GREEN: 完成最小实现与相关当前规格更新。
+- [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
+- [x] Commit: `fix(storage): preserve committed files on write failure`，只暂存本项文件。
 
 ### Task 2: 恢复完整已提交状态
 
@@ -27,10 +27,10 @@
 
 **Implementation:** 提交前持久化上一份 normalized snapshot；pending meta 保留旧 revision，记录 pending revision；中断加载返回完整旧 snapshot，后续提交强制修复文件集合，读取前后校验 meta 防止混合读。保留 v1 可读文件布局。
 
-- [ ] RED: 添加回归并确认因现有行为失败。Cases: 替换/删除 session、写 settings、final meta 各阶段中断均恢复完整旧状态；恢复后再次提交不保留半次写入；提交中并发读取不观察混合状态。
-- [ ] GREEN: 完成最小实现与相关当前规格更新。
-- [ ] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
-- [ ] Commit: `fix(storage): recover interrupted file transactions`，只暂存本项文件。
+- [x] RED: 添加回归并确认因现有行为失败。Cases: 替换/删除 session、写 settings、final meta 各阶段中断均恢复完整旧状态；恢复后再次提交不保留半次写入；提交中并发读取不观察混合状态。
+- [x] GREEN: 完成最小实现与相关当前规格更新。
+- [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
+- [x] Commit: `fix(storage): recover interrupted file transactions`，只暂存本项文件。
 
 ### Task 3: 处理重连后的数据分歧
 

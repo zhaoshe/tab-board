@@ -2086,8 +2086,17 @@ Status:
 
 Accepted。
 
+## D070: Keep a complete recovery snapshot for file transactions
+
+- Problem: replacing multiple live files cannot roll back a partially published transaction from a flag alone.
+- Decision: persist the previous normalized snapshot under an independent commit identity before pending meta; readers use that snapshot while pending, and the next commit repairs the complete file set.
+- Reason: preserve the readable v1 folder layout and stop mixed-version loads without adding a storage dependency.
+- Tradeoff: one additional snapshot write per commit; after successful publication keep the latest recovery file and clean older files. Interrupted legacy data without a recovery snapshot remains a limited compatibility path.
+- Status: implemented with interruption, concurrent-read and retry regressions.
+
 ```md
 ## D00X: Title
+
 
 Context:
 

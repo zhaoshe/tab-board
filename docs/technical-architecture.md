@@ -399,22 +399,23 @@ Bin entry 用于恢复删除内容。
   categoryOrder.json
   bin.json
   ledger.json
+  .tabboard-recovery-<commitId>.json
   sessions/
     <groupId>.json
     ...
 ```
 
-- `meta.json` 是提交点（commit point），字段包括 `version`、`mutationRevision`、`createdAt`、`updatedAt`、`sessionOrder`、`writeInProgress`。`sessionOrder` 持久化 `sessions/<id>.json` 对应的 canonical Session 顺序，读取时不得依赖文件系统目录枚举顺序；旧数据缺少该字段时先兼容加载，并在下一次成功提交时自动回填。
+- `meta.json` 是提交点（commit point），字段包括 `version`、`mutationRevision`、`createdAt`、`updatedAt`、`sessionOrder`、`writeInProgress`、`commitId`、`recoveryFile`。`sessionOrder` 持久化 `sessions/<id>.json` 对应的 canonical Session 顺序，读取时不得依赖文件系统目录枚举顺序；旧数据缺少该字段时先兼容加载，并在下一次成功提交时自动回填。
 - 顶层文件分别对应 state 中同名字段；`categoryOrder.json` 存储 `categoryOrderByWorkspace`，`ledger.json` 存储 `dropOperationLedger`。
 - `sessions/<id>.json` 存储单个 group/session 对象；文件名为 group id。
 
 所有文件写入采用两阶段提交（参见「Persistence / 两阶段提交」）：
 
-1. 写 `meta.json` 置 `writeInProgress: true`、记录 `pendingRevision`。
+1. 先将上一份完整 normalized state 写到本次独立的隐藏 recovery 文件；再写 `meta.json` 置 `writeInProgress: true`，保留旧 `mutationRevision` 和顺序，记录新 `pendingRevision` 与 recovery 引用。
 2. 对本次需要变更的每个数据文件，使用 File System Access API 的 staged writable stream 写入，并在 `close()` 成功时发布；写入失败时 abort，始终保留已有目标文件，不依赖用户目录中的 `move()` 支持。
 3. 最后写 `meta.json` 置 `writeInProgress: false`，把 `revision` 推进到 `pendingRevision`。
 
-加载时若 `meta.json.writeInProgress === true`，表示上一次写入未完成，丢弃该批次，以上一次 `revision` 对应的文件集合为准。`sessions/` 中未被任何 workspace/group 索引引用的孤立文件不会被加载，也不会在正常写入中主动删除；清理动作通过显式的 garbage collect 路径触发。
+新事务中断时，加载器校验 recovery 的 commit identity 与 revision，并返回完整旧 snapshot；恢复文件缺失或损坏则拒绝加载。下一次成功提交强制修复全部 session 与顶层文件，并清理中断产生的 orphan session，随后保留本次 recovery、删除更旧 recovery。正常读取前后复核 meta，遇到并发发布重读，禁止将不同事务的数据混合。旧布局中只有 `writeInProgress`、没有 recovery 引用时仍兼容读取可读数据，但无法保证恢复到旧版本；会记录 warning，并在后续写入修复文件集合。
 
 文件夹句柄通过原生 IndexedDB（单 database、单 object store，仅 put/get/delete）持久化，不引入额外依赖。启动时 `activeAdapter` 先读取 status projection 的 `activeBackend`，只有 File 时才加载 IndexedDB handle/file modules；若句柄缺失、权限被撤销或 IO 失败，自动降级为 `ChromeStorageAdapter`，同时保持 configured target 为 File。
 

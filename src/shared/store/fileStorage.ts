@@ -16,8 +16,8 @@
  *   2) changed session files and top-level files are written atomically
  *   3) meta.json is rewritten with writeInProgress:false, bumped revision + updatedAt
  * If the process crashes between steps 1 and 3, meta.json.writeInProgress is
- * left true; on next startup we log a warning, clean orphan tmp files, and
- * continue with the previous fully-committed state.
+ * left true; readers use the complete recovery snapshot. The next commit
+ * repairs every data file before publishing a new revision.
  *
  * Same-context subscribers are notified via an internal EventTarget;
  * cross-context notification is done by writing FILE_PING_KEY to
@@ -35,6 +35,7 @@ import {
 import {
   clone,
   createEmptyState,
+  createId,
   normalizeState,
   nowIso,
   type TabBoardState,
@@ -84,6 +85,7 @@ const CATEGORY_ORDER_FILE = 'categoryOrder.json';
 const BIN_FILE = 'bin.json';
 const LEDGER_FILE = 'ledger.json';
 const SESSIONS_DIR = 'sessions';
+const RECOVERY_FILE = '.tabboard-recovery.json';
 
 interface StoredMeta {
   version: number;
@@ -95,6 +97,27 @@ interface StoredMeta {
   sessionOrder?: string[];
   writeInProgress?: boolean;
   migrationInProgress?: boolean;
+  pendingRevision?: number;
+  commitId?: string;
+  recoveryFile?: string;
+}
+
+interface RecoverySnapshot {
+  commitId: string;
+  state: TabBoardState | null;
+}
+
+function isRecoveryFileName(value: unknown): value is string {
+  return typeof value === 'string'
+    && (value === RECOVERY_FILE || /^\.tabboard-recovery-[a-z0-9_-]+\.json$/i.test(value));
+}
+
+async function cleanupPreviousRecoveryFiles(root: FileSystemDirectoryHandle, keep: string): Promise<void> {
+  const obsolete: string[] = [];
+  for await (const [name, handle] of asPermissionable(root).entries()) {
+    if (handle.kind === 'file' && name !== keep && isRecoveryFileName(name)) obsolete.push(name);
+  }
+  for (const name of obsolete) await atomicDeleteFile(root, name);
 }
 
 // ---------- error helpers ----------
@@ -141,6 +164,7 @@ export interface FileStorageInitInfo {
   state: TabBoardState | null;
   hasExistingData: boolean;
   fileUpdatedAt: string | null;
+  requiresRepair?: boolean;
 }
 
 async function ensurePermission(root: FileSystemDirectoryHandle): Promise<void> {
@@ -272,41 +296,87 @@ export async function initFileStorageDirectory(
     if (!isNotFoundError(err)) throw err;
   }
 
+  return readCommittedDirectory(root);
+}
+
+async function readCommittedDirectory(
+  root: FileSystemDirectoryHandle,
+  attempt = 0,
+): Promise<FileStorageInitInfo> {
+  if (attempt >= 4) {
+    throw makeInitError('ADAPTER_INIT_FAILED', 'The file store changed repeatedly while reading. Try again.');
+  }
+
   const metaResult = await readJsonFile<StoredMeta>(root, META_FILE);
   if (!metaResult.found) {
     logBreadcrumb('file-storage: init', 'empty directory, no existing state');
     return { state: null, hasExistingData: false, fileUpdatedAt: null };
   }
   const meta = metaResult.value as StoredMeta;
+  if (!meta || typeof meta.fileLayoutVersion !== 'number' || meta.fileLayoutVersion > FILE_LAYOUT_VERSION) {
+    throw makeInitError('FILE_CORRUPT', `Unsupported file layout (supported: <=${FILE_LAYOUT_VERSION}).`);
+  }
+  const metaChanged = async () => serializeJson(meta)
+    !== serializeJson((await readJsonFile<StoredMeta>(root, META_FILE)).value);
   const recoveryActions: string[] = [];
   if (meta.writeInProgress || meta.migrationInProgress) {
     recoveryActions.push(`writeInProgress=${!!meta.writeInProgress}`);
     recoveryActions.push(`migrationInProgress=${!!meta.migrationInProgress}`);
     logWarning(
       'fileStorage',
-      `Previous write did not complete cleanly (${recoveryActions.join(', ')}); loading last good state.`,
+      `Previous write did not complete cleanly (${recoveryActions.join(', ')}).`,
     );
   }
 
-  // Validate file layout version; we only understand v1.
-  if (typeof meta.fileLayoutVersion !== 'number' || meta.fileLayoutVersion > FILE_LAYOUT_VERSION) {
-    throw makeInitError(
-      'FILE_CORRUPT',
-      `Unsupported fileLayoutVersion=${meta.fileLayoutVersion} (supported: <=${FILE_LAYOUT_VERSION})`,
-    );
+  if (meta.writeInProgress && meta.pendingRevision !== undefined) {
+    const recoveryFile = meta.recoveryFile ?? RECOVERY_FILE;
+    if (!isRecoveryFileName(recoveryFile)) throw makeInitError('FILE_CORRUPT', 'Invalid recovery snapshot filename.');
+    let saved: Awaited<ReturnType<typeof readJsonFile<RecoverySnapshot>>>;
+    try {
+      saved = await readJsonFile<RecoverySnapshot>(root, recoveryFile);
+    } catch (error) {
+      if (await metaChanged()) return readCommittedDirectory(root, attempt + 1);
+      throw error;
+    }
+    if (await metaChanged()) return readCommittedDirectory(root, attempt + 1);
+    const snapshot = saved.value;
+    if (!snapshot || snapshot.commitId !== meta.commitId
+      || (snapshot.state !== null && (!Array.isArray(snapshot.state?.groups)
+        || !Array.isArray(snapshot.state?.workspaces)
+        || snapshot.state.mutationRevision !== meta.mutationRevision))) {
+      throw makeInitError('FILE_CORRUPT', 'The interrupted file transaction has no valid recovery snapshot.');
+    }
+    const state = snapshot.state === null ? null : normalizeState(snapshot.state);
+    logBreadcrumb('file-storage: recovery', `restored complete revision=${state?.mutationRevision ?? 'empty'}`);
+    return {
+      state,
+      hasExistingData: state !== null,
+      fileUpdatedAt: state?.updatedAt ?? null,
+      requiresRepair: true,
+    };
   }
 
   // Read top-level files in parallel.
-  const [settings, workspaces, folders, categoryOrder, bin, ledger] = await Promise.all([
-    readJsonFile<unknown>(root, SETTINGS_FILE),
-    readJsonFile<unknown>(root, WORKSPACES_FILE),
-    readJsonFile<unknown>(root, FOLDERS_FILE),
-    readJsonFile<unknown>(root, CATEGORY_ORDER_FILE),
-    readJsonFile<unknown>(root, BIN_FILE),
-    readJsonFile<unknown>(root, LEDGER_FILE),
-  ]);
-
-  const sessions = await readSessions(root);
+  const readFiles = async () => {
+    const [settings, workspaces, folders, categoryOrder, bin, ledger] = await Promise.all([
+      readJsonFile<unknown>(root, SETTINGS_FILE),
+      readJsonFile<unknown>(root, WORKSPACES_FILE),
+      readJsonFile<unknown>(root, FOLDERS_FILE),
+      readJsonFile<unknown>(root, CATEGORY_ORDER_FILE),
+      readJsonFile<unknown>(root, BIN_FILE),
+      readJsonFile<unknown>(root, LEDGER_FILE),
+    ]);
+    return { settings, workspaces, folders, categoryOrder, bin, ledger, sessions: await readSessions(root) };
+  };
+  let files: Awaited<ReturnType<typeof readFiles>>;
+  try {
+    files = await readFiles();
+  } catch (error) {
+    if (await metaChanged()) return readCommittedDirectory(root, attempt + 1);
+    throw error;
+  }
+  if (await metaChanged()) return readCommittedDirectory(root, attempt + 1);
+  const { settings, workspaces, folders, categoryOrder, bin, ledger, sessions } = files;
 
   const parts: FileParts = {
     meta: {
@@ -339,6 +409,7 @@ export async function initFileStorageDirectory(
     state,
     hasExistingData: true,
     fileUpdatedAt: parts.meta.updatedAt,
+    ...(meta.writeInProgress || meta.migrationInProgress ? { requiresRepair: true } : {}),
   };
 }
 
@@ -364,6 +435,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
   private writeQueue: Promise<void> = Promise.resolve();
   private eventTarget = new EventTarget();
   private deps: FileStorageAdapterDeps;
+  private requiresFullWrite = false;
 
   constructor(root: FileSystemDirectoryHandle, deps: FileStorageAdapterDeps = {}) {
     this.root = root;
@@ -380,6 +452,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
       const info = await initFileStorageDirectory(this.root);
       this.cachedState = info.state ? clone(info.state) : null;
       this.fileUpdatedAt = info.fileUpdatedAt;
+      this.requiresFullWrite = !!info.requiresRepair;
       this.initialized = true;
     })();
     await this.initPromise;
@@ -408,6 +481,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     const info = await initFileStorageDirectory(this.root);
     const next = info.state ? clone(info.state) : null;
     this.fileUpdatedAt = info.fileUpdatedAt;
+    this.requiresFullWrite = !!info.requiresRepair;
     this.initialized = true;
     this.initPromise = null;
     const changed = !statesEqual(this.cachedState, next);
@@ -420,7 +494,12 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
   async setState(nextState: TabBoardState): Promise<void> {
     await this.ensureInitialized();
     const done = this.writeQueue.then(async () => {
-      await this.writeCommit(nextState);
+      try {
+        await this.writeCommit(nextState);
+      } catch (error) {
+        this.requiresFullWrite = true;
+        throw error;
+      }
     });
     // Chain rejections into the queue without stopping future writes from chaining.
     this.writeQueue = done.catch(() => undefined);
@@ -437,12 +516,18 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     const nextGroupIds = new Set<string>();
     for (const [id, group] of parts.sessions) {
       nextGroupIds.add(id);
-      if (!cached || !cached.groups.some((g) => g.id === id && groupsEqual(g, group))) {
+      if (this.requiresFullWrite || !cached || !cached.groups.some((g) => g.id === id && groupsEqual(g, group))) {
         toWrite.push({ id, group });
       }
     }
     const toDelete: string[] = [];
-    if (cached) {
+    if (this.requiresFullWrite) {
+      const sessionsDir = await this.root.getDirectoryHandle(SESSIONS_DIR, { create: true });
+      for await (const [name, handle] of asPermissionable(sessionsDir).entries()) {
+        if (handle.kind === 'file' && name.endsWith('.json')
+          && !nextGroupIds.has(name.slice(0, -5))) toDelete.push(name.slice(0, -5));
+      }
+    } else if (cached) {
       for (const g of cached.groups) {
         if (!nextGroupIds.has(g.id)) toDelete.push(g.id);
       }
@@ -451,16 +536,19 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     // Ensure sessions/ directory exists.
     await this.root.getDirectoryHandle(SESSIONS_DIR, { create: true });
 
-    // Phase 1: write meta with writeInProgress:true.
+    // Persist the previous snapshot before any file can be replaced or removed.
+    const commitId = createId('file-commit');
+    const recoveryFile = `.tabboard-recovery-${commitId}.json`;
+    await atomicWriteFile(this.root, recoveryFile, serializeJson({ commitId, state: cached }));
+    const previous = splitState(cached ?? createEmptyState()).meta;
+
+    // Phase 1 keeps the committed revision; pendingRevision names the candidate.
     const inProgressMeta: StoredMeta = {
-      version: parts.meta.version,
-      mutationRevision: parts.meta.mutationRevision,
-      activeWorkspaceId: parts.meta.activeWorkspaceId,
-      createdAt: parts.meta.createdAt,
-      updatedAt: parts.meta.updatedAt,
-      fileLayoutVersion: parts.meta.fileLayoutVersion,
-      sessionOrder: parts.meta.sessionOrder,
+      ...previous,
       writeInProgress: true,
+      pendingRevision: parts.meta.mutationRevision,
+      commitId,
+      recoveryFile,
     };
     await atomicWriteFile(this.root, META_FILE, serializeJson(inProgressMeta));
 
@@ -503,6 +591,8 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
       fileLayoutVersion: parts.meta.fileLayoutVersion,
       sessionOrder: parts.meta.sessionOrder,
       writeInProgress: false,
+      commitId,
+      recoveryFile,
     };
     await atomicWriteFile(this.root, META_FILE, serializeJson(finalMeta));
 
@@ -510,6 +600,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     const committedState: TabBoardState = clone(nextState);
     this.cachedState = committedState;
     this.fileUpdatedAt = nextState.updatedAt;
+    this.requiresFullWrite = false;
 
     // Same-context notification.
     this.dispatchStateChanged(committedState);
@@ -535,6 +626,11 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     } catch (err) {
       // Ping failure should not fail the whole write — data is durably on disk.
       logWarning('fileStorage', 'Failed to write cross-context ping after commit', err);
+    }
+    try {
+      await cleanupPreviousRecoveryFiles(this.root, recoveryFile);
+    } catch (error) {
+      logWarning('fileStorage', 'Committed file data, but could not clean older recovery snapshots', error);
     }
   }
 
