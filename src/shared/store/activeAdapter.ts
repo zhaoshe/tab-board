@@ -247,6 +247,7 @@ class StorageAuthority implements StorageAdapter {
       await writeStorageStatusProjection(fileStorageStatus({
         folderName: root.name || storageStatus.folderName,
         fileUpdatedAt: adapter.getFileUpdatedAt() ?? storageStatus.fileUpdatedAt,
+        unreadSessionCount: adapter.getUnreadSessionCount(),
       }));
       this.installBackend({ mode: 'file', adapter });
       logBreadcrumb('file-storage: init', 'file adapter active');
@@ -668,4 +669,10 @@ export async function reconnectFolder(root: FileSystemDirectoryHandle, choice?: 
   } else {
     await reconnect();
   }
+}
+
+export async function reloadFileState(): Promise<void> {
+  const backend = await getAuthority().currentBackend();
+  if (backend.mode !== 'file' || !isReloadableAdapter(backend.adapter)) throw new Error('Reconnect the folder before re-reading saved files.');
+  await backend.adapter.reloadFromDisk();
 }

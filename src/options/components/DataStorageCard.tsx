@@ -18,19 +18,16 @@ import {
   getActiveAdapter,
   isWorkerModuleFallbackReason,
   reconnectFolder,
+  reloadFileState,
 } from '../../shared/store/activeAdapter';
 import type { ReconnectChoice, ReconnectDataConflict } from '../../shared/store/activeAdapter';
-import {
-  readStorageStatusProjection,
-  subscribeStorageStatusProjection,
-} from '../../shared/store/fsBootstrap';
-import type { StorageStatusProjection } from '../../shared/store/settingsProjection';
+import { useStorageStatusProjection } from '../../shared/hooks/useStorageStatusProjection';
 import { formatNumber, formatTime } from '../../shared/utils/formatters';
 import { FolderPickerDialog } from './FolderPickerDialog';
 import { DisconnectDialog } from './DisconnectDialog';
 
 export function DataStorageCard() {
-  const [status, setStatus] = useState<StorageStatusProjection | null>(null);
+  const status = useStorageStatusProjection();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
@@ -41,24 +38,16 @@ export function DataStorageCard() {
     error: ReconnectDataConflict;
   } | null>(null);
   const [legacyRecoveryAttempted, setLegacyRecoveryAttempted] = useState(false);
+  const [reReading, setReReading] = useState(false);
+  const [readError, setReadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let disposed = false;
-    let receivedSubscriptionUpdate = false;
-    const unsubscribe = subscribeStorageStatusProjection((nextStatus) => {
-      receivedSubscriptionUpdate = true;
-      setStatus(nextStatus);
-    });
-
-    void readStorageStatusProjection().then((initialStatus) => {
-      if (!disposed && !receivedSubscriptionUpdate) setStatus(initialStatus);
-    });
-
-    return () => {
-      disposed = true;
-      unsubscribe();
-    };
-  }, []);
+  const retryRead = async () => {
+    setReReading(true);
+    setReadError(null);
+    try { await reloadFileState(); }
+    catch (error) { setReadError(error instanceof Error ? error.message : String(error)); }
+    finally { setReReading(false); }
+  };
 
   useEffect(() => {
     if (
@@ -145,6 +134,7 @@ export function DataStorageCard() {
     : null;
   const browserSessionCount = reconnectConflict?.error.browserState.groups.length ?? 0;
   const fileSessionCount = reconnectConflict?.error.fileState.groups.length ?? 0;
+  const unreadSessionCount = status?.unreadSessionCount ?? 0;
 
   return (
     <>
@@ -207,6 +197,30 @@ export function DataStorageCard() {
 
           {isFileConfigured && (
             <>
+              {unreadSessionCount > 0 && (
+                <Alert color="yellow" title="Incomplete folder data">
+                  <Stack gap="xs">
+                    <Text size="sm">
+                      {formatNumber(unreadSessionCount)} saved {unreadSessionCount === 1 ? 'session could' : 'sessions could'} not be read. Original files remain in your folder. Re-read the folder or import a backup.
+                    </Text>
+                    {readError && (
+                      <Text size="sm" c="red">
+                        {readError}
+                      </Text>
+                    )}
+                    {status.activeBackend === 'file' && (
+                      <Button
+                        variant="default"
+                        loading={reReading}
+                        onClick={() => void retryRead()}
+                      >
+                        {reReading ? 'Re-reading folder…' : 'Re-read folder'}
+                      </Button>
+                    )}
+                  </Stack>
+                </Alert>
+              )}
+
               <Group
                 className="options-storage-detail-row"
                 justify="space-between"

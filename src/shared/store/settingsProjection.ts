@@ -17,6 +17,7 @@ export interface StorageStatusProjection {
   folderName: string | null;
   fallbackReason: string | null;
   fileUpdatedAt: string | null;
+  unreadSessionCount?: number;
 }
 
 export const BROWSER_STORAGE_STATUS: Readonly<StorageStatusProjection> = {
@@ -49,6 +50,8 @@ export function parseStorageStatusProjection(
   }
   const configuredTarget = candidate.configuredTarget;
   const activeBackend = candidate.activeBackend;
+  const unreadSessionCount = candidate.unreadSessionCount;
+  if (unreadSessionCount !== undefined && (!Number.isSafeInteger(unreadSessionCount) || Number(unreadSessionCount) < 0)) return null;
   if (
     (configuredTarget !== 'browser' && configuredTarget !== 'file')
     || (activeBackend !== 'browser' && activeBackend !== 'file')
@@ -76,15 +79,18 @@ export function parseStorageStatusProjection(
     folderName: candidate.folderName,
     fallbackReason: candidate.fallbackReason,
     fileUpdatedAt: candidate.fileUpdatedAt,
+    ...(configuredTarget === 'file' && Number(unreadSessionCount) > 0 ? { unreadSessionCount: Number(unreadSessionCount) } : {}),
   };
 }
 
 export function fileStorageStatus({
   folderName,
   fileUpdatedAt,
+  unreadSessionCount = 0,
 }: {
   folderName: string | null;
   fileUpdatedAt: string | null;
+  unreadSessionCount?: number;
 }): StorageStatusProjection {
   return {
     configuredTarget: 'file',
@@ -92,6 +98,7 @@ export function fileStorageStatus({
     folderName,
     fallbackReason: null,
     fileUpdatedAt,
+    ...(unreadSessionCount > 0 ? { unreadSessionCount } : {}),
   };
 }
 

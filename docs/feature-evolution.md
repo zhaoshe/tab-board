@@ -21,6 +21,13 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-12: 文件恢复提示明确区分“跳过损坏文件”与“用户删除”
+
+- 问题：损坏的 `sessions/<id>.json` 会在加载时被跳过，但普通用户只能看到 session 消失，无法判断是删除、筛选还是文件损坏。
+- 决定：File bootstrap/status projection 持久化 `unreadSessionCount`；Options 的 Storage location 和 Manager notice 都持续显示 `Incomplete folder data`。File backend 活跃时允许 `Re-read folder`，Manager 统一引导到 Settings。
+- 约束：原始损坏文件在恢复、重读或后续成功提交前保持原样；修复流程不能把未读文件当作 orphan 自动删除。
+- 状态：损坏文件保留、重读清除提示、Options active/fallback 提示和 Manager dismiss/重显生命周期均有回归。
+
 ### 2026-11-12: 重连先处理浏览器与文件数据分歧
 
 - 问题：降级期间的新写入会在重连后被旧文件数据遮蔽，worker 旧故障的自动恢复也可能绕过比较。

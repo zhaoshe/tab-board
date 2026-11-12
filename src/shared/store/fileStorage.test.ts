@@ -572,6 +572,48 @@ describe('createFileStorageAdapter', () => {
     expect(loaded.groups.map((g) => g.id)).toContain(state.groups[1].id);
   });
 
+  it('reports unread sessions and clears the report after the original file is repaired', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const state = knownState();
+    await (await createFileStorageAdapter(root)).setState(state);
+    const sessions = await root.getDirectoryHandle('sessions');
+    const fileName = `${state.groups[0].id}.json`;
+    await atomicWriteFile(sessions, fileName, '{broken');
+
+    const info = await initFileStorageDirectory(root);
+    expect(info.unreadSessionFiles).toEqual([fileName]);
+    const reader = await createFileStorageAdapter(root);
+    expect(reader.getUnreadSessionCount()).toBe(1);
+    expect(await readTextFile(await sessions.getFileHandle(fileName))).toBe('{broken');
+
+    await writeSessionFile(root, state.groups[0].id, state.groups[0]);
+    await reader.reloadFromDisk();
+    expect(reader.getUnreadSessionCount()).toBe(0);
+    expect((await reader.getState()).groups).toHaveLength(2);
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).not.toHaveProperty('unreadSessionCount');
+  });
+
+  it('preserves unread files during recovery rather than deleting them as orphan sessions', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const state = knownState();
+    await (await createFileStorageAdapter(root)).setState(state);
+    const sessions = await root.getDirectoryHandle('sessions');
+    const fileName = `${state.groups[0].id}.json`;
+    await atomicWriteFile(sessions, fileName, '{original broken content');
+    let interrupted = false;
+    const writer = await createFileStorageAdapter(root, {
+      locks: { beforeFinalMeta: () => {
+        if (!interrupted) { interrupted = true; throw new Error('Interrupted'); }
+      } },
+    });
+    const partial = await writer.getState();
+    await expect(writer.setState({ ...partial, mutationRevision: 8 })).rejects.toThrow('Interrupted');
+    await writer.setState({ ...partial, mutationRevision: 9 });
+    expect(await readTextFile(await sessions.getFileHandle(fileName))).toBe('{original broken content');
+  });
+
   it('concurrent setStates are serialized via the write queue', async () => {
     const root = createMemoryDirectory('root');
     withPermission(root);

@@ -12,6 +12,7 @@ import { ToastProvider, useToast } from './hooks/useToast';
 import { onFallback } from '../shared/store/activeAdapter';
 import { logBreadcrumb, logWarning } from '../shared/utils/diagnostics';
 import { DestructiveConfirmationProvider } from '../shared/components/DestructiveConfirmation';
+import { StorageRecoveryNotice } from './components/shell/StorageRecoveryNotice';
 
 // If hydration has not completed within this window, stop showing a blank
 // loading overlay and offer a recovery action instead of an endless white page.
@@ -41,6 +42,7 @@ function AppContent() {
       <ToastProvider>
         <DestructiveConfirmationProvider>
           <FileStorageFallbackToast />
+          <StorageRecoveryNotice />
           <ManagerLayout />
         </DestructiveConfirmationProvider>
       </ToastProvider>

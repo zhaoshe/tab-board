@@ -111,6 +111,7 @@ Options 分为 Basic 和 Advanced：
 - Toolbar、Capture、Restore、Appearance 保持在 Basic 区；Restore 以 Destination 和 Placement 策略呈现，New window 下禁用只适用于 Current window 的 Placement，但不清除既有偏好。
 - Advanced 使用 A2 flat list，不增加只有一个选项的 Safety、Keyboard Shortcuts 或 Recovery 二级 section。Storage location 本身也是普通并列 row。
 - Browser storage 状态把 `Choose folder` 放在 `Storage location` primary row；detail row 只显示 `Browser storage` 和 Chrome profile 说明。Folder ready/fallback 继续使用 configured-target-first 两层结构。
+- `configuredTarget === file` 且存在 unread session files 时，Storage location 会持续显示 `Incomplete folder data` 提示。File backend 仍活跃时提供 `Re-read folder`；已 fallback 到 Browser 时保留缺失提示和原文件身份，但不提供误导性的本地重读按钮。
 - `Exclude URL rules` 明确说明命中的 tabs 不进入 Open Tabs selection/drag/save，并说明规则用逗号或换行分隔。
 - Advanced Settings 展开状态同步到 `?advanced=1`；刷新和浏览器 Back/Forward 保持同一 disclosure context。
 - Basic 从轻量 settings projection 启动，不读取与页面无关的 sessions/folders/bin。Advanced 关闭时不挂载 storage UI、migration dialogs 或 file backend；首次展开时再异步加载，并在 chunk 加载失败时提供 Reload。
@@ -655,9 +656,11 @@ Options 的 Storage location 读取一个轻量持久化状态投影：
 
 - `configuredTarget`：用户正式选择 Browser 或 Local Folder。
 - `activeBackend`：当前实际写入 Browser 或 File。
-- `folderName`、`fallbackReason`、`fileUpdatedAt`：本地文件夹身份、自动降级原因和最后一次成功文件提交时间。
+- `folderName`、`fallbackReason`、`fileUpdatedAt`、`unreadSessionCount`：本地文件夹身份、自动降级原因、最后一次成功文件提交时间，以及本次加载中无法读取的 session 文件数量。
 
 自动 fallback 只把 `activeBackend` 改成 Browser，不把 `configuredTarget` 改成 Browser。Options 因此仍以 `Local folder name: <name>` 为主，并显示 `updated: HH:mm:ss`、降级原因，以及同一恢复动作区中的 `Reconnect folder` 和 `Use browser storage`。长 folder name 保持单行省略，不能挤压右侧更新时间。只有显式 switch-back 成功后 configured target 才变成 Browser；fallback 期间的 browser state 时间不得覆盖 `meta.json.updatedAt`。
+
+当某些 `sessions/<id>.json` 因损坏或不可解析而被跳过时，其他数据仍照常加载，但 Options 和 Manager 都要持续提示 `Incomplete folder data`，避免把缺失 session 误认为用户删除。Manager notice 固定提供 `Open settings`，单页 dismiss 仅影响当前页面，并在 unread count 变化时重新出现。原始损坏文件在用户修复、重新读取或显式替换前保持原样，不得被恢复写入当作 orphan 自动删除。
 
 为什么考虑本地文件夹：
 

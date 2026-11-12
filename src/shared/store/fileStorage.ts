@@ -48,6 +48,7 @@ import {
   cleanupOrphanTempFiles,
   deleteSessionFile,
   readTextFile,
+  readSessionFile,
   writeSessionFile,
 } from './fsAtomic';
 import {
@@ -59,6 +60,7 @@ import {
 } from './fileSerialization';
 import type { AdapterInitError, FileStorageAdapter } from './storageAdapter';
 import { fileStorageStatus, projectionFromState } from './settingsProjection';
+import { readStorageStatusProjection, writeStorageStatusProjection } from './fsBootstrap';
 
 // ---------- Types for DOM widenings ----------
 
@@ -105,6 +107,7 @@ interface StoredMeta {
 interface RecoverySnapshot {
   commitId: string;
   state: TabBoardState | null;
+  unreadSessionFiles?: string[];
 }
 
 function isRecoveryFileName(value: unknown): value is string {
@@ -172,6 +175,7 @@ export interface FileStorageInitInfo {
   hasExistingData: boolean;
   fileUpdatedAt: string | null;
   requiresRepair?: boolean;
+  unreadSessionFiles?: string[];
 }
 
 async function ensurePermission(root: FileSystemDirectoryHandle): Promise<void> {
@@ -244,14 +248,14 @@ async function readJsonFile<T>(
   }
 }
 
-async function readSessions(root: FileSystemDirectoryHandle): Promise<Map<string, Group>> {
+async function readSessions(root: FileSystemDirectoryHandle): Promise<{ sessions: Map<string, Group>; unreadSessionFiles: string[] }> {
   let sessionsDir: FileSystemDirectoryHandle;
   try {
     sessionsDir = await root.getDirectoryHandle(SESSIONS_DIR);
   } catch (err) {
     if (isNotFoundError(err)) {
       sessionsDir = await root.getDirectoryHandle(SESSIONS_DIR, { create: true });
-      return new Map();
+      return { sessions: new Map(), unreadSessionFiles: [] };
     }
     throw err;
   }
@@ -265,14 +269,17 @@ async function readSessions(root: FileSystemDirectoryHandle): Promise<Map<string
   }
 
   const groups = new Map<string, Group>();
-  if (fileEntries.length === 0) return groups;
+  const unreadSessionFiles: string[] = [];
+  if (fileEntries.length === 0) return { sessions: groups, unreadSessionFiles };
 
   const loaded = await pooledMap(fileEntries, 10, async ({ name }) => {
     const sessionId = name.slice(0, -'.json'.length);
     const fh = await sessionsDir.getFileHandle(name);
     const text = await readTextFile(fh);
     try {
-      return { sessionId, group: parseJsonFile<Group>(text, name) };
+      const group = parseJsonFile<Group>(text, name);
+      if (!group || group.id !== sessionId || !Array.isArray(group.tabs)) throw new Error('Invalid session identity or tab list.');
+      return { sessionId, group };
     } catch (err) {
       logWarning('fileStorage', `Corrupt session file "${name}" — skipping.`, err);
       return { sessionId, group: null as Group | null };
@@ -280,8 +287,9 @@ async function readSessions(root: FileSystemDirectoryHandle): Promise<Map<string
   });
   for (const { sessionId, group } of loaded) {
     if (group) groups.set(sessionId, group);
+    else unreadSessionFiles.push(`${sessionId}.json`);
   }
-  return groups;
+  return { sessions: groups, unreadSessionFiles };
 }
 
 /**
@@ -371,6 +379,7 @@ async function readCommittedDirectory(
       hasExistingData: state !== null,
       fileUpdatedAt: state?.updatedAt ?? null,
       requiresRepair: true,
+      ...(snapshot.unreadSessionFiles?.length ? { unreadSessionFiles: snapshot.unreadSessionFiles } : {}),
     };
   }
 
@@ -384,7 +393,7 @@ async function readCommittedDirectory(
       readJsonFile<unknown>(root, BIN_FILE),
       readJsonFile<unknown>(root, LEDGER_FILE),
     ]);
-    return { settings, workspaces, folders, categoryOrder, bin, ledger, sessions: await readSessions(root) };
+    return { settings, workspaces, folders, categoryOrder, bin, ledger, ...await readSessions(root) };
   };
   let files: Awaited<ReturnType<typeof readFiles>>;
   try {
@@ -394,7 +403,7 @@ async function readCommittedDirectory(
     throw error;
   }
   if (await metaChanged()) return readCommittedDirectory(root, attempt + 1);
-  const { settings, workspaces, folders, categoryOrder, bin, ledger, sessions } = files;
+  const { settings, workspaces, folders, categoryOrder, bin, ledger, sessions, unreadSessionFiles } = files;
 
   const parts: FileParts = {
     meta: {
@@ -427,6 +436,7 @@ async function readCommittedDirectory(
     state,
     hasExistingData: true,
     fileUpdatedAt: parts.meta.updatedAt,
+    ...(unreadSessionFiles.length ? { unreadSessionFiles } : {}),
     ...(meta.writeInProgress || meta.migrationInProgress ? { requiresRepair: true } : {}),
   };
 }
@@ -454,6 +464,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
   private eventTarget = new EventTarget();
   private deps: FileStorageAdapterDeps;
   private requiresFullWrite = false;
+  private unreadSessionFiles: string[] = [];
 
   constructor(root: FileSystemDirectoryHandle, deps: FileStorageAdapterDeps = {}) {
     this.root = root;
@@ -471,6 +482,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
       this.cachedState = info.state ? clone(info.state) : null;
       this.fileUpdatedAt = info.fileUpdatedAt;
       this.requiresFullWrite = !!info.requiresRepair;
+      this.unreadSessionFiles = info.unreadSessionFiles ?? [];
       this.initialized = true;
     })();
     await this.initPromise;
@@ -500,12 +512,22 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     const next = info.state ? clone(info.state) : null;
     this.fileUpdatedAt = info.fileUpdatedAt;
     this.requiresFullWrite = !!info.requiresRepair;
+    this.unreadSessionFiles = info.unreadSessionFiles ?? [];
     this.initialized = true;
     this.initPromise = null;
     const changed = !statesEqual(this.cachedState, next);
     this.cachedState = next;
     if (changed && next) {
       this.dispatchStateChanged(clone(next));
+    }
+    if (this.deps.shouldPublishPing?.() !== false) {
+      const status = await readStorageStatusProjection();
+      if (status.activeBackend === 'file' && status.folderName === this.root.name) {
+        await writeStorageStatusProjection(fileStorageStatus({
+          folderName: this.root.name, fileUpdatedAt: this.fileUpdatedAt,
+          unreadSessionCount: this.unreadSessionFiles.length,
+        }));
+      }
     }
   }
 
@@ -542,8 +564,11 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     if (this.requiresFullWrite) {
       const sessionsDir = await this.root.getDirectoryHandle(SESSIONS_DIR, { create: true });
       for await (const [name, handle] of asPermissionable(sessionsDir).entries()) {
-        if (handle.kind === 'file' && name.endsWith('.json')
-          && !nextGroupIds.has(name.slice(0, -5))) toDelete.push(name.slice(0, -5));
+        if (handle.kind !== 'file' || !name.endsWith('.json') || nextGroupIds.has(name.slice(0, -5))) continue;
+        if (this.unreadSessionFiles.includes(name)) continue;
+        const group = await readSessionFile(sessionsDir, name.slice(0, -5));
+        if (group && group.id === name.slice(0, -5) && Array.isArray(group.tabs)) toDelete.push(name.slice(0, -5));
+        else this.unreadSessionFiles.push(name);
       }
     } else if (cached) {
       for (const g of cached.groups) {
@@ -557,7 +582,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     // Persist the previous snapshot before any file can be replaced or removed.
     const commitId = createId('file-commit');
     const recoveryFile = `.tabboard-recovery-${commitId}.json`;
-    await atomicWriteFile(this.root, recoveryFile, serializeJson({ commitId, state: cached }));
+    await atomicWriteFile(this.root, recoveryFile, serializeJson({ commitId, state: cached, unreadSessionFiles: this.unreadSessionFiles }));
     const previous = splitState(cached ?? createEmptyState()).meta;
 
     // Phase 1 keeps the committed revision; pendingRevision names the candidate.
@@ -633,6 +658,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
           [BOOTSTRAP_KEY]: fileStorageStatus({
             folderName: this.root.name || null,
             fileUpdatedAt: nextState.updatedAt,
+            unreadSessionCount: this.unreadSessionFiles.length,
           }),
           [SETTINGS_PROJECTION_KEY]: projectionFromState(nextState),
           [FILE_PING_KEY]: {
@@ -654,6 +680,10 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
 
   getFileUpdatedAt(): string | null {
     return this.fileUpdatedAt;
+  }
+
+  getUnreadSessionCount(): number {
+    return this.unreadSessionFiles.length;
   }
 
   private dispatchStateChanged(state: TabBoardState): void {

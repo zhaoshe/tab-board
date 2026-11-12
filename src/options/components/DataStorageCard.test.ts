@@ -21,6 +21,7 @@ const harness = vi.hoisted(() => ({
   statusListener: null as null | ((status: StorageStatusProjection) => void),
   getActiveAdapter: vi.fn(),
   reconnectFolder: vi.fn(),
+  reloadFileState: vi.fn(),
 }));
 
 vi.mock('../../shared/store/fsBootstrap', () => ({
@@ -41,6 +42,7 @@ vi.mock('../../shared/store/activeAdapter', () => ({
     reason === 'File storage error: document is not defined'
     || reason === 'File storage error: window is not defined',
   reconnectFolder: harness.reconnectFolder,
+  reloadFileState: harness.reloadFileState,
 }));
 
 vi.mock('./FolderPickerDialog', () => ({
@@ -86,6 +88,7 @@ beforeEach(() => {
   harness.getActiveAdapter.mockReset();
   harness.getActiveAdapter.mockResolvedValue({});
   harness.reconnectFolder.mockReset();
+  harness.reloadFileState.mockReset();
   vi.stubGlobal('chrome', {
     runtime: { sendMessage: vi.fn(async () => ({ ok: true })) },
   });
@@ -101,6 +104,22 @@ afterEach(async () => {
 });
 
 describe('DataStorageCard status composition', () => {
+  it('shows incomplete folder data and re-reads without hiding the original files', async () => {
+    harness.status = {
+      configuredTarget: 'file', activeBackend: 'file', folderName: 'TabBoard',
+      fallbackReason: null, fileUpdatedAt: null, unreadSessionCount: 1,
+    };
+    harness.reloadFileState.mockImplementation(async () => {
+      harness.statusListener?.({ ...harness.status, unreadSessionCount: 0 });
+    });
+    await mountCard();
+    expect(document.body.textContent).toContain('1 saved session could not be read');
+    const retry = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find(button => button.textContent?.trim() === 'Re-read folder');
+    expect(retry).toBeDefined();
+    await act(async () => { retry?.click(); });
+    expect(document.body.textContent).not.toContain('saved session could not be read');
+  });
   it('renders Browser storage without folder metadata or fallback actions', async () => {
     await mountCard();
 

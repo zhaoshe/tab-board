@@ -89,6 +89,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `activeAdapter` 是稳定的 Storage Authority。启动时读 `chrome.storage.local["tabboardStorageConfig"]`（BOOTSTRAP_KEY）中的 `StorageStatusProjection` 决定内部 backend；callers 可长期持有同一个 authority interface，backend 切换不会让 subscription 或缓存引用失效。旧 `{ mode }` 记录只作为兼容输入解析。
 - `settingsProjection.ts` 持有可丢弃的 `tabboardSettingsProjection` read model（settings + mutationRevision + updatedAt）。Chrome commit 与 canonical state 原子写入 projection；File commit 在 final meta commit 后发布 projection。projection 缺失或损坏时只允许一次 canonical state repair，不成为第二写入真相。
 - 同一模块还定义 `StorageStatusProjection`：`configuredTarget` 表达用户正式选择，`activeBackend` 表达当前实际 writer，并持久化 `folderName`、`fallbackReason` 和最后一次成功 File commit 的 `fileUpdatedAt`。DirectoryHandle 只存 IndexedDB，不进入该 projection。
+- `StorageStatusProjection` 额外允许 `unreadSessionCount`，用于把“本次目录读取跳过了多少损坏 session 文件”的结果持久化给 Manager/Options；Browser target 不携带该字段。
 - 页面 context 中，`activeAdapter` 只在 file bootstrap、迁移、reconnect 或 handle 清理分支通过 literal dynamic import 加载 `fileStorage` / `fsDirectory`；browser mode 不执行 file backend 模块。MV3 service worker 不支持 dynamic `import()`，因此 worker 入口静态导入这两个模块，并通过既有 module-loader seam 注入 Storage Authority。
 - `storageEvents.ts` 独立承载 file commit ping 与跨 context fallback event；authority 只在 File backend 活跃时绑定这两类 transport，并按 event id 去重。
 - File backend 在初始化、读取、写入或 ping reload 时失败，authority 会切换 backend、重绑 subscription 并通知 UI。本 context 首次发现故障时先把最后一次有效 snapshot 保存到 Chrome；收到其他 context 的 fallback event 时直接读取对方已提交的 Chrome state，禁止用旧 File snapshot 反向覆盖。本次失败写仍 reject，避免把未提交 mutation 误报为成功；既有 persistence retry 会在 Chrome backend 上重试。
@@ -134,6 +135,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `WorkspaceContent` 只消费 board projection；Zustand selector仅用于当前自定义 category标题，不再读取全部 groups或手写 `starred` / `archived` / `folderId` membership。render、card insertion index和end target因此共享 orphan-folder → Inbox语义。
 - `src/shared/applicationFeedback.ts` 是 page-local application feedback owner，提供typed `publish()` / `subscribe()`；channel无DOM/React/Zustand/Chrome依赖、同步且不replay，listener异常被隔离。
 - `useToastNotifications.ts` 只把 `ApplicationFeedback` discriminated union映射为现有toast copy；Store与Manager不再通过window event names通信。
+- `StorageRecoveryNotice` 通过 shared `useStorageStatusProjection()` 直接订阅 bootstrap projection，在 Manager shell 里独立渲染持久化的文件恢复提示；dismiss 只存在当前页面内存，不进入 Zustand、canonical state 或 storage projection。
 - DnD 不复用未类型化 payload；resolver 先校验 workspace/ownership/URL/locked/index 边界，session body 不产生 merge intent。
 - Manager production 不拥有 session/drop execution module；`src/manager/core/commands.ts` 已删除。Shared/background production modules不得导入 Manager。
 - `ManagerLayout` 持有一个 Open Tabs workflow，并通过 `useManagerSelectionScope()` 只拥有当前 active `SelectionScope`。Open Tab IDs 仍由 workflow 持有，saved item IDs 仍由各 `SessionCard` 持有；clear callback 只用于 scope replacement / Exit 同步通知旧 owner，不进入 Zustand、canonical state 或 persistence。
@@ -190,7 +192,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `useOptionsSettings()` 同时拥有 settings mutation queue 的 `loading / idle / saving / saved / error` 状态和失败 retry patch；Options 不再用 component-local state 猜测 persistence 时序。自定义过滤草稿只在 debounce owner 中维护 draft pending。
 - `RestoreSettingsSection` 把现有 `restoreGroupsInNewWindow` / `restoreNextToCurrent` booleans 投影为 Destination / Placement 策略；New window 只禁用不适用的 Placement UI，不改 schema，也不清除用户偏好。
 - `OptionsApp` 只在 Advanced disclosure 打开时 lazy-load `AdvancedSettingsContent`。Storage location、file migration、disconnect/reset dialogs 和 Storage Authority 都不进入默认 Options preload graph；Advanced 打开后直接渲染 Storage、deletion confirmation、Keyboard shortcuts 和 Reset 四个 A2 setting rows，不增加单项二级 section。
-- `DataStorageCard` 只读取/订阅 `StorageStatusProjection`，不读取 canonical state、Zustand 或 IndexedDB handle。Fallback 时 configured target 仍是 File，active backend 才是 Browser；UI 保留 folder identity、reason 和 `meta.json.updatedAt` freshness。
+- `DataStorageCard` 只读取/订阅 `StorageStatusProjection`，不读取 canonical state、Zustand 或 IndexedDB handle。Fallback 时 configured target 仍是 File，active backend 才是 Browser；UI 保留 folder identity、reason、`meta.json.updatedAt` freshness，以及 unread session recovery notice。只有 File backend 仍活跃时才提供 `Re-read folder`，避免在 Browser fallback 下给出无效动作。
 
 ### `src/popup/`
 

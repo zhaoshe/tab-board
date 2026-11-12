@@ -15,6 +15,7 @@ export interface ReloadableStorageAdapter extends StorageAdapter {
 
 export interface FileStorageAdapter extends ReloadableStorageAdapter {
   getFileUpdatedAt(): string | null;
+  getUnreadSessionCount(): number;
 }
 
 export interface AdapterInitError extends Error {
