@@ -28,6 +28,7 @@ import {
 } from './activeAdapter';
 import type { IdbFactory } from './fsDirectory';
 import { createFileStorageAdapter } from './fileStorage';
+import { atomicWriteFile } from './fsAtomic';
 
 // ---------- chrome.storage + onChanged mock ----------
 
@@ -1005,6 +1006,43 @@ describe('activeAdapter', () => {
     const savedFile = JSON.parse(await (await (await root.getFileHandle('.tabboard-reconnect-file.json')).getFile()).text());
     expect(savedBrowser.groups).toEqual(browserState.groups);
     expect(savedFile.groups).toEqual(fileState.groups);
+  });
+
+  it('preserves unreadSessionCount when reconnecting a still-unread folder', async () => {
+    const root = createMemoryDirectory('reconnect');
+    withPermission(root);
+    const originalState = knownState();
+    await (await createFileStorageAdapter(root)).setState(originalState);
+    const sessionsDir = await root.getDirectoryHandle('sessions');
+    const unreadFileName = `${originalState.groups[0].id}.json`;
+    await atomicWriteFile(sessionsDir, unreadFileName, '{broken');
+
+    const unreadAdapter = await createFileStorageAdapter(root);
+    const unreadState = await unreadAdapter.getState();
+    expect(unreadAdapter.getUnreadSessionCount()).toBe(1);
+
+    chromeMock.storage.local.data[STATE_KEY] = unreadState;
+    chromeMock.storage.local.data[BOOTSTRAP_KEY] = {
+      configuredTarget: 'file',
+      activeBackend: 'browser',
+      folderName: 'reconnect',
+      fallbackReason: 'Permission was denied.',
+      fileUpdatedAt: originalState.updatedAt,
+      unreadSessionCount: 1,
+    };
+
+    await getActiveAdapter();
+    await reconnectFolder(root);
+
+    expect(await isFileModeActive()).toBe(true);
+    expect(await getStorageStatus()).toEqual({
+      configuredTarget: 'file',
+      activeBackend: 'file',
+      folderName: 'reconnect',
+      fallbackReason: null,
+      fileUpdatedAt: originalState.updatedAt,
+      unreadSessionCount: 1,
+    });
   });
 
   it('does not automatically recover a worker fallback when browser data has diverged', async () => {

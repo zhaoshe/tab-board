@@ -478,7 +478,10 @@ function getAuthority(): StorageAuthority {
 
 async function commitFileHandleAndBootstrap(
   root: FileSystemDirectoryHandle,
-  fileUpdatedAt: string | null,
+  health: {
+    fileUpdatedAt: string | null;
+    unreadSessionCount?: number;
+  },
 ): Promise<void> {
   const {
     clearRootHandle,
@@ -490,7 +493,8 @@ async function commitFileHandleAndBootstrap(
   try {
     await writeStorageStatusProjection(fileStorageStatus({
       folderName: root.name || null,
-      fileUpdatedAt,
+      fileUpdatedAt: health.fileUpdatedAt,
+      unreadSessionCount: health.unreadSessionCount,
     }));
   } catch (error: unknown) {
     if (previousRoot) {
@@ -595,7 +599,10 @@ export async function switchToFileMode(
     shouldPublishPing: () => committed,
   });
   await adapter.setState(initialState);
-  await commitFileHandleAndBootstrap(root, initialState.updatedAt);
+  await commitFileHandleAndBootstrap(root, {
+    fileUpdatedAt: initialState.updatedAt,
+    unreadSessionCount: adapter.getUnreadSessionCount(),
+  });
   committed = true;
   await getAuthority().install('file', adapter, initialState);
   await writeFilePing(initialState.mutationRevision, initialState.updatedAt);
@@ -659,7 +666,10 @@ export async function reconnectFolder(root: FileSystemDirectoryHandle, choice?: 
       });
       await adapter.setState(state);
     }
-    await commitFileHandleAndBootstrap(root, adapter.getFileUpdatedAt());
+    await commitFileHandleAndBootstrap(root, {
+      fileUpdatedAt: adapter.getFileUpdatedAt(),
+      unreadSessionCount: adapter.getUnreadSessionCount(),
+    });
     await getAuthority().install('file', adapter, state);
     await writeFilePing(state.mutationRevision, state.updatedAt);
   };
