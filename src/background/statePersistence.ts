@@ -8,6 +8,7 @@ import {
   validateMutationBatch,
   type StateMutation,
 } from '../shared/store/stateMutations';
+import type { StateWriteOptions } from '../shared/store/storageAdapter';
 import { isDropIntentAlreadyApplied } from '../shared/model/drop-operations';
 
 interface LockManagerLike {
@@ -16,7 +17,7 @@ interface LockManagerLike {
 
 export interface StatePersistenceDependencies {
   getState: () => Promise<TabBoardState>;
-  setState: (state: TabBoardState) => Promise<void>;
+  setState: (state: TabBoardState, options?: StateWriteOptions) => Promise<void>;
   locks?: LockManagerLike;
 }
 
@@ -38,6 +39,7 @@ export function createStatePersistence({
     const current = await getState();
     const appliedAt = nowIso();
     let replayed = current;
+    let backupBeforeRestore: TabBoardState | undefined;
     let revisionContext = createDropMutationBatchContext(validated.invalidDropIndexes);
     const invalidMutationIndexes = [...validated.invalidDropIndexes];
     const committedMutationIndexes: number[] = [];
@@ -57,7 +59,9 @@ export function createStatePersistence({
             ))) {
           throw new InvalidDropMutationError('Drop mutation revision is stale.');
         }
+        const before = replayed;
         replayed = applyStateMutation(replayed, prepared.mutation, appliedAt);
+        if (prepared.mutation.type === 'restore-backup') backupBeforeRestore = normalizeState(before);
         committedMutationIndexes.push(validated.originalIndexes[index]);
       } catch (error: unknown) {
         if (mutation.type === 'drop-intent' && error instanceof InvalidDropMutationError) {
@@ -73,7 +77,7 @@ export function createStatePersistence({
 
     const committedState = normalizeState(replayed);
     if (committedMutationIndexes.length) {
-      await setState(committedState);
+      await setState(committedState, backupBeforeRestore ? { backupBeforeRestore } : undefined);
     }
     if (invalidMutationIndexes.length) {
       throw new InvalidDropMutationError(

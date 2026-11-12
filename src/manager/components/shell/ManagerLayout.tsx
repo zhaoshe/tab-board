@@ -61,6 +61,8 @@ export function ManagerLayout() {
   useTitleRefreshActivityListener();
   const sidebar = useSidebarDisclosure();
   const [importModalOpened, setImportModalOpened] = useState(false);
+  // The old page URL must not overwrite the workspace published by full restore.
+  const restoreNavigationRef = useRef<{ workspaceId: string | null } | null>(null);
   const [exportModalOpened, setExportModalOpened] = useState(false);
   const [sessionTargetPicker, setSessionTargetPicker] =
     useState<OpenSessionTargetPickerInput | null>(null);
@@ -158,7 +160,26 @@ export function ManagerLayout() {
     showError,
   });
 
+  const handleRestoreBackup = async (text: string, expectedRevision: number) => {
+    const navigation: { workspaceId: string | null } = { workspaceId: null };
+    restoreNavigationRef.current = navigation;
+    try {
+      await useTabBoardStore.getState().restoreBackup(text, expectedRevision);
+      const restored = useTabBoardStore.getState();
+      navigation.workspaceId = restored.activeWorkspaceId;
+      pageState.replace({ workspaceId: restored.activeWorkspaceId, view: 'board' }, restored);
+    } catch (error) {
+      restoreNavigationRef.current = null;
+      throw error;
+    }
+  };
+
   useEffect(() => {
+    const restoreNavigation = restoreNavigationRef.current;
+    if (restoreNavigation) {
+      if (restoreNavigation.workspaceId !== pageState.state.workspaceId) return;
+      restoreNavigationRef.current = null;
+    }
     if (shouldSyncActiveWorkspace(
       pageState.state.workspaceId,
       activeWorkspaceId,
@@ -296,6 +317,7 @@ export function ManagerLayout() {
             opened={importModalOpened}
             onClose={() => setImportModalOpened(false)}
             category={selectedCategory}
+            onRestoreBackup={handleRestoreBackup}
           />
           <ExportModal
             opened={exportModalOpened}

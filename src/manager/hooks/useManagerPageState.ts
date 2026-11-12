@@ -37,7 +37,7 @@ type NavigationUpdate = Partial<Omit<ManagerPageState, 'query'>>;
 export interface ManagerPageStateController {
   state: ManagerPageState;
   navigate(update: NavigationUpdate): void;
-  replace(update: NavigationUpdate): void;
+  replace(update: NavigationUpdate, restoredState?: ValidationState): void;
   setQuery(query: string): void;
 }
 
@@ -92,12 +92,14 @@ export function useManagerPageState(
   const updateNavigation = useCallback((
     update: NavigationUpdate,
     method: 'pushState' | 'replaceState',
+    restoredState?: ValidationState,
   ) => {
+    const currentValidationState = restoredState ?? validationState;
     const current = navigationStateRef.current;
     const nextWorkspaceId = update.workspaceId ?? current.workspaceId;
     const category = update.workspaceId && update.category === undefined
       ? chooseInitialCategory(
-        validationState,
+        currentValidationState,
         nextWorkspaceId,
         readCategoryPreference(nextWorkspaceId),
       )
@@ -107,7 +109,7 @@ export function useManagerPageState(
       ...update,
       ...(category ? { category } : {}),
       query: savedSearchQueryStore.getSnapshot(),
-    }, validationState);
+    }, currentValidationState);
     const projected = {
       workspaceId: next.workspaceId,
       category: next.category,
@@ -124,8 +126,8 @@ export function useManagerPageState(
   const navigate = useCallback((update: NavigationUpdate) => {
     updateNavigation(update, 'pushState');
   }, [updateNavigation]);
-  const replace = useCallback((update: NavigationUpdate) => {
-    updateNavigation(update, 'replaceState');
+  const replace = useCallback((update: NavigationUpdate, restoredState?: ValidationState) => {
+    updateNavigation(update, 'replaceState', restoredState);
   }, [updateNavigation]);
   const setQuery = useCallback((nextQuery: string) => {
     savedSearchQueryStore.set(nextQuery);

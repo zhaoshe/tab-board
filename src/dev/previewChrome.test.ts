@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  createEmptyState,
   createGroupFromTabRecords,
   createTabRecord,
   normalizeState,
@@ -425,6 +426,42 @@ describe('preview Chrome fixture', () => {
     expect(changes[0]).toMatchObject({ tabboardState: { newValue: harness.state } });
     harness.chrome.storage.onChanged.removeListener(listener);
     expect(harness.listenerCount('storage.onChanged')).toBe(0);
+  });
+
+  it('complete restore through the preview worker atomically saves old data and rejects a stale replacement', async () => {
+    let persisted = '';
+    const before = normalizeState({ ...createEmptyState(), mutationRevision: 4 });
+    const incomingBase = createEmptyState();
+    const second = { ...incomingBase.workspaces[0], id: 'workspace-second', name: 'Second' };
+    const incoming = normalizeState({ ...incomingBase, mutationRevision: 90, workspaces: [second], activeWorkspaceId: second.id,
+      settings: { ...incomingBase.settings, theme: 'dark', storageMode: 'file', storageFolderName: 'Other folder' } });
+    const harness = install({ state: before, storagePersistence: { read: () => persisted || null, write: value => { persisted = value; } } });
+    const changes: unknown[] = [];
+    harness.chrome.storage.onChanged.addListener(change => changes.push(change));
+    const mutation = { type: 'restore-backup', backup: incoming, expectedRevision: 4, updatedAt: incoming.updatedAt };
+    const restored = await harness.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations: [mutation] });
+    expect(restored).toMatchObject({ ok: true, result: { mutationRevision: 5, activeWorkspaceId: 'workspace-second', settings: { theme: 'dark', storageMode: 'browser', storageFolderName: '' } } });
+    const stored = await harness.chrome.storage.local.get(['tabboardState', 'tabboardBackupBeforeRestore']);
+    expect(stored.tabboardBackupBeforeRestore).toEqual(before);
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ tabboardState: { newValue: harness.state }, tabboardBackupBeforeRestore: { newValue: before } });
+    expect(JSON.parse(persisted).tabboardBackupBeforeRestore).toEqual(before);
+    await expect(harness.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations: [mutation] })).resolves.toMatchObject({ ok: false, code: 'BACKUP_REVISION_CONFLICT' });
+    expect(await harness.chrome.storage.local.get(['tabboardState', 'tabboardBackupBeforeRestore'])).toEqual(stored);
+    expect(changes).toHaveLength(1);
+  });
+
+  it('failed preview backup publication keeps current data and permits retry', async () => {
+    const before = createEmptyState();
+    const incoming = normalizeState({ ...before, settings: { ...before.settings, theme: 'dark' } });
+    const harness = install({ state: before });
+    vi.spyOn(harness.chrome.storage.local, 'set').mockRejectedValueOnce(new Error('Preview publication failed'));
+    const request = { type: 'tabboard-state-mutations', mutations: [{ type: 'restore-backup', backup: incoming, expectedRevision: 0, updatedAt: incoming.updatedAt }] };
+    await expect(harness.chrome.runtime.sendMessage(request)).resolves.toMatchObject({ ok: false, error: 'Preview publication failed' });
+    expect(harness.state).toEqual(before);
+    expect(await harness.chrome.storage.local.get('tabboardBackupBeforeRestore')).toEqual({});
+    await expect(harness.chrome.runtime.sendMessage(request)).resolves.toMatchObject({ ok: true, result: { mutationRevision: 1, settings: { theme: 'dark' } } });
+    expect((await harness.chrome.storage.local.get('tabboardBackupBeforeRestore')).tabboardBackupBeforeRestore).toEqual(before);
   });
 
   it('honors storage.local.get defaults and preserves failed mutation envelopes', async () => {

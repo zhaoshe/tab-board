@@ -2102,6 +2102,14 @@ Accepted。
 - Tradeoff: one dialog for real divergence and two bounded local recovery JSON files; automatic worker recovery stays in browser mode when content differs.
 - Status: implemented with core, UI and Orca native filesystem verification.
 
+## D072: Complete restore is explicit and saves current data first
+
+- Problem: adding sessions from JSON cannot recover workspace/category structure, settings or Bin.
+- Decision: keep Import's default add behavior and offer complete restore for valid full backups. Preserve current storage configuration, save the previous normalized snapshot in that backend, then commit through the existing authority with an expected revision.
+- Reason: support recovery without silently replacing current work or switching storage based on exported settings.
+- Tradeoff: keep one latest complete pre-restore snapshot; preserve unread file bytes separately, retaining distinct copies on repeated filename collisions. Complete restore rejects snapshots that would lose data during normalization.
+- Status: implemented with model, worker, browser/file persistence and UI regressions. Orca integration evidence is recorded in the Task 7 handoff.
+
 ```md
 ## D00X: Title
 

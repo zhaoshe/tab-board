@@ -572,21 +572,15 @@ Command palette 风格搜索：
 
 ### Import
 
-入口：
+入口：Manager 顶部 More > Import。
 
-- 右侧顶部 toolbar 的 Import。
-
-支持格式：
-
-- TabBoard JSON export。
-- TabBoard text export。
-- OneTab export text。
-- 简单 URL list。
-
-规则：
-
-- 导入结果插入当前 workspace 头部。
-- OneTab 文本中由空行分隔的 blocks 会变成多个 sessions。
+- 默认向当前 workspace/category 追加 sessions，兼容 TabBoard JSON/text、OneTab text 和简单 URL list；空行分隔的 OneTab blocks 形成多个 sessions。
+- 完整 TabBoard JSON 会出现 `Restore complete TabBoard backup` 选项。选择后明确提示替换全部数据，再点击 `Restore Backup` 确认。
+- 完整恢复保留工作区、分类及顺序、sessions/notes、Saved/Archive/lock 等 flags、设置、Bin 与 active workspace；当前存储位置和配置不随备份改变。
+- 替换前在当前后端保存一份规范化旧快照。浏览器存储为 `tabboardBackupBeforeRestore`；文件目录为 `.tabboard-before-restore.json`。文件模式另将损坏原文复制到 `.tabboard-unread-before-restore/`，重名副本使用唯一前缀；未与备份 ID 冲突的原文件继续保留。
+- 完整恢复成功后，Manager 导航同步到备份中的活动工作区；旧 URL 不会把恢复结果切回原工作区。默认追加导入保持当前导航。
+- 恢复预览之后发生的新写入会使完整恢复拒绝提交。用户查看错误后可保留输入和恢复方式重试；不支持的版本、残缺 JSON、无效引用或实体均拒绝完整恢复。
+- 追加和完整恢复都等待后台权威提交成功才关闭弹窗；失败保留文本和方式，允许重试。
 
 ### Export
 

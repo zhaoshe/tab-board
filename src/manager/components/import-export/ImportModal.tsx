@@ -10,6 +10,7 @@ import {
   Box,
   Paper,
   Divider,
+  Radio,
 } from '@mantine/core';
 import {
   Check as IconCheck,
@@ -18,7 +19,7 @@ import {
   FileInput as IconFileImport,
 } from 'lucide-react';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
-import { parseImportedText } from '../../../shared/model/session-operations';
+import { parseCompleteBackup, parseImportedText } from '../../../shared/model/session-operations';
 import { formatNumber } from '../../../shared/utils/formatters';
 import type { CategoryFilter } from '../../core/selectors';
 import { ManagerModal } from '../shell/ManagerModal';
@@ -27,26 +28,38 @@ interface ImportModalProps {
   opened: boolean;
   onClose: () => void;
   category?: CategoryFilter;
+  onRestoreBackup?: (text: string, expectedRevision: number) => Promise<void>;
 }
 
-export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModalProps) {
+export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBackup }: ImportModalProps) {
   const [importText, setImportText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [preview, setPreview] = useState<{ groupCount: number; tabCount: number } | null>(null);
+  const [mode, setMode] = useState<'sessions' | 'restore'>('sessions');
+  const [completeBackup, setCompleteBackup] = useState<{ workspaceCount: number } | null>(null);
+  const [expectedRevision, setExpectedRevision] = useState(0);
+  const [isImporting, setIsImporting] = useState(false);
+  const mutationRevision = useTabBoardStore((state) => state.mutationRevision);
+  const restoreBackup = useTabBoardStore((state) => state.restoreBackup);
   const importGroups = useTabBoardStore((state) => state.importGroups);
   const activeWorkspaceId = useTabBoardStore((state) => state.activeWorkspaceId);
 
   const folderId = category.startsWith('folder:') ? category.slice('folder:'.length) : null;
 
   const updatePreview = useCallback((text: string) => {
+    setExpectedRevision(mutationRevision);
+    let backup = null;
+    try { backup = parseCompleteBackup(text); } catch { /* Session imports also accept partial exports and text. */ }
+    setCompleteBackup(backup ? { workspaceCount: backup.workspaces.length } : null);
     if (!text.trim()) {
       setPreview(null);
       setError(null);
       return;
     }
     try {
-      const groups = parseImportedText(text);
+      if (mode === 'restore' && !backup) parseCompleteBackup(text);
+      const groups = backup ? backup.groups : parseImportedText(text);
       const tabCount = groups.reduce((sum, g) => sum + g.tabs.length, 0);
       setPreview({ groupCount: groups.length, tabCount });
       setError(null);
@@ -56,7 +69,7 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
       setPreview(null);
       setError(message);
     }
-  }, []);
+  }, [mode, mutationRevision]);
 
   const handleTextChange = (value: string) => {
     setImportText(value);
@@ -73,14 +86,15 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
+    if (isImporting) return;
     const file = e.dataTransfer.files?.[0];
     if (file) {
       readFile(file);
     }
-  }, []);
+  };
 
   const readFile = (file: File) => {
     const reader = new FileReader();
@@ -90,36 +104,47 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
       updatePreview(text);
     };
     reader.onerror = () => {
-      setImportText('');
-      setPreview(null);
       setError('The file could not be read. Choose a readable JSON or text export and try again.');
     };
     reader.readAsText(file);
   };
 
   const handleFileSelect = (file: File | null) => {
-    if (file) {
+    if (file && !isImporting) {
       readFile(file);
     }
   };
 
-  const handleImport = () => {
+  const handleImport = async () => {
     if (!importText.trim()) {
       setError('Paste a TabBoard export or OneTab URL list before importing.');
       return;
     }
+    setIsImporting(true);
     try {
-      importGroups(importText, { workspaceId: activeWorkspaceId, folderId });
+      if (mode === 'restore') {
+        await (onRestoreBackup ?? restoreBackup)(importText, expectedRevision);
+      } else {
+        await importGroups(importText, { workspaceId: activeWorkspaceId, folderId });
+      }
       setImportText('');
       setPreview(null);
       setError(null);
+      setMode('sessions');
+      setCompleteBackup(null);
       onClose();
     } catch (e) {
       setError(`Import failed: ${e instanceof Error ? e.message : 'unknown error'}. Check the format and try again.`);
+      setExpectedRevision(useTabBoardStore.getState().mutationRevision);
+    } finally {
+      setIsImporting(false);
     }
   };
 
   const handleClose = () => {
+    if (isImporting) return;
+    setMode('sessions');
+    setCompleteBackup(null);
     setImportText('');
     setPreview(null);
     setError(null);
@@ -163,6 +188,7 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
               >
                 {(props) => (
                   <Button
+                    disabled={isImporting}
                     variant="light"
                     leftSection={<IconFileImport size={16} aria-hidden="true" />}
                     {...props}
@@ -183,12 +209,33 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
           autoComplete="off"
           spellCheck={false}
           placeholder="Paste import text here…"
+          readOnly={isImporting}
           value={importText}
           onChange={(e) => handleTextChange(e.target.value)}
           minRows={10}
           autosize
           style={{ fontFamily: 'monospace', fontSize: 'var(--mantine-font-size-xs)' }}
         />
+
+        {(completeBackup || mode === 'restore') && (
+          <Radio.Group
+            label="Import mode"
+            value={mode}
+            onChange={(value) => { setMode(value === 'restore' ? 'restore' : 'sessions'); setError(null); setExpectedRevision(mutationRevision); }}
+          >
+            <Stack gap="xs" mt="xs">
+              <Radio value="sessions" label="Add sessions to this workspace" disabled={isImporting} />
+              <Radio value="restore" label="Restore complete TabBoard backup" disabled={isImporting} />
+            </Stack>
+          </Radio.Group>
+        )}
+
+        {mode === 'restore' && (
+          <Alert color="yellow" variant="light">
+            Restore replaces all workspaces, sessions, categories, notes, settings and Bin entries.
+            Your current storage location stays selected. A copy of current data is saved locally before replacement.
+          </Alert>
+        )}
 
         <Paper withBorder p="sm" bg="var(--mantine-color-gray-0)">
           <Text size="xs" c="dimmed" fw={500} mb="xs">
@@ -204,16 +251,16 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
           </Stack>
         </Paper>
 
-        {preview && preview.groupCount > 0 && (
+        {preview && (preview.groupCount > 0 || mode === 'restore' && completeBackup) && (
           <Alert icon={<IconCheck size={16} aria-hidden="true" />} color="green" variant="light">
             <Text size="sm" className="tabular-nums">
-              Will import <strong>{formatNumber(preview.groupCount)}</strong> session{preview.groupCount !== 1 ? 's' : ''}{' '}
+              {mode === 'restore' ? `Will restore ${formatNumber(completeBackup?.workspaceCount || 0)} workspace(s) and ` : 'Will import '}<strong>{formatNumber(preview.groupCount)}</strong> session{preview.groupCount !== 1 ? 's' : ''}{' '}
               with <strong>{formatNumber(preview.tabCount)}</strong> tab{preview.tabCount !== 1 ? 's' : ''}
             </Text>
           </Alert>
         )}
 
-        {preview && preview.groupCount === 0 && importText.trim() && (
+        {mode === 'sessions' && preview && preview.groupCount === 0 && importText.trim() && (
           <Alert icon={<IconAlertCircle size={16} aria-hidden="true" />} color="yellow" variant="light">
             <Text size="sm">No sessions found in the import text</Text>
           </Alert>
@@ -226,15 +273,16 @@ export function ImportModal({ opened, onClose, category = 'inbox' }: ImportModal
         )}
 
         <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={handleClose}>
+          <Button variant="default" onClick={handleClose} disabled={isImporting}>
             Cancel
           </Button>
           <Button
             onClick={handleImport}
-            disabled={!preview || preview.groupCount === 0}
+            loading={isImporting}
+            disabled={!preview || (mode === 'restore' ? !completeBackup : preview.groupCount === 0)}
             leftSection={<IconUpload size={16} aria-hidden="true" />}
           >
-            Import
+            {mode === 'restore' ? 'Restore Backup' : 'Import'}
           </Button>
         </Group>
       </Stack>

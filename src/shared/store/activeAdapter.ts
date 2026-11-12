@@ -30,6 +30,7 @@ import type {
   ReloadableStorageAdapter,
   StorageAdapter,
   StorageMode,
+  StateWriteOptions,
 } from './storageAdapter';
 import {
   BROWSER_STORAGE_STATUS,
@@ -392,11 +393,11 @@ class StorageAuthority implements StorageAdapter {
     }
   }
 
-  setState(state: TabBoardState): Promise<void> {
+  setState(state: TabBoardState, options?: StateWriteOptions): Promise<void> {
     return this.enqueueOperation(async () => {
       const backend = await this.ensureBackend();
       try {
-        await backend.adapter.setState(state);
+        await backend.adapter.setState(state, options);
         this.recordState(state);
       } catch (error: unknown) {
         if (backend.mode === 'file') {
@@ -523,8 +524,8 @@ export async function getActiveState(): Promise<TabBoardState> {
   return getAuthority().getState();
 }
 
-export async function setActiveState(state: TabBoardState): Promise<void> {
-  return getAuthority().setState(state);
+export async function setActiveState(state: TabBoardState, options?: StateWriteOptions): Promise<void> {
+  return getAuthority().setState(state, options);
 }
 
 export async function ensureActiveState(): Promise<TabBoardState> {

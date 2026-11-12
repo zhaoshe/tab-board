@@ -24,6 +24,7 @@ import {
 } from './stateMutations';
 import {
   importText,
+  parseCompleteBackup,
   restoreGroupFromBin,
 } from '../model/session-operations';
 import type { DropIntent, SavedTabRef } from '../model/drop-intent';
@@ -100,7 +101,8 @@ interface TabBoardStore extends TabBoardState {
     categoryOrder: readonly string[],
     options: { expectedCategoryOrder: readonly string[] },
   ) => Promise<void>;
-  importGroups: (text: string, options?: { workspaceId?: string; folderId?: string | null }) => void;
+  importGroups: (text: string, options?: { workspaceId?: string; folderId?: string | null }) => Promise<void>;
+  restoreBackup: (text: string, expectedRevision: number) => Promise<void>;
   exportAll: () => string;
   toggleFolderCollapsed: (folderId: string) => void;
 }
@@ -627,12 +629,18 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
       const existingIds = new Set(state.groups.map((group) => group.id));
       const newGroups = importedState.groups.filter((group) => !existingIds.has(group.id));
       const updatedAt = importedState.updatedAt;
-      commitMutation({ type: 'import-groups', groups: newGroups, updatedAt });
+      const pending = publication.commitChecked({ type: 'import-groups', groups: newGroups, updatedAt });
+      pending.catch((error: unknown) => reportPersistenceError(error));
+      return pending;
     } catch (error: unknown) {
       reportError(error, 'import');
       throw error;
     }
   },
+
+  restoreBackup: (text, expectedRevision) => publication.commitChecked({
+    type: 'restore-backup', backup: parseCompleteBackup(text), expectedRevision, updatedAt: nowIso(),
+  }),
 
   exportAll: () => exportToJson(persistedSnapshot(get())),
 

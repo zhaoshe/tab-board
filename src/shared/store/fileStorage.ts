@@ -58,7 +58,7 @@ import {
   splitState,
   type FileParts,
 } from './fileSerialization';
-import type { AdapterInitError, FileStorageAdapter } from './storageAdapter';
+import type { AdapterInitError, FileStorageAdapter, StateWriteOptions } from './storageAdapter';
 import { fileStorageStatus, projectionFromState } from './settingsProjection';
 import { readStorageStatusProjection, writeStorageStatusProjection } from './fsBootstrap';
 
@@ -531,11 +531,11 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     }
   }
 
-  async setState(nextState: TabBoardState): Promise<void> {
+  async setState(nextState: TabBoardState, options?: StateWriteOptions): Promise<void> {
     await this.ensureInitialized();
     const done = this.writeQueue.then(async () => {
       try {
-        await this.writeCommit(nextState);
+        await this.writeCommit(normalizeState(nextState), options);
       } catch (error) {
         this.requiresFullWrite = true;
         throw error;
@@ -546,7 +546,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     await done;
   }
 
-  private async writeCommit(nextState: TabBoardState): Promise<void> {
+  private async writeCommit(nextState: TabBoardState, options?: StateWriteOptions): Promise<void> {
     const start = Date.now();
     const cached = this.cachedState;
     const parts = splitState(nextState);
@@ -556,12 +556,12 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     const nextGroupIds = new Set<string>();
     for (const [id, group] of parts.sessions) {
       nextGroupIds.add(id);
-      if (this.requiresFullWrite || !cached || !cached.groups.some((g) => g.id === id && groupsEqual(g, group))) {
+      if (options || this.requiresFullWrite || !cached || !cached.groups.some((g) => g.id === id && groupsEqual(g, group))) {
         toWrite.push({ id, group });
       }
     }
     const toDelete: string[] = [];
-    if (this.requiresFullWrite) {
+    if (options || this.requiresFullWrite) {
       const sessionsDir = await this.root.getDirectoryHandle(SESSIONS_DIR, { create: true });
       for await (const [name, handle] of asPermissionable(sessionsDir).entries()) {
         if (handle.kind !== 'file' || !name.endsWith('.json') || nextGroupIds.has(name.slice(0, -5))) continue;
@@ -578,6 +578,24 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
 
     // Ensure sessions/ directory exists.
     await this.root.getDirectoryHandle(SESSIONS_DIR, { create: true });
+
+    if (options) {
+      await atomicWriteFile(this.root, '.tabboard-before-restore.json', serializeJson(normalizeState(options.backupBeforeRestore)));
+      if (this.unreadSessionFiles.length) {
+        const preserved = await this.root.getDirectoryHandle('.tabboard-unread-before-restore', { create: true });
+        const sessions = await this.root.getDirectoryHandle(SESSIONS_DIR);
+        for (const name of this.unreadSessionFiles) {
+          let backupName = name;
+          try {
+            await preserved.getFileHandle(name);
+            backupName = `${createId('unread')}-${name}`;
+          } catch (error) {
+            if (!isNotFoundError(error)) throw error;
+          }
+          await atomicWriteFile(preserved, backupName, await readTextFile(await sessions.getFileHandle(name)));
+        }
+      }
+    }
 
     // Persist the previous snapshot before any file can be replaced or removed.
     const commitId = createId('file-commit');
@@ -644,6 +662,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     this.cachedState = committedState;
     this.fileUpdatedAt = nextState.updatedAt;
     this.requiresFullWrite = false;
+    this.unreadSessionFiles = this.unreadSessionFiles.filter(name => !nextGroupIds.has(name.slice(0, -5)));
 
     // Same-context notification.
     this.dispatchStateChanged(committedState);

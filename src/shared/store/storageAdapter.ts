@@ -2,9 +2,13 @@ import type { TabBoardState } from '../model';
 
 export type StorageMode = 'browser' | 'file';
 
+export interface StateWriteOptions {
+  backupBeforeRestore: TabBoardState;
+}
+
 export interface StorageAdapter {
   getState(): Promise<TabBoardState>;
-  setState(state: TabBoardState): Promise<void>;
+  setState(state: TabBoardState, options?: StateWriteOptions): Promise<void>;
   ensureState(): Promise<TabBoardState>;
   subscribeState(callback: (state: TabBoardState) => void): () => void;
 }

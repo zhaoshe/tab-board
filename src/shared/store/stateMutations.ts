@@ -33,6 +33,7 @@ import {
   type CategoryFilter,
 } from '../model/categories';
 import type { DropIntent } from '../model/drop-intent';
+import { validateCompleteBackup } from '../model/session-operations';
 import type { OpenTabInfo } from '../openTabs';
 import {
   isDropIntentShape,
@@ -57,6 +58,7 @@ import {
 export const DELETE_TABS_LIMIT = BIN_LIMIT;
 
 export type StateMutation =
+  | { type: 'restore-backup'; backup: TabBoardState; expectedRevision: number; updatedAt: string }
   | { type: 'set-active-workspace'; workspaceId: string; updatedAt: string }
   | { type: 'add-workspace'; workspace: Workspace }
   | { type: 'rename-workspace'; id: string; name: string; updatedAt: string }
@@ -368,6 +370,10 @@ function isUpdated(value: RecordValue): boolean {
 export function isStateMutation(value: unknown): value is StateMutation {
   if (!isRecord(value) || !isString(value.type)) return false;
   switch (value.type) {
+    case 'restore-backup':
+      if (!hasOnlyKeys(value, ['type', 'backup', 'expectedRevision', 'updatedAt'])
+        || !Number.isSafeInteger(value.expectedRevision) || (value.expectedRevision as number) < 0 || !isUpdated(value)) return false;
+      try { validateCompleteBackup(value.backup); return true; } catch { return false; }
     case 'set-active-workspace':
       return isString(value.workspaceId) && isUpdated(value);
     case 'add-workspace':
@@ -1684,6 +1690,7 @@ function matchesDeleteTabSnapshot(binEntry: BinEntry, group: Group, tab: TabItem
 }
 
 export type StateMutationValidationCode =
+  | 'BACKUP_REVISION_CONFLICT'
   | 'WORKSPACE_NOT_FOUND'
   | 'WORKSPACE_ID_CONFLICT'
   | 'WORKSPACE_NAME_INVALID'
@@ -2447,6 +2454,7 @@ function newGroups(state: TabBoardState, groups: readonly Group[]): Group[] {
 
 function applyStateMutationCore(state: TabBoardState, mutation: StateMutation): TabBoardState {
   assertMutation(mutation);
+  if (mutation.type === 'restore-backup') throw new Error('Use the checked backup restore path.');
   if (mutation.type === 'drop-intent') {
     return applyDropIntentMutation(state, mutation, nowIso());
   }
@@ -2798,6 +2806,15 @@ export function applyStateMutation(
   appliedAt = nowIso(),
 ): TabBoardState {
   assertMutation(mutation);
+  if (mutation.type === 'restore-backup') {
+    if (mutation.expectedRevision !== state.mutationRevision) {
+      throw new StateMutationValidationError('BACKUP_REVISION_CONFLICT', 'Data changed after the restore preview. Review the backup and try again.');
+    }
+    const restored = validateCompleteBackup(mutation.backup);
+    return advanceRevision(state, { ...restored, mutationRevision: state.mutationRevision,
+      settings: { ...restored.settings, storageMode: state.settings.storageMode, storageFolderName: state.settings.storageFolderName },
+      updatedAt: mutation.updatedAt });
+  }
   if (mutation.type === 'drop-intent') {
     return applyDropIntentMutation(state, mutation, appliedAt);
   }

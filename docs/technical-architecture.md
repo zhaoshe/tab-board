@@ -548,18 +548,15 @@ All：
 
 ### Import
 
-入口：
+入口：Manager More > Import，`ImportModal` 默认追加 sessions。
 
-- Manager top toolbar Import。
-
-流程：
-
-1. `openImportModal()` 收集文本。
-2. `parseImportPayload()` 尝试 JSON。
-3. JSON 包含 `groups` 或数组时走 `normalizeState({ groups })`。
-4. JSON 失败时走 `parseOneTabText(text)`。
-5. `parseOneTabText()` 可解析 OneTab blocks；如果未解析出 groups，会回退 `parseImportText()`。
-6. 导入 groups 加上当前 `workspaceId`，插入 groups 头部。
+- `parseImportedText()` 继续解析 TabBoard JSON/text、OneTab 与 URL list；`importGroups()` 用 `publication.commitChecked()` 提交 `import-groups`，等待确认后关闭弹窗。
+- `parseCompleteBackup()` / `validateCompleteBackup()` 只接受无损可规范化的完整 v1 snapshot，并校验实体、引用、顺序、设置与 ID。较早 v1 导出缺失 revision/ledger 时补默认值。
+- 完整恢复走 `restore-backup` typed mutation，带预览时的 `expectedRevision`。应用时比较权威 revision；恢复业务内容并保留当前 `storageMode` / `storageFolderName`，从当前 revision 推进，而不沿用备份 revision。
+- `StatePersistence` 在现有串行队列与写锁内保存替换前的规范化状态，通过显式 `StateWriteOptions.backupBeforeRestore` 传到当前 Storage Authority。
+- Browser adapter 在同一次 `chrome.storage.local.set()` 发布旧快照与新状态。File adapter 在已有 pending-meta/recovery-snapshot 事务前保存 `.tabboard-before-restore.json` 与损坏文件原文副本，再完整写入备份 sessions 并清理可读旧文件；无法读取的原文件不作为 orphan 删除，ID 冲突时写入前保存原文。File v1 布局和普通 mutation/replay/locked 校验不变。
+- ManagerLayout owns the full-restore completion callback: hold URL-to-store workspace reconciliation while committing, then replace navigation using the fresh restored validation state. Resume reconciliation after navigation reaches the restored workspace; ordinary add-session import keeps its navigation.
+- Full restore 的业务设置不触及 backend bootstrap、目录 handle 或 active-backend status。文件提交故障继续由现有 fallback 机制报告。
 
 ### Export
 

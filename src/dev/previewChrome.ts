@@ -22,6 +22,8 @@ import type { BrowserGroup, Group, TabBoardState, TabItem } from '../shared/mode
 import type { OpenTabsCaptureResult } from '../shared/openTabs';
 import { getCaptureCandidateReason, isExtensionPageUrl, matchesCustomUrlFilter } from '../shared/model/capture-policy';
 import { applyStateMutations } from '../shared/store/stateMutations';
+import { createStatePersistence } from '../background/statePersistence';
+import type { StateWriteOptions } from '../shared/store/storageAdapter';
 
 export type PreviewTab = chrome.tabs.Tab & {
   id: number;
@@ -683,9 +685,11 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
     return candidateTabs.map((tab) => tab.windowId === windowId ? byId.get(tab.id)! : { ...tab });
   };
 
-  const setStoredState = async (nextState: TabBoardState): Promise<void> => {
-    state = normalizeState(nextState);
-    await storageLocal.set({ [STATE_KEY]: clone(state) });
+  const setStoredState = async (nextState: TabBoardState, options?: StateWriteOptions): Promise<void> => {
+    await storageLocal.set({
+      ...(options ? { tabboardBackupBeforeRestore: normalizeState(options.backupBeforeRestore) } : {}),
+      [STATE_KEY]: clone(normalizeState(nextState)),
+    });
   };
 
   const storageLocal = {
@@ -722,6 +726,8 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
       if (Object.keys(changes).length) getHub('storage.onChanged').emit(changes, 'local');
     },
   };
+
+  const statePersistence = createStatePersistence({ getState: async () => clone(state), setState: setStoredState });
 
   const listOpenTabs = (): { windows: Array<{
     id: number;
@@ -1241,9 +1247,7 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
         return clone(state);
       case 'tabboard-state-mutations': {
         if (!Array.isArray(message.mutations)) throw new Error('A mutations array is required.');
-        const next = normalizeState(applyStateMutations(state, message.mutations));
-        await setStoredState(next);
-        return clone(next);
+        return statePersistence.applyMutations(message.mutations);
       }
       case 'list-open-tabs':
         return listOpenTabs();

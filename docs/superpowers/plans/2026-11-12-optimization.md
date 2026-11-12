@@ -49,10 +49,10 @@
 
 **Implementation:** 加载损坏 session 时保留其他数据，发布持久化的恢复问题摘要与恢复/重读入口，用户可区分加载不完整与删除。
 
-- [ ] RED: 添加回归并确认因现有行为失败。Cases: 损坏一份 session 后其他 session 可用且呈现明确提示；重新读取成功清除提示；原始损坏文件不被改写。
-- [ ] GREEN: 完成最小实现与相关当前规格更新。
-- [ ] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
-- [ ] Commit: `feat(storage): surface incomplete file recovery`，只暂存本项文件。
+- [x] RED: 添加回归并确认因现有行为失败。Cases: 损坏一份 session 后其他 session 可用且呈现明确提示；重新读取成功清除提示；原始损坏文件不被改写。
+- [x] GREEN: 完成最小实现与相关当前规格更新。
+- [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
+- [x] Commit: `feat(storage): surface incomplete file recovery`，只暂存本项文件。
 
 ### Task 7: 完整备份恢复
 
@@ -60,10 +60,10 @@
 
 **Implementation:** 同一 Import 入口识别完整 TabBoard JSON；默认可作为 sessions 导入，另提供明确的完整恢复选择；恢复工作区、分类、顺序、note、flags，恢复前保存当前 snapshot。
 
-- [ ] RED: 添加回归并确认因现有行为失败。Cases: 多 workspace/category/Saved/Archive/Notes 的导出恢复；保留当前快照；无效输入拒绝；既有 OneTab 导入保持可用。
-- [ ] GREEN: 完成最小实现与相关当前规格更新。
-- [ ] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
-- [ ] Commit: `feat(import): restore complete TabBoard backups`，只暂存本项文件。
+- [x] RED: 添加回归并确认因现有行为失败。Cases: 多 workspace/category/Saved/Archive/Notes 的导出恢复；保留当前快照；无效输入拒绝；既有 OneTab 导入保持可用。
+- [x] GREEN: 完成最小实现与相关当前规格更新。
+- [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
+- [x] Commit: `feat(import): restore complete TabBoard backups`，只暂存本项文件。
 
 ### Task 5: 限制完整交互树
 

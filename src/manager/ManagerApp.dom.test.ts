@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installPreviewChrome, type PreviewChromeHarness } from '../dev/previewChrome';
 import { useTabBoardStore } from '../shared/store/useTabBoardStore';
 import { ManagerApp } from './ManagerApp';
+import { normalizeState } from '../shared/model';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -51,6 +52,41 @@ afterEach(async () => {
 });
 
 describe('ManagerApp hydration', () => {
+  it.each(['sessions', 'restore'])('keeps URL and canonical workspace aligned after explicit %s import', async (mode) => {
+    history.replaceState(null, '', '/manager.html?workspace=workspace_default&category=inbox&view=board');
+    root = createRoot(container!);
+    await act(async () => root?.render(createElement(StrictMode, null, createElement(ManagerApp))));
+    await vi.waitFor(() => expect(document.querySelector('.manager-shell')).not.toBeNull());
+    const before = normalizeState(useTabBoardStore.getState());
+    const research = { ...before.workspaces[0], id: 'workspace_research', name: 'Research' };
+    const backup = normalizeState({ ...before, mutationRevision: 90, workspaces: [...before.workspaces, research], activeWorkspaceId: research.id });
+    await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="More Actions"]')?.click());
+    const importEntry = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === 'Import');
+    expect(importEntry).toBeDefined();
+    await act(async () => importEntry?.click());
+    const textarea = await vi.waitFor(() => {
+      const element = document.querySelector<HTMLTextAreaElement>('textarea[name="session-import-text"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, JSON.stringify(backup));
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    if (mode === 'restore') await act(async () => document.querySelector<HTMLInputElement>('input[value="restore"]')?.click());
+    const submit = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(item => item.textContent === (mode === 'restore' ? 'Restore Backup' : 'Import'));
+    expect(submit?.disabled).toBe(false);
+    await act(async () => submit?.click());
+    await vi.waitFor(() => expect(document.querySelector('textarea[name="session-import-text"]')).toBeNull());
+    const expectedWorkspace = mode === 'restore' ? 'workspace_research' : 'workspace_default';
+    await vi.waitFor(() => expect(new URLSearchParams(location.search).get('workspace')).toBe(expectedWorkspace));
+    expect(useTabBoardStore.getState().activeWorkspaceId).toBe(expectedWorkspace);
+    expect(harness?.state.activeWorkspaceId).toBe(expectedWorkspace);
+    const oldSnapshot = await harness!.chrome.storage.local.get('tabboardBackupBeforeRestore');
+    if (mode === 'restore') expect(oldSnapshot.tabboardBackupBeforeRestore).toEqual(before);
+    else expect(oldSnapshot).toEqual({});
+  });
+
   it('provides a skip link and page heading for keyboard navigation', async () => {
     root = createRoot(container!);
 
@@ -203,7 +239,7 @@ describe('ManagerApp hydration', () => {
     expect(emoji).not.toBeNull();
     await changeInput(emoji!, '👩🏽‍💻');
 
-    const submit = [...document.querySelectorAll<HTMLButtonElement>('button')]
+    const submit = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
       .find((button) => button.textContent?.trim() === 'Create Workspace');
     expect(submit?.disabled).toBe(false);
     await act(async () => submit?.click());

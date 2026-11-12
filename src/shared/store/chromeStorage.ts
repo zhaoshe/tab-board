@@ -91,7 +91,8 @@ export async function sendStateMutations(
     const current = localHarnessState || await getState();
     try {
       const next = await applyMutationsLocally(current, mutations);
-      await setState(next);
+      const restore = mutations.some(value => value && typeof value === 'object' && 'type' in value && value.type === 'restore-backup');
+      await setActiveState(next, restore ? { backupBeforeRestore: normalizeState(current) } : undefined);
       localHarnessState = next;
       return next;
     } catch (error: unknown) {
