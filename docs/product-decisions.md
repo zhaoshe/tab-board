@@ -2126,6 +2126,14 @@ Accepted。
 - Tradeoff: normalization and a complete previous transaction snapshot remain required; forced repair and complete restore still write the complete file set. Changed large branches still require content comparison.
 - Status: implemented with structural sharing, frozen-input, payload isolation and file write/recovery regressions.
 
+## D075: Defer import previews and count the published search query
+
+- Problem: typing repeatedly parsed import text and scanned result counts before the existing search debounce completed.
+- Decision: preview import text after 150ms without edits and cache unchanged parsing; show pending status and prevent stale submission. Count saved results from the board projection and memoize bookmark counts for the published query. Clear and close remain immediate.
+- Reason: reduce repeated work using local React state and existing selectors, while preserving ordinary Add Sessions and explicit complete Restore.
+- Tradeoff: final parsing and authority validation still run on the main thread; 150ms is a trailing delay, not a parsing time limit. No worker, index or runtime dependency is introduced.
+- Status: implemented with component regressions; large JSON paste and real typing acceptance are tracked by the parent task.
+
 ```md
 ## D00X: Title
 

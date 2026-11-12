@@ -73,6 +73,11 @@ describe('ManagerApp hydration', () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, JSON.stringify(backup));
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
+    expect(document.body.textContent).toContain('Updating preview…');
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 150));
+    });
+    expect(document.querySelector('input[value="restore"]')).not.toBeNull();
     if (mode === 'restore') await act(async () => document.querySelector<HTMLInputElement>('input[value="restore"]')?.click());
     const submit = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(item => item.textContent === (mode === 'restore' ? 'Restore Backup' : 'Import'));
     expect(submit?.disabled).toBe(false);

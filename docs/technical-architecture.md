@@ -557,6 +557,9 @@ All：
 
 入口：Manager More > Import，`ImportModal` 默认追加 sessions。
 
+- `ImportModal` 对少于 65,536 字符的文本保持原 autosize/minRows 展示；达到该长度后使用 6 行、可滚动的原生 textarea，不做 autosize 测量，也不限制输入或导入大小。
+- `ImportModal` 保持即时 text draft，以 150ms trailing timer 更新 preview text；解析结果按未变的 preview text 缓存，不因 mode、pending commit 或 revision 更新重复解析。draft 与 preview 不同则隐藏旧预览、显示更新状态并禁止提交。Clear/Close 取消等待；编辑、关闭与提交使较早的 FileReader 回调失效，避免覆盖待提交或失败后保留的输入。authority 仍在 mutation boundary 重新解析和校验，完整恢复继续使用原 expected revision 与导航确认回调。
+
 - `parseImportedText()` 继续解析 TabBoard JSON/text、OneTab 与 URL list；`importGroups()` 用 `publication.commitChecked()` 提交 `import-groups`，等待确认后关闭弹窗。
 - `parseCompleteBackup()` / `validateCompleteBackup()` 只接受无损可规范化的完整 v1 snapshot，并校验实体、引用、顺序、设置与 ID。较早 v1 导出缺失 revision/ledger 时补默认值。
 - 完整恢复走 `restore-backup` typed mutation，带预览时的 `expectedRevision`。应用时比较权威 revision；恢复业务内容并保留当前 `storageMode` / `storageFolderName`，从当前 revision 推进，而不沿用备份 revision。
@@ -719,10 +722,12 @@ Board、session tab list 与 Open Tabs list使用同一条件 overflow cue模型
 
 ## Search
 
+- `SearchBar` 立即显示 local draft，停止输入 150ms 后发布 saved query。结果计数复用同一 query：普通分类直接读取 board projection 的 `visibleGroups.length`，Bookmark 按 query 与只读 groups memoize 匹配。输入等待时显示 `Updating…`，Clear/Close 即时清空 draft 与 query，不执行旧 draft 的计数扫描。
+
 Manager search：
 
 - `searchQuery` 由 `SearchQueryStore` 单一拥有。初始化时非空 URL `?q=` 优先；URL缺失或为空时回退 `sessionStorage["tabboardSearch"]`。非空 initial snapshot会best-effort写回session storage，空初始化不创建key。
-- 顶部 SearchBar 保留本地 input value和150ms debounce；external store更新会同步local value，clear/close立即更新两者。match count使用local input即时过滤canonical category groups，不等待debounce。
+- 顶部 SearchBar 保留本地 input value和150ms debounce；external store更新会同步local value，clear/close立即更新两者。match count使用同一已发布query：普通分类复用board projection的visibleGroups数量，Bookmark按query缓存匹配；等待期间显示Updating…，不扫描即时local draft。
 - `openTabsQuery` 来自 sidebar footer，只过滤 selected browser window 的 pinned/regular rows。
 - `openTabFilter` 来自可保存 open tab 的右键菜单：workflow记录 `tabFilterUrl`，同一 command同步把URL写入 `SearchQueryStore`。window切换和 Open Tabs refresh不自动清除它；capture snapshot直接读取owner，避免setter与React effect之间的竞态。
 - `getBoardProjection()` 先按fallback-safe active workspace和shared category semantics产生未过滤 `categoryGroups`，再用 `filterGroupsByQuery()`产生 `visibleGroups`。空normalized query直接复用category array引用。

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Textarea,
   Button,
@@ -35,45 +35,62 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
   const [importText, setImportText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [preview, setPreview] = useState<{ groupCount: number; tabCount: number } | null>(null);
+  const [previewText, setPreviewText] = useState('');
   const [mode, setMode] = useState<'sessions' | 'restore'>('sessions');
-  const [completeBackup, setCompleteBackup] = useState<{ workspaceCount: number } | null>(null);
   const [expectedRevision, setExpectedRevision] = useState(0);
   const [isImporting, setIsImporting] = useState(false);
+  const fileReadGeneration = useRef(0);
   const mutationRevision = useTabBoardStore((state) => state.mutationRevision);
   const restoreBackup = useTabBoardStore((state) => state.restoreBackup);
   const importGroups = useTabBoardStore((state) => state.importGroups);
   const activeWorkspaceId = useTabBoardStore((state) => state.activeWorkspaceId);
 
+  const isLargeImport = importText.length >= 65_536;
   const folderId = category.startsWith('folder:') ? category.slice('folder:'.length) : null;
 
-  const updatePreview = useCallback((text: string) => {
-    setExpectedRevision(mutationRevision);
-    let backup = null;
-    try { backup = parseCompleteBackup(text); } catch { /* Session imports also accept partial exports and text. */ }
-    setCompleteBackup(backup ? { workspaceCount: backup.workspaces.length } : null);
-    if (!text.trim()) {
-      setPreview(null);
-      setError(null);
+  useEffect(() => () => { fileReadGeneration.current += 1; }, []);
+
+  useEffect(() => {
+    if (!opened || !importText) {
+      setPreviewText('');
       return;
     }
+    const timeout = setTimeout(() => setPreviewText(importText), 150);
+    return () => clearTimeout(timeout);
+  }, [importText, opened]);
+
+  // Cache by text, independent of mode, commit state and authority revision.
+  const parsed = useMemo(() => {
+    if (!previewText.trim()) return { preview: null, completeBackup: null, error: null, restoreError: null };
+    let backup = null;
+    let restoreError = null;
+    const formatError = (e: unknown) => `${e instanceof Error ? e.message : 'The import text could not be parsed.'} Check that the text is a TabBoard export or OneTab URL list.`;
+    try { backup = parseCompleteBackup(previewText); } catch (e) { restoreError = formatError(e); }
     try {
-      if (mode === 'restore' && !backup) parseCompleteBackup(text);
-      const groups = backup ? backup.groups : parseImportedText(text);
-      const tabCount = groups.reduce((sum, g) => sum + g.tabs.length, 0);
-      setPreview({ groupCount: groups.length, tabCount });
-      setError(null);
+      const groups = backup ? backup.groups : parseImportedText(previewText);
+      return {
+        preview: { groupCount: groups.length, tabCount: groups.reduce((sum, group) => sum + group.tabs.length, 0) },
+        completeBackup: backup ? { workspaceCount: backup.workspaces.length } : null,
+        error: null,
+        restoreError,
+      };
     } catch (e) {
-      const detail = e instanceof Error ? e.message : 'The import text could not be parsed.';
-      const message = `${detail} Check that the text is a TabBoard export or OneTab URL list.`;
-      setPreview(null);
-      setError(message);
+      return { preview: null, completeBackup: null, error: formatError(e), restoreError };
     }
-  }, [mode, mutationRevision]);
+  }, [previewText]);
+  const isPreviewPending = importText !== previewText;
+  const preview = isPreviewPending ? null : parsed.preview;
+  const completeBackup = isPreviewPending ? null : parsed.completeBackup;
+  const previewError = isPreviewPending ? null : mode === 'restore' ? parsed.restoreError ?? parsed.error : parsed.error;
+  const displayedError = error ?? previewError;
 
   const handleTextChange = (value: string) => {
+    if (isImporting) return;
+    fileReadGeneration.current += 1;
     setImportText(value);
-    updatePreview(value);
+    if (!value) setPreviewText('');
+    setError(null);
+    setExpectedRevision(mutationRevision);
   };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -97,13 +114,15 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
   };
 
   const readFile = (file: File) => {
+    const generation = ++fileReadGeneration.current;
     const reader = new FileReader();
     reader.onload = (e) => {
+      if (generation !== fileReadGeneration.current) return;
       const text = String(e.target?.result || '');
-      setImportText(text);
-      updatePreview(text);
+      handleTextChange(text);
     };
     reader.onerror = () => {
+      if (generation !== fileReadGeneration.current) return;
       setError('The file could not be read. Choose a readable JSON or text export and try again.');
     };
     reader.readAsText(file);
@@ -116,10 +135,8 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
   };
 
   const handleImport = async () => {
-    if (!importText.trim()) {
-      setError('Paste a TabBoard export or OneTab URL list before importing.');
-      return;
-    }
+    if (isImporting || isPreviewPending || !preview || previewError || (mode === 'restore' ? !completeBackup : preview.groupCount === 0)) return;
+    fileReadGeneration.current += 1;
     setIsImporting(true);
     try {
       if (mode === 'restore') {
@@ -128,10 +145,9 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
         await importGroups(importText, { workspaceId: activeWorkspaceId, folderId });
       }
       setImportText('');
-      setPreview(null);
+      setPreviewText('');
       setError(null);
       setMode('sessions');
-      setCompleteBackup(null);
       onClose();
     } catch (e) {
       setError(`Import failed: ${e instanceof Error ? e.message : 'unknown error'}. Check the format and try again.`);
@@ -143,10 +159,10 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
 
   const handleClose = () => {
     if (isImporting) return;
+    fileReadGeneration.current += 1;
     setMode('sessions');
-    setCompleteBackup(null);
     setImportText('');
-    setPreview(null);
+    setPreviewText('');
     setError(null);
     onClose();
   };
@@ -213,7 +229,9 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
           value={importText}
           onChange={(e) => handleTextChange(e.target.value)}
           minRows={10}
-          autosize
+          rows={isLargeImport ? 6 : undefined}
+          autosize={!isLargeImport}
+          styles={isLargeImport ? { input: { overflowY: 'auto', resize: 'none' } } : undefined}
           style={{ fontFamily: 'monospace', fontSize: 'var(--mantine-font-size-xs)' }}
         />
 
@@ -251,7 +269,11 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
           </Stack>
         </Paper>
 
-        {preview && (preview.groupCount > 0 || mode === 'restore' && completeBackup) && (
+        {isPreviewPending && (
+          <Text size="sm" c="dimmed" role="status">Updating preview…</Text>
+        )}
+
+        {preview && !previewError && (preview.groupCount > 0 || mode === 'restore' && completeBackup) && (
           <Alert icon={<IconCheck size={16} aria-hidden="true" />} color="green" variant="light">
             <Text size="sm" className="tabular-nums">
               {mode === 'restore' ? `Will restore ${formatNumber(completeBackup?.workspaceCount || 0)} workspace(s) and ` : 'Will import '}<strong>{formatNumber(preview.groupCount)}</strong> session{preview.groupCount !== 1 ? 's' : ''}{' '}
@@ -266,9 +288,9 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
           </Alert>
         )}
 
-        {error && (
+        {displayedError && (
           <Alert icon={<IconAlertCircle size={16} aria-hidden="true" />} color="red" variant="light">
-            <Text size="sm">{error}</Text>
+            <Text size="sm">{displayedError}</Text>
           </Alert>
         )}
 
@@ -279,7 +301,7 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
           <Button
             onClick={handleImport}
             loading={isImporting}
-            disabled={!preview || (mode === 'restore' ? !completeBackup : preview.groupCount === 0)}
+            disabled={isPreviewPending || !!previewError || !preview || (mode === 'restore' ? !completeBackup : preview.groupCount === 0)}
             leftSection={<IconUpload size={16} aria-hidden="true" />}
           >
             {mode === 'restore' ? 'Restore Backup' : 'Import'}

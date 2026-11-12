@@ -21,6 +21,14 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-13: 延后导入预览和搜索计数
+
+- 问题：逐字输入时同步解析导入文本，搜索计数也在既有 query debounce 前重新扫描数据。
+- 决定：导入预览在最后一次编辑 150ms 后解析，未变文本复用解析结果；等待期间标明更新中并禁止提交旧预览。搜索计数复用延后的 query 和 board projection。清空、取消和关闭即时生效。
+- 验收修正：真实大 JSON 编辑在预览解析前仍阻塞输入；达到 65,536 字符后关闭 textarea autosize，改为 6 行滚动编辑器，小文本沿用原展示，不限制输入大小。
+- 取舍：最终一次解析仍在主线程执行；大备份完成预览后，提交仍经过 authority 校验。追加导入、完整 Restore、失败保留输入和 CAS/navigation 保护继续执行。
+- 状态：Current；组件回归覆盖延后、输入纠错、stale preview、清空/关闭、较早文件读取和 pending/failed commit。
+
 ### 2026-11-13: Restore tooltip 改为反映真实 keep/remove 语义，并补一次性 saved-session 帮助提示
 
 - 问题：Restore 默认会在普通 session 中移除已恢复 links，但 locked session 与只读 Bookmark 是两个例外；密集 icon-first 界面也让新用户不容易马上发现 Session body 拖拽和右键二级动作。

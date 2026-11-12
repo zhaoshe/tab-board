@@ -137,10 +137,10 @@
 
 **Implementation:** 缓存未变解析结果，延后导入预览；搜索计数复用 deferred 查询，标识更新中并保持 clear/close 即时。
 
-- [ ] RED: 添加回归并确认因现有行为失败。Cases: 连续输入只解析最终文本；格式错误修正恢复预览；clear/close 即时；导入 pending/failed 保留用户输入。
-- [ ] GREEN: 完成最小实现与相关当前规格更新。
-- [ ] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
-- [ ] Commit: `perf(input): defer import preview and search counts`，只暂存本项文件。
+- [x] RED: 添加回归并确认因现有行为失败。Cases: 连续输入只解析最终文本；格式错误修正恢复预览；clear/close 即时；导入 pending/failed 保留用户输入。
+- [x] GREEN: 完成最小实现与相关当前规格更新。
+- [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
+- [x] Commit: `perf(input): defer import preview and search counts`，只暂存本项文件。
 
 ### Task 13: Bookmark 明确状态与顺序
 

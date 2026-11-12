@@ -534,7 +534,7 @@ Session card 可以在 horizontal track 中拖拽排序：
 
 ### 顶部搜索
 
-Workspace header 右侧搜索框过滤当前 workspace 的 sessions。搜索默认收起为 icon button；关闭搜索时清空筛选条件，收起状态不保留上次 query。
+Workspace header 右侧搜索框过滤当前 workspace 的 sessions。搜索默认收起为 icon button；关闭搜索时清空筛选条件，收起状态不保留上次 query。输入停止 150ms 后更新筛选和结果计数，等待期间显示 `Updating…`；Clear 和 Close 立即清空输入与筛选。
 
 匹配范围：
 
@@ -585,6 +585,8 @@ Command palette 风格搜索：
 
 入口：Manager 顶部 More > Import。
 
+- 少于 65,536 字符的导入文本保持自动增高；大文本使用固定 6 行的滚动编辑器，仍可完整编辑和导入，不设数据大小限制。
+- 输入文本或读取文件后，停止修改 150ms 才计算导入预览；等待期间显示 `Updating preview…` 并禁用提交，旧预览不代表当前文本。修正格式错误后自动恢复预览；清空文本和取消立即生效。
 - 默认向当前 workspace/category 追加 sessions，兼容 TabBoard JSON/text、OneTab text 和简单 URL list；空行分隔的 OneTab blocks 形成多个 sessions。
 - 完整 TabBoard JSON 会出现 `Restore complete TabBoard backup` 选项。选择后明确提示替换全部数据，再点击 `Restore Backup` 确认。
 - 完整恢复保留工作区、分类及顺序、sessions/notes、Saved/Archive/lock 等 flags、设置、Bin 与 active workspace；当前存储位置和配置不随备份改变。

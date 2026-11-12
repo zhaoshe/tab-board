@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { TextInput, ActionIcon, Badge } from '@mantine/core';
 import {
   Keyboard as IconKeyboard,
@@ -34,13 +34,13 @@ export function SearchBar({
   const setQuery = useSetSearchQuery();
   const [localValue, setLocalValue] = useState(query);
   const inputRef = useRef<HTMLInputElement>(null);
-  const { categoryGroups } = useBoardProjection(category);
-  const searchableGroups = category === 'bookmarks' ? bookmarkGroups : categoryGroups;
-
-  const normalized = normalizeSearch(localValue);
-  const matchCount = normalized
-    ? filterGroupsByQuery([...searchableGroups], localValue).length
-    : 0;
+  const { visibleGroups } = useBoardProjection(category);
+  const normalized = normalizeSearch(query);
+  const bookmarkMatchCount = useMemo(() => category === 'bookmarks' && normalized
+    ? filterGroupsByQuery([...bookmarkGroups], query).length
+    : 0, [category, bookmarkGroups, query, normalized]);
+  const matchCount = normalized ? category === 'bookmarks' ? bookmarkMatchCount : visibleGroups.length : 0;
+  const isQueryPending = localValue !== query;
 
   useEffect(() => {
     setLocalValue(query);
@@ -116,8 +116,9 @@ export function SearchBar({
         }}
         style={{ width: '100%' }}
       />
-      {normalized && matchCount > 0 && (
+      {localValue && (isQueryPending || normalized && matchCount > 0) && (
         <Badge
+          role="status"
           className="tabular-nums"
           size="sm"
           variant="light"
@@ -129,7 +130,7 @@ export function SearchBar({
             pointerEvents: 'none',
           }}
         >
-          {formatNumber(matchCount)} {matchCount === 1 ? 'result' : 'results'}
+          {isQueryPending ? 'Updating…' : `${formatNumber(matchCount)} ${matchCount === 1 ? 'result' : 'results'}`}
         </Badge>
       )}
     </div>
