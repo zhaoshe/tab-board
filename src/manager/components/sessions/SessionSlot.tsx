@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Group } from '../../../shared/model';
@@ -47,6 +47,20 @@ export function SessionSlot({
   sourceRect: DragSourceRect | null;
   readOnly?: boolean;
 }) {
+  const slotElement = useRef<HTMLDivElement | null>(null);
+  const transfersFocus = useRef(false);
+  const setSlotRef = useCallback((element: HTMLDivElement | null) => {
+    slotElement.current = element;
+    registerSlot(element);
+  }, [registerSlot]);
+  const [retainsInteraction, setRetainsInteraction] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const active = interactive || retainsInteraction || focused;
+  useLayoutEffect(() => {
+    if (!active || !transfersFocus.current) return;
+    transfersFocus.current = false;
+    slotElement.current?.querySelector<HTMLElement>('.session-card__title')?.focus();
+  }, [active]);
   const {
     listeners,
     setNodeRef,
@@ -100,8 +114,9 @@ export function SessionSlot({
     setNodeRef,
     style,
   };
-  const content = interactive ? (
+  const content = active ? (
     <SessionCard
+      onInteractionChange={setRetainsInteraction}
       dragMarker={dragMarker}
       group={group}
       highlighted={highlighted}
@@ -123,10 +138,17 @@ export function SessionSlot({
   );
   return (
     <div
-      ref={registerSlot}
+      ref={setSlotRef}
       className="session-slot"
       data-session-slot-id={group.id}
-      data-session-active={interactive || undefined}
+      data-session-active={active || undefined}
+      onFocusCapture={() => {
+        if (!active) transfersFocus.current = true;
+        setFocused(true);
+      }}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
+      }}
     >
       {content}
     </div>

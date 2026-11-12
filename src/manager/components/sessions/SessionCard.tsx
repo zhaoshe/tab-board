@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
 } from '@mantine/core';
@@ -43,6 +43,7 @@ import {
   ManagerMenuItem,
   isContextMenuKey,
   useManagerMenuOpen,
+  useManagerOwnedOverlayTabId,
   useManagerOverlayCommands,
   useManagerOverlayLifecycle,
 } from '../../hooks/useManagerOverlays';
@@ -63,6 +64,7 @@ interface SessionCardProps {
   sourceRect?: DragSourceRect | null;
   selectionScope?: ManagerSelectionScope;
   readOnly?: boolean;
+  onInteractionChange?: (retained: boolean) => void;
   onOpenSessionTargetPicker?: (input: OpenSessionTargetPickerInput) => void;
 }
 
@@ -78,7 +80,9 @@ export const SessionCard = memo(function SessionCard({
   selectionScope,
   readOnly = false,
   onOpenSessionTargetPicker,
+  onInteractionChange,
 }: SessionCardProps) {
+  const [retainsTabInteraction, setRetainsTabInteraction] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(group.title);
   const [isEditingNote, setIsEditingNote] = useState(false);
@@ -88,6 +92,12 @@ export const SessionCard = memo(function SessionCard({
   const menuKey = `session:${group.id}`;
   const isSessionMenuOpen = useManagerMenuOpen(menuKey);
   useManagerOverlayLifecycle(group);
+  const ownedOverlayTabId = useManagerOwnedOverlayTabId(group.id);
+  const retainsInteraction = retainsTabInteraction || isEditingTitle || isEditingNote || composerMode !== null
+    || ownedOverlayTabId !== null;
+  useLayoutEffect(() => {
+    onInteractionChange?.(retainsInteraction);
+  }, [onInteractionChange, retainsInteraction]);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const noteTextareaRef = useRef<HTMLTextAreaElement>(null);
   const moreActionRef = useRef<HTMLButtonElement>(null);
@@ -625,6 +635,9 @@ export const SessionCard = memo(function SessionCard({
       />
 
       <SessionTabList
+        onInteractionChange={setRetainsTabInteraction}
+        searchQuery={normalizedQuery}
+        ownedOverlayTabId={ownedOverlayTabId}
         canonicalIndexByTabId={tabMetadata.canonicalIndexByTabId}
         commands={tabCommands}
         dragMarker={dragMarker}

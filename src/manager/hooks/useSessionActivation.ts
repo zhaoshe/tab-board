@@ -23,32 +23,37 @@ export function useSessionActivation({
   groupIds,
   initialCount = 6,
   overscanPx = 720,
+  axis = 'horizontal',
 }: {
   contextKey: string;
   forcedIds: readonly string[];
   groupIds: readonly string[];
   initialCount?: number;
   overscanPx?: number;
+  axis?: 'horizontal' | 'vertical';
 }) {
   const [root, setRoot] = useState<HTMLElement | null>(null);
   const [activation, setActivation] = useState(() => ({
     contextKey,
-    ids: getInitialSessionActivation(groupIds, forcedIds, initialCount),
+    ids: getInitialSessionActivation(groupIds, [], initialCount),
   }));
   const slotElements = useRef(new Map<string, Element>());
   const slotIds = useRef(new WeakMap<Element, string>());
   const slotRefCallbacks = useRef(new Map<string, (element: Element | null) => void>());
   const observerRef = useRef<IntersectionObserver | null>(null);
 
-  const activeIds = activation.contextKey === contextKey
-    ? activation.ids
-    : getInitialSessionActivation(groupIds, forcedIds, initialCount);
+  const activeIds = useMemo(() => new Set([
+    ...(activation.contextKey === contextKey
+      ? activation.ids
+      : getInitialSessionActivation(groupIds, [], initialCount)),
+    ...forcedIds.filter((id) => groupIds.includes(id)),
+  ]), [activation, contextKey, forcedIds, groupIds, initialCount]);
 
   const activate = useCallback((id: string) => {
     setActivation((current) => {
       const base = current.contextKey === contextKey
         ? current.ids
-        : getInitialSessionActivation(groupIds, forcedIds, initialCount);
+        : getInitialSessionActivation(groupIds, [], initialCount);
       if (base.has(id) || !groupIds.includes(id)) {
         return current.contextKey === contextKey
           ? current
@@ -56,7 +61,7 @@ export function useSessionActivation({
       }
       return { contextKey, ids: new Set([...base, id]) };
     });
-  }, [contextKey, forcedIds, groupIds, initialCount]);
+  }, [contextKey, groupIds, initialCount]);
 
   const registerSlot = useCallback((id: string) => {
     let callback = slotRefCallbacks.current.get(id);
@@ -80,17 +85,15 @@ export function useSessionActivation({
   }, []);
 
   useEffect(() => {
-    const next = getInitialSessionActivation(groupIds, forcedIds, initialCount);
+    const next = getInitialSessionActivation(groupIds, [], initialCount);
     setActivation((current) => {
       if (current.contextKey !== contextKey) {
         return { contextKey, ids: next };
       }
-      const missing = [...next].filter((id) => !current.ids.has(id));
-      return missing.length
-        ? { contextKey, ids: new Set([...current.ids, ...missing]) }
-        : current;
+      const remaining = new Set([...current.ids].filter((id) => groupIds.includes(id)));
+      return remaining.size === current.ids.size ? current : { contextKey, ids: remaining };
     });
-  }, [contextKey, forcedIds, groupIds, initialCount]);
+  }, [contextKey, groupIds, initialCount]);
 
   useEffect(() => {
     if (!root) return undefined;
@@ -99,23 +102,24 @@ export function useSessionActivation({
       return undefined;
     }
     const observer = new IntersectionObserver((entries) => {
-      const intersecting = entries.flatMap((entry) => {
-        const id = slotIds.current.get(entry.target);
-        return entry.isIntersecting && id ? [id] : [];
-      });
-      if (!intersecting.length) return;
       setActivation((current) => {
         const base = current.contextKey === contextKey
           ? current.ids
-          : getInitialSessionActivation(groupIds, forcedIds, initialCount);
-        const missing = intersecting.filter((id) => !base.has(id));
-        return missing.length
-          ? { contextKey, ids: new Set([...base, ...missing]) }
-          : current;
+          : getInitialSessionActivation(groupIds, [], initialCount);
+        const next = new Set(base);
+        for (const entry of entries) {
+          const id = slotIds.current.get(entry.target);
+          if (!id || !groupIds.includes(id)) continue;
+          if (entry.isIntersecting) next.add(id);
+          else next.delete(id);
+        }
+        return next.size === base.size && [...next].every((id) => base.has(id))
+          ? current
+          : { contextKey, ids: next };
       });
     }, {
       root,
-      rootMargin: `0px ${overscanPx}px`,
+      rootMargin: axis === 'horizontal' ? `0px ${overscanPx}px` : `${overscanPx}px 0px`,
     });
     observerRef.current = observer;
     for (const element of slotElements.current.values()) {
@@ -125,7 +129,7 @@ export function useSessionActivation({
       observerRef.current = null;
       observer.disconnect();
     };
-  }, [contextKey, forcedIds, groupIds, initialCount, overscanPx, root]);
+  }, [axis, contextKey, groupIds, initialCount, overscanPx, root]);
 
   return useMemo(() => ({
     activeIds,

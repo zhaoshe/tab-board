@@ -38,6 +38,7 @@ interface WorkspaceContentProps {
   registerBoardElement?: (element: HTMLElement | null) => void;
   activeDragPayload?: DragPayload | null;
   activeDropTarget?: DropTarget | null;
+  retainedGroupIds?: readonly string[];
   highlightedGroupId?: string | null;
   dragMarker?: DragMarker | null;
   sourceRect?: DragSourceRect | null;
@@ -144,6 +145,7 @@ export function WorkspaceContent({
   activeDragPayload = null,
   activeDropTarget = null,
   highlightedGroupId,
+  retainedGroupIds = [],
   dragMarker = null,
   sourceRect = null,
   selectionScope,
@@ -198,12 +200,16 @@ export function WorkspaceContent({
   ), [activeDropTarget, category, workspaceId]);
   const forcedIds = useMemo(
     () => [
+      ...retainedGroupIds,
+      ...(activeDragPayload?.kind === 'group' || activeDragPayload?.kind === 'tab' ? [activeDragPayload.groupId] : []),
+      ...(activeDragPayload?.kind === 'tabs' ? activeDragPayload.refs.map((ref) => ref.groupId) : []),
+      ...(activeDropTarget?.kind === 'group-body' || activeDropTarget?.kind === 'tab-before' ? [activeDropTarget.groupId] : []),
       ...(highlightedGroupId ? [highlightedGroupId] : []),
       ...(selectionScope.scope?.kind === 'saved-tabs'
         ? [selectionScope.scope.groupId]
         : []),
     ],
-    [highlightedGroupId, selectionScope.scope],
+    [activeDragPayload, activeDropTarget, highlightedGroupId, retainedGroupIds, selectionScope.scope],
   );
   const sessionActivation = useSessionActivation({
     contextKey: activationContextKey,

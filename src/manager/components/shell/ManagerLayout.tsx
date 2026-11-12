@@ -299,6 +299,11 @@ export function ManagerLayout() {
               registerBoardElement={dnd.registerBoardElement}
               activeDragPayload={dnd.dragUiState.payload}
               activeDropTarget={dnd.dragUiState.target}
+              retainedGroupIds={sessionTargetPicker?.source.kind === 'session'
+                ? [sessionTargetPicker.source.groupId]
+                : sessionTargetPicker?.source.kind === 'saved-tabs'
+                  ? sessionTargetPicker.source.refs.map((ref) => ref.groupId)
+                  : []}
               highlightedGroupId={highlightedGroupId}
               dragMarker={dnd.dragUiState.marker}
               sourceRect={dnd.dragUiState.sourceRect}

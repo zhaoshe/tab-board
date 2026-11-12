@@ -2110,6 +2110,14 @@ Accepted。
 - Tradeoff: keep one latest complete pre-restore snapshot; preserve unread file bytes separately, retaining distinct copies on repeated filename collisions. Complete restore rejects snapshots that would lose data during normalization.
 - Status: implemented with model, worker, browser/file persistence and UI regressions. Orca integration evidence is recorded in the Task 7 handoff.
 
+## D073: Bound session interaction trees with stable slots
+
+- Problem: visiting every session kept every interaction tree alive; a very large session mounted all links on its first screen.
+- Decision: retain slot geometry, mount cards/links near the viewport, and keep explicit selection, editing, focus, overlay and drag owners until they release their work.
+- Reason: reduce mounted React/DnD/overlay rows without changing canonical identities, persistence or insertion anchors, and without a runtime dependency.
+- Tradeoff: native browser Find sees mounted link text only; TabBoard Search still scans all data. Notes retain variable height and complete trees; explicit owners such as selecting all links can exceed the viewport bound.
+- Status: implemented with regression tests; real Chrome drag acceptance is tracked separately.
+
 ```md
 ## D00X: Title
 

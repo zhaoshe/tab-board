@@ -21,6 +21,13 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-12: 限制已浏览 session 与超大链接列表的完整交互树
+
+- 问题：横向浏览后完整 card 持续累积，单个 3000-link session 首屏也挂载全部行。
+- 决定：离开 viewport + overscan 后回退稳定 shell；链接按响应式稳定高度 slot 渐进挂载（普通链接桌面 44px、窄屏或 coarse-pointer 52px；附注链接在全部布局预留 76px，保留最多两行附注），临时 owner 保留选中、编辑、焦点、overlay 与拖拽工作。
+- 取舍：notes 保持变量高度完整挂载；浏览器 Ctrl+F 不包含未挂载链接，TabBoard Search 仍扫描全部数据。显式 owner 可突破视口数量上限。
+- 状态：新增视口退出、owner 释放、3000-link 首屏、键盘激活与搜索回归；真实 Chrome DnD 由独立验收记录覆盖。
+
 ### 2026-11-12: 同一 Import 入口支持完整备份恢复
 
 - 问题：已有 JSON 导入只追加 sessions，丢失工作区、分类顺序与全局设置，无法完整恢复长期保存的数据。

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Button,
   Checkbox,
@@ -93,6 +93,7 @@ interface TabItemRowProps {
   sourceRect?: DragSourceRect | null;
   isDragOverlay?: boolean;
   commands?: SessionTabCommands;
+  onInteractionChange?: (tabId: string, retained: boolean) => void;
 }
 
 export interface SessionTabCommands {
@@ -122,8 +123,13 @@ export function TabItemRow({
   sourceRect = null,
   isDragOverlay = false,
   commands,
+  onInteractionChange,
 }: TabItemRowProps) {
   const [isEditingNote, setIsEditingNote] = useState(false);
+  useLayoutEffect(() => {
+    onInteractionChange?.(tab.id, isEditingNote);
+    return () => onInteractionChange?.(tab.id, false);
+  }, [isEditingNote, onInteractionChange, tab.id]);
   const [noteValue, setNoteValue] = useState(tab.note);
   const noteTextareaRef = useRef<HTMLTextAreaElement>(null);
   const titleTriggerRef = useRef<HTMLButtonElement | null>(null);

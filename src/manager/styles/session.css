@@ -166,6 +166,7 @@ button.session-card__note {
 }
 
 .session-card__tabs {
+  --session-link-row-height: 44px;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -178,6 +179,23 @@ button.session-card__note {
     var(--mantine-color-text) 18%,
     transparent
   );
+}
+
+.session-card__tabs > [data-link-note='true'] {
+  --session-link-row-height: 76px;
+}
+
+.tab-item-row__note {
+  line-height: 16px;
+}
+
+.session-card__row-shell {
+  display: block;
+  width: 100%;
+  height: var(--session-link-row-height);
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .session-card__meta {
@@ -224,7 +242,7 @@ button.session-card__note {
   gap: 6px;
   align-items: center;
   min-width: 0;
-  min-height: 44px;
+  min-height: var(--session-link-row-height, 44px);
   padding: 4px 6px;
   border-radius: 6px;
   cursor: grab;
@@ -400,6 +418,10 @@ html[data-tabboard-hover-suppressed] .session-card__actions {
 }
 
 @media (hover: none), (pointer: coarse) {
+  .session-card__tabs {
+    --session-link-row-height: 52px;
+  }
+
   .tab-item-row__content {
     grid-template-columns: 20px minmax(0, 1fr) 32px;
   }
@@ -431,6 +453,10 @@ html[data-tabboard-hover-suppressed] .session-card__actions {
 }
 
 @media (max-width: 760px) {
+  .session-card__tabs {
+    --session-link-row-height: 52px;
+  }
+
   .tab-item-row__content {
     grid-template-columns: 20px minmax(0, 1fr) 44px;
   }

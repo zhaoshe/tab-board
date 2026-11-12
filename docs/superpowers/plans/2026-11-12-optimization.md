@@ -71,10 +71,10 @@
 
 **Implementation:** 超出 viewport+overscan 后回退稳定 shell，选中、编辑、拖拽、搜索定位保留激活；超大 session 行使用稳定高度的渐进挂载，不新增运行时依赖。
 
-- [ ] RED: 添加回归并确认因现有行为失败。Cases: 浏览整块 board 回到开头后完整树有界；3000 link session 首屏完整行有界；selection/focus/search 与五条 DnD 路径正常。
-- [ ] GREEN: 完成最小实现与相关当前规格更新。
-- [ ] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
-- [ ] Commit: `perf(manager): bound session interaction trees`，只暂存本项文件。
+- [x] RED: 添加回归并确认因现有行为失败。Cases: 浏览整块 board 回到开头后完整树有界；3000 link session 首屏完整行有界；selection/focus/search 与五条 DnD 路径正常。
+- [x] GREEN: 完成最小实现与相关当前规格更新。
+- [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
+- [x] Commit: `perf(manager): bound session interaction trees`，只暂存本项文件。
 
 ### Task 6: 降低编辑与文件差异成本
 

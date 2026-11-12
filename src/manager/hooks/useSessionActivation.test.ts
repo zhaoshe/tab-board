@@ -86,7 +86,7 @@ describe('getInitialSessionActivation', () => {
 });
 
 describe('useSessionActivation', () => {
-  it('activates intersecting slots monotonically within one context', async () => {
+  it('deactivates slots outside viewport plus overscan', async () => {
     await renderProbe('workspace:inbox');
     expect([...latest!.activeIds]).toEqual(['group-0', 'group-1', 'group-2']);
     expect(observed).toHaveLength(10);
@@ -109,7 +109,35 @@ describe('useSessionActivation', () => {
         },
       ]);
     });
-    expect(latest!.activeIds.has('group-7')).toBe(true);
+    expect(latest!.activeIds.has('group-7')).toBe(false);
+  });
+
+
+  it('stays bounded after traversing every slot and returning to the beginning', async () => {
+    await renderProbe('workspace:inbox');
+    for (let index = 0; index < ids.length; index += 1) {
+      await act(async () => intersectionCallback?.(ids.map((id, slotIndex) => ({
+        isIntersecting: slotIndex === index,
+        target: container!.querySelector(`[data-id="${id}"]`)!,
+      }))));
+      expect(latest!.activeIds.size).toBe(1);
+    }
+    await act(async () => intersectionCallback?.(ids.map((id, index) => ({
+      isIntersecting: index === 0,
+      target: container!.querySelector(`[data-id="${id}"]`)!,
+    }))));
+    expect([...latest!.activeIds]).toEqual(['group-0']);
+  });
+
+  it('retains forced owners outside overscan and releases them without another intersection', async () => {
+    await renderProbe('workspace:inbox', ['group-8']);
+    await act(async () => intersectionCallback?.([{
+      isIntersecting: false,
+      target: container!.querySelector('[data-id="group-8"]')!,
+    }]));
+    expect(latest!.activeIds.has('group-8')).toBe(true);
+    await renderProbe('workspace:inbox');
+    expect(latest!.activeIds.has('group-8')).toBe(false);
   });
 
   it('resets bounded activation when context changes', async () => {
