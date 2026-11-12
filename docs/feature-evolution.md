@@ -21,6 +21,13 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-12: 文件写入失败保留已提交内容
+
+- 问题：旧文件在替换前被删除，move 或最终写入失败会丢失已保存内容。
+- 决定：使用 File System Access API writable stream 的 `close()` 发布语义；失败时 abort，首次创建失败时清理空目标。
+- 原因：兼容没有可用 `move()` 的用户目录，同时保留最后成功写入的文件。
+- 状态：单文件故障回归已覆盖；多文件事务恢复单独处理。
+
 ### 2026-09-14: Popup 保存绑定来源窗口
 
 - Popup Save 把查询 tab 时得到的 window ID 随 `saveSelectedTabs` 请求提交，不再让

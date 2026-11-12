@@ -411,7 +411,7 @@ Bin entry 用于恢复删除内容。
 所有文件写入采用两阶段提交（参见「Persistence / 两阶段提交」）：
 
 1. 写 `meta.json` 置 `writeInProgress: true`、记录 `pendingRevision`。
-2. 对本次需要变更的每个数据文件，先写同目录临时文件（如 `settings.json.tmp-<uuid>`），完成后 rename 覆盖目标文件，保证单文件原子替换。
+2. 对本次需要变更的每个数据文件，使用 File System Access API 的 staged writable stream 写入，并在 `close()` 成功时发布；写入失败时 abort，始终保留已有目标文件，不依赖用户目录中的 `move()` 支持。
 3. 最后写 `meta.json` 置 `writeInProgress: false`，把 `revision` 推进到 `pendingRevision`。
 
 加载时若 `meta.json.writeInProgress === true`，表示上一次写入未完成，丢弃该批次，以上一次 `revision` 对应的文件集合为准。`sessions/` 中未被任何 workspace/group 索引引用的孤立文件不会被加载，也不会在正常写入中主动删除；清理动作通过显式的 garbage collect 路径触发。
