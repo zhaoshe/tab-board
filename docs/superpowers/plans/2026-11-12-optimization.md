@@ -104,10 +104,10 @@
 
 **Implementation:** 修复漏掉标题刷新动作的菜单断言；PR CI 复用 build/check/test；端口参数化并验证目标身份；真实 extension 边界用已有 worker tests 加可执行专项验收记录。实际浏览器驱动使用 Orca。
 
-- [ ] RED: 添加回归并确认因现有行为失败。Cases: 新增刷新动作 keyboard/focus 可达；测试配置不复用任意 200 页面；CI 包含 PR gate；capture partial restore worker 生命周期故障有专项结果。
-- [ ] GREEN: 完成最小实现与相关当前规格更新。
-- [ ] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
-- [ ] Commit: `test(ci): align browser contracts and PR validation`，只暂存本项文件。
+- [x] RED: 添加回归并确认因现有行为失败。Cases: 新增刷新动作 keyboard/focus 可达；测试配置不复用任意 200 页面；CI 包含 PR gate；capture partial restore worker 生命周期故障有专项结果。
+- [x] GREEN: 完成最小实现与相关当前规格更新。
+- [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
+- [x] Commit: `test(ci): align browser contracts and PR validation`，只暂存本项文件。
 
 ### Task 10: 准确的隐私文案
 

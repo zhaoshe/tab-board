@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react';
 import { crx } from '@crxjs/vite-plugin';
 import { fileURLToPath, URL } from 'node:url';
 import manifest from './manifest.json';
+import { resolveTabBoardPorts } from './src/dev/previewValidation';
+
+const ports = resolveTabBoardPorts(process.env);
 
 export default defineConfig({
   plugins: [react(), crx({ manifest: manifest as any })],
@@ -35,10 +38,11 @@ export default defineConfig({
     setupFiles: ['src/test/setup.ts'],
   },
   server: {
-    port: 5173,
+    host: '127.0.0.1',
+    port: ports.devPort,
     strictPort: true,
     hmr: {
-      port: 5173,
+      port: ports.hmrPort,
     },
   },
 });

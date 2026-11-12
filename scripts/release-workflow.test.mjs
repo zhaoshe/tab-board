@@ -6,6 +6,10 @@ const workflowPath = new URL(
   '../.github/workflows/release.yml',
   import.meta.url,
 );
+const prWorkflowPath = new URL(
+  '../.github/workflows/pr-validation.yml',
+  import.meta.url,
+);
 
 test('release workflow is tag-only and minimally privileged', async () => {
   const source = await readFile(workflowPath, 'utf8');
@@ -44,6 +48,36 @@ test('release workflow gates publication on validation and tests', async () => {
   assert.ok(browserIndex >= 0);
   assert.ok(rebuildIndex > browserIndex);
   assert.ok(packageIndex > rebuildIndex);
+});
+
+test('pull request workflow is minimally privileged and includes the browser gate', async () => {
+  const source = await readFile(prWorkflowPath, 'utf8');
+  assert.match(source, /pull_request:/);
+  assert.match(
+    source,
+    /permissions:\s*\n\s{2}contents:\s*read\s*\n\s*\n\s*jobs:/,
+  );
+  assert.doesNotMatch(source, /gh release create|release:package|tags:/);
+  for (const command of [
+    'npm ci',
+    'npm run check',
+    'npm test',
+    'npx playwright install --with-deps chromium',
+    'npx playwright test --workers=1',
+    'npm run test:runtime-contract',
+  ]) {
+    assert.ok(source.includes(command), `missing command: ${command}`);
+  }
+});
+
+test('package exposes a browser-free runtime contract command', async () => {
+  const packageJson = JSON.parse(
+    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  );
+  assert.equal(
+    packageJson.scripts?.['test:runtime-contract'],
+    'node scripts/run-runtime-contract.mjs',
+  );
 });
 
 test('README exposes binary installation and update limitations', async () => {

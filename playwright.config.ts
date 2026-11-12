@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { resolvePlaywrightPreviewServer } from './src/dev/previewValidation';
 
 /**
  * Playwright config for TabBoard browser-level smoke tests.
@@ -9,6 +10,8 @@ import { defineConfig, devices } from '@playwright/test';
  * extension. They are intentionally NOT part of `npm test` (Vitest) or `npm run
  * check`; run them on demand with `npm run test:e2e`.
  */
+const previewServer = resolvePlaywrightPreviewServer(process.env);
+
 export default defineConfig({
   testDir: './tests/e2e',
   testMatch: '**/*.e2e.ts',
@@ -16,8 +19,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'line' : 'list',
+  globalSetup: './tests/e2e/global-setup.ts',
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: previewServer.baseURL,
     trace: 'on-first-retry',
   },
   projects: [
@@ -28,7 +32,8 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run dev',
-    url: 'http://localhost:5173/dev/manager-preview.html',
+    env: previewServer.webServerEnv,
+    url: previewServer.previewURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

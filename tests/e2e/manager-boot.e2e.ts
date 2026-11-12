@@ -1250,7 +1250,7 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     const menu = page.getByRole('menu', { name: 'Session Actions' });
     await expect(menu).toBeVisible();
     const items = menu.getByRole('menuitem');
-    await expect(items).toHaveCount(9);
+    await expect(items).toHaveCount(10);
     await expect(items).toHaveText([
       'Add Link',
       'Add Note',
@@ -1258,6 +1258,7 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
       'Edit Session Note',
       'Move Session',
       'Lock Session',
+      'Refresh All Titles',
       'Copy Links',
       'Select Tabs',
       'Delete Session',
@@ -1364,11 +1365,16 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     await expect(savedMenu).toBeVisible();
     await assertDenseItems(savedMenu, [
       'Add Note',
+      'Refresh Title',
       'Copy URL',
       'Delete Saved Tab',
     ]);
     await expect(savedMenu.getByRole('menuitem').first()).toBeFocused();
     await expect(page.locator('.manager-menu-item__description-tip')).toHaveCount(0);
+    await page.keyboard.press('ArrowDown');
+    await expect(savedMenu.getByRole('menuitem', { name: 'Refresh Title' })).toBeFocused();
+    await expect(page.locator('.manager-menu-item__description-tip'))
+      .toHaveText('Reload the page title');
     await page.keyboard.press('ArrowDown');
     await expect(savedMenu.getByRole('menuitem', { name: 'Copy URL' })).toBeFocused();
     await expect(page.locator('.manager-menu-item__description-tip'))
