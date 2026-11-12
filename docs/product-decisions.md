@@ -2118,6 +2118,14 @@ Accepted。
 - Tradeoff: native browser Find sees mounted link text only; TabBoard Search still scans all data. Notes retain variable height and complete trees; explicit owners such as selecting all links can exceed the viewport bound.
 - Status: implemented with regression tests; real Chrome drag acceptance is tracked separately.
 
+## D074: Reuse unchanged state branches and skip equal file writes
+
+- Problem: renaming a workspace copied every saved tab; ordinary file commits searched old sessions repeatedly and rewrote unchanged top-level files.
+- Decision: ordinary immutable mutations retain unchanged branches and isolate incoming payloads. Compare revisions by replaced branches and file sessions by ID Map; skip equal data files only on ordinary commits.
+- Reason: reduce editing and file IO costs with the existing schema and persistence boundaries.
+- Tradeoff: normalization and a complete previous transaction snapshot remain required; forced repair and complete restore still write the complete file set. Changed large branches still require content comparison.
+- Status: implemented with structural sharing, frozen-input, payload isolation and file write/recovery regressions.
+
 ```md
 ## D00X: Title
 

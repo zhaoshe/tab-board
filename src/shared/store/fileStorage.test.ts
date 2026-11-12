@@ -123,6 +123,8 @@ async function listSessionFileIds(root: MemoryDirectoryHandle): Promise<string[]
   return names.sort();
 }
 
+const topLevelDataFiles = ['settings.json', 'workspaces.json', 'folders.json', 'categoryOrder.json', 'bin.json', 'ledger.json'];
+
 // Default permission: granted.
 function withPermission(root: MemoryDirectoryHandle, state: PermissionState = 'granted'): void {
   (root as unknown as {
@@ -167,6 +169,55 @@ describe('initFileStorageDirectory', () => {
 });
 
 describe('createFileStorageAdapter', () => {
+  it('keeps unchanged data files when only a workspace name changes', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const previous = knownState();
+    const writer = await createFileStorageAdapter(root);
+    await writer.setState(previous);
+    const names = [...topLevelDataFiles, 'meta.json'];
+    const writes = await Promise.all(names.map(async (name) => vi.spyOn(await root.getFileHandle(name), 'createWritable')));
+    const sessions = await root.getDirectoryHandle('sessions');
+    const sessionWrites = await Promise.all(previous.groups.map(async (group) => vi.spyOn(await sessions.getFileHandle(`${group.id}.json`), 'createWritable')));
+    const next = normalizeState({
+      ...previous, mutationRevision: 8,
+      workspaces: previous.workspaces.map((workspace) => ({ ...workspace, name: 'Renamed' })),
+    });
+    await writer.setState(next);
+    for (const [index, name] of names.entries()) {
+      expect(writes[index]).toHaveBeenCalledTimes(name === 'meta.json' ? 2 : name === 'workspaces.json' ? 1 : 0);
+    }
+    for (const index of previous.groups.keys()) {
+      expect(sessionWrites[index]).not.toHaveBeenCalled();
+    }
+    expect(await (await createFileStorageAdapter(root)).getState()).toEqual(next);
+  });
+
+  it.each(['restore', 'repair'] as const)('rewrites all data files for forced %s even when content is equal', async (mode) => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const previous = knownState();
+    await (await createFileStorageAdapter(root)).setState(previous);
+    let interrupt = mode === 'repair';
+    const writer = await createFileStorageAdapter(root, {
+      locks: { beforeMetaWrite: () => {
+        if (interrupt) { interrupt = false; throw new Error('Interrupted'); }
+      } },
+    });
+    if (mode === 'repair') await expect(writer.setState(previous)).rejects.toThrow('Interrupted');
+    const writes = await Promise.all(topLevelDataFiles.map(async (name) => vi.spyOn(await root.getFileHandle(name), 'createWritable')));
+    const sessions = await root.getDirectoryHandle('sessions');
+    const sessionWrites = await Promise.all(previous.groups.map(async (group) => vi.spyOn(await sessions.getFileHandle(`${group.id}.json`), 'createWritable')));
+    const next = { ...previous, mutationRevision: 9 };
+    await writer.setState(next, mode === 'restore' ? { backupBeforeRestore: previous } : undefined);
+    for (const index of topLevelDataFiles.keys()) {
+      expect(writes[index]).toHaveBeenCalledTimes(1);
+    }
+    for (const index of previous.groups.keys()) {
+      expect(sessionWrites[index]).toHaveBeenCalledTimes(1);
+    }
+    expect(await (await createFileStorageAdapter(root)).getState()).toEqual(next);
+  });
   let chromeMock: ChromeMock;
 
   beforeEach(() => {

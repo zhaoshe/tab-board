@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createEmptyState,
   DEFAULT_WORKSPACE_EMOJI,
@@ -9,6 +9,7 @@ import {
   type Workspace,
 } from '../model';
 import { structurallyShareState } from './stateStructuralSharing';
+import { applyStateMutation } from './stateMutations';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 
@@ -87,6 +88,110 @@ function state(): TabBoardState {
     },
   };
 }
+
+function freezeTree(value: unknown): void {
+  if (!value || typeof value !== 'object') return;
+  Object.values(value).forEach(freezeTree);
+  Object.freeze(value);
+}
+
+describe('ordinary mutation structural sharing', () => {
+  it('renames a workspace without copying or serializing unrelated sessions', () => {
+    const previous = state();
+    const snapshot = structuredClone(previous);
+    freezeTree(previous);
+    const stringify = vi.spyOn(JSON, 'stringify');
+    let next: TabBoardState;
+    try {
+      next = applyStateMutation(previous, {
+        type: 'rename-workspace', id: 'workspace-a', name: 'Renamed',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      });
+      expect(stringify.mock.calls.some(([value]) => value === previous || value === previous.groups)).toBe(false);
+    } finally {
+      stringify.mockRestore();
+    }
+    expect(next!.workspaces[0].name).toBe('Renamed');
+    expect(next!.workspaces[1]).toBe(previous.workspaces[1]);
+    expect(next!.groups).toBe(previous.groups);
+    expect(next!.folders).toBe(previous.folders);
+    expect(next!.settings).toBe(previous.settings);
+    expect(next!.bin).toBe(previous.bin);
+    expect(next!.mutationRevision).toBe(previous.mutationRevision + 1);
+    expect(previous).toEqual(snapshot);
+  });
+
+  it('copies only the edited tab path and isolates nested caller patches', () => {
+    const previous = state();
+    previous.groups[0].tabs.push(tab('tab-sibling'));
+    const snapshot = structuredClone(previous);
+    freezeTree(previous);
+    const browserGroup = { sourceGroupId: 1, title: 'Browser group', color: 'blue', collapsed: false };
+    const next = applyStateMutation(previous, {
+      type: 'update-tab', groupId: 'group-a', tabId: 'tab-a',
+      updates: { title: 'Changed', browserGroup }, updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    browserGroup.title = 'Caller changed';
+    expect(next.groups[0].tabs[0].title).toBe('Changed');
+    expect(next.groups[0].tabs[0].browserGroup?.title).toBe('Browser group');
+    expect(next.groups[0]).not.toBe(previous.groups[0]);
+    expect(next.groups[0].tabs).not.toBe(previous.groups[0].tabs);
+    expect(next.groups[0].tabs[1]).toBe(previous.groups[0].tabs[1]);
+    expect(next.groups[1]).toBe(previous.groups[1]);
+    expect(next.workspaces).toBe(previous.workspaces);
+    expect(previous).toEqual(snapshot);
+  });
+
+  it('isolates added session payloads while retaining existing sessions', () => {
+    const previous = state();
+    freezeTree(previous);
+    const incoming = group('group-new', 'workspace-a', [tab('tab-new')]);
+    const next = applyStateMutation(previous, {
+      type: 'add-group', group: incoming, updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    incoming.tabs[0].title = 'Caller changed';
+    incoming.tabs.push(tab('caller-extra'));
+    expect(next.groups[2].tabs).toHaveLength(1);
+    expect(next.groups[2].tabs[0].title).toBe('tab-new');
+    expect(next.groups[0]).toBe(previous.groups[0]);
+    expect(next.groups[1]).toBe(previous.groups[1]);
+  });
+
+  it('retains the revision on an equal patch even when collections are copied', () => {
+    const previous = state();
+    freezeTree(previous);
+    const next = applyStateMutation(previous, {
+      type: 'update-settings', updates: { theme: previous.settings.theme }, updatedAt: previous.updatedAt,
+    });
+    expect(next).toEqual(previous);
+    expect(next.mutationRevision).toBe(previous.mutationRevision);
+    expect(next.groups).toBe(previous.groups);
+  });
+
+  it('reuses the state on an ordinary replay without advancing its revision', () => {
+    const mutation = {
+      type: 'update-workspace' as const, id: 'workspace-a', name: 'Renamed', emoji: DEFAULT_WORKSPACE_EMOJI,
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    };
+    const committed = applyStateMutation(state(), mutation);
+    freezeTree(committed);
+    expect(applyStateMutation(committed, mutation)).toBe(committed);
+  });
+
+  it('removes restored tabs while retaining unaffected sessions and surviving tabs', () => {
+    const previous = state();
+    previous.groups[0].tabs.push(tab('tab-sibling'));
+    freezeTree(previous);
+    const next = applyStateMutation(previous, {
+      type: 'remove-restored-refs', refs: [{ source: 'group', groupId: 'group-a', tabId: 'tab-a' }],
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    expect(next.groups[0].tabs.map((item) => item.id)).toEqual(['tab-sibling']);
+    expect(next.groups[0].tabs[0]).toBe(previous.groups[0].tabs[1]);
+    expect(next.groups[1]).toBe(previous.groups[1]);
+    expect(previous.groups[0].tabs).toHaveLength(2);
+  });
+});
 
 describe('authoritative state structural sharing', () => {
   it('reuses unchanged entities and collections after normalization clones them', () => {

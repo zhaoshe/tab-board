@@ -198,7 +198,10 @@ function isExpectedRevision(value: unknown): boolean {
 const MAX_SAFE_REVISION = Number.MAX_SAFE_INTEGER;
 
 function advanceRevision(state: TabBoardState, next: TabBoardState): TabBoardState {
-  if (next === state || JSON.stringify(next) === JSON.stringify(state)) return next;
+  // Ordinary edits retain unchanged branches; compare only the replaced data.
+  const keys = Object.keys(state) as Array<keyof TabBoardState>;
+  if (next === state || (keys.length === Object.keys(next).length && keys.every((key) =>
+    next[key] === state[key] || JSON.stringify(next[key]) === JSON.stringify(state[key])))) return next;
   if (!Number.isSafeInteger(state.mutationRevision) || state.mutationRevision >= MAX_SAFE_REVISION) {
     throw new Error('Mutation revision exhausted.');
   }
@@ -870,7 +873,10 @@ function simulateRemoveRestoredRefs(state: TabBoardState, refs: readonly TabRef[
   return {
     ...state,
     groups: state.groups
-      .map((group) => ({ ...group, tabs: group.tabs.filter((tab) => !groupRefs.has(`${group.id}:${tab.id}`)) }))
+      .map((group) => {
+        const tabs = group.tabs.filter((tab) => !groupRefs.has(`${group.id}:${tab.id}`));
+        return tabs.length === group.tabs.length ? group : { ...group, tabs };
+      })
       .filter((group) => group.tabs.length || group.locked || group.note),
   };
 }
@@ -2459,7 +2465,7 @@ function applyStateMutationCore(state: TabBoardState, mutation: StateMutation): 
     return applyDropIntentMutation(state, mutation, nowIso());
   }
   assertStateMutationSemantics(state, mutation);
-  const next = clone(state);
+  const next = state;
   switch (mutation.type) {
     case 'set-active-workspace':
       return { ...next, activeWorkspaceId: mutation.workspaceId, updatedAt: mutation.updatedAt };
@@ -2793,9 +2799,7 @@ function applyStateMutationCore(state: TabBoardState, mutation: StateMutation): 
     case 'set-category-order':
       return { ...next, categoryOrderByWorkspace: { ...next.categoryOrderByWorkspace, [mutation.workspaceId]: categoryOrder(next, mutation.workspaceId, mutation.categoryOrder) }, updatedAt: mutation.updatedAt };
     case 'remove-restored-refs': {
-      const refs = new Set(mutation.refs.filter((ref) => ref.source === 'group').map((ref) => `${ref.groupId}:${ref.tabId}`));
-      const groups = next.groups.map((group) => ({ ...group, tabs: group.tabs.filter((tab) => !refs.has(`${group.id}:${tab.id}`)) })).filter((group) => group.tabs.length || group.locked || group.note);
-      return { ...next, groups, updatedAt: mutation.updatedAt };
+      return { ...simulateRemoveRestoredRefs(next, mutation.refs), updatedAt: mutation.updatedAt };
     }
   }
 }
@@ -2819,7 +2823,7 @@ export function applyStateMutation(
     return applyDropIntentMutation(state, mutation, appliedAt);
   }
   assertCategoryCasPreconditions(state, mutation);
-  if (isAlreadyApplied(state, mutation)) return clone(state);
+  if (isAlreadyApplied(state, mutation)) return state;
   assertOrdinaryMutationSafety(state, mutation);
   return advanceRevision(state, applyStateMutationCore(state, mutation));
 }

@@ -82,10 +82,10 @@
 
 **Implementation:** 普通 mutation 使用 immutable 局部复制，复用未改对象；文件差异通过 ID Map，跳过未变顶层文件；保留校验、CAS 和 replay 规则。
 
-- [ ] RED: 添加回归并确认因现有行为失败。Cases: 修改 workspace 不复制无关 groups/tabs；输入 state 未被修改；locked/CAS/replay 原测试全通过；微基准可对照。
-- [ ] GREEN: 完成最小实现与相关当前规格更新。
-- [ ] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
-- [ ] Commit: `perf(state): avoid full clones for ordinary edits`，只暂存本项文件。
+- [x] RED: 添加回归并确认因现有行为失败。Cases: 修改 workspace 不复制无关 groups/tabs；输入 state 未被修改；locked/CAS/replay 原测试全通过；微基准可对照。
+- [x] GREEN: 完成最小实现与相关当前规格更新。
+- [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
+- [x] Commit: `perf(state): avoid full clones for ordinary edits`，只暂存本项文件。
 
 ### Task 8: 工具链安全更新
 

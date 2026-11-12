@@ -550,13 +550,16 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     const start = Date.now();
     const cached = this.cachedState;
     const parts = splitState(nextState);
+    const previousParts = cached ? splitState(cached) : null;
+    const fullWrite = !!options || this.requiresFullWrite || !previousParts;
 
     // Session diff: which sessions to write vs delete.
     const toWrite: Array<{ id: string; group: Group }> = [];
     const nextGroupIds = new Set<string>();
     for (const [id, group] of parts.sessions) {
       nextGroupIds.add(id);
-      if (options || this.requiresFullWrite || !cached || !cached.groups.some((g) => g.id === id && groupsEqual(g, group))) {
+      const previousGroup = previousParts?.sessions.get(id);
+      if (fullWrite || !previousGroup || !groupsEqual(previousGroup, group)) {
         toWrite.push({ id, group });
       }
     }
@@ -628,15 +631,18 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
       toDelete.map(async (id) => deleteSessionFile(this.root, id)),
     );
 
-    // Top-level files in parallel.
-    await settleOperations([
-      atomicWriteFile(this.root, SETTINGS_FILE, serializeJson(parts.settings)),
-      atomicWriteFile(this.root, WORKSPACES_FILE, serializeJson(parts.workspaces)),
-      atomicWriteFile(this.root, FOLDERS_FILE, serializeJson(parts.folders)),
-      atomicWriteFile(this.root, CATEGORY_ORDER_FILE, serializeJson(parts.categoryOrderByWorkspace)),
-      atomicWriteFile(this.root, BIN_FILE, serializeJson(parts.bin)),
-      atomicWriteFile(this.root, LEDGER_FILE, serializeJson(parts.dropOperationLedger)),
-    ]);
+    // Ordinary commits skip equal files; recovery and restore replace every file.
+    const topLevelFiles = [
+      [SETTINGS_FILE, 'settings'],
+      [WORKSPACES_FILE, 'workspaces'],
+      [FOLDERS_FILE, 'folders'],
+      [CATEGORY_ORDER_FILE, 'categoryOrderByWorkspace'],
+      [BIN_FILE, 'bin'],
+      [LEDGER_FILE, 'dropOperationLedger'],
+    ] as const;
+    await settleOperations(topLevelFiles
+      .filter(([, key]) => fullWrite || JSON.stringify(parts[key]) !== JSON.stringify(previousParts![key]))
+      .map(([filename, key]) => atomicWriteFile(this.root, filename, serializeJson(parts[key]))));
 
     if (this.deps.locks?.beforeFinalMeta) {
       await this.deps.locks.beforeFinalMeta();

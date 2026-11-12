@@ -1895,6 +1895,13 @@ production build/check 再打包。
 
 当前状态：Current。
 
+### 2026-11-12: 降低普通编辑与文件提交成本
+
+- 普通 state mutation 只复制变化分支，隔离新增 payload；workspace 重命名不再复制或序列化未变化的 sessions。相等 patch、locked、CAS 与 replay 规则保留。
+- File backend 使用 session ID Map 做差异比较，普通提交跳过未变化的数据文件；独立事务 recovery snapshot、meta 提交点、强制修复与完整恢复前备份继续执行。
+- 取舍：authority normalization 和每次文件事务的完整旧快照仍保留，单次大 session 内容比较仍随其数据量增长。
+- 当前状态：实现并加入引用复用、冻结输入、payload 隔离、普通文件写入范围及强制完整写入回归。
+
 ## 待观察问题
 
 - 右键菜单触发筛选是否足够容易被发现。

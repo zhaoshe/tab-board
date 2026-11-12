@@ -94,7 +94,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `storageEvents.ts` 独立承载 file commit ping 与跨 context fallback event；authority 只在 File backend 活跃时绑定这两类 transport，并按 event id 去重。
 - File backend 在初始化、读取、写入或 ping reload 时失败，authority 会切换 backend、重绑 subscription 并通知 UI。本 context 首次发现故障时先把最后一次有效 snapshot 保存到 Chrome；收到其他 context 的 fallback event 时直接读取对方已提交的 Chrome state，禁止用旧 File snapshot 反向覆盖。本次失败写仍 reject，避免把未提交 mutation 误报为成功；既有 persistence retry 会在 Chrome backend 上重试。
 - `authoritativePublication.ts` 是 Manager-side publication owner。它不依赖 Zustand、React、DOM event 或具体 Chrome adapter，独占 optimistic queue、in-flight batch、remote buffer、drop/category waiter、bounded retry、terminal isolation、authoritative reconciliation、structural sharing 和 hydration generation。
-- `stateMutations.ts` 以 immutable commands 应用普通 state mutation，并拒绝无效引用、locked 目标和 link/note URL 形态错误。
+- `stateMutations.ts` 以 immutable commands 应用普通 state mutation，只复制变化分支、复用未变化的对象，并克隆新增或 patch payload，避免共享调用方的可变对象。revision 比较先检查顶层引用，仅序列化替换的分支；相等 patch 与已确认 replay 不推进 revision。无效引用、locked 目标和 link/note URL 形态错误仍在 mutation 边界拒绝，authority/persistence 继续 normalize。
 - `mutationValidation.ts` 负责 mutation-batch candidate boundary；DropIntent/OpenTab raw shape由 shared model `drop-validation.ts` 负责。
 - `stateMutationFeedback.ts` 把 committed `StateMutation` 纯映射为 typed `ApplicationFeedback`；不决定commit时机。
 - `useTabBoardStore.ts` 只提供 Zustand UI projection、领域 action facade、restore/import/export 准备和publication ports；它在publication确认commit/surface error后publish typed feedback，不拥有 persistence queue、retry timer、waiter 或 hydration subscription。
@@ -417,6 +417,8 @@ Bin entry 用于恢复删除内容。
 1. 先将上一份完整 normalized state 写到本次独立的隐藏 recovery 文件；再写 `meta.json` 置 `writeInProgress: true`，保留旧 `mutationRevision` 和顺序，记录新 `pendingRevision` 与 recovery 引用。
 2. 对本次需要变更的每个数据文件，使用 File System Access API 的 staged writable stream 写入，并在 `close()` 成功时发布；写入失败时 abort，始终保留已有目标文件，不依赖用户目录中的 `move()` 支持。
 3. 最后写 `meta.json` 置 `writeInProgress: false`，把 `revision` 推进到 `pendingRevision`。
+
+普通提交使用 session ID Map 比较新旧 session 内容，跳过内容相等的 session 和顶层 settings/workspaces/folders/categoryOrder/bin/ledger 文件；独立 recovery snapshot 与两次 meta 写仍每次执行。首次写入、失败后的修复和完整备份恢复强制写入完整数据文件集合，保留 unread 文件与完整恢复前的原始字节备份。
 
 新事务中断时，加载器校验 recovery 的 commit identity 与 revision，并返回完整旧 snapshot；恢复文件缺失或损坏则拒绝加载。下一次成功提交强制修复全部 session 与顶层文件，并清理中断产生的 orphan session，随后保留本次 recovery、删除更旧 recovery。正常读取前后复核 meta，遇到并发发布重读，禁止将不同事务的数据混合。同批并发 IO 全部收敛后才 reject，禁止尚未完成的旧写入覆盖后续重试。旧布局中只有 `writeInProgress`、没有 recovery 引用时仍兼容读取可读数据，但无法保证恢复到旧版本；会记录 warning，并在后续写入修复文件集合。
 
