@@ -141,6 +141,13 @@ function makeInitError(
 
 // ---------- concurrency helper ----------
 
+async function settleOperations(operations: readonly Promise<unknown>[]): Promise<void> {
+  const results = await Promise.allSettled(operations);
+  for (const result of results) {
+    if (result.status === 'rejected') throw result.reason;
+  }
+}
+
 async function pooledMap<T, R>(
   items: readonly T[],
   limit: number,
@@ -154,7 +161,7 @@ async function pooledMap<T, R>(
       results[idx] = await fn(items[idx], idx);
     }
   });
-  await Promise.all(workers);
+  await settleOperations(workers);
   return results;
 }
 
@@ -562,12 +569,12 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
       await writeSessionFile(this.root, id, group);
     });
     // Deletes are independent and cheap.
-    await Promise.all(
+    await settleOperations(
       toDelete.map(async (id) => deleteSessionFile(this.root, id)),
     );
 
     // Top-level files in parallel.
-    await Promise.all([
+    await settleOperations([
       atomicWriteFile(this.root, SETTINGS_FILE, serializeJson(parts.settings)),
       atomicWriteFile(this.root, WORKSPACES_FILE, serializeJson(parts.workspaces)),
       atomicWriteFile(this.root, FOLDERS_FILE, serializeJson(parts.folders)),

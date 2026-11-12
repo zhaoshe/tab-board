@@ -470,6 +470,49 @@ describe('createFileStorageAdapter', () => {
     expect(during).toEqual(good);
   });
 
+  it('settles other session writes before rejecting a failed transaction', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const good = knownState();
+    const writer = await createFileStorageAdapter(root);
+    await writer.setState(good);
+    const sessions = await root.getDirectoryHandle('sessions');
+    const getFile = sessions.getFileHandle.bind(sessions);
+    let resume!: () => void;
+    let entered!: () => void;
+    const paused = new Promise<void>((resolve) => { resume = resolve; });
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    vi.spyOn(sessions, 'getFileHandle').mockImplementation(async (name, options) => {
+      const file = await getFile(name, options);
+      const createWritable = file.createWritable.bind(file);
+      file.createWritable = async () => {
+        const stream = await createWritable();
+        if (name === `${good.groups[0].id}.json`) {
+          stream.close = async () => { throw new Error('Failed session write'); };
+        } else {
+          const close = stream.close.bind(stream);
+          stream.close = async () => { entered(); await paused; await close(); };
+        }
+        return stream;
+      };
+      return file;
+    });
+    const next = normalizeState({
+      ...good, mutationRevision: 8,
+      groups: good.groups.map((group) => ({ ...group, title: 'Uncommitted' })),
+    });
+    const writing = writer.setState(next);
+    const outcome = writing.then(() => 'resolved', () => 'rejected');
+    await ready;
+    const beforeResume = await Promise.race([
+      outcome,
+      new Promise<string>((resolve) => setTimeout(() => resolve('pending'), 10)),
+    ]);
+    resume();
+    await expect(writing).rejects.toThrow('Failed session write');
+    expect(beforeResume).toBe('pending');
+  });
+
   it('corrupt meta.json throws FILE_CORRUPT', async () => {
     const root = createMemoryDirectory('root');
     withPermission(root);

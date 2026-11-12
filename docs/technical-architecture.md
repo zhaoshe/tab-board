@@ -415,7 +415,7 @@ Bin entry 用于恢复删除内容。
 2. 对本次需要变更的每个数据文件，使用 File System Access API 的 staged writable stream 写入，并在 `close()` 成功时发布；写入失败时 abort，始终保留已有目标文件，不依赖用户目录中的 `move()` 支持。
 3. 最后写 `meta.json` 置 `writeInProgress: false`，把 `revision` 推进到 `pendingRevision`。
 
-新事务中断时，加载器校验 recovery 的 commit identity 与 revision，并返回完整旧 snapshot；恢复文件缺失或损坏则拒绝加载。下一次成功提交强制修复全部 session 与顶层文件，并清理中断产生的 orphan session，随后保留本次 recovery、删除更旧 recovery。正常读取前后复核 meta，遇到并发发布重读，禁止将不同事务的数据混合。旧布局中只有 `writeInProgress`、没有 recovery 引用时仍兼容读取可读数据，但无法保证恢复到旧版本；会记录 warning，并在后续写入修复文件集合。
+新事务中断时，加载器校验 recovery 的 commit identity 与 revision，并返回完整旧 snapshot；恢复文件缺失或损坏则拒绝加载。下一次成功提交强制修复全部 session 与顶层文件，并清理中断产生的 orphan session，随后保留本次 recovery、删除更旧 recovery。正常读取前后复核 meta，遇到并发发布重读，禁止将不同事务的数据混合。同批并发 IO 全部收敛后才 reject，禁止尚未完成的旧写入覆盖后续重试。旧布局中只有 `writeInProgress`、没有 recovery 引用时仍兼容读取可读数据，但无法保证恢复到旧版本；会记录 warning，并在后续写入修复文件集合。
 
 文件夹句柄通过原生 IndexedDB（单 database、单 object store，仅 put/get/delete）持久化，不引入额外依赖。启动时 `activeAdapter` 先读取 status projection 的 `activeBackend`，只有 File 时才加载 IndexedDB handle/file modules；若句柄缺失、权限被撤销或 IO 失败，自动降级为 `ChromeStorageAdapter`，同时保持 configured target 为 File。
 
