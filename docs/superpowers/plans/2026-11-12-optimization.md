@@ -93,10 +93,10 @@
 
 **Implementation:** 按实际 audit 的可修复版本更新 Vite/Vitest/happy-dom 及兼容插件；对照 Chrome 115 与 CI Node 版本；不新增运行时依赖。
 
-- [ ] RED: 添加回归并确认因现有行为失败。Cases: npm audit --omit=dev 仍为 0；可修复开发告警消除；全套 build/check/tests；Orca browser 可启动预览。
-- [ ] GREEN: 完成最小实现与相关当前规格更新。
-- [ ] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
-- [ ] Commit: `chore(deps): update vulnerable development tooling`，只暂存本项文件。
+- [x] RED: 添加回归并确认因现有行为失败。Cases: npm audit --omit=dev 仍为 0；可修复开发告警消除；全套 build/check/tests；Orca browser 可启动预览。
+- [x] GREEN: 完成最小实现与相关当前规格更新。
+- [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
+- [x] Commit: `chore(deps): update vulnerable development tooling`，只暂存本项文件。
 
 ### Task 9: 同步浏览器与持续验证
 

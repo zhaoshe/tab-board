@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
   BOOTSTRAP_KEY,
   FILE_PING_KEY,
@@ -42,14 +42,14 @@ interface ChromeMock {
   storage: {
     local: {
       data: Record<string, unknown>;
-      get: ReturnType<typeof vi.fn>;
-      set: ReturnType<typeof vi.fn>;
-      remove: ReturnType<typeof vi.fn>;
+      get: Mock<(keys?: string | string[] | Record<string, unknown> | null) => Promise<Record<string, unknown>>>;
+      set: Mock<(items: Record<string, unknown>) => Promise<void>>;
+      remove: Mock<(keys: string | string[]) => Promise<void>>;
     };
     onChanged: {
       _listeners: Set<StorageChangedListener>;
-      addListener: ReturnType<typeof vi.fn>;
-      removeListener: ReturnType<typeof vi.fn>;
+      addListener: Mock<(cb: StorageChangedListener) => void>;
+      removeListener: Mock<(cb: StorageChangedListener) => void>;
       _fire(changes: Record<string, StorageChange>, area?: string): void;
     };
   };

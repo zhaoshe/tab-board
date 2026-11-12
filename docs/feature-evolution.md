@@ -21,6 +21,13 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-12: 开发工具链升级到已修复安全版本
+
+- 问题：`npm audit` 在 Vite、Vitest、happy-dom 及其开发链路转依赖上报告 12 条可修复漏洞，`npm audit --omit=dev` 虽然为 0，但本地开发、测试与 CI 工具链仍落在已知受影响版本上。
+- 决定：将构建与测试工具链升级到兼容修复版本：Vite 6.4.6、`@vitejs/plugin-react` 4.7.0、Vitest 4.1.12、happy-dom 21.0.4，并用 npm `overrides` 将仍被旧范围解析到的 `browserslist`、`baseline-browser-mapping`、`postcss`、`nanoid` 与 `source-map-js` 固定到安全补丁版。
+- 取舍：最低源码构建 Node 版本提升到 20；Chrome 运行基线维持 115，不改 MV3 静态 worker import/build 契约。个别测试按更严格的 modal/mocks 时序与类型约束更新兼容写法，但保留原有行为断言。
+- 状态：`npm audit`、`npm audit --omit=dev`、`npm test` 与 `npm run check` 已通过。
+
 ### 2026-11-12: 限制已浏览 session 与超大链接列表的完整交互树
 
 - 问题：横向浏览后完整 card 持续累积，单个 3000-link session 首屏也挂载全部行。

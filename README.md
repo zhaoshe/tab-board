@@ -11,7 +11,7 @@ TabBoard is a React 18 + TypeScript app built with Vite and packaged with `@crxj
 ## Requirements
 
 - Google Chrome (or a Chromium-based browser) version 115 or newer.
-- Node.js 18 or newer, only to build the extension from source.
+- Node.js 20 or newer, only to build the extension from source.
 
 ## Install
 
