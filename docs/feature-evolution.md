@@ -21,6 +21,12 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-13: 隐私文案改为准确描述浏览器侧网络行为
+
+- 问题：README 和 PRIVACY 之前把产品写成“完全不发网络请求”，但现有实现里，restore 和 title refresh 会让 Chrome 访问目标 URL，保存的 favicon 也可能通过图片地址加载。
+- 决定：隐私文案改为强调 saved sessions 仍然本地保存、不上传到 TabBoard 服务、不需要账号、不卖数据、也不增加 host permissions，同时明确说明 restore、title refresh 和 favicon 展示带来的浏览器侧访问。
+- 状态：Current。
+
 ### 2026-11-12: 开发工具链升级到已修复安全版本
 
 - 问题：`npm audit` 在 Vite、Vitest、happy-dom 及其开发链路转依赖上报告 12 条可修复漏洞，`npm audit --omit=dev` 虽然为 0，但本地开发、测试与 CI 工具链仍落在已知受影响版本上。

@@ -53,8 +53,18 @@ Chrome shortcut keys can be customized at `chrome://extensions/shortcuts`.
 
 ## Permissions and Privacy
 
-TabBoard is local-first and does not make any network requests. All saved sessions
-stay on your machine in `chrome.storage.local` or in a local folder you select.
+TabBoard is local-first. Saved sessions stay on your machine in
+`chrome.storage.local` or in a local folder you select, and TabBoard does not
+upload them to a TabBoard-operated service. It does not require an account or
+sell data.
+
+Some browser-driven network activity still happens as part of normal features:
+
+- Restoring a saved tab or session opens the target page in Chrome.
+- Refreshing a saved tab title may briefly open the saved URL in a minimized
+  popup window so Chrome can read the final page title.
+- Saved favicon URLs may load from the original site or a Chrome-provided
+  favicon URL when TabBoard displays them.
 
 It requests only the permissions it needs to manage tabs:
 
@@ -64,7 +74,8 @@ It requests only the permissions it needs to manage tabs:
 - `contextMenus`: add right-click capture actions.
 - `clipboardWrite`: support copy/export actions.
 
-TabBoard requests no host permissions, so it cannot read the contents of any web page.
+TabBoard requests no host permissions, so it cannot read the contents of web
+pages.
 
 ## Screenshots
 

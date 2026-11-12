@@ -89,15 +89,18 @@ test('README exposes binary installation and update limitations', async () => {
   assert.match(readme, /Chrome Web Store.*pending/i);
 });
 
-test('privacy policy states local storage and no network transfer', async () => {
+test('privacy policy states local storage and browser-driven network behavior accurately', async () => {
   const privacy = await readFile(
     new URL('../PRIVACY.md', import.meta.url),
     'utf8',
   );
   assert.match(privacy, /chrome\.storage\.local/);
   assert.match(privacy, /local folder/i);
-  assert.match(privacy, /does not make network requests/i);
+  assert.match(privacy, /does not upload saved sessions to a TabBoard-operated service/i);
   assert.match(privacy, /does not sell/i);
+  assert.match(privacy, /restoring a saved tab or session opens the target page/i);
+  assert.match(privacy, /refreshing a saved tab title/i);
+  assert.match(privacy, /favicon/i);
 });
 
 test('release dependencies resolve from the public npm registry', async () => {
