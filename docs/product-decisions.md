@@ -118,7 +118,7 @@ Trade-offs:
 - 未来如果要恢复类似能力，需要重新定义 copy/move/reference 的关系。
 
 Data handling:
-`quickList` 仍作为 state schema 字段保留（normalize 补齐为空数组），当前 UI 不再暴露。插件未上线，不再保留历史数据迁移逻辑。
+`quickList` 已从当前 schema 移除。`normalizeState()` 读到历史 `quickList` 时，会把遗留 items 迁移成一个普通 `Former Quick list` session，之后不再保留该字段。
 
 Status:
 Accepted。
@@ -2133,6 +2133,14 @@ Accepted。
 - Reason: reduce repeated work using local React state and existing selectors, while preserving ordinary Add Sessions and explicit complete Restore.
 - Tradeoff: final parsing and authority validation still run on the main thread; 150ms is a trailing delay, not a parsing time limit. No worker, index or runtime dependency is introduced.
 - Status: implemented with component regressions; large JSON paste and real typing acceptance are tracked by the parent task.
+
+## D076: Keep current docs aligned with executable contracts
+
+- Problem: current docs and agent guidance drifted from the shipped source on version, built-in Bookmark behavior, default import placement, and the actual `npm run check` pipeline.
+- Decision: current-facing docs must follow the executable source contract: version `0.1.6`, Chrome `115+`, Node `20+` source builds, Bookmark as a read-only runtime category, default Import appending into the current workspace/category, and `npm run check` including extension sanity, cycle, architecture and release-contract gates. Implementation history stays in dedicated review records instead of being implied by the current spec.
+- Reason: reduce future maintenance errors and stop agents or reviewers from rebuilding removed flows such as Todo, Quick list or `All items` navigation from stale docs.
+- Tradeoff: every product or tooling contract change now needs a matching docs update; browser-proof claims remain limited to recorded evidence rather than inferred from configured tests alone.
+- Status: implemented as docs-only alignment at the end of the 2026-11-12 optimization cycle.
 
 ```md
 ## D00X: Title

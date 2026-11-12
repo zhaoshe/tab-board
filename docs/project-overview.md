@@ -135,14 +135,15 @@ Bin：
 
 ## 当前状态
 
-版本：`0.1.0`
+版本：`0.1.6`
 
 代码规模：
 
-- 技术栈：React 18 + TypeScript + Vite；UI 使用 Mantine v7 + Lucide，状态通过 Zustand facade 与 browser/file Storage Authority 持久化，拖拽用 `@dnd-kit`。
+- 运行与构建基线：Chrome `115+`；从源码构建需要 Node.js `20+`。
+- 技术栈：React 18 + TypeScript + Vite `6.4.6`；UI 使用 Mantine v7 + Lucide，状态通过 Zustand facade 与 browser/file Storage Authority 持久化，拖拽用 `@dnd-kit`。扩展打包使用 `@crxjs/vite-plugin` `2.7.1`；测试使用 Vitest `4.1.12` + happy-dom `21.0.4`。
 - 核心 extension 页面入口：`manager.html`、`popup.html`、`options.html`。
 - 核心模块目录：`src/background/`（Chrome API 边界与 service worker）、`src/shared/model/`（纯数据）、`src/shared/store/`（持久化与 Zustand）、`src/manager/`（Manager UI + core 纯逻辑 + hooks）。
-- 构建与测试：`npm run build`（`tsc --noEmit` + `vite build`）、`npm test`（Vitest）、`npm run check`（build + `scripts/check-extension.mjs`）和 `git diff --check`。
+- 构建与测试：`npm run build`（`tsc --noEmit` + `vite build`）、`npm test`（Vitest）、`npm run check`（`build` + extension sanity + `check:cycles` + `check:architecture` + `test:release`）、`npm run test:e2e`（按需 Playwright 浏览器套件）和 `git diff --check`。
 
 主要风险：
 

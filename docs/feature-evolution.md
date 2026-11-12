@@ -21,6 +21,13 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-13: 当前规范与执行契约完成最终对齐
+
+- 问题：优化 1-13 已全部落地，但当前文档、Agent Guide 和实现账本仍残留少量机械偏差，例如版本号、Bookmark 内置分类、默认追加导入顺序，以及 `npm run check` 的实际门禁组成。
+- 决定：把当前规格统一到 `0.1.6` / Chrome `115+` / Node `20+` 的真实源码基线，明确 Bookmark 是只读运行时分类，默认 Import 继续向当前 workspace/category 追加 sessions，`npm run check` 继续包含 extension sanity、cycle、architecture 和 release contracts；同时补全优化 1-14 的最终 implementation record。
+- 取舍：历史评审和旧决策仍保留原始背景，但当前规格只描述最终行为，不回写已移除的 Todo、Quick list 或 `All items` 导航。
+- 状态：Current；本项只更新文档与交付记录，不改变运行时代码。
+
 ### 2026-11-13: Bookmark 请求状态改为保留旧列表并显式重试
 
 - 问题：Bookmark category 之前在请求失败时会清空已显示列表，多个并发刷新也可能让较旧响应覆盖较新结果，用户看不到明确的加载/失败状态。

@@ -9,9 +9,11 @@ TabBoard 是 Chrome Manifest V3 extension，使用 React + TypeScript 开发，�
 运行环境：
 
 - Chrome 115+。
+- Source builds require Node.js 20+.
 - Manifest V3 service worker。
-- Vite + `@crxjs/vite-plugin` 构建链；`manager.html` 的生产入口是 `src/manager/main.tsx`。
-- React 18、Mantine v7、Zustand、`@dnd-kit`、`lucide-react`。
+- Vite `6.4.6` + `@crxjs/vite-plugin` `2.7.1` 构建链；`manager.html` 的生产入口是 `src/manager/main.tsx`。
+- React `18.3.x`、Mantine v7、Zustand `4.5.x`、`@dnd-kit`、`lucide-react`。
+- Vitest `4.1.12` + happy-dom `21.0.4` 作为默认源码测试栈。
 - `chrome.storage.local`（默认后端，也存放 bootstrap key）。
 - File System Access API（可选本地文件后端）和 IndexedDB（持久化目录句柄）。
 - `chrome.tabs` / `chrome.windows` / `chrome.tabGroups` / `chrome.contextMenus` / `chrome.omnibox` / `chrome.runtime`。
@@ -769,6 +771,9 @@ Icons：
 npm test
 npm run build
 npm run check
+npm run test:release
+npm run test:runtime-contract
+npm run test:e2e
 git diff --check
 ```
 
@@ -777,7 +782,8 @@ git diff --check
 - `npm test`（Vitest，happy-dom）：React/core contracts，包括 selectors、state mutations、Authoritative Publication queue/retry/waiter/reconciliation/lifecycle、worker persistence、capture ownership/feedback、typed DnD、Open Tabs policy、overlays、layout 和 hydration。
 - `build`：`tsc --noEmit` 类型检查加 Vite/CRX 产物构建。
 - `dev` / `build` / `preview` 显式使用 `vite.config.ts`；跟踪的 `vite.config.js` 只 re-export 该配置，防止 CLI 默认配置与程序化测试配置分叉。页面继续保留 modulepreload 与 file-only lazy chunks；生产 service worker chunk 必须静态引用 file/fs chunks，且不得包含指向它们的 dynamic `import()`。
-- `check`：先 `build`，再由 `scripts/check-extension.mjs` 校验 Manifest entry、构建产物引用和 extension sanity；strict import graph gate拒绝任何 source SCC，并禁止 publication依赖UI/concrete storage、shared/background反向依赖Manager。
+- `check`：先 `build`，再运行 `scripts/check-extension.mjs`、`check:cycles`、`check:architecture` 和 `test:release`；strict import graph gate拒绝任何 source SCC，并禁止 publication依赖UI/concrete storage、shared/background反向依赖Manager。
+- `test:release`：Node release/package/startup contract tests；`test:runtime-contract`：命名的 worker/store contract 记录；`test:e2e`：按需执行 Playwright 浏览器套件与 CI browser gate。
 
 当前测试空白：
 

@@ -159,8 +159,8 @@
 
 **Implementation:** 以现有追加导入顺序为兼容行为，校准规格；补 Bookmark 只读分类、版本与当前检查命令；记录每项最终实现和验证。
 
-- [ ] RED: 添加回归并确认因现有行为失败。Cases: 当前规范与代码、测试和版本一致；所有 14 项有 commit/verification 记录。
-- [ ] GREEN: 完成最小实现与相关当前规格更新。
-- [ ] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
-- [ ] Commit: `docs: align current product and verification contracts`，只暂存本项文件。
+- [x] RED: 添加回归并确认因现有行为失败。Cases: 当前规范与代码、测试和版本一致；所有 14 项有 commit/verification 记录。
+- [x] GREEN: 完成最小实现与相关当前规格更新。
+- [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
+- [x] Commit: `docs: align current product and verification contracts`，只暂存本项文件。
 
