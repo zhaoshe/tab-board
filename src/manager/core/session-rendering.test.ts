@@ -548,6 +548,10 @@ describe('Task108 session rendering contracts', () => {
     const moreMenu = card.match(/const menuItems = [\s\S]*?\n\n  if \(isDragging/)?.[0] || '';
     expect(moreMenu).not.toContain('Restore');
     expect(cardHeader).toContain('label="Restore"');
+    expect(cardHeader).toContain('tooltip={restoreTooltip}');
+    expect(card).toContain('const restoreTooltip = getSessionRestoreTooltip({');
+    expect(card).toContain('const savedLinkRestoreTooltip = getSavedLinkRestoreTooltip({');
+    expect(card).toContain('savedLinkRestoreTooltip={savedLinkRestoreTooltip}');
   });
 
   it('guards destructive tab actions for locked groups', () => {

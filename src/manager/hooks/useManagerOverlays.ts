@@ -92,6 +92,7 @@ export interface TabHoverTooltipModel {
   domain: string;
   link: string;
   savedAt?: string;
+  action?: string;
 }
 
 export function getTabHoverDomain(url: string): string {
@@ -116,6 +117,9 @@ export function renderTabHoverTooltipContent(model: TabHoverTooltipModel): React
     createElement('strong', { className: 'manager-tab-tooltip__title' }, model.title),
     model.domain
       ? createElement('span', { className: 'manager-tab-tooltip__domain' }, model.domain)
+      : null,
+    model.action
+      ? createElement('p', { className: 'manager-tab-tooltip__action' }, model.action)
       : null,
     model.link ? createElement('p', { className: 'manager-tab-tooltip__link' }, model.link) : null,
     savedTime

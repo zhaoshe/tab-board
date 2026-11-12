@@ -30,6 +30,10 @@ import {
 } from '../../../shared/model';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
+import {
+  getSavedLinkRestoreTooltip,
+  getSessionRestoreTooltip,
+} from '../../core/restoreActionCopy';
 import { useToast } from '../../hooks/useToast';
 import { SessionCardHeader } from './SessionCardHeader';
 import { SessionCardEditor } from './SessionCardEditor';
@@ -114,6 +118,9 @@ export const SessionCard = memo(function SessionCard({
   const lockGroup = useTabBoardStore((state) => state.lockGroup);
   const addTabToGroup = useTabBoardStore((state) => state.addTabToGroup);
   const addNoteToGroup = useTabBoardStore((state) => state.addNoteToGroup);
+  const deleteRestoredTabs = useTabBoardStore(
+    (state) => state.settings.deleteRestoredTabs,
+  );
   const confirmBeforeDestructive = useTabBoardStore(
     (state) => state.settings.confirmBeforeDestructive,
   );
@@ -125,6 +132,16 @@ export const SessionCard = memo(function SessionCard({
     deleteTab,
     updateTab,
   }), [confirmBeforeDestructive, deleteTab, updateTab]);
+  const restoreTooltip = getSessionRestoreTooltip({
+    deleteRestoredTabs,
+    locked: group.locked,
+    readOnly,
+  });
+  const savedLinkRestoreTooltip = getSavedLinkRestoreTooltip({
+    deleteRestoredTabs,
+    locked: group.locked,
+    readOnly,
+  });
 
   const normalizedQuery = normalizeSearch(searchQuery);
   const titleMatches = normalizedQuery.length > 0 && group.title.toLowerCase().includes(normalizedQuery);
@@ -593,6 +610,7 @@ export const SessionCard = memo(function SessionCard({
         onTitleDoubleClick={handleTitleDoubleClick}
         onTitleInputKeyDown={handleTitleKeyDown}
         restorableTabCount={tabMetadata.restorableTabCount}
+        restoreTooltip={restoreTooltip}
         selectionToolbar={selectionMode ? (
           <SessionSelectionToolbar
             groupId={group.id}
@@ -654,6 +672,7 @@ export const SessionCard = memo(function SessionCard({
         sourceRect={sourceRect}
         tabs={tabMetadata.visibleTabs}
         readOnly={readOnly}
+        savedLinkRestoreTooltip={savedLinkRestoreTooltip}
         workspaceId={group.workspaceId}
         onStartSelection={startSelection}
         onToggleSelection={toggleSelection}

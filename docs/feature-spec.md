@@ -50,6 +50,7 @@ Manager 是 tabExtend-style visual board 主工作台，分为：
 - 左侧 Open Tabs sidebar：desktop pinned 展开时占据 grid column 并推动 board；collapsed 是固定 52px rail。Pinned 展开/收起同时对 shell track 与 sidebar width 使用 `180ms cubic-bezier(.2,.8,.2,1)` 连续过渡；Open Tab copy、context actions、header utilities 和 Filter 在容器展开 75ms 后用 80ms `ease-out` 淡入，收起时立即反向淡出。Fine pointer hover/focus rail 约 350ms 后进入 temporary peek，作为不阻塞 topbar/main 的 overlay，离开即关闭；Peek 只动画 sidebar width + shadow，Board 始终留在 52px offset。显式 Expand 会 pin 并 reflow。Selection 或 Filter 从 peek 开始时自动 pin。900px 及以下显式 Expand 打开阻塞 topbar/main 的 drawer，并由 Close Sidebar 关闭；Drawer 与 Peek 一样覆盖 Board、不改变 52px main offset。所有过渡支持中途反向，并在 `prefers-reduced-motion: reduce` 下关闭；peek/drawer 都不写入持久化偏好。
 - 右侧 48px toolbar：Workspace、Categories + Category Options、Search、Bin、More 按固定顺序排列；Import、Export、Options 只在 More 中。内置 category 顺序为 Inbox、Saved、Bookmark、Archive。桌面 workspace trigger 使用独立 emoji / name / chevron slots，emoji 与名称至少间隔 6px，名称与 chevron 至少间隔 4px；紧凑断点只显示居中的 emoji。Category label 与 count 使用独立间距，compact topbar 保留当前 count 并自动把 active Category 滚入可视区。全部 controls 对齐同一基线。Search 静止态无边框/底色，展开时独占 category 区域但不改变 toolbar 高度。
 - 右侧 active category board：只展示当前 category 的 saved sessions；sessions 直接位于 A1/D1 canvas 上，单行横向排列并滚动，不再有 category outer frame。
+- 第一次出现 saved session context 时，Manager 只显示一次可关闭的紧凑帮助提示：说明 Session/card body 是拖拽表面，更多次级动作在右键菜单里；dismiss 持久化后不会在后续 save/reload 中反复打扰。
 
 Window selector 只用 window glyph + 内部 tab count 表示 Chrome normal windows；focused Chrome window 在 glyph 角落显示 accent badge，selected window 使用 quiet `aria-pressed` 状态。可见/accessible 文案不显示 `Window N`、raw Chrome window ID、Current 或 Active。Header 只负责 window selector，不提供手动 Refresh 或重复的整窗保存动作；唯一 Save All 位于下方 Open Tabs context bar。一次只渲染 selected window 的 Open Tabs。
 
@@ -223,6 +224,7 @@ Options > Capture 默认开启 capture 时 tab 去重。
 - Persisted Saved Tab 点击通过 worker restore；新页面 `status=complete` 且非 URL
   title 稳定 400ms 后，若原记录仍存在且 URL 未变，只更新其 title。
 - Read-only Bookmark projection 只打开 URL，不写入 canonical state。
+- Restore action 的说明文案保持原 accessible name，不重命名 title/link 本身；tooltip 只额外解释 restore 后是 keep/remove 哪一种结果。
 
 ### Session restore
 
@@ -235,6 +237,11 @@ Options > Capture 默认开启 capture 时 tab 去重。
 规则：
 
 - 恢复 session 中所有 restorable links。
+- Session Restore tooltip 按实际语义显示：
+  - 普通 session + `deleteRestoredTabs=true`：`Open and remove saved links`
+  - 普通 session + `deleteRestoredTabs=false`：`Open and keep saved links`
+  - Locked session：始终 `Open and keep saved links`
+  - Read-only Bookmark session：`Open without removing bookmarks`
 - 可配置是否在新窗口恢复。
 - 可配置是否恢复到当前 tab 旁边。
 - 可配置是否 focus 第一个恢复 tab。

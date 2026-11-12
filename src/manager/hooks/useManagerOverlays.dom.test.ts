@@ -25,6 +25,7 @@ import {
   useManagerOverlayController,
   type ManagerOverlaysController,
 } from './useManagerOverlays';
+import { getSavedLinkRestoreTooltip } from '../core/restoreActionCopy';
 import * as tabItemRowModule from '../components/sessions/TabItemRow';
 import { TabItemRow } from '../components/sessions/TabItemRow';
 import { ToastProvider } from './useToast';
@@ -295,6 +296,8 @@ interface SavedRowHarnessProps {
   tab?: TabItem;
   runtime?: ManagerRuntime;
   locked?: boolean;
+  readOnly?: boolean;
+  deleteRestoredTabs?: boolean;
   updateTab?: (
     groupId: string,
     tabId: string,
@@ -308,6 +311,8 @@ function SavedRowParentOverwriteHarness({
   tab = savedNote,
   runtime = runtimeStub,
   locked = false,
+  readOnly = false,
+  deleteRestoredTabs = true,
   updateTab = vi.fn(),
 }: SavedRowHarnessProps): ReactNode {
   const controller = useManagerOverlayController();
@@ -350,6 +355,12 @@ function SavedRowParentOverwriteHarness({
       selectedRefs: [],
       runtime,
       locked,
+      readOnly,
+      savedLinkRestoreTooltip: getSavedLinkRestoreTooltip({
+        deleteRestoredTabs,
+        locked,
+        readOnly,
+      }),
       commands: {
         confirmBeforeDestructive: false,
         deleteTab: vi.fn(),
@@ -510,6 +521,58 @@ describe('mounted manager overlay behavior', () => {
     expect(tooltip?.textContent).toContain('example.test');
     expect(tooltip?.textContent).toContain('https://example.test/page');
     expect(tooltip?.textContent).toContain('Saved');
+  });
+
+  it.each([
+    ['ordinary remove', { deleteRestoredTabs: true }, 'Open and remove saved link'],
+    ['ordinary keep', { deleteRestoredTabs: false }, 'Open and keep saved link'],
+    ['locked keep', { deleteRestoredTabs: true, locked: true }, 'Open and keep saved link'],
+    ['readonly bookmark', { deleteRestoredTabs: true, readOnly: true, locked: true }, 'Open without removing bookmark'],
+  ] as const)('shows %s saved-link restore semantics in the hover tooltip', async (_label, overrides, actionCopy) => {
+    const { container, root } = await mountSavedRow({
+      tab: savedLink,
+      ...overrides,
+    });
+
+    try {
+      const title = container.querySelector<HTMLButtonElement>('.tab-item-row__title');
+      expect(title?.getAttribute('aria-label')).toBeNull();
+
+      await act(async () => title?.focus());
+
+      const tooltip = document.querySelector<HTMLElement>('.manager-info-popover[role="tooltip"]');
+      expect(tooltip).not.toBeNull();
+      expect(tooltip?.textContent).toContain(savedLink.title);
+      expect(tooltip?.textContent).toContain(actionCopy);
+      expect(title?.getAttribute('aria-describedby')).toBe(tooltip?.id);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('does not add restore semantics to saved notes and keeps note identity text', async () => {
+    const { container, root } = await mountSavedRow({
+      tab: savedNote,
+    });
+
+    try {
+      const title = container.querySelector<HTMLButtonElement>('.tab-item-row__title');
+      expect(title?.textContent).toBe(savedNote.note);
+      expect(title?.getAttribute('aria-label')).toBeNull();
+
+      await act(async () => title?.focus());
+
+      const tooltip = document.querySelector<HTMLElement>('.manager-info-popover[role="tooltip"]');
+      expect(tooltip).not.toBeNull();
+      expect(tooltip?.textContent).toContain(savedNote.note);
+      expect(tooltip?.textContent).not.toContain('Open and remove saved link');
+      expect(tooltip?.textContent).not.toContain('Open and keep saved link');
+      expect(tooltip?.textContent).not.toContain('Open without removing bookmark');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
   });
 
   it.each([

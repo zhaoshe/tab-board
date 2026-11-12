@@ -33,6 +33,7 @@ export function SessionTabList({
   runtime,
   searchActive,
   readOnly = false,
+  savedLinkRestoreTooltip,
   selectionMode,
   selectedRefs,
   selectedTabIds,
@@ -56,6 +57,7 @@ export function SessionTabList({
   runtime: ManagerRuntime;
   searchActive: boolean;
   readOnly?: boolean;
+  savedLinkRestoreTooltip: string;
   selectionMode: boolean;
   selectedRefs: SavedTabRef[];
   selectedTabIds: ReadonlySet<string>;
@@ -151,6 +153,7 @@ export function SessionTabList({
             runtime={runtime}
             locked={locked}
             readOnly={readOnly}
+            savedLinkRestoreTooltip={savedLinkRestoreTooltip}
             selectionMode={selectionMode}
             selected={selectedTabIds.has(tab.id)}
             onStartSelection={() => onStartSelection(tab.id)}

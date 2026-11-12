@@ -30,6 +30,7 @@ export function SessionCardHeader({
   onTitleDoubleClick,
   onTitleInputKeyDown,
   restorableTabCount,
+  restoreTooltip,
   selectionToolbar,
   title,
   titleInputRef,
@@ -54,6 +55,7 @@ export function SessionCardHeader({
   onTitleDoubleClick: (event: MouseEvent) => void;
   onTitleInputKeyDown: (event: KeyboardEvent) => void;
   restorableTabCount: number;
+  restoreTooltip: string;
   selectionToolbar?: ReactNode;
   title: string;
   titleInputRef: RefObject<HTMLInputElement>;
@@ -98,6 +100,7 @@ export function SessionCardHeader({
         {restorableTabCount > 0 && (
           <AccessibleIconAction
             label="Restore"
+            tooltip={restoreTooltip}
             disabled={isDragOverlay}
             onClick={onRestore}
           >

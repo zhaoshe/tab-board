@@ -10,8 +10,10 @@ import { useColorScheme } from '../shared/hooks/useColorScheme';
 import { usePageTheme } from '../shared/hooks/usePageTheme';
 import { ToastProvider, useToast } from './hooks/useToast';
 import { onFallback } from '../shared/store/activeAdapter';
+import { useTabBoardStore } from '../shared/store/useTabBoardStore';
 import { logBreadcrumb, logWarning } from '../shared/utils/diagnostics';
 import { DestructiveConfirmationProvider } from '../shared/components/DestructiveConfirmation';
+import { FirstSavedHint } from './components/shell/FirstSavedHint';
 import { StorageRecoveryNotice } from './components/shell/StorageRecoveryNotice';
 
 // If hydration has not completed within this window, stop showing a blank
@@ -35,6 +37,7 @@ function FileStorageFallbackToast() {
 
 function AppContent() {
   const colorScheme = useColorScheme();
+  const savedSessionCount = useTabBoardStore((state) => state.groups.length);
   usePageTheme(colorScheme);
 
   return (
@@ -43,6 +46,7 @@ function AppContent() {
         <DestructiveConfirmationProvider>
           <FileStorageFallbackToast />
           <StorageRecoveryNotice />
+          <FirstSavedHint savedSessionCount={savedSessionCount} />
           <ManagerLayout />
         </DestructiveConfirmationProvider>
       </ToastProvider>

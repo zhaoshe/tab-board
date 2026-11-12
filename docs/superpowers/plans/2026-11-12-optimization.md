@@ -126,10 +126,10 @@
 
 **Implementation:** 相关 tooltip 按设置说明打开并保留/打开并移除；首次保存后给一次可关闭的拖拽/右键说明，保持工作台密度。
 
-- [ ] RED: 添加回归并确认因现有行为失败。Cases: 两种恢复设置提示正确；提示可关闭且不重复干扰；Orca browser 检查桌面与窄屏。
-- [ ] GREEN: 完成最小实现与相关当前规格更新。
-- [ ] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
-- [ ] Commit: `feat(ux): clarify saved session actions`，只暂存本项文件。
+- [x] RED: 添加回归并确认因现有行为失败。Cases: 两种恢复设置提示正确；提示可关闭且不重复干扰；Orca browser 检查桌面与窄屏。
+- [x] GREEN: 完成最小实现与相关当前规格更新。
+- [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
+- [x] Commit: `feat(ux): clarify saved session actions`，只暂存本项文件。
 
 ### Task 12: 延后导入与计数计算
 

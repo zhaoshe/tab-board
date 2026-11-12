@@ -21,6 +21,13 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-13: Restore tooltip 改为反映真实 keep/remove 语义，并补一次性 saved-session 帮助提示
+
+- 问题：Restore 默认会在普通 session 中移除已恢复 links，但 locked session 与只读 Bookmark 是两个例外；密集 icon-first 界面也让新用户不容易马上发现 Session body 拖拽和右键二级动作。
+- 决定：Session Restore 保持 `Restore` 的可访问名称，同时把 tooltip 改为按普通设置、locked override 和 Bookmark override 呈现真实结果；Manager 在第一次出现 saved session context 时显示一次可关闭的紧凑帮助提示，说明从 Session body 拖拽、以及通过右键进入更多动作。
+- 取舍：帮助提示只做一次，不在每次 save/reload 后反复打扰；提示状态仅保存在 manager page 的 localStorage，不进入 canonical state。
+- 状态：Current。
+
 ### 2026-11-13: 隐私文案改为准确描述浏览器侧网络行为
 
 - 问题：README 和 PRIVACY 之前把产品写成“完全不发网络请求”，但现有实现里，restore 和 title refresh 会让 Chrome 访问目标 URL，保存的 favicon 也可能通过图片地址加载。

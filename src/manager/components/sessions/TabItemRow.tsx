@@ -85,6 +85,8 @@ interface TabItemRowProps {
   runtime: ManagerRuntime;
   locked?: boolean;
   readOnly?: boolean;
+  deleteRestoredTabs?: boolean;
+  savedLinkRestoreTooltip?: string;
   selectionMode?: boolean;
   selected?: boolean;
   dropMarker?: DragMarker | null;
@@ -115,6 +117,7 @@ export function TabItemRow({
   runtime,
   locked = false,
   readOnly = false,
+  savedLinkRestoreTooltip = '',
   selectionMode = false,
   selected = false,
   dropMarker = null,
@@ -272,6 +275,7 @@ export function TabItemRow({
     model: {
       title: tab.itemType === ITEM_LINK ? tab.title : displayText,
       domain: getTabHoverDomain(tab.url),
+      action: tab.itemType === ITEM_LINK ? savedLinkRestoreTooltip : '',
       link: tab.itemType === ITEM_LINK ? tab.url : '',
       savedAt: tab.createdAt,
     },

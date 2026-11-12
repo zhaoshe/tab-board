@@ -136,6 +136,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `src/shared/applicationFeedback.ts` 是 page-local application feedback owner，提供typed `publish()` / `subscribe()`；channel无DOM/React/Zustand/Chrome依赖、同步且不replay，listener异常被隔离。
 - `useToastNotifications.ts` 只把 `ApplicationFeedback` discriminated union映射为现有toast copy；Store与Manager不再通过window event names通信。
 - `StorageRecoveryNotice` 通过 shared `useStorageStatusProjection()` 直接订阅 bootstrap projection，在 Manager shell 里独立渲染持久化的文件恢复提示；dismiss 只存在当前页面内存，不进入 Zustand、canonical state 或 storage projection。
+- `ManagerApp` 还拥有一次性的 `FirstSavedHint`：只在当前浏览器第一次出现 saved-session context 时显示紧凑提示，持久化到 page-local `localStorage` key `tabboard.firstSavedHint`；dismiss 后不再复现，也不进入 Zustand、canonical state 或 storage projection。
 - DnD 不复用未类型化 payload；resolver 先校验 workspace/ownership/URL/locked/index 边界，session body 不产生 merge intent。
 - Manager production 不拥有 session/drop execution module；`src/manager/core/commands.ts` 已删除。Shared/background production modules不得导入 Manager。
 - `ManagerLayout` 持有一个 Open Tabs workflow，并通过 `useManagerSelectionScope()` 只拥有当前 active `SelectionScope`。Open Tab IDs 仍由 workflow 持有，saved item IDs 仍由各 `SessionCard` 持有；clear callback 只用于 scope replacement / Exit 同步通知旧 owner，不进入 Zustand、canonical state 或 persistence。
@@ -159,6 +160,9 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
   Chrome tab IDs 并发复用 `waitForStableTabTitle()`，最后一次性提交 title-only
   `update-tab` mutation batch。`Promise.allSettled()` 隔离单页超时/失败，整个同步
   失败也不改变 restore 结果。
+- `src/manager/core/restoreActionCopy.ts` 单独拥有 Restore tooltip copy，把 source setting
+  `deleteRestoredTabs`、locked override 和 read-only Bookmark override 收敛成稳定文案；
+  `SessionCard` 只传 `tooltip`，继续保留 `Restore` 作为原 accessible name。
 - Locked Session 的 mutation safety 仅对 own keys 恰好为 `{ title }` 的
   `update-tab` 放行；URL、note、favicon、mixed patch 和其它 group/tab mutation
   继续返回 `GROUP_LOCKED`。

@@ -68,6 +68,7 @@ function list(tabs: TabItem[] = links, extra: Partial<ComponentProps<typeof Sess
     dragMarker: null, groupId: 'large', isDragOverlay: false, locked: false,
     overflowCues: { blockStart: false, blockEnd: false, inlineStart: false, inlineEnd: false },
     overflowRef: () => {}, runtime, searchActive: false, selectedRefs: [], selectedTabIds: new Set<string>(),
+    savedLinkRestoreTooltip: 'Open and remove saved link',
     selectionMode: false, sourceRect: null, tabs, workspaceId: 'workspace',
     onStartSelection: () => {}, onToggleSelection: () => {}, ...extra,
   });
