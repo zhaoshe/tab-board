@@ -258,6 +258,27 @@ describe('Task108 session rendering contracts', () => {
     expect(row).toContain('disabled={locked}');
   });
 
+  it('shares link row and shell height across desktop, compact and coarse layouts', () => {
+    expect(cssBlock('.session-card__tabs')).toContain('--session-link-row-height: 44px');
+    expect(cssBlock('.session-card__row-shell')).toContain('height: var(--session-link-row-height)');
+    expect(cssBlock('.tab-item-row__content')).toContain('min-height: var(--session-link-row-height, 44px)');
+    for (const media of ['@media (hover: none), (pointer: coarse)', '@media (max-width: 760px)']) {
+      const mediaStart = css.indexOf(media, css.indexOf('.session-card__row-shell'));
+      expect(mediaStart).toBeGreaterThan(-1);
+      const nextMedia = css.indexOf('@media', mediaStart + media.length);
+      const section = css.slice(mediaStart, nextMedia === -1 ? undefined : nextMedia);
+      expect(section).toMatch(/\.session-card__tabs\s*\{[^}]*--session-link-row-height: 52px;/);
+    }
+  });
+
+  it('reserves both existing note lines for annotated links in full and shell geometry', () => {
+    expect(cssBlock(".session-card__tabs > [data-link-note='true']"))
+      .toContain('--session-link-row-height: 76px');
+    expect(cssBlock('.tab-item-row__note')).toContain('line-height: 16px');
+    expect(row).toContain('lineClamp={2}');
+    expect(row).toContain('{tab.note}');
+  });
+
   it('uses the shared 32px neutral quick action for Saved Tab deletion', () => {
     expect(row).toContain("from '../../../shared/components/AccessibleIconAction'");
     expect(row).not.toContain('<ActionIcon');
