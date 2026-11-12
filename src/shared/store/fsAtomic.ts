@@ -29,7 +29,7 @@ function isNotFoundError(err: unknown): boolean {
 export async function atomicWriteFile(
   parent: FileSystemDirectoryHandle,
   filename: string,
-  content: string,
+  content: string | BufferSource,
 ): Promise<void> {
   let created = false;
   let writable: FileSystemWritableFileStream | undefined;

@@ -25,7 +25,14 @@ beforeEach(() => {
   const data: Record<string, unknown> = {};
   vi.stubGlobal('chrome', { storage: { local: { get: async () => data, set: async (items: object) => Object.assign(data, items) } } });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+function captureUnreadWarnings() {
+  const originalWarn = console.warn;
+  return vi.spyOn(console, 'warn').mockImplementation((...args) => {
+    if (!String(args[0]).includes('Corrupt session file "')) originalWarn(...args);
+  });
+}
 
 describe('complete backup restore', () => {
   it('round trips workspace/category order, notes, flags, settings and Bin', () => {
@@ -105,6 +112,7 @@ describe('complete backup restore', () => {
     expect(data[STATE_KEY]).toMatchObject({ activeWorkspaceId: 'workspace-two' });
   });
   it('file restores a full replacement, saves the previous snapshot, and preserves unread original bytes even on an ID collision', async () => {
+    const warnings = captureUnreadWarnings();
     const root = createMemoryDirectory('Restore');
     const old = normalizeState({ ...createEmptyState(), groups: [createGroupFromTabRecords([createNoteRecord('Previous data')], { title: 'Old session' })] });
     const adapter = await createFileStorageAdapter(root);
@@ -124,8 +132,10 @@ describe('complete backup restore', () => {
     expect(loaded.unreadSessionFiles).toEqual(['unread-original.json']);
     expect(await readTextFile(await sessions.getFileHandle('unread-original.json'))).toBe('{unread');
     expect(await readTextFile(await preserved.getFileHandle('unread-original.json'))).toBe('{unread');
+    expect(warnings.mock.calls.map(([message]) => message)).toEqual(Array(3).fill(expect.stringContaining('Corrupt session file')));
   });
   it('keeps both unread originals when a later restore encounters the same filename again', async () => {
+    const warnings = captureUnreadWarnings();
     const root = createMemoryDirectory('Repeated restore');
     const adapter = await createFileStorageAdapter(root);
     const old = createEmptyState();
@@ -142,6 +152,36 @@ describe('complete backup restore', () => {
     const contents: string[] = [];
     for await (const [name] of preserved.entries()) contents.push(await readTextFile(await preserved.getFileHandle(name)));
     expect(contents.sort()).toEqual(['{first-broken', '{second-broken']);
+    expect(warnings.mock.calls.map(([message]) => message)).toEqual(Array(2).fill(expect.stringContaining('Corrupt session file')));
+  });
+  it('preserves exact invalid UTF-8 bytes through repeated unread filename collisions', async () => {
+    const warnings = captureUnreadWarnings();
+    const root = createMemoryDirectory('Unread binary originals');
+    const adapter = await createFileStorageAdapter(root);
+    const old = createEmptyState();
+    await adapter.setState(old);
+    const source = backup();
+    const sessions = await root.getDirectoryHandle('sessions');
+    const name = source.groups[0].id + '.json';
+    const originals = [[123, 255, 254, 125], [123, 192, 128, 125]];
+    for (const bytes of originals) {
+      const file = await sessions.getFileHandle(name, { create: true });
+      const writable = await file.createWritable();
+      await writable.write(new Uint8Array(bytes));
+      await writable.close();
+      await adapter.reloadFromDisk();
+      await adapter.setState(source, { backupBeforeRestore: old });
+    }
+    const preserved = await root.getDirectoryHandle('.tabboard-unread-before-restore');
+    const contents: number[][] = [];
+    for await (const [name] of preserved.entries()) {
+      const file = await (await preserved.getFileHandle(name)).getFile();
+      contents.push([...new Uint8Array(await file.arrayBuffer())]);
+    }
+    expect(contents).toHaveLength(2);
+    expect(contents).toEqual(expect.arrayContaining(originals));
+    expect(warnings.mock.calls.map(([message]) => message)).toEqual(Array(2).fill(expect.stringContaining('Corrupt session file')));
+    expect((await initFileStorageDirectory(root)).state?.groups).toEqual(source.groups);
   });
   it('saving the current file snapshot failing prevents replacement', async () => {
     const root = createMemoryDirectory('Restore failure');

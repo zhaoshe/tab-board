@@ -592,7 +592,8 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
           } catch (error) {
             if (!isNotFoundError(error)) throw error;
           }
-          await atomicWriteFile(preserved, backupName, await readTextFile(await sessions.getFileHandle(name)));
+          const original = await (await sessions.getFileHandle(name)).getFile();
+          await atomicWriteFile(preserved, backupName, await original.arrayBuffer());
         }
       }
     }
