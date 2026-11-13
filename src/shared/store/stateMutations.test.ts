@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   BIN_LIMIT,
   createEmptyState,
@@ -10,6 +10,7 @@ import type { BinEntry, Folder, Group, TabBoardState, TabItem, Workspace } from 
 import {
   applyStateMutation,
   applyStateMutations,
+  createMutationBatch,
   InvalidDropMutationError,
   RestoreCollisionError,
   isStateMutation,
@@ -3745,6 +3746,177 @@ describe('state mutations', () => {
       committedMutationIndexes: [0, 2],
     });
     expect((thrown as InvalidDropMutationError).committedState?.folders[0].name).toBe('Renamed');
+  });
+
+  it('evaluates mutation batches with original coordinates and failure evidence', () => {
+    const before = createEmptyState();
+    const batch = createMutationBatch([
+      { type: 'add-folder', folder: folder('batch-valid') },
+      { type: 'drop-intent', intent: null },
+      { type: 'rename-folder', id: 'batch-valid', name: 'Renamed', updatedAt: timestamp },
+    ]);
+
+    const evaluation = batch.evaluate(before, timestamp);
+
+    expect(evaluation.state.folders[0]).toMatchObject({ id: 'batch-valid', name: 'Renamed' });
+    expect(evaluation.acceptedMutationIndexes).toEqual([0, 2]);
+    expect(evaluation.failure).toMatchObject({
+      code: 'INVALID_DROP_INTENT',
+      invalidMutationIndexes: [1],
+      committedMutationIndexes: [0, 2],
+    });
+  });
+
+  it('verifies exact replay without live Open Tabs reads', async () => {
+    const mutation: StateMutation = {
+      type: 'drop-intent',
+      operationId: 'batch-replay-live-copy',
+      expectedRevision: 0,
+      intent: {
+        kind: 'copy-open-tabs',
+        tabIds: [101],
+        windowId: 7,
+        targetGroupId: 'batch-replay-target',
+        targetIndex: 0,
+        workspaceId: 'workspace_default',
+      },
+      openTabs: [{
+        id: 101,
+        windowId: 7,
+        title: 'Live',
+        url: 'https://live.test',
+        favIconUrl: '',
+        pinned: false,
+        index: 0,
+        browserGroup: null,
+        storable: true,
+        reason: null,
+      }],
+      updatedAt: timestamp,
+    };
+    const applied = applyStateMutations({ ...createEmptyState(), groups: [group('batch-replay-target')] }, [mutation]);
+    const replay = createMutationBatch([{ ...mutation, openTabs: [] }]);
+    const readLiveOpenTabs = vi.fn(async () => {
+      throw new Error('live read should not happen for replay');
+    });
+
+    const continuation = await replay.verify(applied, readLiveOpenTabs);
+    const evaluation = continuation.evaluate(applied, timestamp);
+
+    expect(readLiveOpenTabs).not.toHaveBeenCalled();
+    expect(evaluation.acceptedMutationIndexes).toEqual([0]);
+    expect(evaluation.failure).toBeUndefined();
+    expect(evaluation.state).toEqual(applied);
+  });
+
+  it('rejects empty live Open Tabs drops without accepting a continuation', async () => {
+    const before = { ...createEmptyState(), groups: [group('batch-live-target')] };
+    const continuation = await createMutationBatch([{
+      type: 'drop-intent',
+      operationId: 'batch-live-unavailable',
+      expectedRevision: 0,
+      intent: {
+        kind: 'copy-open-tabs',
+        tabIds: [101],
+        windowId: 7,
+        targetGroupId: 'batch-live-target',
+        targetIndex: 0,
+        workspaceId: 'workspace_default',
+      },
+      openTabs: [],
+      updatedAt: timestamp,
+    }]).verify(before, async () => {
+      throw new Error('live tabs unavailable');
+    });
+
+    expect(continuation.hasAcceptedMutations()).toBe(false);
+    expect(continuation.failureWithoutCommit(before)).toMatchObject({
+      code: 'INVALID_DROP_INTENT',
+      invalidMutationIndexes: [0],
+      committedMutationIndexes: [],
+      committedState: before,
+    });
+  });
+
+  it('soft-fails non-live drop execution errors only during verification', async () => {
+    const before = {
+      ...createEmptyState(),
+      mutationRevision: Number.MAX_SAFE_INTEGER,
+      groups: [group('batch-max-revision-drop')],
+    };
+    const mutation: StateMutation = {
+      type: 'drop-intent',
+      operationId: 'batch-max-revision-drop-operation',
+      expectedRevision: Number.MAX_SAFE_INTEGER,
+      intent: {
+        kind: 'move-session',
+        groupId: 'batch-max-revision-drop',
+        category: 'saved',
+        index: 0,
+        workspaceId: 'workspace_default',
+      },
+      openTabs: [],
+      updatedAt: timestamp,
+    };
+
+    const continuation = await createMutationBatch([mutation]).verify(before, vi.fn());
+
+    expect(continuation.hasAcceptedMutations()).toBe(false);
+    expect(continuation.failureWithoutCommit(before)).toMatchObject({
+      code: 'INVALID_DROP_INTENT',
+      invalidMutationIndexes: [0],
+      committedMutationIndexes: [],
+      committedState: before,
+    });
+    expect(() => createMutationBatch([mutation]).evaluate(before, timestamp))
+      .toThrow('Mutation revision exhausted.');
+    await expect(createMutationBatch([{
+      type: 'add-folder',
+      folder: { ...folder('ordinary-hard-abort'), workspaceId: 'missing-workspace' },
+    }]).verify(createEmptyState(), vi.fn())).rejects.toThrow('Workspace not found.');
+  });
+
+  it('does not double-count verified failure gaps when evaluating accepted continuation', async () => {
+    const before = {
+      ...createEmptyState(),
+      mutationRevision: 7,
+      groups: [group('batch-continuation-valid')],
+    };
+    const valid: StateMutation = {
+      type: 'drop-intent',
+      operationId: 'batch-continuation-valid-operation',
+      expectedRevision: 8,
+      intent: {
+        kind: 'move-session',
+        groupId: 'batch-continuation-valid',
+        category: 'saved',
+        index: 0,
+        workspaceId: 'workspace_default',
+      },
+      openTabs: [],
+      updatedAt: timestamp,
+    };
+    const continuation = await createMutationBatch([
+      {
+        type: 'drop-intent',
+        operationId: 'batch-continuation-invalid-operation',
+        expectedRevision: 7,
+        intent: { kind: 'move-session', groupId: 'missing-continuation-valid', category: 'saved', index: 0, workspaceId: 'workspace_default' },
+        openTabs: [],
+        updatedAt: timestamp,
+      },
+      valid,
+    ]).verify(before, vi.fn());
+
+    const evaluation = continuation.evaluate(before, timestamp);
+
+    expect(evaluation.state.groups[0].starred).toBe(true);
+    expect(evaluation.state.mutationRevision).toBe(8);
+    expect(evaluation.acceptedMutationIndexes).toEqual([1]);
+    expect(evaluation.failure).toMatchObject({
+      invalidMutationIndexes: [0],
+      committedMutationIndexes: [1],
+    });
   });
 
   it('enforces monotonic expected revisions and exact replay no-op', () => {

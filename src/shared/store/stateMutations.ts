@@ -17,6 +17,7 @@ import {
   type TabItem,
   type TabRef,
   type Workspace,
+  normalizeState,
 } from '../model';
 import {
   dropOperationGroupId,
@@ -601,7 +602,7 @@ export interface ValidatedMutationBatch {
   invalidDropIndexes: number[];
 }
 
-export function validateMutationBatch(input: unknown): ValidatedMutationBatch {
+function validateMutationBatch(input: unknown): ValidatedMutationBatch {
   if (!Array.isArray(input) || input.length > MAX_MUTATIONS || !isDenseArray(input)) {
     throw new Error('Invalid state mutation batch.');
   }
@@ -1764,14 +1765,14 @@ export class InvalidDropMutationError extends Error {
   }
 }
 
-export interface DropMutationBatchContext {
+interface DropMutationBatchContext {
   batchRevision: number | null;
   invalidDropCount: number;
   externalRevisionStale: boolean;
   rawInvalidDropIndexes: readonly number[];
 }
 
-export function createDropMutationBatchContext(
+function createDropMutationBatchContext(
   rawInvalidDropIndexes: readonly number[] = [],
 ): DropMutationBatchContext {
   return {
@@ -1782,7 +1783,7 @@ export function createDropMutationBatchContext(
   };
 }
 
-export function prepareDropMutationForBatch(
+function prepareDropMutationForBatch(
   state: TabBoardState,
   mutation: StateMutation,
   context: DropMutationBatchContext,
@@ -1812,10 +1813,327 @@ export function prepareDropMutationForBatch(
   };
 }
 
-export function markInvalidDropMutationForBatch(
+function markInvalidDropMutationForBatch(
   context: DropMutationBatchContext,
 ): DropMutationBatchContext {
   return { ...context, invalidDropCount: context.invalidDropCount + 1 };
+}
+
+export interface LiveOpenTabRequest {
+  tabIds: readonly number[];
+  windowId: number;
+}
+
+export type ReadLiveOpenTabs = (
+  request: LiveOpenTabRequest,
+  settings: Settings,
+) => Promise<OpenTabInfo[]>;
+
+export interface MutationBatchEvaluation {
+  state: TabBoardState;
+  acceptedMutationIndexes: number[];
+  failure?: InvalidDropMutationError;
+  backupBeforeRestore?: TabBoardState;
+}
+
+export interface VerifiedMutationBatchContinuation {
+  evaluate(state: TabBoardState, appliedAt?: string): MutationBatchEvaluation;
+  hasAcceptedMutations(): boolean;
+  failureWithoutCommit(state: TabBoardState): InvalidDropMutationError | undefined;
+  finalizeFailure(evaluation: MutationBatchEvaluation, committedState: TabBoardState): InvalidDropMutationError | undefined;
+}
+
+export interface MutationBatch {
+  evaluate(state: TabBoardState, appliedAt?: string): MutationBatchEvaluation;
+  verify(state: TabBoardState, readLiveOpenTabs: ReadLiveOpenTabs): Promise<VerifiedMutationBatchContinuation>;
+  finalizeFailure(evaluation: MutationBatchEvaluation, committedState: TabBoardState): InvalidDropMutationError | undefined;
+}
+
+interface MutationBatchEntry {
+  mutation: StateMutation;
+  originalIndex: number;
+}
+
+function sortUniqueIndexes(indexes: readonly number[]): number[] {
+  return [...new Set(indexes)].sort((left, right) => left - right);
+}
+
+function createInvalidDropFailure(
+  message: string,
+  invalidMutationIndexes: readonly number[],
+  committedMutationIndexes: readonly number[],
+  committedState: TabBoardState,
+): InvalidDropMutationError {
+  return new InvalidDropMutationError(
+    message,
+    sortUniqueIndexes(invalidMutationIndexes),
+    sortUniqueIndexes(committedMutationIndexes),
+    committedState,
+  );
+}
+
+function sameIndexes(left: readonly number[], right: readonly number[]): boolean {
+  const sortedLeft = sortUniqueIndexes(left);
+  const sortedRight = sortUniqueIndexes(right);
+  return sortedLeft.length === sortedRight.length
+    && sortedLeft.every((item, index) => item === sortedRight[index]);
+}
+
+function getLiveOpenTabRequest(mutation: StateMutation): LiveOpenTabRequest | null {
+  if (mutation.type !== 'drop-intent') return null;
+  if (mutation.intent.kind === 'copy-open-tabs') {
+    return { tabIds: mutation.intent.tabIds, windowId: mutation.intent.windowId };
+  }
+  if (mutation.intent.kind === 'create-session' && mutation.intent.source.kind === 'open-tabs') {
+    return { tabIds: mutation.intent.source.tabIds, windowId: mutation.intent.source.windowId };
+  }
+  return null;
+}
+
+function recoverRecordedDropSnapshot(
+  state: TabBoardState,
+  mutation: StateMutation,
+): StateMutation {
+  if (mutation.type !== 'drop-intent' || mutation.openTabs.length !== 0) return mutation;
+  const entry = state.dropOperationLedger.find((item) => item.operationId === mutation.operationId);
+  if (!entry) return mutation;
+  try {
+    const parsed = JSON.parse(entry.digest) as { openTabs?: unknown };
+    if (!Array.isArray(parsed.openTabs)
+      || getDropOperationDigest(mutation.intent, parsed.openTabs as OpenTabInfo[]) !== entry.digest) {
+      return mutation;
+    }
+    return { ...mutation, openTabs: parsed.openTabs as OpenTabInfo[] };
+  } catch {
+    return mutation;
+  }
+}
+
+interface LiveOpenTabsVerificationRequest {
+  request: LiveOpenTabRequest;
+  settings: Settings;
+}
+
+interface MutationBatchInterpreterOptions {
+  mode: 'evaluate' | 'verify';
+  inheritedInvalidIndexes: readonly number[];
+  revisionGapIndexes: readonly number[];
+  appliedAt?: string;
+  failureMessage: string;
+}
+
+interface MutationBatchInterpreterResult extends MutationBatchEvaluation {
+  entries: MutationBatchEntry[];
+}
+
+function* interpretMutationBatch(
+  state: TabBoardState,
+  entries: readonly MutationBatchEntry[],
+  options: MutationBatchInterpreterOptions,
+): Generator<LiveOpenTabsVerificationRequest, MutationBatchInterpreterResult, OpenTabInfo[]> {
+  let current = state;
+  let revisionContext = createDropMutationBatchContext(options.revisionGapIndexes);
+  const invalidIndexes = [...options.inheritedInvalidIndexes];
+  const acceptedIndexes: number[] = [];
+  const acceptedEntries: MutationBatchEntry[] = [];
+  let backupBeforeRestore: TabBoardState | undefined;
+
+  for (const { mutation: rawMutation, originalIndex } of entries) {
+    const recoveredMutation = options.mode === 'verify'
+      ? recoverRecordedDropSnapshot(current, rawMutation)
+      : rawMutation;
+    const mutationForPreparation = recoveredMutation;
+    const prepared = prepareDropMutationForBatch(current, mutationForPreparation, revisionContext, originalIndex);
+    revisionContext = prepared.context;
+    const mutation = prepared.mutation;
+    let liveOpenTabRequest: LiveOpenTabRequest | null = null;
+    try {
+      if (prepared.stale
+        && !(mutation.type === 'drop-intent'
+          && isDropIntentAlreadyApplied(
+            current,
+            mutation.intent,
+            mutation.openTabs,
+            mutation.operationId,
+          ))) {
+        throw new InvalidDropMutationError('Drop mutation revision is stale.');
+      }
+      if (options.mode === 'verify'
+        && mutation.type === 'drop-intent'
+        && (mutation.openTabs.length > 0 || getLiveOpenTabRequest(mutation) === null)
+        && isDropIntentAlreadyApplied(current, mutation.intent, mutation.openTabs, mutation.operationId)) {
+        acceptedIndexes.push(originalIndex);
+        acceptedEntries.push({ mutation, originalIndex });
+        continue;
+      }
+      liveOpenTabRequest = options.mode === 'verify' ? getLiveOpenTabRequest(mutation) : null;
+      const executableMutation = liveOpenTabRequest && mutation.type === 'drop-intent'
+        ? { ...mutation, openTabs: yield { request: liveOpenTabRequest, settings: current.settings } }
+        : mutation;
+      const before = current;
+      current = applyStateMutation(current, executableMutation, options.appliedAt);
+      if (executableMutation.type === 'restore-backup') backupBeforeRestore = normalizeState(before);
+      acceptedIndexes.push(originalIndex);
+      acceptedEntries.push({ mutation: executableMutation, originalIndex });
+    } catch (error: unknown) {
+      if (mutationForPreparation.type === 'drop-intent'
+        && (error instanceof InvalidDropMutationError || options.mode === 'verify')) {
+        invalidIndexes.push(originalIndex);
+        if (!prepared.stale) {
+          revisionContext = markInvalidDropMutationForBatch(revisionContext);
+        }
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  const failure = invalidIndexes.length
+    ? createInvalidDropFailure(options.failureMessage, invalidIndexes, acceptedIndexes, current)
+    : undefined;
+  return {
+    state: current,
+    acceptedMutationIndexes: sortUniqueIndexes(acceptedIndexes),
+    failure,
+    backupBeforeRestore,
+    entries: acceptedEntries,
+  };
+}
+
+function evaluateMutationEntries(
+  state: TabBoardState,
+  entries: readonly MutationBatchEntry[],
+  options: MutationBatchInterpreterOptions,
+): MutationBatchInterpreterResult {
+  const interpreter = interpretMutationBatch(state, entries, options);
+  const result = interpreter.next();
+  if (!result.done) {
+    throw new Error('Live Open Tabs verification is unavailable in synchronous mutation batch evaluation.');
+  }
+  return result.value;
+}
+
+async function verifyMutationEntries(
+  state: TabBoardState,
+  entries: readonly MutationBatchEntry[],
+  options: MutationBatchInterpreterOptions,
+  readLiveOpenTabs: ReadLiveOpenTabs,
+): Promise<MutationBatchInterpreterResult> {
+  const interpreter = interpretMutationBatch(state, entries, options);
+  let next = interpreter.next();
+  while (!next.done) {
+    try {
+      const openTabs = await readLiveOpenTabs(next.value.request, next.value.settings);
+      next = interpreter.next(openTabs);
+    } catch (error: unknown) {
+      next = interpreter.throw(error);
+    }
+  }
+  return next.value;
+}
+
+class VerifiedMutationBatchContinuationImpl implements VerifiedMutationBatchContinuation {
+  constructor(
+    private readonly entries: readonly MutationBatchEntry[],
+    private readonly inheritedInvalidIndexes: readonly number[],
+  ) {}
+
+  evaluate(state: TabBoardState, appliedAt?: string): MutationBatchEvaluation {
+    return evaluateMutationEntries(state, this.entries, {
+      mode: 'evaluate',
+      inheritedInvalidIndexes: this.inheritedInvalidIndexes,
+      revisionGapIndexes: [],
+      appliedAt,
+      failureMessage: 'Invalid drop intent.',
+    });
+  }
+
+  hasAcceptedMutations(): boolean {
+    return this.entries.length > 0;
+  }
+
+  failureWithoutCommit(state: TabBoardState): InvalidDropMutationError | undefined {
+    if (this.entries.length || !this.inheritedInvalidIndexes.length) return undefined;
+    return createInvalidDropFailure(
+      'Open Tabs selection is unavailable or cannot be saved.',
+      this.inheritedInvalidIndexes,
+      [],
+      state,
+    );
+  }
+
+  finalizeFailure(
+    evaluation: MutationBatchEvaluation,
+    committedState: TabBoardState,
+  ): InvalidDropMutationError | undefined {
+    if (!evaluation.failure) return undefined;
+    const message = sameIndexes(evaluation.failure.invalidMutationIndexes, this.inheritedInvalidIndexes)
+      ? 'Open Tabs selection is unavailable or cannot be saved.'
+      : evaluation.failure.message;
+    return createInvalidDropFailure(
+      message,
+      evaluation.failure.invalidMutationIndexes,
+      evaluation.failure.committedMutationIndexes,
+      committedState,
+    );
+  }
+}
+
+class MutationBatchImpl implements MutationBatch {
+  private readonly entries: MutationBatchEntry[];
+  private readonly rawInvalidDropIndexes: number[];
+
+  constructor(raw: unknown) {
+    const validated = validateMutationBatch(raw);
+    this.entries = validated.mutations.map((mutation, index) => ({
+      mutation,
+      originalIndex: validated.originalIndexes[index],
+    }));
+    this.rawInvalidDropIndexes = [...validated.invalidDropIndexes];
+  }
+
+  evaluate(state: TabBoardState, appliedAt?: string): MutationBatchEvaluation {
+    return evaluateMutationEntries(state, this.entries, {
+      mode: 'evaluate',
+      inheritedInvalidIndexes: this.rawInvalidDropIndexes,
+      revisionGapIndexes: this.rawInvalidDropIndexes,
+      appliedAt,
+      failureMessage: 'Invalid state mutation.',
+    });
+  }
+
+  async verify(
+    state: TabBoardState,
+    readLiveOpenTabs: ReadLiveOpenTabs,
+  ): Promise<VerifiedMutationBatchContinuation> {
+    const result = await verifyMutationEntries(state, this.entries, {
+      mode: 'verify',
+      inheritedInvalidIndexes: this.rawInvalidDropIndexes,
+      revisionGapIndexes: this.rawInvalidDropIndexes,
+      failureMessage: 'Invalid drop intent.',
+    }, readLiveOpenTabs);
+    return new VerifiedMutationBatchContinuationImpl(
+      result.entries,
+      result.failure?.invalidMutationIndexes || [],
+    );
+  }
+
+  finalizeFailure(
+    evaluation: MutationBatchEvaluation,
+    committedState: TabBoardState,
+  ): InvalidDropMutationError | undefined {
+    if (!evaluation.failure) return undefined;
+    return createInvalidDropFailure(
+      'Invalid drop intent.',
+      evaluation.failure.invalidMutationIndexes,
+      evaluation.failure.committedMutationIndexes,
+      committedState,
+    );
+  }
+}
+
+export function createMutationBatch(raw: unknown): MutationBatch {
+  return new MutationBatchImpl(raw);
 }
 
 function appendDropOperation(
@@ -2829,46 +3147,7 @@ export function applyStateMutation(
 }
 
 export function applyStateMutations(state: TabBoardState, mutations: readonly unknown[]): TabBoardState {
-  const validated = validateMutationBatch(mutations);
-  let current = state;
-  let revisionContext = createDropMutationBatchContext(validated.invalidDropIndexes);
-  const invalidIndexes = [...validated.invalidDropIndexes];
-  const committedIndexes: number[] = [];
-  validated.mutations.forEach((mutation, index) => {
-    const originalIndex = validated.originalIndexes[index];
-    const prepared = prepareDropMutationForBatch(current, mutation, revisionContext, originalIndex);
-    revisionContext = prepared.context;
-    try {
-      if (prepared.stale
-        && !(prepared.mutation.type === 'drop-intent'
-          && isDropIntentAlreadyApplied(
-            current,
-            prepared.mutation.intent,
-            prepared.mutation.openTabs,
-            prepared.mutation.operationId,
-          ))) {
-        throw new InvalidDropMutationError('Drop mutation revision is stale.');
-      }
-      current = applyStateMutation(current, prepared.mutation);
-      committedIndexes.push(validated.originalIndexes[index]);
-    } catch (error: unknown) {
-      if (mutation.type === 'drop-intent' && error instanceof InvalidDropMutationError) {
-        invalidIndexes.push(validated.originalIndexes[index]);
-        if (!prepared.stale) {
-          revisionContext = markInvalidDropMutationForBatch(revisionContext);
-        }
-        return;
-      }
-      throw error;
-    }
-  });
-  if (invalidIndexes.length) {
-    throw new InvalidDropMutationError(
-      'Invalid state mutation.',
-      invalidIndexes.sort((left, right) => left - right),
-      committedIndexes,
-      current,
-    );
-  }
-  return current;
+  const evaluation = createMutationBatch(mutations).evaluate(state);
+  if (evaluation.failure) throw evaluation.failure;
+  return evaluation.state;
 }

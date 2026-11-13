@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createEmptyState,
   restoreRefKey,
+  STATE_KEY,
   SETTINGS_PROJECTION_KEY,
   type BrowserGroup,
   type Group,
@@ -2286,6 +2287,118 @@ describe('Task112 live Open Tabs validation', () => {
     expect(response).toMatchObject({ ok: false, code: 'INVALID_DROP_INTENT' });
     expect(harness.state.current.groups).toHaveLength(1);
     expect(harness.state.current.groups[0].tabs).toHaveLength(0);
+  });
+
+  it('returns all-rejected live drop failure without a second persistence read', async () => {
+    const liveTab = createTab(1, 'Incognito live tab', { incognito: true });
+    const initial = createState();
+    initial.groups = [createSavedGroup('zero-accepted-read-target')];
+    const harness = createChromeHarness(initial, {
+      tabs: [liveTab],
+      windows: [{ id: 1, type: 'normal', incognito: true, focused: true, alwaysOnTop: false, tabs: [liveTab] }],
+    });
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+    let stateReadCount = 0;
+    harness.chromeMock.storage.local.get.mockImplementation(async (keys: unknown) => {
+      if (keys === STATE_KEY) {
+        stateReadCount += 1;
+        if (stateReadCount > 1) throw new Error('unexpected second state read');
+      }
+      return {
+        tabboardState: structuredClone(harness.state.current),
+        [SETTINGS_PROJECTION_KEY]: projectionFromState(harness.state.current),
+      };
+    });
+
+    const response = await sendMessage(harness.runtimeMessage.getListener(), {
+      type: 'tabboard-state-mutations',
+      mutations: [{
+        type: 'drop-intent',
+        expectedRevision: 0,
+        operationId: 'zero-accepted-read-failure',
+        intent: {
+          kind: 'copy-open-tabs',
+          tabIds: [1],
+          windowId: 1,
+          targetGroupId: 'zero-accepted-read-target',
+          targetIndex: 0,
+          workspaceId: 'workspace-a',
+        },
+        openTabs: [],
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }],
+    }) as { ok: boolean; code?: string; error?: string; invalidMutationIndexes?: number[]; committedMutationIndexes?: number[]; state?: TabBoardState };
+
+    expect(response).toMatchObject({
+      ok: false,
+      code: 'INVALID_DROP_INTENT',
+      error: 'Open Tabs selection is unavailable or cannot be saved.',
+      invalidMutationIndexes: [0],
+      committedMutationIndexes: [],
+    });
+    expect(response.state?.groups.map(({ id }) => id)).toEqual(['zero-accepted-read-target']);
+    expect(stateReadCount).toBe(1);
+    expect(harness.writes).toHaveLength(0);
+  });
+
+  it('returns the initial state for zero-accepted failure when storage changes after verification', async () => {
+    const liveTab = createTab(1, 'Incognito live tab', { incognito: true });
+    const initial = createState();
+    initial.groups = [createSavedGroup('zero-accepted-initial')];
+    const harness = createChromeHarness(initial, {
+      tabs: [liveTab],
+      windows: [{ id: 1, type: 'normal', incognito: true, focused: true, alwaysOnTop: false, tabs: [liveTab] }],
+    });
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+    harness.chromeMock.storage.local.get.mockImplementation(async (keys: unknown) => {
+      if (keys !== STATE_KEY) {
+        return {
+          tabboardState: structuredClone(harness.state.current),
+          [SETTINGS_PROJECTION_KEY]: projectionFromState(harness.state.current),
+        };
+      }
+      const first = structuredClone(harness.state.current);
+      harness.state.current = {
+        ...harness.state.current,
+        mutationRevision: harness.state.current.mutationRevision + 1,
+        groups: [createSavedGroup('zero-accepted-concurrent')],
+      };
+      return {
+        tabboardState: first,
+        [SETTINGS_PROJECTION_KEY]: projectionFromState(first),
+      };
+    });
+
+    const response = await sendMessage(harness.runtimeMessage.getListener(), {
+      type: 'tabboard-state-mutations',
+      mutations: [{
+        type: 'drop-intent',
+        expectedRevision: 0,
+        operationId: 'zero-accepted-concurrent-change',
+        intent: {
+          kind: 'copy-open-tabs',
+          tabIds: [1],
+          windowId: 1,
+          targetGroupId: 'zero-accepted-initial',
+          targetIndex: 0,
+          workspaceId: 'workspace-a',
+        },
+        openTabs: [],
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }],
+    }) as { ok: boolean; code?: string; state?: TabBoardState };
+
+    expect(response).toMatchObject({
+      ok: false,
+      code: 'INVALID_DROP_INTENT',
+      invalidMutationIndexes: [0],
+      committedMutationIndexes: [],
+    });
+    expect(response.state?.groups.map(({ id }) => id)).toEqual(['zero-accepted-initial']);
+    expect(harness.state.current.groups.map(({ id }) => id)).toEqual(['zero-accepted-concurrent']);
+    expect(harness.writes).toHaveLength(0);
   });
 
   it('commits valid sibling mutations around an invalid live drop', async () => {

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createEmptyState, createNoteRecord } from '../shared/model';
 import type { BinEntry, Folder, Group, TabBoardState, TabItem } from '../shared/model';
 import { createStatePersistence } from './statePersistence';
-import type { StateMutation } from '../shared/store/stateMutations';
+import { createMutationBatch, type StateMutation } from '../shared/store/stateMutations';
 import { getDropOperationDigest } from '../shared/model/drop-operations';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
@@ -110,6 +110,86 @@ describe('state persistence queue', () => {
     expect(result.groups[0].id).toBe('captured');
     expect(result.folders[0].name).toBe('Work');
     expect(setState).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies verified continuations to the fresh state read at commit time', async () => {
+    const verifiedBase = { ...createEmptyState(), groups: [group('fresh-drop')] };
+    const continuation = await createMutationBatch([{
+      type: 'drop-intent',
+      expectedRevision: 0,
+      operationId: 'fresh-drop-operation',
+      intent: { kind: 'move-session', groupId: 'fresh-drop', category: 'saved', index: 0, workspaceId: 'workspace_default' },
+      openTabs: [],
+      updatedAt: timestamp,
+    }]).verify(verifiedBase, vi.fn());
+    let stored = {
+      ...createEmptyState(),
+      groups: [group('fresh-concurrent'), group('fresh-drop')],
+    };
+    const setState = vi.fn(async (next: TabBoardState) => {
+      stored = structuredClone(next);
+    });
+    const persistence = createStatePersistence({
+      locks: undefined,
+      getState: async () => structuredClone(stored),
+      setState,
+    });
+
+    const result = await persistence.applyBatch(continuation);
+
+    expect(result.state.groups.map(({ id }) => id)).toEqual(['fresh-concurrent', 'fresh-drop']);
+    expect(result.state.groups.find(({ id }) => id === 'fresh-drop')?.starred).toBe(true);
+    expect(setState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groups: expect.arrayContaining([
+          expect.objectContaining({ id: 'fresh-concurrent' }),
+          expect.objectContaining({ id: 'fresh-drop', starred: true }),
+        ]),
+      }),
+      undefined,
+    );
+  });
+
+  it('uses one appliedAt timestamp for every accepted drop in a persistence batch', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-04T05:06:07.008Z'));
+    try {
+      let stored = {
+        ...createEmptyState(),
+        groups: [group('timestamp-a'), group('timestamp-b')],
+      };
+      const persistence = createStatePersistence({
+        locks: undefined,
+        getState: async () => structuredClone(stored),
+        setState: async (next) => {
+          stored = structuredClone(next);
+        },
+      });
+
+      await persistence.applyMutations([
+        {
+          type: 'drop-intent',
+          expectedRevision: 0,
+          operationId: 'timestamp-a-operation',
+          intent: { kind: 'move-session', groupId: 'timestamp-a', category: 'saved', index: 0, workspaceId: 'workspace_default' },
+          openTabs: [],
+          updatedAt: timestamp,
+        },
+        {
+          type: 'drop-intent',
+          expectedRevision: 1,
+          operationId: 'timestamp-b-operation',
+          intent: { kind: 'move-session', groupId: 'timestamp-b', category: 'archive', index: 0, workspaceId: 'workspace_default' },
+          openTabs: [],
+          updatedAt: timestamp,
+        },
+      ]);
+
+      expect(stored.dropOperationLedger.map(({ appliedAt }) => appliedAt))
+        .toEqual(['2026-03-04T05:06:07.008Z', '2026-03-04T05:06:07.008Z']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects malformed TabItem payloads before persistence', async () => {

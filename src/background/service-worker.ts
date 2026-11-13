@@ -52,18 +52,11 @@ import * as fileStorageModule from '../shared/store/fileStorage';
 import * as fsDirectoryModule from '../shared/store/fsDirectory';
 import { createStatePersistence, type StatePersistence } from './statePersistence';
 import {
-  applyStateMutation,
-  createDropMutationBatchContext,
+  createMutationBatch,
   InvalidDropMutationError,
-  markInvalidDropMutationForBatch,
-  prepareDropMutationForBatch,
-  validateMutationBatch,
+  type LiveOpenTabRequest,
   type StateMutation,
 } from '../shared/store/stateMutations';
-import {
-  getDropOperationDigest,
-  isDropIntentAlreadyApplied,
-} from '../shared/model/drop-operations';
 import { readSettingsProjection } from '../shared/store/settingsProjection';
 import { logWarning } from '../shared/utils/diagnostics';
 import {
@@ -214,41 +207,6 @@ chrome.omnibox.onInputEntered.addListener(async (text) => {
   await openManager({ query: text });
 });
 
-interface LiveOpenTabRequest {
-  tabIds: readonly number[];
-  windowId: number;
-}
-
-function getLiveOpenTabRequest(mutation: StateMutation): LiveOpenTabRequest | null {
-  if (mutation.type !== 'drop-intent') return null;
-  if (mutation.intent.kind === 'copy-open-tabs') {
-    return { tabIds: mutation.intent.tabIds, windowId: mutation.intent.windowId };
-  }
-  if (mutation.intent.kind === 'create-session' && mutation.intent.source.kind === 'open-tabs') {
-    return { tabIds: mutation.intent.source.tabIds, windowId: mutation.intent.source.windowId };
-  }
-  return null;
-}
-
-function recoverRecordedDropSnapshot(
-  state: TabBoardState,
-  mutation: StateMutation,
-): StateMutation {
-  if (mutation.type !== 'drop-intent' || mutation.openTabs.length !== 0) return mutation;
-  const entry = state.dropOperationLedger.find((item) => item.operationId === mutation.operationId);
-  if (!entry) return mutation;
-  try {
-    const parsed = JSON.parse(entry.digest) as { intent?: unknown; openTabs?: unknown };
-    if (!Array.isArray(parsed.openTabs)
-      || getDropOperationDigest(mutation.intent, parsed.openTabs as OpenTabInfo[]) !== entry.digest) {
-      return mutation;
-    }
-    return { ...mutation, openTabs: parsed.openTabs as OpenTabInfo[] };
-  } catch {
-    return mutation;
-  }
-}
-
 async function getVerifiedLiveOpenTabs(
   request: LiveOpenTabRequest,
   settings: Settings,
@@ -303,105 +261,23 @@ async function getVerifiedLiveOpenTabs(
   return records;
 }
 
-interface VerifiedMutationBatch {
-  mutations: StateMutation[];
-  originalIndexes: number[];
-  invalidMutationIndexes: number[];
-}
-
-function sortIndexes(indexes: readonly number[]): number[] {
-  return [...new Set(indexes)].sort((left, right) => left - right);
-}
-
-async function verifyDropMutations(
-  state: TabBoardState,
-  mutations: readonly StateMutation[],
-  originalMutationIndexes: readonly number[] = mutations.map((_, index) => index),
-  invalidDropIndexes: readonly number[] = [],
-): Promise<VerifiedMutationBatch> {
-  let workingState = state;
-  let revisionContext = createDropMutationBatchContext(invalidDropIndexes);
-  const invalidMutationIndexes: number[] = [];
-  const verifiedMutations: StateMutation[] = [];
-  const originalIndexes: number[] = [];
-  for (const [index, rawMutation] of mutations.entries()) {
-    const originalIndex = originalMutationIndexes[index] ?? index;
-    const recoveredMutation = recoverRecordedDropSnapshot(workingState, rawMutation);
-    const prepared = prepareDropMutationForBatch(workingState, recoveredMutation, revisionContext, originalIndex);
-    revisionContext = prepared.context;
-    const mutation = prepared.mutation;
-    if (mutation.type === 'drop-intent'
-      && isDropIntentAlreadyApplied(workingState, mutation.intent, mutation.openTabs, mutation.operationId)) {
-      verifiedMutations.push(mutation);
-      originalIndexes.push(index);
-      continue;
-    }
-    const request = getLiveOpenTabRequest(mutation);
-    try {
-      if (prepared.stale) throw new InvalidDropMutationError('Drop mutation revision is stale.');
-      const verifiedMutation = request && mutation.type === 'drop-intent'
-        ? { ...mutation, openTabs: await getVerifiedLiveOpenTabs(request, workingState.settings) }
-        : mutation;
-      workingState = applyStateMutation(workingState, verifiedMutation);
-      verifiedMutations.push(verifiedMutation);
-      originalIndexes.push(index);
-    } catch (error: unknown) {
-      if (mutation.type === 'drop-intent') {
-        invalidMutationIndexes.push(index);
-        if (!prepared.stale) {
-          revisionContext = markInvalidDropMutationForBatch(revisionContext);
-        }
-        continue;
-      }
-      throw error;
-    }
-  }
-  return { mutations: verifiedMutations, originalIndexes, invalidMutationIndexes };
-}
-
 async function applyWorkerMutations(input: unknown): Promise<TabBoardState> {
-  const validated = validateMutationBatch(input);
+  const batch = createMutationBatch(input);
   const state = await getState();
-  const verified = await verifyDropMutations(
+  const verified = await batch.verify(
     state,
-    validated.mutations,
-    validated.originalIndexes,
-    validated.invalidDropIndexes,
+    getVerifiedLiveOpenTabs,
   );
-  const verifiedOriginalIndexes = verified.originalIndexes.map((index) => validated.originalIndexes[index]);
-  const persistableMutations = verified.mutations;
-  const persistableOriginalIndexes = verifiedOriginalIndexes;
-  const invalidMutationIndexes = sortIndexes([
-    ...validated.invalidDropIndexes,
-    ...verified.invalidMutationIndexes.map((index) => validated.originalIndexes[index]),
-  ]);
-  let persisted = state;
-  if (persistableMutations.length) {
-    try {
-      persisted = await (await getPersistence()).applyMutations(persistableMutations);
-    } catch (error: unknown) {
-      if (!(error instanceof InvalidDropMutationError)) throw error;
-      const mapIndexes = (indexes: readonly number[]): number[] => indexes.flatMap((index) => {
-        const originalIndex = persistableOriginalIndexes[index];
-        return originalIndex === undefined ? [] : [originalIndex];
-      });
-      throw new InvalidDropMutationError(
-        error.message,
-        sortIndexes([...invalidMutationIndexes, ...mapIndexes(error.invalidMutationIndexes)]),
-        sortIndexes(mapIndexes(error.committedMutationIndexes)),
-        error.committedState,
-      );
-    }
+  if (!verified.hasAcceptedMutations()) {
+    const failure = verified.failureWithoutCommit(state);
+    if (failure) throw failure;
+    return state;
   }
-  if (invalidMutationIndexes.length) {
-    throw new InvalidDropMutationError(
-      'Open Tabs selection is unavailable or cannot be saved.',
-      invalidMutationIndexes,
-      persistableOriginalIndexes,
-      persisted,
-    );
+  const committed = await (await getPersistence()).applyBatch(verified);
+  if (committed.failure) {
+    throw committed.failure;
   }
-  return persisted;
+  return committed.state;
 }
 
 const UNTRUSTED_RUNTIME_SENDER = 'UNTRUSTED_RUNTIME_SENDER';

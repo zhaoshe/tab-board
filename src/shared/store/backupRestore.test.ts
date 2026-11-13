@@ -77,6 +77,42 @@ describe('complete backup restore', () => {
     expect(data.tabboardBackupBeforeRestore).toEqual(old);
     expect(data[STATE_KEY]).toMatchObject({ mutationRevision: 8, activeWorkspaceId: 'workspace-two' });
   });
+  it('stores the state before the last successful restore in a multi-restore browser batch', async () => {
+    const old = normalizeState({ ...createEmptyState(), mutationRevision: 7 });
+    const first = backup();
+    const secondBase = backup();
+    const second = normalizeState({
+      ...secondBase,
+      groups: secondBase.groups.map(group => group.id === 'saved' ? { ...group, title: 'Second backup saved' } : group),
+    });
+    const expectedBeforeSecond = normalizeState({
+      ...first,
+      mutationRevision: 8,
+      settings: { ...first.settings, storageMode: 'browser', storageFolderName: '' },
+      updatedAt: timestamp,
+    });
+    const data: Record<string, unknown> = { [STATE_KEY]: old };
+    const writes: Record<string, unknown>[] = [];
+    const set = vi.fn(async (items: Record<string, unknown>) => {
+      writes.push(structuredClone(items));
+      Object.assign(data, items);
+    });
+    vi.stubGlobal('chrome', { storage: { local: { get: async () => data, set } } });
+    const adapter = createChromeStorageAdapter();
+    const persistence = createStatePersistence({ getState: () => adapter.getState(), setState: (state, options) => adapter.setState(state, options) });
+
+    const result = await persistence.applyMutations([restore(first, 7), restore(second, 8)]);
+
+    expect(writes).toHaveLength(1);
+    expect(data.tabboardBackupBeforeRestore).toEqual(expectedBeforeSecond);
+    expect(data[STATE_KEY]).toMatchObject({
+      mutationRevision: 9,
+      groups: second.groups,
+      activeWorkspaceId: second.activeWorkspaceId,
+      settings: { storageMode: 'browser', storageFolderName: '', theme: second.settings.theme },
+    });
+    expect(result).toEqual(data[STATE_KEY]);
+  });
   it('checked store publishes only the confirmed restore and keeps backend settings', async () => {
     vi.resetModules();
     const old = createEmptyState();

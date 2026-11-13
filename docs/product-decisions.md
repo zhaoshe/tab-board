@@ -2142,6 +2142,14 @@ Accepted。
 - Tradeoff: every product or tooling contract change now needs a matching docs update; browser-proof claims remain limited to recorded evidence rather than inferred from configured tests alone.
 - Status: implemented as docs-only alignment at the end of the 2026-11-12 optimization cycle.
 
+## D077: Mutation Batch owns ordered evaluation and verification
+
+- Problem: three mutation loops duplicated drop revision rebasing, Replay detection, invalid-index mapping and partial commit reporting across pure state mutations, worker verification and persistence.
+- Decision: use `createMutationBatch(raw)` as the small interface. Callers can synchronously evaluate a batch or ask the worker to verify live Open Tabs through an injected reader, then persistence commits the verified continuation against fresh state. The old `DropMutationBatchContext` and prepare/mark helpers are no longer exported to callers.
+- Reason: keep raw validation, original coordinates, failure merging, replay exemptions and restore-before snapshots local to one implementation while preserving the existing worker, storage and feedback protocols.
+- Tradeoff: `stateMutations.ts` becomes the first home for both sync and async batch policy. A later split should create a real module seam only if it avoids cycles and does not re-expose policy knobs.
+- Status: implemented with pure, persistence, worker and publication regressions.
+
 ```md
 ## D00X: Title
 

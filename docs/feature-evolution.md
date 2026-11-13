@@ -21,6 +21,13 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-13: Mutation Batch 集中 revision/replay 与 partial commit 规则
+
+- 问题：`applyStateMutations`、worker verification 和 `statePersistence` 各自维护 revision gap、原始索引、Replay 与 partial failure 循环，调用方必须理解 `DropMutationBatchContext`、prepare/mark 和二次 index remap。
+- 决定：新增 `createMutationBatch(raw)` 作为深模块 interface；同步 `evaluate()` 负责普通持久化候选状态、accepted original indexes、失败证据和 restore-before snapshot，异步 `verify()` 由 worker 注入 live Open Tabs reader 后返回 verified continuation，再交给 persistence 基于 fresh state 提交。
+- 取舍：逻辑先留在 `stateMutations.ts`，避免引入 runtime cycle 或 pass-through facade；persistence 仍保留队列、锁、normalize 和唯一写入，worker 仍保留 Chrome live tab reader。
+- 状态：Current；回归覆盖 raw gap 前后、stale latch、Replay 零 live read、运行时拒绝、ordinary hard error 零写入、verification/commit fresh state、原始索引、restore-before snapshot 和写入失败语义。
+
 ### 2026-11-13: 重连保留冲突原件并恢复投影发布
 
 - 问题：选择浏览器副本可能覆盖同 ID 的未读文件；重连候选保持静默，导致选定设置和后续修复状态未发布。

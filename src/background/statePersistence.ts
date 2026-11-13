@@ -1,15 +1,11 @@
 import { normalizeState, nowIso, type TabBoardState } from '../shared/model';
 import {
-  applyStateMutation,
-  createDropMutationBatchContext,
+  createMutationBatch,
   InvalidDropMutationError,
-  markInvalidDropMutationForBatch,
-  prepareDropMutationForBatch,
-  validateMutationBatch,
-  type StateMutation,
+  type MutationBatchEvaluation,
+  type VerifiedMutationBatchContinuation,
 } from '../shared/store/stateMutations';
 import type { StateWriteOptions } from '../shared/store/storageAdapter';
-import { isDropIntentAlreadyApplied } from '../shared/model/drop-operations';
 
 interface LockManagerLike {
   request<T>(name: string, options: { mode: 'exclusive' }, callback: () => Promise<T>): Promise<T>;
@@ -23,6 +19,7 @@ export interface StatePersistenceDependencies {
 
 export interface StatePersistence {
   applyMutations(mutations: readonly unknown[]): Promise<TabBoardState>;
+  applyBatch(batch: VerifiedMutationBatchContinuation): Promise<MutationBatchEvaluation>;
   ensureState(): Promise<TabBoardState>;
 }
 
@@ -34,60 +31,21 @@ export function createStatePersistence({
 }: StatePersistenceDependencies & { ensureState?: () => Promise<TabBoardState> }): StatePersistence {
   let queue: Promise<unknown> = Promise.resolve();
 
-  const transaction = async (input: readonly unknown[]): Promise<TabBoardState> => {
-    const validated = validateMutationBatch(input);
+  const transaction = async (batch: {
+    evaluate(state: TabBoardState, appliedAt?: string): MutationBatchEvaluation;
+    finalizeFailure(evaluation: MutationBatchEvaluation, committedState: TabBoardState): InvalidDropMutationError | undefined;
+  }): Promise<MutationBatchEvaluation> => {
     const current = await getState();
     const appliedAt = nowIso();
-    let replayed = current;
-    let backupBeforeRestore: TabBoardState | undefined;
-    let revisionContext = createDropMutationBatchContext(validated.invalidDropIndexes);
-    const invalidMutationIndexes = [...validated.invalidDropIndexes];
-    const committedMutationIndexes: number[] = [];
-
-    for (const [index, mutation] of validated.mutations.entries()) {
-      const originalIndex = validated.originalIndexes[index];
-      const prepared = prepareDropMutationForBatch(replayed, mutation, revisionContext, originalIndex);
-      revisionContext = prepared.context;
-      try {
-        if (prepared.stale
-          && !(prepared.mutation.type === 'drop-intent'
-            && isDropIntentAlreadyApplied(
-              replayed,
-              prepared.mutation.intent,
-              prepared.mutation.openTabs,
-              prepared.mutation.operationId,
-            ))) {
-          throw new InvalidDropMutationError('Drop mutation revision is stale.');
-        }
-        const before = replayed;
-        replayed = applyStateMutation(replayed, prepared.mutation, appliedAt);
-        if (prepared.mutation.type === 'restore-backup') backupBeforeRestore = normalizeState(before);
-        committedMutationIndexes.push(validated.originalIndexes[index]);
-      } catch (error: unknown) {
-        if (mutation.type === 'drop-intent' && error instanceof InvalidDropMutationError) {
-          invalidMutationIndexes.push(validated.originalIndexes[index]);
-          if (!prepared.stale) {
-            revisionContext = markInvalidDropMutationForBatch(revisionContext);
-          }
-          continue;
-        }
-        throw error;
-      }
+    const evaluated = batch.evaluate(current, appliedAt);
+    const committedState = normalizeState(evaluated.state);
+    if (evaluated.acceptedMutationIndexes.length) {
+      await setState(committedState, evaluated.backupBeforeRestore
+        ? { backupBeforeRestore: evaluated.backupBeforeRestore }
+        : undefined);
     }
-
-    const committedState = normalizeState(replayed);
-    if (committedMutationIndexes.length) {
-      await setState(committedState, backupBeforeRestore ? { backupBeforeRestore } : undefined);
-    }
-    if (invalidMutationIndexes.length) {
-      throw new InvalidDropMutationError(
-        'Invalid drop intent.',
-        invalidMutationIndexes.sort((left, right) => left - right),
-        committedMutationIndexes.sort((left, right) => left - right),
-        committedState,
-      );
-    }
-    return committedState;
+    const failure = batch.finalizeFailure(evaluated, committedState);
+    return { ...evaluated, state: committedState, failure };
   };
 
   const enqueueLocked = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -98,8 +56,15 @@ export function createStatePersistence({
     return run;
   };
 
-  const applyMutations = (mutations: readonly StateMutation[]): Promise<TabBoardState> =>
-    enqueueLocked(() => transaction(mutations));
+  const applyBatch = (batch: VerifiedMutationBatchContinuation): Promise<MutationBatchEvaluation> =>
+    enqueueLocked(() => transaction(batch));
+
+  const applyMutations = async (mutations: readonly unknown[]): Promise<TabBoardState> => {
+    const batch = createMutationBatch(mutations);
+    const evaluation = await enqueueLocked(() => transaction(batch));
+    if (evaluation.failure) throw evaluation.failure;
+    return evaluation.state;
+  };
 
   const ensurePersistedState = (): Promise<TabBoardState> =>
     enqueueLocked(async () => {
@@ -109,5 +74,5 @@ export function createStatePersistence({
       return ensureState();
     });
 
-  return { applyMutations, ensureState: ensurePersistedState };
+  return { applyMutations, applyBatch, ensureState: ensurePersistedState };
 }

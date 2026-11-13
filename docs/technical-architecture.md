@@ -96,7 +96,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `storageEvents.ts` 独立承载 file commit ping 与跨 context fallback event；authority 只在 File backend 活跃时绑定这两类 transport，并按 event id 去重。
 - File backend 在初始化、读取、写入或 ping reload 时失败，authority 会切换 backend、重绑 subscription 并通知 UI。本 context 首次发现故障时先把最后一次有效 snapshot 保存到 Chrome；收到其他 context 的 fallback event 时直接读取对方已提交的 Chrome state，禁止用旧 File snapshot 反向覆盖。本次失败写仍 reject，避免把未提交 mutation 误报为成功；既有 persistence retry 会在 Chrome backend 上重试。
 - `authoritativePublication.ts` 是 Manager-side publication owner。它不依赖 Zustand、React、DOM event 或具体 Chrome adapter，独占 optimistic queue、in-flight batch、remote buffer、drop/category waiter、bounded retry、terminal isolation、authoritative reconciliation、structural sharing 和 hydration generation。
-- `stateMutations.ts` 以 immutable commands 应用普通 state mutation，只复制变化分支、复用未变化的对象，并克隆新增或 patch payload，避免共享调用方的可变对象。revision 比较先检查顶层引用，仅序列化替换的分支；相等 patch 与已确认 replay 不推进 revision。无效引用、locked 目标和 link/note URL 形态错误仍在 mutation 边界拒绝，authority/persistence 继续 normalize。
+- `stateMutations.ts` 以 immutable commands 应用普通 state mutation，只复制变化分支、复用未变化的对象，并克隆新增或 patch payload，避免共享调用方的可变对象。revision 比较先检查顶层引用，仅序列化替换的分支；相等 patch 与已确认 replay 不推进 revision。无效引用、locked 目标和 link/note URL 形态错误仍在 mutation 边界拒绝，authority/persistence 继续 normalize。`createMutationBatch(raw)` 是 mutation batch 的深模块 interface：同步 `evaluate()` 集中 raw drop gap、revision/replay、原始索引和 partial failure；异步 `verify()` 只接受 worker 注入的 live Open Tabs reader，并返回 verified continuation 给 persistence 重新基于 fresh state 提交。
 - `mutationValidation.ts` 负责 mutation-batch candidate boundary；DropIntent/OpenTab raw shape由 shared model `drop-validation.ts` 负责。
 - `stateMutationFeedback.ts` 把 committed `StateMutation` 纯映射为 typed `ApplicationFeedback`；不决定commit时机。
 - `useTabBoardStore.ts` 只提供 Zustand UI projection、领域 action facade、restore/import/export 准备和publication ports；它在publication确认commit/surface error后publish typed feedback，不拥有 persistence queue、retry timer、waiter 或 hydration subscription。
@@ -105,7 +105,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 
 1. **Storage Authority** 决定 browser/file backend，维护稳定 adapter identity、backend migration、fallback 和 backend subscription。
 2. **Authoritative Publication** 决定 Manager projection 的 optimistic/authoritative 时序，串行发送 mutation、处理 retry/waiter/remote publication/hydration。
-3. **Worker State Persistence** 在 service worker 内对 mutation batch 做 validation、revision/replay 判定和 normalized atomic write。
+3. **Worker State Persistence** 在 service worker 内串行提交 verified mutation batch，持有锁、fresh state 读取、normalize 和唯一写入；batch validation、revision/replay、index mapping 和 partial failure 合并由 `stateMutations.ts` 的 Mutation Batch 拥有。
 
 所有写入最终交给 Storage Authority 当前 backend 原子提交；跨页面更新由 Authoritative Publication 按 revision/hydration 规则合并。Storage Authority 的 last-known snapshot 与 publication 的 last-authoritative projection 都按 revision/updatedAt 单调推进，不能让旧快照覆盖较新 state。
 
@@ -120,7 +120,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
   `windows.getAll({ windowTypes: ['normal'] })` 投影 normal windows，因此 helper
   不进入 window selector。Worker 监听 `tabs.onUpdated`，在 complete + 非 URL title
   保持 400ms 后返回，15s 无结果则失败；临时窗口始终在 `finally` 中删除。
-- `statePersistence.ts` 串行化 mutation batch，使用可用的 Web Locks，执行 normalized atomic writes，并返回 committed/invalid/replay evidence。
+- `statePersistence.ts` 串行化 mutation batch，使用可用的 Web Locks，执行 normalized atomic writes，并返回 committed evaluation。它不重新实现 revision/index/replay policy；raw `applyMutations()` 和 worker verified continuation 都通过 Mutation Batch 的 `evaluate()` 得到 committed/invalid/replay evidence。
 
 ### `src/manager/`
 
