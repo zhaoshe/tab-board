@@ -2191,3 +2191,11 @@ Proposed / Accepted / Rejected / Revisit
 - Reason: a single owner can preserve capture high-water across later replies and replay only outstanding work already displayed, without waiting for unrelated RPC. Preview never publishes untouched checked/category additional mutations or changes queue/wire/drop CAS, waiter, timer or feedback policy.
 - Tradeoff: track projected mutation identities separately from the existing transport batch. Preserve valid current Workspace only in the eager projection; canonical base remains independent. Semantic replay failure keeps newest canonical observation for settlement while leaving projection/outstanding work unchanged and returning the existing committed-but-unreconciled outcome. Existing settlement pruning, retry and checked-retry display policy are preserved.
 - Status: implemented with direct Publication and real Zustand/Storage Authority/capture DOM contracts. Native Chrome proof is recorded separately. See ADR 0004.
+
+## D081: Reveal targets stable Session Slots
+
+- Problem: capture completion and URL `targetGroupId` reveal used the complete SessionCard DOM id. With bounded activation, an offscreen target can be represented only by its stable shell slot, so reveal could wait for a card that only reveal/highlight would activate.
+- Decision: use the existing `data-session-slot-id` contract as the reveal lookup target, then keep the current scroll, highlight ownership and release lifecycle. The slot can initially contain either a shell or a full card.
+- Reason: the stable slot is already the DnD/geometry identity for every rendered session. Reusing it fixes shell-first reveal without adding public props, a second protocol, a generic reveal framework or persistence changes.
+- Tradeoff: tests must cover real hook + slot rendering rather than relying on source-string assertions. Browser/manual offscreen capture remains a separate acceptance layer.
+- Status: implemented with shell-first capture/URL reveal regression tests; see ADR 0005.

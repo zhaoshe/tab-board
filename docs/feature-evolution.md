@@ -21,6 +21,13 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-13: Capture reveal 改走稳定 Session Slot
+
+- 问题：capture completion 和 URL `targetGroupId` reveal 之前等待完整 `SessionCard` 的 DOM id；大 board 中离屏目标可能只挂载 shell，导致“先有 card 才能 reveal、先 reveal 才能激活 card”的循环。
+- 决定：继续复用现有 reveal owner，但按既有 `data-session-slot-id` 精确定位稳定 `SessionSlot`。先滚动 slot，再通过 highlight forced owner 激活完整 card，并保持 3000ms 后释放。
+- 取舍：不新增公开 hook/props/protocol，也不引入通用 reveal 框架；slot contract 需要由真实 render 测试覆盖 selector-sensitive ID、capture 与 URL 两个入口、释放和取消。
+- 状态：Current；自动化覆盖 shell-first capture reveal、URL `targetGroupId`、reduced motion、target disappearance cancellation 和 card-only lookup 删除突变。
+
 ### 2026-11-13: Manager 导航集中完整恢复时序
 
 - 问题：Layout 管恢复 guard 与 fresh replace，hook effect 却依据 render 快照校验 URL；恢复期间的投影更新和失败重试需要跨组件协调。

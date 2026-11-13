@@ -168,10 +168,12 @@ describe('Task108 session rendering contracts', () => {
     expect(plus).not.toMatch(/z-index:\s*(?:999|\d{4,})/);
   });
 
-  it('keeps targetGroupId reveals addressable by the session card id', () => {
-    expect(layout).toContain('getElementById(`session-card-${pendingTargetGroupId}`)');
+  it('keeps targetGroupId reveals addressable by the stable session slot id', () => {
+    expect(layout).toContain('findSessionSlotElement(pendingTargetGroupId)');
+    expect(layout).toContain("[data-session-slot-id]");
+    expect(layout).toContain('element.dataset.sessionSlotId === groupId');
     expect(layout).toContain('setPendingTargetGroupId(targetGroupId)');
-    expect(card).toContain('id={`session-card-${group.id}`}');
+    expect(slot).toContain('data-session-slot-id={group.id}');
   });
 
   it('renders insertion-target highlight only for confirmed drag markers', () => {

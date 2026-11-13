@@ -36,3 +36,6 @@ Mutation Batch 中只有成功变更被保存的结果，失败变更仍可辨�
 
 **Authoritative Publication**:
 面向页面发布已保存状态与待确认编辑的当前投影，并维护编辑的确认、失败和重试结果。页面通过这份投影显示数据，不自行选择原始快照或覆盖其他待确认编辑。
+
+**Session Slot**:
+Session 在 board 中的可定位位置。它在内容的不同展示阶段仍保持相同的 Session 身份和位置。

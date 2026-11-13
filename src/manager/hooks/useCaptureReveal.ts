@@ -48,6 +48,13 @@ function replaceUrlParams(params: URLSearchParams): void {
   );
 }
 
+function findSessionSlotElement(groupId: string): HTMLElement | null {
+  for (const element of document.querySelectorAll<HTMLElement>('[data-session-slot-id]')) {
+    if (element.dataset.sessionSlotId === groupId) return element;
+  }
+  return null;
+}
+
 export function useCaptureReveal({
   activeWorkspaceId,
   groups,
@@ -209,7 +216,7 @@ export function useCaptureReveal({
       clearPendingTarget();
       return;
     }
-    const element = document.getElementById(`session-card-${pendingTargetGroupId}`);
+    const element = findSessionSlotElement(pendingTargetGroupId);
     if (!element) return;
     element.scrollIntoView({
       behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches

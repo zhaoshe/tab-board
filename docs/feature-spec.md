@@ -64,7 +64,7 @@ Open Tabs context bar 在 normal expanded/peek/drawer 状态显示 open-tab coun
 
 Open Tabs 自动刷新期间保留上一份 window/tab rows，不插入 loading 文案或空白占位；请求成功后再原子替换列表，失败时保留旧 rows 并显示错误。
 
-大分类中的每个 session 都保留稳定的横向 slot、pointer/touch surface listeners 和 insertion geometry。初次激活前 6 个，之后完整 card 按 viewport + 横向 720px overscan 挂载，离开后回退为 title、link/note count 和 lock 状态的轻量 shell，不累积已浏览的完整树。选中、编辑、附注草稿、composer、焦点、菜单/preview、移动对话框及拖拽来源/目标暂时保留所属 card；释放 owner 后重新按视口收敛。Shell title 可通过键盘聚焦升级，并把焦点交给完整 title。
+大分类中的每个 session 都保留稳定的横向 slot、pointer/touch surface listeners 和 insertion geometry。初次激活前 6 个，之后完整 card 按 viewport + 横向 720px overscan 挂载，离开后回退为 title、link/note count 和 lock 状态的轻量 shell，不累积已浏览的完整树。选中、编辑、附注草稿、composer、焦点、菜单/preview、移动对话框、capture/URL reveal highlight 及拖拽来源/目标暂时保留所属 card；释放 owner 后重新按视口收敛。Shell title 可通过键盘聚焦升级，并把焦点交给完整 title。Capture completion 和 URL `targetGroupId` reveal 先按已有稳定 slot 定位和滚动，因此目标 session 即使还只是 shell，也能被激活、高亮并在 3000ms 后释放。
 
 Session 内链接初次挂载前 24 行，之后按列表 viewport + 纵向 440px overscan 挂载；远端 link 使用共享响应式高度 slot（普通链接桌面 44px、窄屏或 coarse-pointer 52px；附注链接在全部布局预留 76px，保留最多两行附注），保留按顺序可聚焦的激活按钮，进入后焦点转到真实链接。选中、编辑、焦点、菜单/preview 和拖拽来源/目标保留所属行。Note item 保持完整挂载及变量高度，附注编辑允许行临时增高；此取舍保证笔记和编辑几何，但大量 notes 或显式选中全部链接时完整树仍会增长。Canonical tab ID/index 和全部排序 ID 保持不变。
 
