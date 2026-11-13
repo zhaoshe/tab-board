@@ -1958,6 +1958,13 @@ production build/check 再打包。
 - 取舍：authority normalization 和每次文件事务的完整旧快照仍保留，单次大 session 内容比较仍随其数据量增长。
 - 当前状态：实现并加入引用复用、冻结输入、payload 隔离、普通文件写入范围及强制完整写入回归。
 
+### 2026-11-13: Storage Authority 排序完整后端生命周期
+
+- 切换和重连原先只有最后的安装入队，准备期间的保存或重读可能仍使用旧 backend。现在 backend 选择、读取、fallback、完整切换和手动重读由同一 authority queue 排序；显式切换先在队列外取得既有 Web Lock。
+- 候选 File adapter 保持静默，提交成功后才有发布资格。替换与同步 reset 撤销旧 callback、binding 和初始化结果的本地资格；手动重读仍直接报告失败，自动 ping 重读仍执行 fallback。
+- 取舍：读取会等待本上下文的生命周期操作。已开始的 disk/transport 写入不能撤销；其他上下文继续通过现有 storage-switched 消息刷新，不引入分布式 backend 切换协议。
+- 当前状态：实现并加入真实 browser/file adapter 的队列、锁、reset、旧来源隔离及 publication 回归。Mutation Batch 和 State Persistence 职责保持，见 ADR 0002。
+
 ## 待观察问题
 
 - 右键菜单触发筛选是否足够容易被发现。

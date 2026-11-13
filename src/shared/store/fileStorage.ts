@@ -522,7 +522,8 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     }
     if (this.deps.shouldPublishPing?.() !== false) {
       const status = await readStorageStatusProjection();
-      if (status.activeBackend === 'file' && status.folderName === this.root.name) {
+      if (this.deps.shouldPublishPing?.() !== false
+        && status.activeBackend === 'file' && status.folderName === this.root.name) {
         await writeStorageStatusProjection(fileStorageStatus({
           folderName: this.root.name, fileUpdatedAt: this.fileUpdatedAt,
           unreadSessionCount: this.unreadSessionFiles.length,

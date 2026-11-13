@@ -89,6 +89,8 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
   - `ChromeStorageAdapter`（`chromeStorageAdapter.ts`）：封装 `chrome.storage.local["tabboardState"]`，是默认后端。
   - `FileStorageAdapter`（`fileStorage.ts` + `fileSerialization.ts` + `fsAtomic.ts`）：通过 File System Access API 把数据写入用户选择的本地文件夹；详见下文「File Store Layout」。
 - `activeAdapter` 是稳定的 Storage Authority。启动时读 `chrome.storage.local["tabboardStorageConfig"]`（BOOTSTRAP_KEY）中的 `StorageStatusProjection` 决定内部 backend；callers 可长期持有同一个 authority interface，backend 切换不会让 subscription 或缓存引用失效。旧 `{ mode }` 记录只作为兼容输入解析。
+- Storage Authority 的同一队列排序 backend 选择、读取与 fallback、写入、显式切换、reconnect 和手动重读。显式切换先在队列外取得 `tabboard-state-write` Web Lock，再把准备、复制、bootstrap commit 和安装作为完整操作入队；内部只调用 backend，不重入公开 facade。锁顺序保持 State Persistence queue → Web Lock → Authority queue。
+- 候选 File adapter 准备期间静默，旧 backend 在提交成功前继续有效。File 发布资格同时检查 lifecycle 和已安装 adapter 身份；旧 subscription、ping/fallback binding 和 reset 前的异步结果不能更新新 backend。同步 reset 撤销旧资格但保留在途 IO 的队列顺序，新 lifecycle 的初始化与读写等待旧操作退出，避免同目录双 writer 和旧缓存差异比较。旧 promise 的清理只作用于自身；已开始的 disk/transport 写入仍按实际结果完成。
 - `settingsProjection.ts` 持有可丢弃的 `tabboardSettingsProjection` read model（settings + mutationRevision + updatedAt）。Chrome commit 与 canonical state 原子写入 projection；File commit 在 final meta commit 后发布 projection。projection 缺失或损坏时只允许一次 canonical state repair，不成为第二写入真相。
 - 同一模块还定义 `StorageStatusProjection`：`configuredTarget` 表达用户正式选择，`activeBackend` 表达当前实际 writer，并持久化 `folderName`、`fallbackReason` 和最后一次成功 File commit 的 `fileUpdatedAt`。DirectoryHandle 只存 IndexedDB，不进入该 projection。
 - `StorageStatusProjection` 额外允许 `unreadSessionCount`，用于把“本次目录读取跳过了多少损坏 session 文件”的结果持久化给 Manager/Options；Browser target 不携带该字段。
@@ -103,7 +105,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 
 三类 ownership 不应混淆：
 
-1. **Storage Authority** 决定 browser/file backend，维护稳定 adapter identity、backend migration、fallback 和 backend subscription。
+1. **Storage Authority** 决定 browser/file backend，以同一队列拥有完整 backend lifecycle，维护稳定 adapter identity、migration、fallback 和 backend subscription。
 2. **Authoritative Publication** 决定 Manager projection 的 optimistic/authoritative 时序，串行发送 mutation、处理 retry/waiter/remote publication/hydration。
 3. **Worker State Persistence** 在 service worker 内串行提交 verified mutation batch，持有锁、fresh state 读取、normalize 和唯一写入；batch validation、revision/replay、index mapping 和 partial failure 合并由 `stateMutations.ts` 的 Mutation Batch 拥有。
 

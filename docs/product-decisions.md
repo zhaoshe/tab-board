@@ -2150,6 +2150,14 @@ Accepted。
 - Tradeoff: `stateMutations.ts` becomes the first home for both sync and async batch policy. A later split should create a real module seam only if it avoids cycles and does not re-expose policy knobs.
 - Status: implemented with pure, persistence, worker and publication regressions.
 
+## D078: Storage Authority owns ordered backend transitions
+
+- Problem: only enqueueing installation lets saves, reads and reloads overlap migration preparation against the wrong backend.
+- Decision: preserve the public facade and order complete transitions, reads and reloads in Storage Authority. Explicit switches and reconnect acquire the existing Web Lock before entering its queue. Candidate file adapters stay silent; publication checks installed identity and lifecycle.
+- Reason: keep backend selection, copy, bootstrap commit, installation and fallback local to the existing Chrome/File seam. State Persistence keeps transaction locking and Mutation Batch keeps pure evaluation, as in ADR 0001 and ADR 0002.
+- Tradeoff: reads wait for same-context lifecycle work. Synchronous reset revokes the old lifecycle but retains the IO queue; new initialization and writes wait for old operations, preventing two adapters from writing one folder. Stale work cannot install or publish locally. Handle rollback finishes before the queue releases, including failed bootstrap commits during reset; actual IO errors remain. Other contexts still refresh through existing switch messages.
+- Status: implemented with real-adapter lifecycle, lock ordering, reset and retired-source regressions.
+
 ```md
 ## D00X: Title
 

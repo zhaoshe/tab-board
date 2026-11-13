@@ -25,6 +25,7 @@ import {
   reconnectFolder,
   reloadFileState,
   resetActiveAdapterForTests,
+  resetActiveAdapter,
   switchToBrowserMode,
   switchToFileMode,
 } from './activeAdapter';
@@ -310,6 +311,29 @@ async function writeBootstrap(mode: 'browser' | 'file', chromeMock: ChromeMock):
   await chromeMock.storage.local.set({ [BOOTSTRAP_KEY]: { mode } });
 }
 
+function gate() {
+  let release!: () => void;
+  const promise = new Promise<void>(resolve => { release = resolve; });
+  return { promise, release };
+}
+
+async function withFileCommitGate(root: MemoryDirectoryHandle) {
+  const entered = gate();
+  const resume = gate();
+  _setActiveAdapterModuleLoadersForTests({
+    loadFsDirectoryModule: () => import('./fsDirectory'),
+    loadFileStorageModule: async () => {
+      const module = await import('./fileStorage');
+      return { ...module, createFileStorageAdapter: (target, deps) => module.createFileStorageAdapter(target, {
+        ...deps,
+        locks: { beforeFinalMeta: async () => { entered.release(); await resume.promise; } },
+      }) };
+    },
+  });
+  withPermission(root);
+  return { entered, resume };
+}
+
 // ---------- tests ----------
 
 describe('activeAdapter', () => {
@@ -328,6 +352,302 @@ describe('activeAdapter', () => {
     _setActiveAdapterIdbFactory(undefined);
     _setActiveAdapterModuleLoadersForTests(undefined);
     vi.unstubAllGlobals();
+  });
+
+  it('orders later saves and reads after the complete file transition', async () => {
+    const authority = await getActiveAdapter();
+    await authority.setState(knownState({ mutationRevision: 10 }));
+    const root = createMemoryDirectory('queued-target');
+    const { entered, resume } = await withFileCommitGate(root);
+    const switching = switchToFileMode(root, knownState({ mutationRevision: 11 }));
+    await entered.promise;
+    const save = authority.setState(knownState({ mutationRevision: 12 }));
+    const read = authority.getState();
+    await Promise.resolve();
+    resume.release();
+    await Promise.all([switching, save]);
+    expect((await read).mutationRevision).toBe(12);
+    await expect((await createFileStorageAdapter(root)).getState()).resolves.toMatchObject({ mutationRevision: 12 });
+    expect((chromeMock.storage.local.data[STATE_KEY] as TabBoardState).mutationRevision).toBe(10);
+  });
+
+  it('copies back the preceding queued file write', async () => {
+    const root = createMemoryDirectory('copy-after-write');
+    withPermission(root);
+    const publishing = gate(); const finish = gate();
+    let writes = 0;
+    _setActiveAdapterModuleLoadersForTests({
+      loadFsDirectoryModule: () => import('./fsDirectory'),
+      loadFileStorageModule: async () => {
+        const module = await import('./fileStorage');
+        return { ...module, createFileStorageAdapter: (target, deps) => module.createFileStorageAdapter(target, {
+          ...deps, locks: { beforeFinalMeta: async () => {
+            if (++writes === 2) { publishing.release(); await finish.promise; }
+          } },
+        }) };
+      },
+    });
+    await switchToFileMode(root, knownState({ mutationRevision: 20 }));
+    const authority = await getActiveAdapter();
+    const save = authority.setState(knownState({ mutationRevision: 21 }));
+    await publishing.promise;
+    const copy = switchToBrowserMode(true);
+    finish.release();
+    await Promise.all([save, copy]);
+    expect((await authority.getState()).mutationRevision).toBe(21);
+    expect((chromeMock.storage.local.data[STATE_KEY] as TabBoardState).mutationRevision).toBe(21);
+  });
+
+  it('waits for the Web Lock outside the authority queue', async () => {
+    const authority = await getActiveAdapter();
+    const requested = gate();
+    const grant = gate();
+    let lockRequested = false;
+    vi.stubGlobal('navigator', { locks: { request: async (name: string, options: unknown, operation: () => Promise<void>) => {
+      expect(name).toBe('tabboard-state-write');
+      expect(options).toEqual({ mode: 'exclusive' });
+      lockRequested = true; requested.release(); await grant.promise; return operation();
+    } } });
+    const switching = switchToBrowserMode(false);
+    await Promise.resolve();
+    if (!lockRequested) await switching;
+    expect(lockRequested).toBe(true);
+    await requested.promise;
+    // This models a persistence caller already holding the lock.
+    await authority.setState(knownState({ mutationRevision: 30 }));
+    expect((await authority.getState()).mutationRevision).toBe(30);
+    grant.release();
+    await switching;
+  });
+
+  it('manual reload waits for a transition and retains its direct error', async () => {
+    const authority = await getActiveAdapter();
+    const root = createMemoryDirectory('manual-after-switch');
+    const { entered, resume } = await withFileCommitGate(root);
+    const switching = switchToFileMode(root, knownState({ mutationRevision: 40 }));
+    await entered.promise;
+    const reload = reloadFileState();
+    // Attach before releasing the gate so the former direct rejection is observed.
+    const result = reload.then(() => 'reloaded', error => error.message);
+    resume.release();
+    await switching;
+    expect(await result).toBe('reloaded');
+    root.getDirectoryHandle = async () => { throw new Error('manual disk failure'); };
+    await expect(reloadFileState()).rejects.toThrow('manual disk failure');
+    expect(await isFileModeActive()).toBe(true);
+    expect((await authority.getState()).mutationRevision).toBe(40);
+  });
+
+  it('rejects old initialization after reset without resurrecting its backend', async () => {
+    const root = createMemoryDirectory('stale-init');
+    withPermission(root);
+    const { saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(root, idbFactory);
+    await writeBootstrap('file', chromeMock);
+    const entered = gate(); const resume = gate();
+    _setActiveAdapterModuleLoadersForTests({
+      loadFsDirectoryModule: () => import('./fsDirectory'),
+      loadFileStorageModule: async () => { entered.release(); await resume.promise; return import('./fileStorage'); },
+    });
+    const old = getActiveAdapter().then(() => 'installed', error => error.message);
+    await entered.promise;
+    resetActiveAdapter();
+    await writeBootstrap('browser', chromeMock);
+    const replacing = getActiveAdapter();
+    resume.release();
+    expect(await old).not.toBe('installed');
+    const replacement = await replacing;
+    expect(await isFileModeActive()).toBe(false);
+    await replacement.setState(knownState({ mutationRevision: 50 }));
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toEqual({ mode: 'browser' });
+  });
+
+  it('retired initialized file adapters cannot publish later commits', async () => {
+    const root = createMemoryDirectory('retired-file');
+    withPermission(root);
+    const { saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(root, idbFactory);
+    await writeBootstrap('file', chromeMock);
+    let file!: Awaited<ReturnType<typeof createFileStorageAdapter>>;
+    _setActiveAdapterModuleLoadersForTests({
+      loadFsDirectoryModule: () => import('./fsDirectory'),
+      loadFileStorageModule: async () => {
+        const module = await import('./fileStorage');
+        return { ...module, createFileStorageAdapter: async (target, deps) => {
+          file = await module.createFileStorageAdapter(target, deps); return file;
+        } };
+      },
+    });
+    const authority = await getActiveAdapter();
+    await authority.setState(knownState({ mutationRevision: 60 }));
+    expect((chromeMock.storage.local.data[FILE_PING_KEY] as { mutationRevision: number }).mutationRevision).toBe(60);
+    await switchToBrowserMode(true);
+    const notifications: number[] = [];
+    authority.subscribeState(state => notifications.push(state.mutationRevision));
+    await file.setState(knownState({ mutationRevision: 999 }));
+    expect((chromeMock.storage.local.data[BOOTSTRAP_KEY] as { activeBackend: string }).activeBackend).toBe('browser');
+    expect((chromeMock.storage.local.data[FILE_PING_KEY] as { mutationRevision: number }).mutationRevision).toBe(60);
+    expect(notifications).toEqual([]);
+    expect((await authority.getState()).mutationRevision).toBe(60);
+  });
+
+  it('ignores queued and late events from the old file binding after replacement', async () => {
+    const previous = createMemoryDirectory('old-binding'); withPermission(previous);
+    await switchToFileMode(previous, knownState({ mutationRevision: 70 }));
+    const authority = await getActiveAdapter();
+    const oldListeners = Array.from(chromeMock.storage.onChanged._listeners);
+    const next = createMemoryDirectory('new-binding');
+    const { entered, resume } = await withFileCommitGate(next);
+    const switching = switchToFileMode(next, knownState({ mutationRevision: 71 }));
+    await entered.promise;
+    const event = {
+      [FILE_PING_KEY]: { newValue: { mutationRevision: 999, updatedAt: '2026-11-13T10:00:00.000Z' } },
+      [STORAGE_FALLBACK_KEY]: { newValue: { eventId: 'old-event', reason: 'old folder failed', occurredAt: '2026-11-13T10:00:00.000Z' } },
+    };
+    oldListeners.forEach(listener => listener(event, 'local'));
+    resume.release(); await switching;
+    expect((await authority.getState()).mutationRevision).toBe(71);
+    const lateEvent = { ...event, [STORAGE_FALLBACK_KEY]: { newValue: { eventId: 'late-old-event', reason: 'retired folder failed again', occurredAt: '2026-11-13T10:00:00.000Z' } } };
+    oldListeners.forEach(listener => listener(lateEvent, 'local'));
+    expect((await authority.getState()).mutationRevision).toBe(71);
+    expect(await isFileModeActive()).toBe(true);
+    expect((await getStorageStatus()).folderName).toBe('new-binding');
+  });
+
+  it('ignores a late backend subscription callback even with a higher revision', async () => {
+    const root = createMemoryDirectory('late-callback'); withPermission(root);
+    let late!: (state: TabBoardState) => void;
+    _setActiveAdapterModuleLoadersForTests({
+      loadFsDirectoryModule: () => import('./fsDirectory'),
+      loadFileStorageModule: async () => {
+        const module = await import('./fileStorage');
+        return { ...module, createFileStorageAdapter: async (target, deps) => {
+          const adapter = await module.createFileStorageAdapter(target, deps);
+          const subscribe = adapter.subscribeState.bind(adapter);
+          adapter.subscribeState = callback => { late = callback; return subscribe(callback); };
+          return adapter;
+        } };
+      },
+    });
+    await switchToFileMode(root, knownState({ mutationRevision: 80 }));
+    const authority = await getActiveAdapter();
+    await switchToBrowserMode(true);
+    const notifications: number[] = [];
+    authority.subscribeState(state => notifications.push(state.mutationRevision));
+    late(knownState({ mutationRevision: 999 }));
+    expect((await authority.getState()).mutationRevision).toBe(80);
+    expect(notifications).toEqual([]);
+  });
+
+  it('reset revokes publication for an already-started file commit without losing its IO error', async () => {
+    const root = createMemoryDirectory('reset-write'); withPermission(root);
+    const entered = gate(); const resume = gate(); let writes = 0;
+    _setActiveAdapterModuleLoadersForTests({
+      loadFsDirectoryModule: () => import('./fsDirectory'),
+      loadFileStorageModule: async () => {
+        const module = await import('./fileStorage');
+        return { ...module, createFileStorageAdapter: (target, deps) => module.createFileStorageAdapter(target, {
+          ...deps, locks: { beforeFinalMeta: async () => {
+            if (++writes === 2) { entered.release(); await resume.promise; throw new Error('original disk error'); }
+          } },
+        }) };
+      },
+    });
+    await switchToFileMode(root, knownState({ mutationRevision: 90 }));
+    const authority = await getActiveAdapter();
+    const saving = authority.setState(knownState({ mutationRevision: 91 }));
+    const result = saving.catch(error => error.message);
+    await entered.promise;
+    resetActiveAdapter();
+    await writeBootstrap('browser', chromeMock);
+    const replacing = getActiveAdapter();
+    resume.release();
+    expect(await result).toBe('original disk error');
+    const replacement = await replacing;
+    expect(await isFileModeActive()).toBe(false);
+    await replacement.setState(knownState({ mutationRevision: 92 }));
+    expect((chromeMock.storage.local.data[FILE_PING_KEY] as { mutationRevision: number }).mutationRevision).toBe(90);
+  });
+
+  it('reset stops a candidate paused before adapter creation from starting disk writes', async () => {
+    const root = createMemoryDirectory('reset-candidate'); withPermission(root);
+    const entered = gate(); const resume = gate();
+    _setActiveAdapterModuleLoadersForTests({
+      loadFsDirectoryModule: () => import('./fsDirectory'),
+      loadFileStorageModule: async () => { entered.release(); await resume.promise; return import('./fileStorage'); },
+    });
+    await getActiveAdapter();
+    const switching = switchToFileMode(root, knownState({ mutationRevision: 100 }));
+    const result = switching.catch(error => error.message);
+    await entered.promise;
+    resetActiveAdapter();
+    const replacing = getActiveAdapter();
+    resume.release();
+    await replacing;
+    expect(await result).toBe('Storage authority was reset during the operation.');
+    const entries: string[] = [];
+    for await (const [name] of root.entries()) entries.push(name);
+    expect(entries).toEqual([]);
+    expect(await isFileModeActive()).toBe(false);
+  });
+
+  it('keeps same-root file commits ordered across synchronous reset', async () => {
+    const root = createMemoryDirectory('same-root-reset'); withPermission(root);
+    const entered = gate(); const resume = gate(); let writes = 0;
+    let oldReleased = false; let overlap = false;
+    _setActiveAdapterModuleLoadersForTests({
+      loadFsDirectoryModule: () => import('./fsDirectory'),
+      loadFileStorageModule: async () => {
+        const module = await import('./fileStorage');
+        return { ...module, createFileStorageAdapter: (target, deps) => module.createFileStorageAdapter(target, {
+          ...deps, locks: { beforeFinalMeta: async () => {
+            if (++writes === 2) { entered.release(); await resume.promise; }
+            else if (writes === 3) overlap = !oldReleased;
+          } },
+        }) };
+      },
+    });
+    await switchToFileMode(root, knownState({ mutationRevision: 110 }));
+    const authority = await getActiveAdapter();
+    const oldSave = authority.setState(knownState({ mutationRevision: 111 }));
+    const oldResult = oldSave.catch(error => error.message);
+    await entered.promise;
+    resetActiveAdapter();
+    const newSave = authority.setState(knownState({ mutationRevision: 112 }));
+    // MemoryFS IO is microtask-only: one scheduler turn lets an unfenced writer finish.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const writesWhileOldPaused = writes;
+    oldReleased = true; resume.release();
+    await Promise.all([oldResult, newSave]);
+    expect(writesWhileOldPaused).toBe(2);
+    expect(overlap).toBe(false);
+    expect((await (await createFileStorageAdapter(root)).getState()).mutationRevision).toBe(112);
+    expect((await authority.getState()).mutationRevision).toBe(112);
+    expect((chromeMock.storage.local.data[FILE_PING_KEY] as { mutationRevision: number }).mutationRevision).toBe(112);
+  });
+
+  it('preserves handle rollback and the actual bootstrap error when reset occurs during commit', async () => {
+    await getActiveAdapter();
+    const previous = createMemoryDirectory('previous-handle'); withPermission(previous);
+    const target = createMemoryDirectory('failed-reset-target'); withPermission(target);
+    const { saveRootHandle, loadRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(previous, idbFactory);
+    const entered = gate(); const resume = gate();
+    const original = chromeMock.storage.local.set.getMockImplementation()!;
+    chromeMock.storage.local.set.mockImplementation(async items => {
+      if (BOOTSTRAP_KEY in items) { entered.release(); await resume.promise; throw new Error('bootstrap failed during reset'); }
+      return original(items);
+    });
+    const switching = switchToFileMode(target, knownState({ mutationRevision: 120 }));
+    const result = switching.catch(error => error.message);
+    await entered.promise;
+    resetActiveAdapter();
+    const replacing = getActiveAdapter();
+    resume.release();
+    expect(await result).toBe('bootstrap failed during reset');
+    await replacing;
+    expect(await loadRootHandle(idbFactory)).toBe(previous);
+    expect(await isFileModeActive()).toBe(false);
   });
 
   it('browser bootstrap does not load file-only storage modules', async () => {
@@ -692,6 +1012,68 @@ describe('activeAdapter', () => {
     });
     expect(fallbackCb).toHaveBeenCalledTimes(1);
     expect((await authority.getState()).mutationRevision).toBe(12);
+  });
+
+  it('suppresses remote fallback notification after reset during the awaited status write', async () => {
+    const root = createMemoryDirectory('remote-reset-status'); withPermission(root);
+    await switchToFileMode(root, knownState({ mutationRevision: 130 }));
+    const entered = gate(); const resume = gate();
+    const reason = 'Remote folder failed before reset';
+    const original = chromeMock.storage.local.set.getMockImplementation()!;
+    chromeMock.storage.local.set.mockImplementation(async items => {
+      if ((items[BOOTSTRAP_KEY] as { fallbackReason?: string })?.fallbackReason === reason) {
+        entered.release(); await resume.promise;
+      }
+      return original(items);
+    });
+    const reasons: string[] = [];
+    onFallback(value => reasons.push(value));
+    chromeMock.storage.onChanged._fire({
+      [STORAGE_FALLBACK_KEY]: { newValue: { eventId: 'remote-reset-status', reason, occurredAt: '2026-11-13T10:00:00.000Z' } },
+    });
+    await entered.promise;
+    resetActiveAdapter();
+    const replacing = getActiveAdapter();
+    resume.release();
+    const replacement = await replacing;
+    await replacement.getState();
+    expect(reasons).toEqual([]);
+    expect(await isFileModeActive()).toBe(false);
+    // A transport write already started before reset still publishes its actual success.
+    expect(await getStorageStatus()).toMatchObject({ activeBackend: 'browser', fallbackReason: reason });
+  });
+
+  it('preserves initialization IO rejection after reset without stale installation or fallback', async () => {
+    const root = createMemoryDirectory('init-reset-status'); withPermission(root);
+    const { saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(root, idbFactory);
+    await writeBootstrap('file', chromeMock);
+    const entered = gate(); const resume = gate();
+    const actualError = new Error('Initialization status transport failed after reset');
+    const original = chromeMock.storage.local.set.getMockImplementation()!;
+    let paused = false;
+    chromeMock.storage.local.set.mockImplementation(async items => {
+      if (!paused && (items[BOOTSTRAP_KEY] as { activeBackend?: string })?.activeBackend === 'file') {
+        paused = true; entered.release(); await resume.promise; throw actualError;
+      }
+      return original(items);
+    });
+    const reasons: string[] = [];
+    onFallback(value => reasons.push(value));
+    const initializing = getActiveAdapter().catch(error => error);
+    await entered.promise;
+    resetActiveAdapter();
+    chromeMock.storage.local.data[BOOTSTRAP_KEY] = { mode: 'browser' };
+    const replacing = getActiveAdapter();
+    resume.release();
+    expect(await initializing).toBe(actualError);
+    const replacement = await replacing;
+    await replacement.getState();
+    expect(await isFileModeActive()).toBe(false);
+    expect(reasons).toEqual([]);
+    expect(chromeMock.storage.local.data[STORAGE_FALLBACK_KEY]).toBeUndefined();
+    expect(chromeMock.storage.local.data[FILE_PING_KEY]).toBeUndefined();
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toEqual({ mode: 'browser' });
   });
 
   it('remote fallback event moves a live authority to browser storage exactly once', async () => {

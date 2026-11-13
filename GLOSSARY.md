@@ -27,3 +27,6 @@ Session 的单一归属；Inbox、Saved 和 Archive 是内置归属，自定义 
 
 **Partial commit**:
 Mutation Batch 中只有成功变更被保存的结果，失败变更仍可辨认和重试。
+
+**Storage Authority**:
+当前保存数据的读写入口。它区分用户配置的保存位置与实际可用的后端；文件目录不可用时使用浏览器副本，重连时按用户确认的副本恢复文件保存。

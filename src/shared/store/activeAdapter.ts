@@ -169,6 +169,7 @@ function isReloadableAdapter(adapter: StorageAdapter): adapter is ReloadableStor
 
 class StorageAuthority implements StorageAdapter {
   private backend: AuthorityBackend | null = null;
+  private lifecycle = 0;
   private initPromise: Promise<AuthorityBackend> | null = null;
   private backendUnsubscribe: (() => void) | null = null;
   private readonly subscribers = new Set<(state: TabBoardState) => void>();
@@ -179,29 +180,28 @@ class StorageAuthority implements StorageAdapter {
   private pingUnsubscribe: (() => void) | null = null;
   private fallbackUnsubscribe: (() => void) | null = null;
 
-  private bindFileEvents(): void {
+  private bindFileEvents(binding: AuthorityBackend): void {
     this.unbindFileEvents();
     this.pingUnsubscribe = subscribeFilePing((ping) => {
-      if (ping.mutationRevision <= this.lastSeenRevision) return;
+      if (this.backend !== binding || ping.mutationRevision <= this.lastSeenRevision) return;
       void this.enqueueOperation(async () => {
-        const backend = await this.ensureBackend();
-        if (backend.mode !== 'file' || !isReloadableAdapter(backend.adapter)) return;
+        const backend = this.backend;
+        if (backend !== binding || !isReloadableAdapter(backend.adapter)) return;
         this.lastSeenRevision = ping.mutationRevision;
         try {
           await backend.adapter.reloadFromDisk();
         } catch (error: unknown) {
-          await this.degradeToBrowser(error, true);
+          if (this.backend === backend) await this.degradeToBrowser(error, true);
         }
-      });
+      }).catch(error => logWarning('activeAdapter', 'Automatic file reload failed', error));
     });
     this.fallbackUnsubscribe = subscribeStorageFallback((event) => {
-      if (this.handledFallbackEvents.has(event.eventId)) return;
+      if (this.backend !== binding || this.handledFallbackEvents.has(event.eventId)) return;
       this.handledFallbackEvents.add(event.eventId);
       void this.enqueueOperation(async () => {
-        const backend = await this.ensureBackend();
-        if (backend.mode !== 'file') return;
+        if (this.backend !== binding) return;
         await this.degradeToBrowser(new Error(event.reason), false, event);
-      });
+      }).catch(error => logWarning('activeAdapter', 'Remote file fallback failed', error));
     });
   }
 
@@ -212,28 +212,44 @@ class StorageAuthority implements StorageAdapter {
     this.fallbackUnsubscribe = null;
   }
 
-  private enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {
-    const run = this.operationQueue.then(operation);
+  private assertLifecycle(lifecycle: number): void {
+    if (lifecycle !== this.lifecycle) throw new Error('Storage authority was reset during the operation.');
+  }
+
+  private assertBackend(backend: AuthorityBackend): void {
+    if (this.backend !== backend) throw new Error('Storage authority was reset during the operation.');
+  }
+
+  private enqueueOperation<T>(operation: () => Promise<T>, lifecycle = this.lifecycle): Promise<T> {
+    const run = this.operationQueue.then(async () => {
+      this.assertLifecycle(lifecycle);
+      const result = await operation();
+      this.assertLifecycle(lifecycle);
+      return result;
+    });
     this.operationQueue = run.then(() => undefined, () => undefined);
     return run;
   }
 
-  private async initializeBackend(): Promise<AuthorityBackend> {
+  private async initializeBackend(lifecycle: number): Promise<AuthorityBackend> {
     const storageStatus = await readStorageStatusProjection();
+    this.assertLifecycle(lifecycle);
     const mode = storageStatus.activeBackend;
     const shouldRecoverWorkerPreloadFallback = storageStatus.configuredTarget === 'file'
       && mode === 'browser'
       && isWorkerModuleFallbackReason(storageStatus.fallbackReason);
     if (mode === 'browser' && !shouldRecoverWorkerPreloadFallback) {
       const adapter = createChromeStorageAdapter();
-      this.installBackend({ mode, adapter });
+      const backend = this.installBackend({ mode, adapter });
       logBreadcrumb('file-storage: init', 'browser storage active');
-      return { mode, adapter };
+      return backend;
     }
 
     try {
       const { loadRootHandle } = await loadFsDirectoryModule();
+      this.assertLifecycle(lifecycle);
       const root = await loadRootHandle(testIdbFactory);
+      this.assertLifecycle(lifecycle);
       if (!root) {
         throw Object.assign(
           new Error('No saved folder handle. Select a folder in Options to use file storage.'),
@@ -241,54 +257,65 @@ class StorageAuthority implements StorageAdapter {
         );
       }
       const { createFileStorageAdapter } = await loadFileStorageModule();
-      const adapter = await createFileStorageAdapter(root);
+      this.assertLifecycle(lifecycle);
+      let adapter: StorageAdapter;
+      const fileAdapter = await createFileStorageAdapter(root, {
+        shouldPublishPing: () => lifecycle === this.lifecycle && this.backend?.adapter === adapter,
+      });
+      adapter = fileAdapter;
+      this.assertLifecycle(lifecycle);
       if (shouldRecoverWorkerPreloadFallback) {
         const saved = (await chrome.storage.local.get(STATE_KEY))[STATE_KEY];
         if (saved && !reconnectDataMatches(normalizeState(saved), await adapter.getState())) {
           const browserAdapter = createChromeStorageAdapter();
-          this.installBackend({ mode: 'browser', adapter: browserAdapter });
+          this.assertLifecycle(lifecycle);
+          const backend = this.installBackend({ mode: 'browser', adapter: browserAdapter });
           await this.publishFallback('Browser and folder copies differ. Reconnect to choose which data to use.', storageStatus);
-          return { mode: 'browser', adapter: browserAdapter };
+          return backend;
         }
       }
+      this.assertLifecycle(lifecycle);
       await writeStorageStatusProjection(fileStorageStatus({
         folderName: root.name || storageStatus.folderName,
-        fileUpdatedAt: adapter.getFileUpdatedAt() ?? storageStatus.fileUpdatedAt,
-        unreadSessionCount: adapter.getUnreadSessionCount(),
+        fileUpdatedAt: fileAdapter.getFileUpdatedAt() ?? storageStatus.fileUpdatedAt,
+        unreadSessionCount: fileAdapter.getUnreadSessionCount(),
       }));
-      this.installBackend({ mode: 'file', adapter });
+      this.assertLifecycle(lifecycle);
+      const backend = this.installBackend({ mode: 'file', adapter });
       logBreadcrumb('file-storage: init', 'file adapter active');
-      return { mode: 'file', adapter };
+      return backend;
     } catch (error: unknown) {
+      if (lifecycle !== this.lifecycle) throw error;
       logWarning('activeAdapter', 'File adapter initialization failed; falling back to browser storage', error);
       const reason = (error as { code?: string })?.code === 'NO_HANDLE'
         ? (error as Error).message
         : fallbackReason(error);
       const adapter = createChromeStorageAdapter();
-      this.installBackend({ mode: 'browser', adapter });
+      const backend = this.installBackend({ mode: 'browser', adapter });
       await this.publishFallback(reason, storageStatus);
-      return { mode: 'browser', adapter };
+      return backend;
     }
   }
 
   private async ensureBackend(): Promise<AuthorityBackend> {
     if (this.backend) return this.backend;
     if (!this.initPromise) {
-      this.initPromise = this.initializeBackend().finally(() => {
-        this.initPromise = null;
+      const promise = this.initializeBackend(this.lifecycle).finally(() => {
+        if (this.initPromise === promise) this.initPromise = null;
       });
+      this.initPromise = promise;
     }
     return this.initPromise;
   }
 
-  private installBackend(backend: AuthorityBackend, state?: TabBoardState): void {
+  private installBackend(backend: AuthorityBackend, state?: TabBoardState): AuthorityBackend {
     this.backendUnsubscribe?.();
+    this.backend = backend;
     if (backend.mode === 'file') {
-      this.bindFileEvents();
+      this.bindFileEvents(backend);
     } else {
       this.unbindFileEvents();
     }
-    this.backend = backend;
     if (state) {
       this.lastKnownState = state;
       this.lastSeenRevision = state.mutationRevision;
@@ -296,9 +323,11 @@ class StorageAuthority implements StorageAdapter {
       this.lastSeenRevision = -1;
     }
     this.backendUnsubscribe = backend.adapter.subscribeState((nextState) => {
+      if (this.backend !== backend) return;
       this.recordState(nextState);
       this.notifyState(nextState);
     });
+    return backend;
   }
 
   private recordState(state: TabBoardState): void {
@@ -327,8 +356,10 @@ class StorageAuthority implements StorageAdapter {
     reason: string,
     currentStatus?: StorageStatusProjection,
   ): Promise<void> {
+    const lifecycle = this.lifecycle;
     emitFallback(reason);
     const status = currentStatus ?? await readStorageStatusProjection();
+    this.assertLifecycle(lifecycle);
     if (status.configuredTarget === 'file') {
       await writeStorageStatusProjection({
         ...status,
@@ -336,6 +367,7 @@ class StorageAuthority implements StorageAdapter {
         fallbackReason: reason,
       });
     }
+    this.assertLifecycle(lifecycle);
     const event: StorageFallbackEvent = {
       eventId: createId('storage-fallback'),
       reason,
@@ -367,13 +399,18 @@ class StorageAuthority implements StorageAdapter {
         throw chromeError;
       }
     }
+    if (this.backend !== current) return;
     const state = await adapter.getState();
+    if (this.backend !== current) return;
     this.installBackend({ mode: 'browser', adapter }, state);
+    const installed = this.backend;
     this.notifyState(state);
+    if (this.backend !== installed) return;
     if (broadcast) {
       await this.publishFallback(reason);
     } else {
       const status = await readStorageStatusProjection();
+      if (this.backend !== installed) return;
       if (status.configuredTarget === 'file') {
         await writeStorageStatusProjection({
           ...status,
@@ -381,32 +418,47 @@ class StorageAuthority implements StorageAdapter {
           fallbackReason: reason,
         });
       }
+      if (this.backend !== installed) return;
       emitFallback(reason);
     }
   }
 
-  async getState(): Promise<TabBoardState> {
-    await this.operationQueue.catch(() => undefined);
-    const backend = await this.ensureBackend();
-    try {
-      const state = await backend.adapter.getState();
-      this.recordState(state);
-      return this.lastKnownState || state;
-    } catch (error: unknown) {
-      if (backend.mode !== 'file') throw error;
-      await this.enqueueOperation(() => this.degradeToBrowser(error, true));
-      return (await this.ensureBackend()).adapter.getState();
-    }
+  getState(): Promise<TabBoardState> {
+    return this.enqueueOperation(async () => {
+      const lifecycle = this.lifecycle;
+      const backend = await this.ensureBackend();
+      this.assertLifecycle(lifecycle);
+      this.assertBackend(backend);
+      try {
+        const state = await backend.adapter.getState();
+        this.assertBackend(backend);
+        this.recordState(state);
+        return this.lastKnownState || state;
+      } catch (error: unknown) {
+        if (backend.mode !== 'file' || this.backend !== backend) throw error;
+        await this.degradeToBrowser(error, true);
+        this.assertLifecycle(lifecycle);
+        const current = await this.ensureBackend();
+        this.assertBackend(current);
+        const state = await current.adapter.getState();
+        this.assertBackend(current);
+        this.recordState(state);
+        return this.lastKnownState || state;
+      }
+    });
   }
 
   setState(state: TabBoardState, options?: StateWriteOptions): Promise<void> {
     return this.enqueueOperation(async () => {
+      const lifecycle = this.lifecycle;
       const backend = await this.ensureBackend();
+      this.assertLifecycle(lifecycle);
+      this.assertBackend(backend);
       try {
         await backend.adapter.setState(state, options);
-        this.recordState(state);
+        if (this.backend === backend) this.recordState(state);
       } catch (error: unknown) {
-        if (backend.mode === 'file') {
+        if (backend.mode === 'file' && this.backend === backend) {
           await this.degradeToBrowser(error, true);
         }
         throw error;
@@ -416,15 +468,23 @@ class StorageAuthority implements StorageAdapter {
 
   ensureState(): Promise<TabBoardState> {
     return this.enqueueOperation(async () => {
+      const lifecycle = this.lifecycle;
       const backend = await this.ensureBackend();
+      this.assertLifecycle(lifecycle);
+      this.assertBackend(backend);
       try {
         const state = await backend.adapter.ensureState();
+        this.assertBackend(backend);
         this.recordState(state);
         return this.lastKnownState || state;
       } catch (error: unknown) {
-        if (backend.mode !== 'file') throw error;
+        if (backend.mode !== 'file' || this.backend !== backend) throw error;
         await this.degradeToBrowser(error, true);
-        const state = await (await this.ensureBackend()).adapter.ensureState();
+        this.assertLifecycle(lifecycle);
+        const current = await this.ensureBackend();
+        this.assertBackend(current);
+        const state = await current.adapter.ensureState();
+        this.assertBackend(current);
         this.recordState(state);
         return this.lastKnownState || state;
       }
@@ -436,21 +496,127 @@ class StorageAuthority implements StorageAdapter {
     return () => this.subscribers.delete(callback);
   }
 
-  async isFileMode(): Promise<boolean> {
-    return (await this.ensureBackend()).mode === 'file';
+  ready(): Promise<void> {
+    return this.enqueueOperation(async () => { await this.ensureBackend(); });
   }
 
-  async currentBackend(): Promise<AuthorityBackend> {
-    return this.ensureBackend();
+  isFileMode(): Promise<boolean> {
+    return this.enqueueOperation(async () => (await this.ensureBackend()).mode === 'file');
   }
 
-  async install(mode: StorageMode, adapter: StorageAdapter, state?: TabBoardState): Promise<void> {
-    await this.enqueueOperation(async () => {
-      this.installBackend({ mode, adapter }, state);
+  private async transition(operation: (lifecycle: number) => Promise<void>): Promise<void> {
+    const lifecycle = this.lifecycle;
+    const run = () => this.enqueueOperation(() => operation(lifecycle), lifecycle);
+    const locks = globalThis.navigator?.locks;
+    if (typeof locks?.request === 'function') {
+      await locks.request('tabboard-state-write', { mode: 'exclusive' }, run);
+    } else {
+      await run();
+    }
+  }
+
+  switchToFileMode(root: FileSystemDirectoryHandle, initialState: TabBoardState): Promise<void> {
+    return this.transition(async lifecycle => {
+      logBreadcrumb('file-storage: migration', `switching to file mode, revision=${initialState.mutationRevision}`);
+      const { createFileStorageAdapter } = await loadFileStorageModule();
+      this.assertLifecycle(lifecycle);
+      const adapter = await createFileStorageAdapter(root, {
+        shouldPublishPing: () => lifecycle === this.lifecycle && this.backend?.adapter === adapter,
+      });
+      this.assertLifecycle(lifecycle);
+      await adapter.setState(initialState);
+      this.assertLifecycle(lifecycle);
+      await commitFileHandleAndBootstrap(root, {
+        fileUpdatedAt: initialState.updatedAt,
+        unreadSessionCount: adapter.getUnreadSessionCount(),
+      }, undefined, () => this.assertLifecycle(lifecycle));
+      this.assertLifecycle(lifecycle);
+      this.installBackend({ mode: 'file', adapter }, initialState);
+      await writeFilePing(initialState.mutationRevision, initialState.updatedAt);
+    });
+  }
+
+  switchToBrowserMode(copyFileData: boolean): Promise<void> {
+    return this.transition(async lifecycle => {
+      logBreadcrumb('file-storage: migration', `switching to browser mode, copyFileData=${copyFileData}`);
+      const current = await this.ensureBackend();
+      let fileStateToCopy: TabBoardState | null = null;
+      if (copyFileData && current.mode === 'file') {
+        try {
+          fileStateToCopy = await current.adapter.getState();
+        } catch (err) {
+          logWarning('activeAdapter', 'Failed to read file state while switching to browser mode', err);
+        }
+      }
+
+      this.assertLifecycle(lifecycle);
+      const chromeAdapter = createChromeStorageAdapter();
+      if (fileStateToCopy) {
+        await chromeAdapter.setState(fileStateToCopy);
+      }
+      const state = await chromeAdapter.getState();
+      this.assertLifecycle(lifecycle);
+      await writeStorageStatusProjection({ ...BROWSER_STORAGE_STATUS });
+      try {
+        const { clearRootHandle } = await loadFsDirectoryModule();
+        this.assertLifecycle(lifecycle);
+        await clearRootHandle(testIdbFactory);
+      } catch (err) {
+        logWarning('activeAdapter', 'Failed to clear root handle during switch to browser mode', err);
+      }
+      this.assertLifecycle(lifecycle);
+      this.installBackend({ mode: 'browser', adapter: chromeAdapter }, state);
+    });
+  }
+
+  reconnectFolder(root: FileSystemDirectoryHandle, choice?: ReconnectChoice): Promise<void> {
+    return this.transition(async lifecycle => {
+      logBreadcrumb('file-storage: reconnect', 'reconnecting to file folder');
+      const { createFileStorageAdapter, saveReconnectCopies } = await loadFileStorageModule();
+      this.assertLifecycle(lifecycle);
+      const adapter = await createFileStorageAdapter(root, { shouldPublishPing: () => lifecycle === this.lifecycle && this.backend?.adapter === adapter });
+      this.assertLifecycle(lifecycle);
+      const fileState = await adapter.getState();
+      const saved = (await chrome.storage.local.get(STATE_KEY))[STATE_KEY];
+      const browserState = normalizeState(saved);
+      const differs = saved !== undefined && !reconnectDataMatches(browserState, fileState);
+      if (differs && !choice) throw new ReconnectDataConflict(browserState, fileState);
+      let state = fileState;
+      if (differs) {
+        this.assertLifecycle(lifecycle);
+        await saveReconnectCopies(root, browserState, fileState);
+        const revision = Math.max(browserState.mutationRevision, fileState.mutationRevision);
+        if (revision === Number.MAX_SAFE_INTEGER) throw new Error('The saved state revision cannot be advanced.');
+        state = normalizeState({
+          ...(choice === 'browser' ? browserState : fileState),
+          mutationRevision: revision + 1,
+          updatedAt: nowIso(),
+        });
+        this.assertLifecycle(lifecycle);
+        await adapter.setState(state);
+      }
+      this.assertLifecycle(lifecycle);
+      await commitFileHandleAndBootstrap(root, {
+        fileUpdatedAt: adapter.getFileUpdatedAt(),
+        unreadSessionCount: adapter.getUnreadSessionCount(),
+      }, state, () => this.assertLifecycle(lifecycle));
+      this.assertLifecycle(lifecycle);
+      this.installBackend({ mode: 'file', adapter }, state);
+    });
+  }
+
+  reloadFileState(): Promise<void> {
+    return this.enqueueOperation(async () => {
+      const backend = await this.ensureBackend();
+      this.assertBackend(backend);
+      if (backend.mode !== 'file' || !isReloadableAdapter(backend.adapter)) throw new Error('Reconnect the folder before re-reading saved files.');
+      await backend.adapter.reloadFromDisk();
     });
   }
 
   resetBackend(): void {
+    this.lifecycle++;
+    // Keep in-flight IO ordered across reset; two adapters may target the same folder.
     this.backendUnsubscribe?.();
     this.backendUnsubscribe = null;
     this.unbindFileEvents();
@@ -489,16 +655,20 @@ async function commitFileHandleAndBootstrap(
     fileUpdatedAt: string | null;
     unreadSessionCount?: number;
   },
-  selectedState?: TabBoardState,
+  selectedState: TabBoardState | undefined,
+  assertCurrent: () => void,
 ): Promise<void> {
   const {
     clearRootHandle,
     loadRootHandle,
     saveRootHandle,
   } = await loadFsDirectoryModule();
+  assertCurrent();
   const previousRoot = await loadRootHandle(testIdbFactory);
+  assertCurrent();
   await saveRootHandle(root, testIdbFactory);
   try {
+    assertCurrent();
     const status = fileStorageStatus({
       folderName: root.name || null,
       fileUpdatedAt: health.fileUpdatedAt,
@@ -535,7 +705,7 @@ async function commitFileHandleAndBootstrap(
  */
 export async function getActiveAdapter(): Promise<StorageAdapter> {
   const activeAuthority = getAuthority();
-  await activeAuthority.currentBackend();
+  await activeAuthority.ready();
   return activeAuthority;
 }
 
@@ -608,102 +778,19 @@ export function onFallback(callback: (reason: string) => void): () => void {
  * bootstrap='file', resets the singleton, seeds the file adapter with the
  * provided initial state, and leaves the file adapter active.
  */
-export async function switchToFileMode(
-  root: FileSystemDirectoryHandle,
-  initialState: TabBoardState,
-): Promise<void> {
-  logBreadcrumb('file-storage: migration', `switching to file mode, revision=${initialState.mutationRevision}`);
-  const { createFileStorageAdapter } = await loadFileStorageModule();
-  let committed = false;
-  const adapter = await createFileStorageAdapter(root, {
-    shouldPublishPing: () => committed,
-  });
-  await adapter.setState(initialState);
-  await commitFileHandleAndBootstrap(root, {
-    fileUpdatedAt: initialState.updatedAt,
-    unreadSessionCount: adapter.getUnreadSessionCount(),
-  });
-  committed = true;
-  await getAuthority().install('file', adapter, initialState);
-  await writeFilePing(initialState.mutationRevision, initialState.updatedAt);
+export async function switchToFileMode(root: FileSystemDirectoryHandle, initialState: TabBoardState): Promise<void> {
+  return getAuthority().switchToFileMode(root, initialState);
 }
 
-/**
- * Switch back to browser storage mode. If copyFileData is true and a file
- * adapter is currently active, copies the on-disk state into chrome.storage
- * before switching so no data is lost. Clears the IndexedDB root handle and
- * resets the singleton so the next getActiveAdapter() returns a fresh
- * ChromeStorageAdapter.
- */
 export async function switchToBrowserMode(copyFileData: boolean): Promise<void> {
-  logBreadcrumb('file-storage: migration', `switching to browser mode, copyFileData=${copyFileData}`);
-  const activeAuthority = getAuthority();
-  const current = await activeAuthority.currentBackend();
-  let fileStateToCopy: TabBoardState | null = null;
-  if (copyFileData && current.mode === 'file') {
-    try {
-      fileStateToCopy = await current.adapter.getState();
-    } catch (err) {
-      logWarning('activeAdapter', 'Failed to read file state while switching to browser mode', err);
-    }
-  }
-
-  const chromeAdapter = createChromeStorageAdapter();
-  if (fileStateToCopy) {
-    await chromeAdapter.setState(fileStateToCopy);
-  }
-  const state = await chromeAdapter.getState();
-  await writeStorageStatusProjection({ ...BROWSER_STORAGE_STATUS });
-  try {
-    const { clearRootHandle } = await loadFsDirectoryModule();
-    await clearRootHandle(testIdbFactory);
-  } catch (err) {
-    logWarning('activeAdapter', 'Failed to clear root handle during switch to browser mode', err);
-  }
-  await activeAuthority.install('browser', chromeAdapter, state);
+  return getAuthority().switchToBrowserMode(copyFileData);
 }
 
 /** Reconnect matching data directly; divergent data requires an explicit choice and local recovery copies. */
 export async function reconnectFolder(root: FileSystemDirectoryHandle, choice?: ReconnectChoice): Promise<void> {
-  const reconnect = async () => {
-    logBreadcrumb('file-storage: reconnect', 'reconnecting to file folder');
-    const { createFileStorageAdapter, saveReconnectCopies } = await loadFileStorageModule();
-    let committed = false;
-    const adapter = await createFileStorageAdapter(root, { shouldPublishPing: () => committed });
-    const fileState = await adapter.getState();
-    const saved = (await chrome.storage.local.get(STATE_KEY))[STATE_KEY];
-    const browserState = normalizeState(saved);
-    const differs = saved !== undefined && !reconnectDataMatches(browserState, fileState);
-    if (differs && !choice) throw new ReconnectDataConflict(browserState, fileState);
-    let state = fileState;
-    if (differs) {
-      await saveReconnectCopies(root, browserState, fileState);
-      const revision = Math.max(browserState.mutationRevision, fileState.mutationRevision);
-      if (revision === Number.MAX_SAFE_INTEGER) throw new Error('The saved state revision cannot be advanced.');
-      state = normalizeState({
-        ...(choice === 'browser' ? browserState : fileState),
-        mutationRevision: revision + 1,
-        updatedAt: nowIso(),
-      });
-      await adapter.setState(state);
-    }
-    await commitFileHandleAndBootstrap(root, {
-      fileUpdatedAt: adapter.getFileUpdatedAt(),
-      unreadSessionCount: adapter.getUnreadSessionCount(),
-    }, state);
-    committed = true;
-    await getAuthority().install('file', adapter, state);
-  };
-  const locks = globalThis.navigator?.locks;
-  if (typeof locks?.request === 'function') {
-    await locks.request('tabboard-state-write', { mode: 'exclusive' }, reconnect);
-  } else {
-    await reconnect();
-  }
+  return getAuthority().reconnectFolder(root, choice);
 }
 
 export async function reloadFileState(): Promise<void> {
-  const backend = await getAuthority().currentBackend();
-  if (backend.mode !== 'file' || !isReloadableAdapter(backend.adapter)) throw new Error('Reconnect the folder before re-reading saved files.');
-  await backend.adapter.reloadFromDisk();
+  return getAuthority().reloadFileState();
 }

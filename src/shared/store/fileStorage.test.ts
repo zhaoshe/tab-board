@@ -169,6 +169,29 @@ describe('initFileStorageDirectory', () => {
 });
 
 describe('createFileStorageAdapter', () => {
+  it('rechecks publication eligibility after the awaited reload status read', async () => {
+    const root = createMemoryDirectory('reload-retired');
+    let eligible = true;
+    const adapter = await createFileStorageAdapter(root, { shouldPublishPing: () => eligible });
+    await adapter.setState(knownState());
+    const previousStatus = chromeMock.storage.local.data[BOOTSTRAP_KEY];
+    let entered!: () => void; let release!: () => void;
+    const reading = new Promise<void>(resolve => { entered = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    chromeMock.storage.local.get.mockImplementationOnce(async keys => {
+      expect(keys).toBe(BOOTSTRAP_KEY);
+      entered(); await resume;
+      return { [BOOTSTRAP_KEY]: chromeMock.storage.local.data[BOOTSTRAP_KEY] };
+    });
+    const reloading = adapter.reloadFromDisk();
+    await reading;
+    eligible = false;
+    chromeMock.storage.local.data[BOOTSTRAP_KEY] = { ...previousStatus as object, fileUpdatedAt: 'replacement-status' };
+    release();
+    await reloading;
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toMatchObject({ fileUpdatedAt: 'replacement-status' });
+  });
+
   it('keeps unchanged data files when only a workspace name changes', async () => {
     const root = createMemoryDirectory('root');
     withPermission(root);
