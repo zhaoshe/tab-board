@@ -26,7 +26,7 @@ interface UseCaptureRevealInput {
   showBin: boolean;
   searchQuery: string;
   tabFilterUrl: string | null;
-  pageState: ManagerPageStateController;
+  pageState: Pick<ManagerPageStateController, 'replace' | 'setQuery'>;
   showSuccess: (message: string, title?: string) => void;
   showInfo: (message: string, title?: string) => void;
   showError: (message: string, title?: string) => void;

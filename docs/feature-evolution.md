@@ -21,6 +21,13 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-13: Manager 导航集中完整恢复时序
+
+- 问题：Layout 管恢复 guard 与 fresh replace，hook effect 却依据 render 快照校验 URL；恢复期间的投影更新和失败重试需要跨组件协调。
+- 决定：零参数 `useManagerPageState()` 拥有订阅、导航、恢复等待、成功 replace 与失败后的即时工作区同步；每次执行读取最新 ref/store/query。修正 Bookmark URL 解析，使刷新与历史导航保留分类。
+- 取舍：hook 具体依赖已有 React/store/history，纯解析仍留在 core；保留 D046 全局活动工作区同步和 D072 持久化/CAS，不建立第二个 owner。
+- 状态：Current；hook 与真实 preview publication 恢复窗口覆盖 guard、原错误、重试 revision 和 history/query 保留。
+
 ### 2026-11-13: Mutation Batch 集中 revision/replay 与 partial commit 规则
 
 - 问题：`applyStateMutations`、worker verification 和 `statePersistence` 各自维护 revision gap、原始索引、Replay 与 partial failure 循环，调用方必须理解 `DropMutationBatchContext`、prepare/mark 和二次 index remap。

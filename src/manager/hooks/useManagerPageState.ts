@@ -5,7 +5,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { TabBoardState } from '../../shared/model/types';
+import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
+import { logWarning } from '../../shared/utils/diagnostics';
 import {
   chooseInitialCategory,
   readCategoryPreference,
@@ -16,6 +17,7 @@ import {
   parseManagerPageState,
   serializeManagerPageState,
   validateManagerPageState,
+  shouldSyncActiveWorkspace,
   type ManagerPageState,
 } from '../core/managerPageState';
 import {
@@ -23,21 +25,13 @@ import {
   useSearchQuery,
 } from './useSearchQuery';
 
-type ValidationState = Pick<
-  TabBoardState,
-  | 'activeWorkspaceId'
-  | 'workspaces'
-  | 'folders'
-  | 'groups'
-  | 'categoryOrderByWorkspace'
->;
-
 type NavigationUpdate = Partial<Omit<ManagerPageState, 'query'>>;
 
 export interface ManagerPageStateController {
   state: ManagerPageState;
   navigate(update: NavigationUpdate): void;
-  replace(update: NavigationUpdate, restoredState?: ValidationState): void;
+  replace(update: NavigationUpdate): void;
+  restoreBackup(text: string, expectedRevision: number): Promise<void>;
   setQuery(query: string): void;
 }
 
@@ -45,10 +39,15 @@ function currentUrl(search: string): string {
   return `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash}`;
 }
 
-export function useManagerPageState(
-  validationState: ValidationState,
-): ManagerPageStateController {
+export function useManagerPageState(): ManagerPageStateController {
+  const activeWorkspaceId = useTabBoardStore(state => state.activeWorkspaceId);
+  const workspaces = useTabBoardStore(state => state.workspaces);
+  const folders = useTabBoardStore(state => state.folders);
+  const groups = useTabBoardStore(state => state.groups);
+  const categoryOrderByWorkspace = useTabBoardStore(state => state.categoryOrderByWorkspace);
+  const restorePendingRef = useRef(false);
   const [navigationState, setNavigationState] = useState(() => {
+    const validationState = useTabBoardStore.getState();
     let validated = validateManagerPageState(
       parseManagerPageState(window.location.search),
       validationState,
@@ -71,7 +70,6 @@ export function useManagerPageState(
     };
   });
   const navigationStateRef = useRef(navigationState);
-  navigationStateRef.current = navigationState;
   const query = useSearchQuery();
   const state = useMemo<ManagerPageState>(() => ({
     ...navigationState,
@@ -92,9 +90,8 @@ export function useManagerPageState(
   const updateNavigation = useCallback((
     update: NavigationUpdate,
     method: 'pushState' | 'replaceState',
-    restoredState?: ValidationState,
   ) => {
-    const currentValidationState = restoredState ?? validationState;
+    const currentValidationState = useTabBoardStore.getState();
     const current = navigationStateRef.current;
     const nextWorkspaceId = update.workspaceId ?? current.workspaceId;
     const category = update.workspaceId && update.category === undefined
@@ -121,13 +118,13 @@ export function useManagerPageState(
     if (next.view === 'board') {
       writeCategoryPreference(next.workspaceId, next.category);
     }
-  }, [validationState, write]);
+  }, [write]);
 
   const navigate = useCallback((update: NavigationUpdate) => {
     updateNavigation(update, 'pushState');
   }, [updateNavigation]);
-  const replace = useCallback((update: NavigationUpdate, restoredState?: ValidationState) => {
-    updateNavigation(update, 'replaceState', restoredState);
+  const replace = useCallback((update: NavigationUpdate) => {
+    updateNavigation(update, 'replaceState');
   }, [updateNavigation]);
   const setQuery = useCallback((nextQuery: string) => {
     savedSearchQueryStore.set(nextQuery);
@@ -142,7 +139,7 @@ export function useManagerPageState(
     const onPopState = () => {
       const next = validateManagerPageState(
         parseManagerPageState(window.location.search),
-        validationState,
+        useTabBoardStore.getState(),
       );
       const projected = {
         workspaceId: next.workspaceId,
@@ -158,31 +155,54 @@ export function useManagerPageState(
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [validationState]);
+  }, []);
+
+  const syncActiveWorkspace = useCallback(() => {
+    if (restorePendingRef.current) return;
+    const current = useTabBoardStore.getState();
+    const workspaceId = navigationStateRef.current.workspaceId;
+    if (shouldSyncActiveWorkspace(workspaceId, current.activeWorkspaceId, current.workspaces)) {
+      current.setActiveWorkspace(workspaceId);
+    }
+  }, []);
+
+  const restoreBackup = useCallback(async (text: string, expectedRevision: number) => {
+    restorePendingRef.current = true;
+    try {
+      await useTabBoardStore.getState().restoreBackup(text, expectedRevision);
+      updateNavigation({ workspaceId: useTabBoardStore.getState().activeWorkspaceId, view: 'board' }, 'replaceState');
+      restorePendingRef.current = false;
+    } catch (error) {
+      restorePendingRef.current = false;
+      try {
+        syncActiveWorkspace();
+      } catch (syncError) {
+        logWarning('manager-navigation', 'Workspace reconciliation failed after restore', String(syncError));
+      }
+      throw error;
+    }
+  }, [syncActiveWorkspace, updateNavigation]);
 
   useEffect(() => {
-    const next = validateManagerPageState(state, validationState);
-    if (
-      next.workspaceId !== state.workspaceId
-      || next.category !== state.category
-    ) {
-      const projected = {
-        workspaceId: next.workspaceId,
-        category: next.category,
-        view: next.view,
-      };
+    if (restorePendingRef.current) return;
+    const current = { ...navigationStateRef.current, query: savedSearchQueryStore.getSnapshot() };
+    const next = validateManagerPageState(current, useTabBoardStore.getState());
+    if (next.workspaceId !== current.workspaceId || next.category !== current.category) {
+      const projected = { workspaceId: next.workspaceId, category: next.category, view: next.view };
       navigationStateRef.current = projected;
       setNavigationState(projected);
       write('replaceState', next);
     }
-  }, [state, validationState, write]);
+  }, [navigationState, activeWorkspaceId, workspaces, folders, groups, categoryOrderByWorkspace, write]);
+
+  useEffect(syncActiveWorkspace, [activeWorkspaceId, workspaces, navigationState, syncActiveWorkspace]);
 
   useEffect(() => {
-    write('replaceState', state);
-  }, [query, state, write]);
+    write('replaceState', { ...navigationStateRef.current, query: savedSearchQueryStore.getSnapshot() });
+  }, [query, navigationState, write]);
 
   return useMemo(
-    () => ({ state, navigate, replace, setQuery }),
-    [navigate, replace, setQuery, state],
+    () => ({ state, navigate, replace, setQuery, restoreBackup }),
+    [navigate, replace, setQuery, restoreBackup, state],
   );
 }

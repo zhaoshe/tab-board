@@ -12,8 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getWorkspaceFiltersAfterDelete,
   ManagerLayout,
-  shouldSyncActiveWorkspace,
 } from './ManagerLayout';
+import { shouldSyncActiveWorkspace } from '../../core/managerPageState';
 import type { CategoryFilter } from '../../core/selectors';
 import { ManagerFrame } from './ManagerFrame';
 import {
@@ -98,6 +98,7 @@ const testHarness = vi.hoisted(() => {
       },
       navigate: vi.fn(),
       replace: vi.fn(),
+      restoreBackup: vi.fn(),
       setQuery: vi.fn(),
     },
   };

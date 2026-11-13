@@ -2158,6 +2158,14 @@ Accepted。
 - Tradeoff: reads wait for same-context lifecycle work. Synchronous reset revokes the old lifecycle but retains the IO queue; new initialization and writes wait for old operations, preventing two adapters from writing one folder. Stale work cannot install or publish locally. Handle rollback finishes before the queue releases, including failed bootstrap commits during reset; actual IO errors remain. Other contexts still refresh through existing switch messages.
 - Status: implemented with real-adapter lifecycle, lock ordering, reset and retired-source regressions.
 
+## D079: Manager page-state hook owns complete restore navigation
+
+- Problem: Layout's restore guard and fresh replace depend on hook effects that can still observe an older render; failure reconciliation must precede ImportModal's retry revision read.
+- Decision: deepen the existing zero-argument hook with `restoreBackup(text, expectedRevision)`. Its subscriptions wake effects, while commands and effects read latest navigation ref/store/query. Restore guards before store invocation, validates one success replace, and immediately reconciles valid workspace mismatch before rethrowing the original error.
+- Reason: keep navigation and its full recovery sequencing in one existing module, with real hook and publication integration tests. Bookmark uses the same URL round-trip contract.
+- Tradeoff: the runtime hook concretely depends on React/store/history. D046 global workspace synchronization and D072 authority/CAS remain; multi-page arbitration is unchanged. Secondary reconciliation failures are diagnostic and cannot replace the restore error.
+- Status: implemented; see ADR 0003.
+
 ```md
 ## D00X: Title
 

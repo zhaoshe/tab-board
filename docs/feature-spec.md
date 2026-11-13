@@ -593,9 +593,9 @@ Command palette 风格搜索：
 - 完整 TabBoard JSON 会出现 `Restore complete TabBoard backup` 选项。选择后明确提示替换全部数据，再点击 `Restore Backup` 确认。
 - 完整恢复保留工作区、分类及顺序、sessions/notes、Saved/Archive/lock 等 flags、设置、Bin 与 active workspace；当前存储位置和配置不随备份改变。
 - 替换前在当前后端保存一份规范化旧快照。浏览器存储为 `tabboardBackupBeforeRestore`；文件目录为 `.tabboard-before-restore.json`。文件模式另将损坏原文复制到 `.tabboard-unread-before-restore/`，重名副本使用唯一前缀；未与备份 ID 冲突的原文件继续保留。
-- 完整恢复成功后，Manager 导航同步到备份中的活动工作区；旧 URL 不会把恢复结果切回原工作区。默认追加导入保持当前导航。
+- 完整恢复等待期间暂停页面校验与工作区同步；成功后以 replace 导航到备份中的活动工作区和 Board，沿用该工作区的分类偏好，保留当前搜索、其它 URL 参数、hash 和 history state。旧 effect 不会把恢复结果切回原工作区。默认追加导入保持当前导航。
 - 恢复预览之后发生的新写入会使完整恢复拒绝提交。用户查看错误后可保留输入和恢复方式重试；不支持的版本、残缺 JSON、无效引用或实体均拒绝完整恢复。
-- 追加和完整恢复都等待后台权威提交成功才关闭弹窗；失败保留文本和方式，允许重试。
+- 追加和完整恢复都等待后台权威提交成功才关闭弹窗；失败保留文本、方式和错误。完整恢复失败先恢复合法页面工作区与全局活动工作区的同步，再更新重试 revision。
 
 ### Export
 

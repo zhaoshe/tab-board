@@ -688,7 +688,9 @@ manager.html
         -> SessionCard / TabItemRow
 ```
 
-Manager page-local navigation state 由 `src/manager/core/managerPageState.ts` 纯 owner 与 `src/manager/hooks/useManagerPageState.ts` React adapter 负责。它只管理 URL 中的 `workspace/category/view/q`，不进入 `TabBoardState`、Storage Authority 或 Zustand persistent projection。Navigation 使用 `pushState`，搜索使用 `replaceState`，`popstate` 反向恢复页面；history side effect 在 state updater 外执行，避免 StrictMode 重放 updater 时重复写入。Workspace create/select 以一个 atomic state push workspace/category/view，active delete replacement 以一个 atomic replace 覆盖已失效 entry；ManagerLayout 只把仍存在于 workspace projection 的 page Workspace 同步到 store。validation 复用 shared category ownership，拒绝不存在或跨 workspace 的 folder category。
+Manager 导航由 `src/manager/core/managerPageState.ts` 的纯 parsing/validation/serialization 与零参数 `useManagerPageState()` 负责。公开 controller 提供 `state`、`navigate(update)`、`replace(update)`、`setQuery(query)` 和 `restoreBackup(text, expectedRevision)`。hook 订阅已有 store 的五个导航相关分支，命令、popstate 与 effect 在执行时读取最新 navigation ref、store 和 query snapshot。ref 在命令中同步更新，render 不覆盖它；页面导航不进入 persistent schema。
+
+普通导航使用 `pushState`，搜索、校验和完整恢复使用 `replaceState`；保留其它 URL 参数、路径、hash 与 history state，支持 Bookmark 和合法的自定义分类刷新与历史恢复。hook 延续 D046：合法页面工作区与全局活动工作区不同则同步 store，不同步已删除的工作区。完整恢复在调用 store 前同步启用私有 guard，暂停被动校验和工作区同步；等待确认后，读取最新投影并通过同一 validated navigation update 切到 Board，沿用分类偏好并保留搜索。失败立即重新评估合法工作区同步，再抛出原错误；同步的次要错误只记录 diagnostics，ImportModal 随后读取更新后的 retry revision。ManagerLayout 只调用 controller，不再拥有恢复 guard、快照校验或工作区同步 effect。底层 Publication、Storage Authority 和 CAS 合约保持既有职责。
 
 Workspace create/rename UI 由 `WorkspaceMenu` 管理 validated modal；不使用 `window.prompt`。Sidebar disclosure 由 `useSidebarDisclosure` 单一拥有 `collapsed / peek / pinned / drawer`：desktop pointer/focus intent 共享可清理的 350ms timer，任一 intent 保持时 peek 不收回；pinned 进入 grid，peek/drawer 使用 overlay，只有 drawer 产生 inert。Selection/Filter 使用 `promote()` 从 peek 进入本次页面的 pinned layout 但不写 preference；只有显式 Expand/Pin 或 desktop Collapse 更新 `tabboard.sidebarCollapsed`。Header global actions 固定为 direct Bin + More，More 只包含 Import、Export、Options。
 

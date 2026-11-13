@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installPreviewChrome, type PreviewChromeHarness } from '../dev/previewChrome';
 import { useTabBoardStore } from '../shared/store/useTabBoardStore';
 import { ManagerApp } from './ManagerApp';
+import { STATE_KEY } from '../shared/model/constants';
 import { normalizeState } from '../shared/model';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -90,6 +91,83 @@ describe('ManagerApp hydration', () => {
     const oldSnapshot = await harness!.chrome.storage.local.get('tabboardBackupBeforeRestore');
     if (mode === 'restore') expect(oldSnapshot.tabboardBackupBeforeRestore).toEqual(before);
     else expect(oldSnapshot).toEqual({});
+  });
+
+  it('keeps restore guarded during real publication recovery, then retries with the reconciled revision', async () => {
+    history.replaceState({ marker: 'restore' }, '', '/manager.html?workspace=workspace_default&category=inbox&view=bin&q=retained&other=keep#anchor');
+    root = createRoot(container!);
+    await act(async () => root?.render(createElement(StrictMode, null, createElement(ManagerApp))));
+    await vi.waitFor(() => expect(document.querySelector('.manager-shell')).not.toBeNull());
+    const before = normalizeState(useTabBoardStore.getState());
+    const restoredWorkspace = { ...before.workspaces[0], id: 'restored', name: 'Restored' };
+    const remoteWorkspace = { ...before.workspaces[0], id: 'remote', name: 'Remote' };
+    const backup = normalizeState({ ...before, workspaces: [...before.workspaces, restoredWorkspace], activeWorkspaceId: 'restored' });
+    const text = JSON.stringify(backup);
+    await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="More Actions"]')?.click());
+    const importEntry = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === 'Import');
+    await act(async () => importEntry?.click());
+    const textarea = document.querySelector<HTMLTextAreaElement>('textarea[name="session-import-text"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, text);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(resolve => setTimeout(resolve, 160));
+    });
+    await act(async () => document.querySelector<HTMLInputElement>('input[value="restore"]')?.click());
+    const submit = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(item => item.textContent === 'Restore Backup')!;
+    const dispatch = harness!.dispatchMessage.bind(harness);
+    let recoveryPending = false;
+    let recoveryStarted = false;
+    let release!: () => void;
+    const recoveryGate = new Promise<void>(resolve => { release = resolve; });
+    const get = harness!.chrome.storage.local.get.bind(harness!.chrome.storage.local);
+    vi.spyOn(harness!.chrome.storage.local, 'get').mockImplementation(async keys => {
+      if (keys === STATE_KEY && recoveryPending) {
+        recoveryStarted = true;
+        await recoveryGate;
+      }
+      return get(keys);
+    });
+    const dispatchSpy = vi.spyOn(harness!, 'dispatchMessage').mockImplementation(async message => {
+      if (!recoveryPending && typeof message === 'object' && message !== null && 'type' in message && message.type === 'tabboard-state-mutations') {
+        recoveryPending = true;
+        return { ok: false, error: 'Review and retry', code: 'BACKUP_REVISION_CONFLICT' };
+      }
+      return dispatch(message);
+    });
+    const push = vi.spyOn(history, 'pushState');
+    const replace = vi.spyOn(history, 'replaceState');
+    await act(async () => submit.click());
+    await vi.waitFor(() => expect(recoveryStarted).toBe(true));
+    // The real publication cleared inFlight but still awaits authority recovery before rejecting its waiter.
+    const remote = normalizeState({ ...before, mutationRevision: before.mutationRevision + 10, workspaces: [...before.workspaces, remoteWorkspace], activeWorkspaceId: 'remote' });
+    await act(async () => harness!.chrome.storage.local.set({ [STATE_KEY]: remote }));
+    expect(useTabBoardStore.getState().activeWorkspaceId).toBe('remote');
+    expect(submit.disabled).toBe(true);
+    expect(document.body.textContent).not.toContain('Import failed:');
+    expect(replace).not.toHaveBeenCalled();
+    await act(async () => { recoveryPending = false; release(); });
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Import failed: Review and retry'));
+    expect(textarea.value).toBe(text);
+    expect(document.querySelector<HTMLInputElement>('input[value="restore"]')?.checked).toBe(true);
+    expect(useTabBoardStore.getState().activeWorkspaceId).toBe('workspace_default');
+    const retryRevision = remote.mutationRevision + 1;
+    expect(useTabBoardStore.getState().mutationRevision).toBe(retryRevision);
+    dispatchSpy.mockImplementation(dispatch);
+    await act(async () => submit.click());
+    await vi.waitFor(() => expect(document.querySelector('textarea[name="session-import-text"]')).toBeNull());
+    const restoreMutations = harness!.sentMessages.flatMap(message => {
+      if (typeof message !== 'object' || message === null || !('mutations' in message) || !Array.isArray(message.mutations)) return [];
+      return message.mutations.filter(mutation => mutation.type === 'restore-backup');
+    });
+    expect(restoreMutations.map(mutation => mutation.expectedRevision)).toEqual([before.mutationRevision, retryRevision]);
+    expect(useTabBoardStore.getState().activeWorkspaceId).toBe('restored');
+    expect(harness!.state.activeWorkspaceId).toBe('restored');
+    expect(new URLSearchParams(location.search).get('workspace')).toBe('restored');
+    expect(new URLSearchParams(location.search).get('q')).toBe('retained');
+    expect(new URLSearchParams(location.search).get('other')).toBe('keep');
+    expect(location.hash).toBe('#anchor');
+    expect(history.state).toEqual({ marker: 'restore' });
+    expect(push).not.toHaveBeenCalled();
   });
 
   it('provides a skip link and page heading for keyboard navigation', async () => {

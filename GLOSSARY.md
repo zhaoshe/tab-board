@@ -30,3 +30,6 @@ Mutation Batch 中只有成功变更被保存的结果，失败变更仍可辨�
 
 **Storage Authority**:
 当前保存数据的读写入口。它区分用户配置的保存位置与实际可用的后端；文件目录不可用时使用浏览器副本，重连时按用户确认的副本恢复文件保存。
+
+**Manager navigation**:
+当前 Manager 页面的 Workspace、Category、Board/Bin 和 Query 组合，保存在 URL 中，用于刷新和历史导航，并依据既定 Workspace 策略与保存数据同步。

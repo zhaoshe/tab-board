@@ -19,6 +19,11 @@ const state = {
 } as Pick<TabBoardState, 'activeWorkspaceId' | 'workspaces' | 'folders'>;
 
 describe('manager page state', () => {
+  it.each(['inbox', 'saved', 'bookmarks', 'archive', 'folder:folder-a'])('round-trips owned category %s', category => {
+    const parsed = parseManagerPageState('?workspace=workspace-a&category=' + encodeURIComponent(category));
+    expect(parsed.category).toBe(category);
+    expect(parseManagerPageState(serializeManagerPageState(validateManagerPageState(parsed, state)))).toEqual(parsed);
+  });
   it('parses and serializes workspace, category, Bin, and query state', () => {
     const parsed = parseManagerPageState(
       '?workspace=workspace-a&category=folder%3Afolder-a&view=bin&q=needle',

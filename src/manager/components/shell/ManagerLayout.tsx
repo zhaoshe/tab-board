@@ -48,21 +48,10 @@ export function getWorkspaceFiltersAfterDelete(): {
   return { category: 'inbox', showBin: false };
 }
 
-export function shouldSyncActiveWorkspace(
-  pageWorkspaceId: string,
-  activeWorkspaceId: string,
-  workspaces: readonly { id: string }[],
-): boolean {
-  return pageWorkspaceId !== activeWorkspaceId
-    && workspaces.some(({ id }) => id === pageWorkspaceId);
-}
-
 export function ManagerLayout() {
   useTitleRefreshActivityListener();
   const sidebar = useSidebarDisclosure();
   const [importModalOpened, setImportModalOpened] = useState(false);
-  // The old page URL must not overwrite the workspace published by full restore.
-  const restoreNavigationRef = useRef<{ workspaceId: string | null } | null>(null);
   const [exportModalOpened, setExportModalOpened] = useState(false);
   const [sessionTargetPicker, setSessionTargetPicker] =
     useState<OpenSessionTargetPickerInput | null>(null);
@@ -74,23 +63,9 @@ export function ManagerLayout() {
   const categoryOrderByWorkspace = useTabBoardStore(
     (state) => state.categoryOrderByWorkspace,
   );
-  const setActiveWorkspace = useTabBoardStore((state) => state.setActiveWorkspace);
   const applyDropIntent = useTabBoardStore((state) => state.applyDropIntent);
   const settings = useTabBoardStore((state) => state.settings);
-  const pageValidationState = useMemo(() => ({
-    activeWorkspaceId,
-    workspaces,
-    folders,
-    groups: allGroups,
-    categoryOrderByWorkspace,
-  }), [
-    activeWorkspaceId,
-    allGroups,
-    categoryOrderByWorkspace,
-    folders,
-    workspaces,
-  ]);
-  const pageState = useManagerPageState(pageValidationState);
+  const pageState = useManagerPageState();
   const selectedCategory = pageState.state.category;
   const showBin = pageState.state.view === 'bin';
   const groups = useFilteredGroups(showBin ? 'inbox' : selectedCategory);
@@ -160,40 +135,6 @@ export function ManagerLayout() {
     showInfo,
     showError,
   });
-
-  const handleRestoreBackup = async (text: string, expectedRevision: number) => {
-    const navigation: { workspaceId: string | null } = { workspaceId: null };
-    restoreNavigationRef.current = navigation;
-    try {
-      await useTabBoardStore.getState().restoreBackup(text, expectedRevision);
-      const restored = useTabBoardStore.getState();
-      navigation.workspaceId = restored.activeWorkspaceId;
-      pageState.replace({ workspaceId: restored.activeWorkspaceId, view: 'board' }, restored);
-    } catch (error) {
-      restoreNavigationRef.current = null;
-      throw error;
-    }
-  };
-
-  useEffect(() => {
-    const restoreNavigation = restoreNavigationRef.current;
-    if (restoreNavigation) {
-      if (restoreNavigation.workspaceId !== pageState.state.workspaceId) return;
-      restoreNavigationRef.current = null;
-    }
-    if (shouldSyncActiveWorkspace(
-      pageState.state.workspaceId,
-      activeWorkspaceId,
-      workspaces,
-    )) {
-      setActiveWorkspace(pageState.state.workspaceId);
-    }
-  }, [
-    activeWorkspaceId,
-    pageState.state.workspaceId,
-    setActiveWorkspace,
-    workspaces,
-  ]);
 
   useToastNotifications();
 
@@ -350,7 +291,7 @@ export function ManagerLayout() {
             opened={importModalOpened}
             onClose={() => setImportModalOpened(false)}
             category={selectedCategory}
-            onRestoreBackup={handleRestoreBackup}
+            onRestoreBackup={pageState.restoreBackup}
           />
           <ExportModal
             opened={exportModalOpened}
