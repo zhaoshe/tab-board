@@ -12,6 +12,8 @@ import { projectionFromState } from '../shared/store/settingsProjection';
 import type { StateMutation } from '../shared/store/stateMutations';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createMemoryDirectory } from '../shared/testing/memoryFs';
+import { BOOTSTRAP_KEY } from '../shared/model/constants';
 
 const TRUSTED_EXTENSION_ID = 'test-extension-id';
 
@@ -205,7 +207,7 @@ function createChromeHarness(initialState: TabBoardState, options: ChromeHarness
       onInstalled: createEvent(),
       onStartup: startup,
       onMessage: runtimeMessage,
-      sendMessage: vi.fn(async () => undefined),
+      sendMessage: vi.fn(async (_message?: unknown): Promise<unknown> => undefined),
       openOptionsPage: vi.fn(),
     },
     storage: {
@@ -428,6 +430,73 @@ describe('Chrome action settings synchronization', () => {
 });
 
 describe('tabboard-storage-switched message', () => {
+  it.each(['checked', 'hydration', 'capture'])('publishes the explicitly selected older browser dataset through %s with the same Chrome context', async (admission) => {
+    const browser = { ...createState(), mutationRevision: 1 };
+    const file = {
+      ...createEmptyState(),
+      mutationRevision: 50,
+      workspaces: [{ ...browser.workspaces[0], id: 'file-only', name: 'File only' }],
+      activeWorkspaceId: 'file-only',
+    };
+    const harness = createChromeHarness(browser);
+    const projections: Record<string, unknown> = {};
+    harness.chromeMock.storage.local.get.mockImplementation(async () => ({
+      ...projections,
+      [STATE_KEY]: structuredClone(harness.state.current),
+    }));
+    const write = harness.chromeMock.storage.local.set.getMockImplementation()!;
+    harness.chromeMock.storage.local.set.mockImplementation(async value => {
+      Object.assign(projections, value);
+      await write(value);
+    });
+    const root = createMemoryDirectory('selected-folder');
+    let savedRoot: FileSystemDirectoryHandle | null = null;
+    vi.doMock('../shared/store/fsDirectory', () => ({
+      loadRootHandle: async () => savedRoot,
+      saveRootHandle: async (handle: FileSystemDirectoryHandle) => { savedRoot = handle; },
+      clearRootHandle: async () => { savedRoot = null; },
+    }));
+    vi.stubGlobal('chrome', harness.chromeMock);
+    await import('./service-worker');
+    const authority = await import('../shared/store/activeAdapter');
+    const { useTabBoardStore: store } = await import('../shared/store/useTabBoardStore');
+    harness.chromeMock.runtime.sendMessage.mockImplementation(async (message?: unknown) =>
+      sendMessage(harness.runtimeMessage.getListener(), message as Record<string, unknown>));
+    try {
+      await authority.switchToFileMode(root as unknown as FileSystemDirectoryHandle, file);
+      expect(projections[BOOTSTRAP_KEY]).toMatchObject({ activeBackend: 'file' });
+      await store.getState().hydrate();
+      expect(store.getState().activeWorkspaceId).toBe('file-only');
+      await authority.switchToBrowserMode(false);
+      await sendMessage(harness.runtimeMessage.getListener(), { type: 'tabboard-storage-switched' });
+      if (admission === 'checked') {
+        await store.getState().updateCategoryOrder('workspace-a', ['saved', 'inbox', 'bookmarks', 'archive'], {
+          expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'],
+        });
+        expect(harness.state.current.mutationRevision).toBe(2);
+        expect(store.getState().categoryOrderByWorkspace['workspace-a'][0]).toBe('saved');
+      } else if (admission === 'hydration') {
+        store.getState().releaseHydration();
+        await store.getState().hydrate();
+      } else {
+        const captured = await sendMessage(harness.runtimeMessage.getListener(), {
+          type: 'capture', mode: 'tab-id', tabId: 1, workspaceId: 'workspace-a',
+        }) as { ok: boolean };
+        expect(captured.ok).toBe(true);
+        store.getState().reconcileCaptureCommit(await authority.getActiveState());
+        expect(store.getState().groups).toHaveLength(1);
+      }
+      expect(globalThis.chrome).toBe(harness.chromeMock);
+      expect(store.getState().mutationRevision).toBe(harness.state.current.mutationRevision);
+      expect(store.getState().workspaces.some(({ id }) => id === 'file-only')).toBe(false);
+      expect(store.getState().activeWorkspaceId).toBe('workspace-a');
+    } finally {
+      store.getState().releaseHydration();
+      authority.resetActiveAdapterForTests();
+      vi.doUnmock('../shared/store/fsDirectory');
+    }
+  });
+
   it('resets the active adapter and re-ensures state without breaking the queue', async () => {
     const state = createState();
     const harness = createChromeHarness(state);

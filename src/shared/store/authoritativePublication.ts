@@ -37,6 +37,7 @@ export interface AuthoritativePublicationDependencies {
   subscribeAuthoritativeState(callback: (state: TabBoardState) => void): () => void;
   sendMutations(mutations: readonly StateMutation[]): Promise<TabBoardState>;
   currentContext(): unknown;
+  currentDataset(): unknown;
   onPersistenceError(error: unknown, notify: boolean): void;
   onMutationCommitted(mutation: StateMutation): void;
 }
@@ -341,6 +342,7 @@ export function createAuthoritativePublication(
   let inFlightPersistenceWaiters: PendingPersistenceWaiter[] = [];
   let publicationQueue: Promise<unknown> = Promise.resolve();
   let persistenceContext: unknown;
+  let canonicalDataset = dependencies.currentDataset();
   let publicationGeneration = 0;
   let hydrationPromise: Promise<void> | null = null;
   let hydrationUnsubscribe: (() => void) | null = null;
@@ -472,10 +474,21 @@ export function createAuthoritativePublication(
     persistenceContext = context;
   };
 
+  const syncCanonicalDataset = (): boolean => {
+    const dataset = dependencies.currentDataset();
+    if (canonicalDataset === dataset) return false;
+    canonicalDataset = dataset;
+    // Revisions order observations only within the selected dataset; queued work keeps its own lifecycle.
+    lastAuthoritativeState = null;
+    pendingRemoteState = null;
+    return true;
+  };
+
   const reconcileAuthoritativeState = (
     authoritative: TabBoardState,
     committedMutations: readonly StateMutation[] = [],
   ): ReconciliationFailure[] => {
+    syncCanonicalDataset();
     const projection = dependencies.readProjection();
     const buffered = pendingRemoteState;
     pendingRemoteState = null;
@@ -505,13 +518,17 @@ export function createAuthoritativePublication(
   };
 
   const recoverAuthoritativeState = async (): Promise<TabBoardState | null> => {
+    syncCanonicalDataset();
     let recovered: TabBoardState | null = null;
     try {
       recovered = await dependencies.initializeAuthoritativeState();
     } catch {
       recovered = null;
     }
-    if (recovered) return selectCanonicalState(recovered, pendingRemoteState, lastAuthoritativeState);
+    syncCanonicalDataset();
+    if (recovered) {
+      return selectCanonicalState(recovered, pendingRemoteState, lastAuthoritativeState);
+    }
     if (lastAuthoritativeState) {
       return newestRemoteState(lastAuthoritativeState, pendingRemoteState);
     }
@@ -546,6 +563,7 @@ export function createAuthoritativePublication(
 
   const acceptRemoteState = (state: TabBoardState): void => {
     if (disposed) return;
+    syncCanonicalDataset();
     if (pendingMutations.length || inFlightMutations) {
       pendingRemoteState = selectCanonicalState(state, pendingRemoteState, lastAuthoritativeState);
       return;
@@ -565,6 +583,7 @@ export function createAuthoritativePublication(
       throw new Error('Persistence context changed.');
     }
     persistenceContext = dependencies.currentContext();
+    syncCanonicalDataset();
     const projection = dependencies.readProjection();
     const base = selectCanonicalState(canonical, pendingRemoteState, lastAuthoritativeState);
     // Keep even a failed observation for the existing settlement/recovery path.
@@ -623,8 +642,11 @@ export function createAuthoritativePublication(
       remaining = remaining.filter((candidate) => candidate !== mutation);
       pendingMutations = [...remaining, ...queuedOutsideBatch];
       inFlightMutations = [mutation];
+      const requestDataset = dependencies.currentDataset();
       try {
-        const persisted = await dependencies.sendMutations([mutation]);
+        let persisted: TabBoardState | null = await dependencies.sendMutations([mutation]);
+        const sameDataset = requestDataset === dependencies.currentDataset();
+        if (!sameDataset) persisted = await recoverAuthoritativeState();
         if (generation !== publicationGeneration || disposed) {
           return {
             error: new Error('Persistence context changed.'),
@@ -639,11 +661,11 @@ export function createAuthoritativePublication(
         inFlightMutations = null;
         captureQueuedMutations();
         pendingMutations = [...remaining, ...queuedOutsideBatch];
-        const reconciliationFailures = reconcileAuthoritativeState(
+        const reconciliationFailures = persisted ? reconcileAuthoritativeState(
           persisted,
-          [mutation],
-        );
-        rebasePendingDropRevisions(lastAuthoritativeState || persisted);
+          sameDataset ? [mutation] : [],
+        ) : [];
+        if (persisted) rebasePendingDropRevisions(lastAuthoritativeState || persisted);
         if (reconciliationFailures.length) {
           failures.push(...reconciliationFailures);
           reconciliationError = reconciliationFailures[0]?.error;
@@ -744,13 +766,17 @@ export function createAuthoritativePublication(
       inFlightPersistenceWaiters = waiters;
       if (!batch.length || disposed) return null;
       inFlightMutations = batch;
+      const requestDataset = dependencies.currentDataset();
       try {
-        const authoritative = await dependencies.sendMutations(batch);
+        let authoritative: TabBoardState | null = await dependencies.sendMutations(batch);
+        const sameDataset = requestDataset === dependencies.currentDataset();
+        // An old request may finish after selection; its outcome remains real, its snapshot belongs to the retired dataset.
+        if (!sameDataset) authoritative = await recoverAuthoritativeState();
         if (generation !== publicationGeneration || disposed) return null;
         inFlightMutations = null;
         settlePersistenceWaiters(waiters, batch);
         inFlightPersistenceWaiters = [];
-        const failures = reconcileAuthoritativeState(authoritative, batch);
+        const failures = authoritative ? reconcileAuthoritativeState(authoritative, sameDataset ? batch : []) : [];
         batch.forEach(dependencies.onMutationCommitted);
         persistenceRetryAttempt = 0;
         suppressRetrySchedule = false;
@@ -902,7 +928,8 @@ export function createAuthoritativePublication(
               sameMutation(candidate, mutation),
             ),
         );
-        let reconciliationState = persisted;
+        const sameDataset = requestDataset === dependencies.currentDataset();
+        let reconciliationState = sameDataset ? persisted : await recoverAuthoritativeState();
         if (
           !reconciliationState
           && (
@@ -918,9 +945,9 @@ export function createAuthoritativePublication(
         }
         let reconciliationFailures: ReconciliationFailure[] = [];
         if (reconciliationState) {
-          const committedMutations = batch.filter(
+          const committedMutations = sameDataset ? batch.filter(
             (_, index) => committedIndexes.has(index),
-          );
+          ) : [];
           reconciliationFailures = reconcileAuthoritativeState(
             reconciliationState,
             committedMutations,
@@ -1091,6 +1118,7 @@ export function createAuthoritativePublication(
     commitCategory,
     hydrate: () => {
       syncPersistenceContext();
+      syncCanonicalDataset();
       if (hydrationPromise) return hydrationPromise;
       const generation = hydrationGeneration;
       const hydration = (async () => {
@@ -1100,6 +1128,7 @@ export function createAuthoritativePublication(
           hydrationUnsubscribe = dependencies.subscribeAuthoritativeState(
             (state) => {
               if (disposed || generation !== hydrationGeneration) return;
+              if (syncCanonicalDataset()) pendingHydrationState = null;
               if (!dependencies.readProjection().hydrated) {
                 pendingHydrationState = selectCanonicalState(
                   state,
@@ -1113,6 +1142,7 @@ export function createAuthoritativePublication(
           );
           const authoritative = await dependencies.initializeAuthoritativeState();
           if (disposed || generation !== hydrationGeneration) return;
+          if (syncCanonicalDataset()) pendingHydrationState = null;
           const projection = dependencies.readProjection();
           const shared = structurallyShareState(
             projection.state,

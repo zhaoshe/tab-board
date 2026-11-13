@@ -109,7 +109,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 2. **Authoritative Publication** 决定 Manager projection 的 optimistic/authoritative 时序，串行发送 mutation、处理 retry/waiter/remote publication/hydration。
 3. **Worker State Persistence** 在 service worker 内串行提交 verified mutation batch，持有锁、fresh state 读取、normalize 和唯一写入；batch validation、revision/replay、index mapping 和 partial failure 合并由 `stateMutations.ts` 的 Mutation Batch 拥有。
 
-所有写入最终交给 Storage Authority 当前 backend 原子提交；跨页面更新由 Authoritative Publication 按 revision/hydration 规则合并。Storage Authority 的 last-known snapshot 与 publication 的 last-authoritative projection 都按 revision/updatedAt 单调推进，不能让旧快照覆盖较新 state。
+所有写入最终交给 Storage Authority 当前 backend 原子提交；跨页面更新由 Authoritative Publication 按 revision/hydration 规则合并。同一所选数据集内，Storage Authority 的 last-known snapshot 与 Publication canonical high-water 按 revision/updatedAt 单调推进。Authority 提供同步、本地的 dataset identity：初始化和普通 IO 不改变它，已安装 backend 的选择替换与 reset 改变它；Publication 只撤销旧 incumbent/buffer，保留队列、checked waiter 和 retry。跨选择返回的旧 RPC 保留真实成功/partial outcome，但用当前 Authority 重读代替旧快照，已在旧数据集提交的 mutation 不重放到新数据集。此标识不持久化、不跨页面传输，也不增加自动 backend 切换协议。
 
 ### `src/background/`
 

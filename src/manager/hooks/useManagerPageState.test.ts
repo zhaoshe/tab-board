@@ -216,28 +216,38 @@ describe('useManagerPageState', () => {
   });
 
   it.each(['mismatch', 'deleted', 'equal', 'sync-throw'])('immediately resumes %s reconciliation before the original restore rejection', async (scenario) => {
-    const observed: { current: ManagerPageStateController | null } = { current: null };
-    let reject!: (error: unknown) => void;
-    const original = new Error('restore failed');
-    useTabBoardStore.setState({ restoreBackup: vi.fn(() => new Promise<void>((_, fail) => { reject = fail; })) });
-    root = createRoot(container!);
-    await act(async () => root?.render(createElement(Probe, { onValue: value => { observed.current = value; } })));
-    const sync = vi.fn((id: string) => {
-      if (scenario === 'sync-throw') throw new Error('secondary');
-      useTabBoardStore.setState({ activeWorkspaceId: id, mutationRevision: 8 });
-    });
-    useTabBoardStore.setState({ setActiveWorkspace: sync });
-    let result!: Promise<unknown>;
-    await act(async () => {
-      result = observed.current!.restoreBackup('backup', 3).catch(error => {
-        expect(sync).toHaveBeenCalledTimes(scenario === 'mismatch' || scenario === 'sync-throw' ? 1 : 0);
-        if (scenario === 'mismatch') expect(useTabBoardStore.getState().mutationRevision).toBe(8);
-        return error;
+    const warning = scenario === 'sync-throw' ? vi.spyOn(console, 'warn').mockImplementation(() => undefined) : null;
+    try {
+      const observed: { current: ManagerPageStateController | null } = { current: null };
+      let reject!: (error: unknown) => void;
+      const original = new Error('restore failed');
+      useTabBoardStore.setState({ restoreBackup: vi.fn(() => new Promise<void>((_, fail) => { reject = fail; })) });
+      root = createRoot(container!);
+      await act(async () => root?.render(createElement(Probe, { onValue: value => { observed.current = value; } })));
+      const sync = vi.fn((id: string) => {
+        if (scenario === 'sync-throw') throw new Error('secondary');
+        useTabBoardStore.setState({ activeWorkspaceId: id, mutationRevision: 8 });
       });
-      useTabBoardStore.setState({ activeWorkspaceId: scenario === 'equal' ? 'workspace-b' : 'workspace-a', workspaces: scenario === 'deleted' ? [validationState.workspaces[0]] : validationState.workspaces });
-    });
-    expect(sync).not.toHaveBeenCalled();
-    await act(async () => { reject(original); expect(await result).toBe(original); });
+      useTabBoardStore.setState({ setActiveWorkspace: sync });
+      let result!: Promise<unknown>;
+      await act(async () => {
+        result = observed.current!.restoreBackup('backup', 3).catch(error => {
+          expect(sync).toHaveBeenCalledTimes(scenario === 'mismatch' || scenario === 'sync-throw' ? 1 : 0);
+          if (scenario === 'mismatch') expect(useTabBoardStore.getState().mutationRevision).toBe(8);
+          return error;
+        });
+        useTabBoardStore.setState({ activeWorkspaceId: scenario === 'equal' ? 'workspace-b' : 'workspace-a', workspaces: scenario === 'deleted' ? [validationState.workspaces[0]] : validationState.workspaces });
+      });
+      expect(sync).not.toHaveBeenCalled();
+      await act(async () => { reject(original); expect(await result).toBe(original); });
+      if (warning) {
+        expect(warning).toHaveBeenCalledExactlyOnceWith(
+          '[tabboard:manager-navigation] Workspace reconciliation failed after restore', 'Error: secondary',
+        );
+      }
+    } finally {
+      warning?.mockRestore();
+    }
   });
 
   it('reconciles synchronous parse failure and validates commands/popstate against current store', async () => {

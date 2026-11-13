@@ -131,6 +131,7 @@ function createHarness(initialState: TabBoardState = createEmptyState()) {
     },
     sendMutations,
     currentContext: () => 'test-context',
+    currentDataset: () => 'test-dataset',
     onPersistenceError: vi.fn(),
     onMutationCommitted: vi.fn(),
   };
@@ -1573,6 +1574,70 @@ describe('capture replay concurrency boundaries', () => {
 });
 
 describe('capture canonical context lifecycle', () => {
+  it.each([false, true])('rechecks dataset after rejected recovery, preserving the old success and B observation during wait=%s', async (observeDuringWait) => {
+    const file = { ...createEmptyState(), mutationRevision: 50 };
+    const harness = createHarness(file);
+    let dataset = 'file';
+    harness.dependencies.currentDataset = () => dataset;
+    const publication = createAuthoritativePublication(harness.dependencies);
+    await publication.hydrate();
+    let finish!: (state: TabBoardState) => void;
+    harness.sendMutations.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const edit: StateMutation = { type: 'update-settings', updates: { theme: 'dark' }, updatedAt: timestamp };
+    const waiter = publication.commitChecked(edit);
+    await Promise.resolve();
+    dataset = 'browser-a';
+    const browserA = { ...createEmptyState(), mutationRevision: 100 };
+    browserA.settings = { ...browserA.settings, theme: 'light' };
+    publication.reconcileCaptureCommit(browserA);
+    let entered!: () => void;
+    const reading = new Promise<void>(resolve => { entered = resolve; });
+    let rejectRead!: (error: unknown) => void;
+    harness.dependencies.initializeAuthoritativeState = () => new Promise((_, reject) => {
+      rejectRead = reject;
+      entered();
+    });
+    finish(applyStateMutations(file, [edit]));
+    await reading;
+    dataset = 'browser-b';
+    const browserB = { ...createEmptyState(), mutationRevision: 1 };
+    if (observeDuringWait) publication.reconcileCaptureCommit(browserB);
+    rejectRead(new Error('read invalidated by authority reset'));
+    await expect(waiter).resolves.toBeUndefined();
+    if (!observeDuringWait) publication.reconcileCaptureCommit(browserB);
+    expect(harness.getProjection().state.mutationRevision).toBe(1);
+    expect(harness.getProjection().state.settings.theme).toBe('system');
+    publication.dispose();
+  });
+
+  it.each(['success', 'partial', 'read-failed'])('does not admit a delayed prior-dataset %s reply after explicit selection while preserving its waiter outcome', async (reply) => {
+    const initial = { ...createEmptyState(), groups: [group('file')], mutationRevision: 50 };
+    const harness = createHarness(initial);
+    let dataset = 'file';
+    harness.dependencies.currentDataset = () => dataset;
+    const publication = createAuthoritativePublication(harness.dependencies);
+    await publication.hydrate();
+    let finish!: (state: TabBoardState) => void;
+    let fail!: (error: unknown) => void;
+    harness.sendMutations.mockImplementationOnce(() => new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+    const edit: StateMutation = { type: 'update-settings', updates: { theme: 'dark' }, updatedAt: timestamp };
+    const waiter = publication.commitChecked(edit);
+    await Promise.resolve();
+    const oldCommitted = applyStateMutations(initial, [edit]);
+    dataset = 'browser';
+    const browser = { ...createEmptyState(), groups: [group('browser-capture')], mutationRevision: 2 };
+    harness.setAuthoritative(browser);
+    publication.reconcileCaptureCommit(browser);
+    if (reply === 'read-failed') harness.dependencies.initializeAuthoritativeState = async () => { throw new Error('selected authority temporarily unavailable'); };
+    if (reply !== 'partial') finish(oldCommitted);
+    else fail(new InvalidDropMutationError('old partial', [], [0], oldCommitted));
+    await waiter;
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['browser-capture']);
+    expect(harness.getProjection().state.mutationRevision).toBe(2);
+    expect(harness.getProjection().state.settings.theme).toBe(browser.settings.theme);
+    publication.dispose();
+  });
+
   it('does not carry capture high-water into hydration for a replacement context', async () => {
     const initial = createEmptyState();
     const harness = createHarness(initial);

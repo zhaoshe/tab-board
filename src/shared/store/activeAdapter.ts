@@ -169,6 +169,7 @@ function isReloadableAdapter(adapter: StorageAdapter): adapter is ReloadableStor
 
 class StorageAuthority implements StorageAdapter {
   private backend: AuthorityBackend | null = null;
+  private datasetIdentity: object = {};
   private lifecycle = 0;
   private initPromise: Promise<AuthorityBackend> | null = null;
   private backendUnsubscribe: (() => void) | null = null;
@@ -309,6 +310,7 @@ class StorageAuthority implements StorageAdapter {
   }
 
   private installBackend(backend: AuthorityBackend, state?: TabBoardState): AuthorityBackend {
+    if (this.backend) this.datasetIdentity = {};
     this.backendUnsubscribe?.();
     this.backend = backend;
     if (backend.mode === 'file') {
@@ -615,6 +617,7 @@ class StorageAuthority implements StorageAdapter {
   }
 
   resetBackend(): void {
+    this.datasetIdentity = {};
     this.lifecycle++;
     // Keep in-flight IO ordered across reset; two adapters may target the same folder.
     this.backendUnsubscribe?.();
@@ -630,6 +633,10 @@ class StorageAuthority implements StorageAdapter {
     this.resetBackend();
     this.subscribers.clear();
     this.handledFallbackEvents.clear();
+  }
+
+  selectedDataset(): object {
+    return this.datasetIdentity;
   }
 }
 
@@ -719,6 +726,11 @@ export async function setActiveState(state: TabBoardState, options?: StateWriteO
 
 export async function ensureActiveState(): Promise<TabBoardState> {
   return getAuthority().ensureState();
+}
+
+// Local selection identity: initialization and ordinary IO do not replace a dataset.
+export function getActiveDatasetIdentity(): object {
+  return getAuthority().selectedDataset();
 }
 
 export function subscribeActiveState(

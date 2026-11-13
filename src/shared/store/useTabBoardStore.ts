@@ -14,6 +14,7 @@ import { sendStateMutations } from './chromeStorage';
 import {
   ensureActiveState,
   getActiveState,
+  getActiveDatasetIdentity,
   onFallback,
   subscribeActiveState,
 } from './activeAdapter';
@@ -195,6 +196,7 @@ const publication = createAuthoritativePublication({
   subscribeAuthoritativeState: subscribeActiveState,
   sendMutations: sendStateMutations,
   currentContext: () => globalThis.chrome,
+  currentDataset: getActiveDatasetIdentity,
   onPersistenceError: reportPersistenceError,
   onMutationCommitted: (mutation) => {
     const feedback = feedbackForCommittedMutation(mutation);

@@ -19,6 +19,7 @@ import {
   _setActiveAdapterIdbFactory,
   _setActiveAdapterModuleLoadersForTests,
   getActiveAdapter,
+  getActiveDatasetIdentity,
   getStorageStatus,
   isFileModeActive,
   onFallback,
@@ -369,6 +370,30 @@ describe('activeAdapter', () => {
     expect((await read).mutationRevision).toBe(12);
     await expect((await createFileStorageAdapter(root)).getState()).resolves.toMatchObject({ mutationRevision: 12 });
     expect((chromeMock.storage.local.data[STATE_KEY] as TabBoardState).mutationRevision).toBe(10);
+  });
+
+  it('keeps dataset identity through initialization and ordinary IO, changing only at selection or reset', async () => {
+    const initialIdentity = getActiveDatasetIdentity();
+    const adapter = await getActiveAdapter();
+    await adapter.ensureState();
+    await adapter.setState(knownState({ mutationRevision: 10 }));
+    await adapter.getState();
+    expect(getActiveDatasetIdentity()).toBe(initialIdentity);
+    const root = createMemoryDirectory('identity-target');
+    await switchToFileMode(root, knownState({ mutationRevision: 50 }));
+    const fileIdentity = getActiveDatasetIdentity();
+    expect(fileIdentity).not.toBe(initialIdentity);
+    await adapter.getState();
+    await adapter.setState(knownState({ mutationRevision: 51 }));
+    expect(getActiveDatasetIdentity()).toBe(fileIdentity);
+    await switchToBrowserMode(false);
+    const browserIdentity = getActiveDatasetIdentity();
+    expect(browserIdentity).not.toBe(fileIdentity);
+    resetActiveAdapter();
+    const resetIdentity = getActiveDatasetIdentity();
+    expect(resetIdentity).not.toBe(browserIdentity);
+    await adapter.ensureState();
+    expect(getActiveDatasetIdentity()).toBe(resetIdentity);
   });
 
   it('copies back the preceding queued file write', async () => {

@@ -1986,6 +1986,13 @@ production build/check 再打包。
 - 取舍：Publication 需区分 preview 求值与 settlement effects，以及 canonical 基线和临时 Workspace overlay；语义 preview 失败保留观察快照并返回 committed-but-unreconciled。
 - 当前状态：实现并加入 direct owner 与真实 facade/capture DOM 并发回归；Chrome 原生 capture 验收另行记录。见 D080 与 ADR 0004。
 
+### 2026-11-13: Canonical 高水位限定在所选数据集
+
+- 问题：显式选回较旧的 browser 数据后，Publication 仍可能保留 file 的更高 revision，导致确认提交后显示旧工作区。
+- 修复：现有 Authority 生命周期提供本地 dataset identity，选择替换/reset 后撤销旧 canonical incumbent/buffer；同一数据集的旧回复保护、pending/checked/drop 与 retry 保留。跨选择期间迟到的旧 RPC 用当前 Authority 重读完成显示，其原成功/partial 结果不改变。
+- 边界：不新增 schema 或分布式切换协议；若当前 Authority 暂不可读，保留可用的新数据集观察和真实 RPC 结果，等待后续读取刷新显示。
+- 当前状态：真实 facade/Authority/worker 的 file50 → browser1 回归覆盖 checked、hydration 和 capture；本地延迟 success/partial 与重读失败另有 owner 回归。
+
 ## 待观察问题
 
 - 右键菜单触发筛选是否足够容易被发现。
