@@ -26,7 +26,7 @@
 - 聚焦 RED 为 `7 failed / 76 passed`，两次 GREEN 均为 `83 passed`。最终完整 `npm test` 为 `117 files / 1702 tests`；`npm run check` 包含 build、extension sanity、cycle `6/6`、architecture `8/8`、release `19/19`，均通过；`git diff --check` 通过。
 - 本修复波次未运行浏览器、未新增依赖、未提交。原有物理证据仍有其记录边界；新增重连契约的 Native/review 收口由父任务完成。
 
-逐次输出与范围见 [最终集成修复报告](../../.superpowers/sdd/2026-11-12-optimization/final-integration-fix-report.md)，全量日志见 [final-fix-npm-test.log](../../.superpowers/sdd/2026-11-12-optimization/final-fix-npm-test.log) 与 [final-fix-npm-check.log](../../.superpowers/sdd/2026-11-12-optimization/final-fix-npm-check.log)。
+逐次输出与范围见 [最终集成修复报告](../../.agents/optimization/reviews-and-ledger/final-integration-fix-report.md)，全量日志见 [final-fix-npm-test.log](../../.agents/optimization/reviews-and-ledger/final-fix-npm-test.log) 与 [final-fix-npm-check.log](../../.agents/optimization/reviews-and-ledger/final-fix-npm-check.log)。
 
 ## 物理验证边界
 
