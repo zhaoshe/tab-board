@@ -237,13 +237,6 @@ describe('Task107 source contracts', () => {
     expect(row).toContain('contain-intrinsic-size: auto 44px');
   });
 
-  it('structurally shares direct selected-capture reconciliation before publishing it', () => {
-    const runtime = readFileSync(resolve(process.cwd(), 'src/manager/hooks/useOpenTabsRuntime.ts'), 'utf8');
-
-    expect(runtime).toContain("import { structurallyShareState } from '../../shared/store/stateStructuralSharing';");
-    expect(runtime).toContain('useTabBoardStore.setState(structurallyShareState(currentState, stateToApply))');
-  });
-
   const root = resolve(process.cwd(), 'src');
   const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
 

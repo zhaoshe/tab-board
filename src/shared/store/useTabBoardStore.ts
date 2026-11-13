@@ -57,6 +57,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 interface TabBoardStore extends TabBoardState {
   hydrated: boolean;
   persistenceError: string | null;
+  reconcileCaptureCommit: (canonical: TabBoardState) => void;
   hydrate: () => Promise<void>;
   releaseHydration: () => void;
   setActiveWorkspace: (workspaceId: string) => void;
@@ -245,6 +246,7 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
   hydrated: false,
   persistenceError: null,
 
+  reconcileCaptureCommit: (canonical) => publication.reconcileCaptureCommit(canonical),
   hydrate: () => publication.hydrate(),
   releaseHydration: () => publication.releaseHydration(),
 

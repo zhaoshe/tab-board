@@ -33,3 +33,6 @@ Mutation Batch 中只有成功变更被保存的结果，失败变更仍可辨�
 
 **Manager navigation**:
 当前 Manager 页面的 Workspace、Category、Board/Bin 和 Query 组合，保存在 URL 中，用于刷新和历史导航，并依据既定 Workspace 策略与保存数据同步。
+
+**Authoritative Publication**:
+面向页面发布已保存状态与待确认编辑的当前投影，并维护编辑的确认、失败和重试结果。页面通过这份投影显示数据，不自行选择原始快照或覆盖其他待确认编辑。

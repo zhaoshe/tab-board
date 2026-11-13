@@ -44,10 +44,6 @@ vi.mock('../../shared/store/chromeStorage', () => ({
   getState: testHarness.getPersistedState,
 }));
 
-vi.mock('../../shared/store/stateStructuralSharing', () => ({
-  structurallyShareState: (_current: unknown, next: unknown) => next,
-}));
-
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function chromeEvent() {
@@ -117,7 +113,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.append(container);
   runtime = null;
-  Object.assign(testHarness.state, createEmptyState());
+  Object.assign(testHarness.state, createEmptyState(), { reconcileCaptureCommit: (canonical: unknown) => Object.assign(testHarness.state, canonical) });
   testHarness.getPersistedState.mockReset();
   testHarness.savedSearchQuery = '';
   testHarness.sendMessage.mockReset();

@@ -19,7 +19,7 @@ TabBoard 当前能力分为七组：
 - 当前源码版本以 `package.json` / `manifest.json` 为准，现行为 `0.1.6`；Chrome 运行基线是 `115+`，从源码构建需 Node.js `20+`。
 - 生产 Manager 只有 React + Mantine 入口：`manager.html` 加载 `src/manager/main.tsx`，并由 Manifest V3 new-tab override 指向 `manager.html`。
 - workspace/category/session、Open Tabs、capture、import/export、Bin、overlay、DnD 与 persistence 行为由 typed React contracts 和现有 core tests 覆盖；状态更新保持 immutable，普通 mutation 经过引用、locked 和 URL 边界校验。
-- capture feedback 以后台 commit 与 manager reconciliation 的权威结果为准：成功、已提交但未定位、失败分别产生不同结果，不用乐观 toast 冒充保存完成。
+- capture feedback 以后台 commit 与 manager reconciliation 的权威结果为准：成功、已提交但未定位、失败分别产生不同结果，不用乐观 toast 冒充保存完成。确认保存后，Manager 在现有 canonical read、created-ID 校验和 Open Tabs refresh 流程中即时展示 capture，保留已经显示的普通编辑，不等待无关保存 RPC；尚未确认的 checked 批量操作不会因 capture preview 提前显示。工作区、category、filter 与 selection 已变化时仍不强制 reveal。
 - 默认自动化 proof 是 `npm test` 与 `npm run check`：后者会顺序执行 `build`、extension sanity、`check:cycles`、`check:architecture` 和 `test:release`。`tests/e2e/` 浏览器套件与 PR browser gate 已配置，但不是每次本地文档或代码改动的默认命令。
 - 自动化 proof 与真实 Chrome 手工验收是两层证据：自动化通过不等于完整 UI parity，DnD 事件时序、Shadow DOM/focus、capture/restore 与 sender 集成仍需 unpacked extension 手工回归。
 

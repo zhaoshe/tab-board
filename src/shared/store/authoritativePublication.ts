@@ -42,6 +42,7 @@ export interface AuthoritativePublicationDependencies {
 }
 
 export interface AuthoritativePublication {
+  reconcileCaptureCommit(canonical: TabBoardState): void;
   commit(mutation: StateMutation): void;
   commitChecked(mutation: StateMutation): Promise<void>;
   commitRestore(mutation: RestoreStateMutation): void;
@@ -267,7 +268,7 @@ function newestRemoteState(
       ? buffered
       : authoritative;
   }
-  return remoteStateTimestamp(buffered) >= remoteStateTimestamp(authoritative)
+  return remoteStateTimestamp(buffered) > remoteStateTimestamp(authoritative)
     ? buffered
     : authoritative;
 }
@@ -288,6 +289,42 @@ interface ReconciliationFailure {
   error: unknown;
 }
 
+function selectCanonicalState(
+  incoming: TabBoardState,
+  buffered: TabBoardState | null,
+  incumbent: TabBoardState | null,
+): TabBoardState {
+  let selected = incumbent || buffered || incoming;
+  if (buffered) selected = newestRemoteState(selected, buffered);
+  return newestRemoteState(selected, incoming);
+}
+
+// Preview rebases only a display copy; settlement keeps the real CAS mutation.
+function evaluateOrderedReplay(
+  base: TabBoardState,
+  mutations: readonly StateMutation[],
+  preview = false,
+): { state: TabBoardState; retained: StateMutation[]; projected: StateMutation[]; failures: ReconciliationFailure[] } {
+  let state = base;
+  const retained: StateMutation[] = [];
+  const projected: StateMutation[] = [];
+  const failures: ReconciliationFailure[] = [];
+  mutations.forEach((mutation) => {
+    const replay = preview && mutation.type === 'drop-intent'
+      ? { ...mutation, expectedRevision: state.mutationRevision }
+      : mutation;
+    try {
+      state = applyStateMutation(state, replay);
+      retained.push(mutation);
+      projected.push(mutation);
+    } catch (error: unknown) {
+      if (mutation.type === 'drop-intent') retained.push(mutation);
+      if (preview || mutation.type !== 'drop-intent') failures.push({ mutation, error });
+    }
+  });
+  return { state, retained, projected, failures };
+}
+
 export function createAuthoritativePublication(
   dependencies: AuthoritativePublicationDependencies,
 ): AuthoritativePublication {
@@ -297,6 +334,7 @@ export function createAuthoritativePublication(
   let suppressRetrySchedule = false;
   let pendingMutations: StateMutation[] = [];
   let inFlightMutations: StateMutation[] | null = null;
+  let projectedMutations = new Set<StateMutation>();
   let pendingRemoteState: TabBoardState | null = null;
   let lastAuthoritativeState: TabBoardState | null = null;
   let pendingPersistenceWaiters: PendingPersistenceWaiter[] = [];
@@ -311,7 +349,7 @@ export function createAuthoritativePublication(
 
   const publishOptimisticMutation = (mutation: StateMutation): void => {
     const projection = dependencies.readProjection();
-    if (!pendingMutations.length && !inFlightMutations) {
+    if (!lastAuthoritativeState && !pendingMutations.length && !inFlightMutations) {
       lastAuthoritativeState = projection.state;
     }
     const next = applyStateMutation(projection.state, mutation);
@@ -323,6 +361,7 @@ export function createAuthoritativePublication(
       },
     );
     pendingMutations = [...pendingMutations, mutation];
+    projectedMutations.add(mutation);
   };
 
   const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -420,6 +459,7 @@ export function createAuthoritativePublication(
       }
       pendingMutations = [];
       inFlightMutations = null;
+      projectedMutations.clear();
       pendingRemoteState = null;
       lastAuthoritativeState = null;
       persistenceRetryAttempt = 0;
@@ -439,42 +479,29 @@ export function createAuthoritativePublication(
     const projection = dependencies.readProjection();
     const buffered = pendingRemoteState;
     pendingRemoteState = null;
-    const reconciledRemoteState = newestRemoteState(authoritative, buffered);
-    const reconciledBase = hasDistinctNewerRemoteState(authoritative, buffered)
+    const reconciledRemoteState = selectCanonicalState(authoritative, buffered, lastAuthoritativeState);
+    const reconciledBase = hasDistinctNewerRemoteState(authoritative, reconciledRemoteState)
       ? replayCommittedMutations(
         reconciledRemoteState,
         authoritative,
         committedMutations,
       )
       : reconciledRemoteState;
-    const failures: ReconciliationFailure[] = [];
-    const retainedPending: StateMutation[] = [];
-    let optimistic = reconciledBase;
-    pendingMutations.forEach((mutation) => {
-      try {
-        optimistic = applyStateMutation(optimistic, mutation);
-        retainedPending.push(mutation);
-      } catch (error: unknown) {
-        if (mutation.type === 'drop-intent') {
-          retainedPending.push(mutation);
-        } else {
-          failures.push({ mutation, error });
-        }
-      }
-    });
-    pendingMutations = retainedPending;
+    const replay = evaluateOrderedReplay(reconciledBase, pendingMutations);
+    pendingMutations = replay.retained;
+    projectedMutations = new Set(replay.projected);
     lastAuthoritativeState = structurallyShareState(
       lastAuthoritativeState || projection.state,
       reconciledBase,
     );
     dependencies.publishProjection(
-      structurallyShareState(projection.state, optimistic),
+      structurallyShareState(projection.state, replay.state),
       {
         hydrated: projection.hydrated,
         persistenceError: projection.persistenceError,
       },
     );
-    return failures;
+    return replay.failures;
   };
 
   const recoverAuthoritativeState = async (): Promise<TabBoardState | null> => {
@@ -484,7 +511,7 @@ export function createAuthoritativePublication(
     } catch {
       recovered = null;
     }
-    if (recovered) return newestRemoteState(recovered, pendingRemoteState);
+    if (recovered) return selectCanonicalState(recovered, pendingRemoteState, lastAuthoritativeState);
     if (lastAuthoritativeState) {
       return newestRemoteState(lastAuthoritativeState, pendingRemoteState);
     }
@@ -500,6 +527,7 @@ export function createAuthoritativePublication(
         const next = mutation.expectedRevision === simulated.mutationRevision
           ? mutation
           : { ...mutation, expectedRevision: simulated.mutationRevision };
+        if (projectedMutations.delete(mutation)) projectedMutations.add(next);
         try {
           simulated = applyStateMutation(simulated, next);
         } catch {
@@ -519,13 +547,40 @@ export function createAuthoritativePublication(
   const acceptRemoteState = (state: TabBoardState): void => {
     if (disposed) return;
     if (pendingMutations.length || inFlightMutations) {
-      pendingRemoteState = newestRemoteState(state, pendingRemoteState);
+      pendingRemoteState = selectCanonicalState(state, pendingRemoteState, lastAuthoritativeState);
       return;
     }
     const projection = dependencies.readProjection();
-    const shared = structurallyShareState(projection.state, state);
+    const shared = structurallyShareState(projection.state, selectCanonicalState(state, pendingRemoteState, lastAuthoritativeState));
     lastAuthoritativeState = shared;
     dependencies.publishProjection(shared, {
+      hydrated: projection.hydrated,
+      persistenceError: projection.persistenceError,
+    });
+  };
+
+  const reconcileCaptureCommit = (canonical: TabBoardState): void => {
+    if (disposed) throw new Error('Authoritative publication is disposed.');
+    if (persistenceContext !== undefined && persistenceContext !== dependencies.currentContext()) {
+      throw new Error('Persistence context changed.');
+    }
+    persistenceContext = dependencies.currentContext();
+    const projection = dependencies.readProjection();
+    const base = selectCanonicalState(canonical, pendingRemoteState, lastAuthoritativeState);
+    // Keep even a failed observation for the existing settlement/recovery path.
+    pendingRemoteState = base;
+    lastAuthoritativeState = structurallyShareState(lastAuthoritativeState || projection.state, base);
+    const outstanding = [...(inFlightMutations || []), ...pendingMutations]
+      .filter((mutation) => projectedMutations.has(mutation));
+    const preview = evaluateOrderedReplay(base, outstanding, true);
+    if (preview.failures.length) throw preview.failures[0].error;
+    const activeWorkspaceId = preview.state.workspaces.some(({ id }) => id === projection.state.activeWorkspaceId)
+      ? projection.state.activeWorkspaceId
+      : base.activeWorkspaceId;
+    const state = activeWorkspaceId === preview.state.activeWorkspaceId
+      ? preview.state
+      : { ...preview.state, activeWorkspaceId };
+    dependencies.publishProjection(structurallyShareState(projection.state, state), {
       hydrated: projection.hydrated,
       persistenceError: projection.persistenceError,
     });
@@ -868,7 +923,7 @@ export function createAuthoritativePublication(
           );
           reconciliationFailures = reconcileAuthoritativeState(
             reconciliationState,
-            pendingRemoteState ? committedMutations : [],
+            committedMutations,
           );
           const shouldRebasePendingDrops = !invalidDrop && (
             (
@@ -1028,12 +1083,14 @@ export function createAuthoritativePublication(
   };
 
   return {
+    reconcileCaptureCommit,
     commit,
     commitChecked,
     commitRestore,
     commitDrop,
     commitCategory,
     hydrate: () => {
+      syncPersistenceContext();
       if (hydrationPromise) return hydrationPromise;
       const generation = hydrationGeneration;
       const hydration = (async () => {
@@ -1044,9 +1101,10 @@ export function createAuthoritativePublication(
             (state) => {
               if (disposed || generation !== hydrationGeneration) return;
               if (!dependencies.readProjection().hydrated) {
-                pendingHydrationState = newestRemoteState(
+                pendingHydrationState = selectCanonicalState(
                   state,
                   pendingHydrationState,
+                  lastAuthoritativeState,
                 );
                 return;
               }
@@ -1058,7 +1116,7 @@ export function createAuthoritativePublication(
           const projection = dependencies.readProjection();
           const shared = structurallyShareState(
             projection.state,
-            newestRemoteState(authoritative, pendingHydrationState),
+            selectCanonicalState(authoritative, pendingHydrationState, lastAuthoritativeState),
           );
           pendingHydrationState = null;
           lastAuthoritativeState = shared;
@@ -1100,6 +1158,7 @@ export function createAuthoritativePublication(
       retryTimeout = null;
       pendingMutations = [];
       inFlightMutations = null;
+      projectedMutations.clear();
       pendingRemoteState = null;
       lastAuthoritativeState = null;
       persistenceRetryAttempt = 0;

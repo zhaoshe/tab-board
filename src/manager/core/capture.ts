@@ -1,5 +1,4 @@
 import type { CategoryFilter } from '../../shared/model/categories';
-import type { TabBoardState } from '../../shared/model/types';
 
 export type OpenTabsCaptureSnapshot = {
   selectedTabIds: number[];
@@ -17,37 +16,6 @@ export type CaptureFilterSnapshot = {
   searchQuery: string;
   tabFilterUrl: string | null;
 };
-
-export function mergeCapturedGroups(
-  currentState: TabBoardState,
-  persistedState: TabBoardState,
-  createdGroupIds: readonly string[],
-  workspaceId: string,
-): TabBoardState {
-  const currentGroupIds = new Set(currentState.groups.map((group) => group.id));
-  const createdIds = new Set(createdGroupIds);
-  const addedIds = new Set<string>();
-  const missingGroups = persistedState.groups.filter((group) => {
-    if (group.workspaceId !== workspaceId || !createdIds.has(group.id) || currentGroupIds.has(group.id)) {
-      return false;
-    }
-    if (addedIds.has(group.id)) return false;
-    addedIds.add(group.id);
-    return true;
-  });
-  if (!missingGroups.length) return currentState;
-
-  const firstWorkspaceGroupIndex = currentState.groups.findIndex((group) => group.workspaceId === workspaceId);
-  const insertionIndex = firstWorkspaceGroupIndex === -1 ? 0 : firstWorkspaceGroupIndex;
-  return {
-    ...currentState,
-    groups: [
-      ...currentState.groups.slice(0, insertionIndex),
-      ...missingGroups,
-      ...currentState.groups.slice(insertionIndex),
-    ],
-  };
-}
 
 export function sameCaptureFilterSnapshot(
   left: CaptureFilterSnapshot,

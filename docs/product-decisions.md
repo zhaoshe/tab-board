@@ -2182,3 +2182,12 @@ Status:
 Proposed / Accepted / Rejected / Revisit
 ```
 - D029（2026-07-19）：Open Tabs 不再提供 pinned、Chrome URL、file URL 三组捕获开关，仅保留自定义 URL 过滤规则。原因：多组“能否选择”的特例造成列表、批量操作与设置的认知负担；过滤应是统一的隐藏规则。取舍：Chrome 对部分 URL 的实际操作限制仍由平台返回错误。
+
+
+## D080: Authoritative Publication owns capture projection
+
+- Problem: capture hook compared optimistic UI timestamps and merged created groups itself, outside the existing canonical buffer/replay rules. Unrelated in-flight RPC settlement could lose the captured session or replace displayed edits.
+- Decision: add synchronous `reconcileCaptureCommit(canonical)` to the existing owner/facade after the hook's canonical read and created-ID/source-workspace check. Select by canonical revision, parsed timestamp, then incumbent on ties. A shared private ordered replay calculator drives eager preview and the existing settlement path.
+- Reason: a single owner can preserve capture high-water across later replies and replay only outstanding work already displayed, without waiting for unrelated RPC. Preview never publishes untouched checked/category additional mutations or changes queue/wire/drop CAS, waiter, timer or feedback policy.
+- Tradeoff: track projected mutation identities separately from the existing transport batch. Preserve valid current Workspace only in the eager projection; canonical base remains independent. Semantic replay failure keeps newest canonical observation for settlement while leaving projection/outstanding work unchanged and returning the existing committed-but-unreconciled outcome. Existing settlement pruning, retry and checked-retry display policy are preserved.
+- Status: implemented with direct Publication and real Zustand/Storage Authority/capture DOM contracts. Native Chrome proof is recorded separately. See ADR 0004.

@@ -1972,6 +1972,13 @@ production build/check 再打包。
 - 取舍：读取会等待本上下文的生命周期操作。已开始的 disk/transport 写入不能撤销；其他上下文继续通过现有 storage-switched 消息刷新，不引入分布式 backend 切换协议。
 - 当前状态：实现并加入真实 browser/file adapter 的队列、锁、reset、旧来源隔离及 publication 回归。Mutation Batch 和 State Persistence 职责保持，见 ADR 0002。
 
+### 2026-11-13: Capture projection 回到 Authoritative Publication
+
+- Capture hook 原先按 UI timestamp 选择整份 state 或补入 created groups，可能覆盖在途编辑，且旧 RPC settle 会再次丢失已保存的 session。现有 read/ID 校验之后统一调用同步 `reconcileCaptureCommit(canonical)`，由 Publication 选择 canonical high-water 并即时重放已显示的 outstanding work。
+- Preview 只使用 optimistic in-flight subset，未显示的 checked/category additional 继续等待原确认；drop expectedRevision 只改临时显示副本。selection、source snapshot、refresh、feedback/reveal、实际 CAS、retry 和 waiter 保持原职责。
+- 取舍：Publication 需区分 preview 求值与 settlement effects，以及 canonical 基线和临时 Workspace overlay；语义 preview 失败保留观察快照并返回 committed-but-unreconciled。
+- 当前状态：实现并加入 direct owner 与真实 facade/capture DOM 并发回归；Chrome 原生 capture 验收另行记录。见 D080 与 ADR 0004。
+
 ## 待观察问题
 
 - 右键菜单触发筛选是否足够容易被发现。
