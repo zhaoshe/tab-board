@@ -603,9 +603,7 @@ Command palette 风格搜索：
 
 ### Export
 
-入口：
-
-- 右侧顶部 toolbar 的 Export。
+入口：Manager 顶部 More > Export。
 
 支持：
 
@@ -615,7 +613,8 @@ Command palette 风格搜索：
 
 当前 Export 范围：
 
-- 所有 state groups。
+- JSON 通过 store `exportAll()` 导出完整 canonical state，包括所有 workspaces、active workspace、categories 及顺序、sessions/notes、settings、Bin，以及 version、revision、timestamps 和 drop replay ledger，可用于完整备份恢复。
+- Text 导出 OneTab-compatible 的 titles/URLs 文本，用于追加导入；文本不保留完整 JSON 的工作区、分类、设置、Bin 等结构。
 
 ## Bin
 

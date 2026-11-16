@@ -89,7 +89,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
   - `ChromeStorageAdapter`（`chromeStorageAdapter.ts`）：封装 `chrome.storage.local["tabboardState"]`，是默认后端。
   - `FileStorageAdapter`（`fileStorage.ts` + `fileSerialization.ts` + `fsAtomic.ts`）：通过 File System Access API 把数据写入用户选择的本地文件夹；详见下文「File Store Layout」。
 - `activeAdapter` 是稳定的 Storage Authority。启动时读 `chrome.storage.local["tabboardStorageConfig"]`（BOOTSTRAP_KEY）中的 `StorageStatusProjection` 决定内部 backend；callers 可长期持有同一个 authority interface，backend 切换不会让 subscription 或缓存引用失效。旧 `{ mode }` 记录只作为兼容输入解析。
-- Storage Authority 的同一队列排序 backend 选择、读取与 fallback、写入、显式切换、reconnect 和手动重读。显式切换先在队列外取得 `tabboard-state-write` Web Lock，再把准备、复制、bootstrap commit 和安装作为完整操作入队；内部只调用 backend，不重入公开 facade。锁顺序保持 State Persistence queue → Web Lock → Authority queue。
+- Storage Authority 的同一队列排序 backend 选择、读取与 fallback、写入、显式切换、reconnect 和手动重读。显式切换先在队列外取得 `tabboard-state-write` Web Lock，再把准备、复制、bootstrap commit 和安装作为完整操作入队；手动重读与 peer 显式重读同样在入队前取得该锁。内部只调用 backend，不重入公开 facade。锁顺序保持 State Persistence queue → Web Lock → Authority queue。
 - 候选 File adapter 准备期间静默，旧 backend 在提交成功前继续有效。File 发布资格同时检查 lifecycle 和已安装 adapter 身份；旧 subscription、ping/fallback binding 和 reset 前的异步结果不能更新新 backend。同步 reset 撤销旧资格但保留在途 IO 的队列顺序，新 lifecycle 的初始化与读写等待旧操作退出，避免同目录双 writer 和旧缓存差异比较。旧 promise 的清理只作用于自身；已开始的 disk/transport 写入仍按实际结果完成。
 - `settingsProjection.ts` 持有可丢弃的 `tabboardSettingsProjection` read model（settings + mutationRevision + updatedAt）。Chrome commit 与 canonical state 原子写入 projection；File commit 在 final meta commit 后发布 projection。projection 缺失或损坏时只允许一次 canonical state repair，不成为第二写入真相。
 - 同一模块还定义 `StorageStatusProjection`：`configuredTarget` 表达用户正式选择，`activeBackend` 表达当前实际 writer，并持久化 `folderName`、`fallbackReason` 和最后一次成功 File commit 的 `fileUpdatedAt`。DirectoryHandle 只存 IndexedDB，不进入该 projection。
@@ -457,7 +457,7 @@ Storage Authority 把 bootstrap/handle 当作 mode-switch commit point：
 
 任何 pre-commit 步骤失败都会保留原 backend、bootstrap 和 handle；UI 不会把半完成切换显示为成功。
 
-手动 `Re-read folder` 是 File backend 活跃时的显式用户读取，不是普通 stale snapshot。Storage Authority 在同一队列中执行 `reloadFromDisk()`，成功后用合法的 one-shot `file-reread_*` event id 写入 File ping；peer Authority 只消费一次且不 rebroadcast。这个显式 observation 允许 Authoritative Publication 在同 revision/timestamp exact tie 上替换当前 canonical base，用既有 eager preview/replay 计算发布修复后的 session，同时保留已显示 optimistic subset、checked hidden work、retry/waiter 和实际 wire mutation。普通 ping、旧 RPC 和 lower revision observation 仍按 revision-first high-water 与 incumbent-on-tie 防护处理，不能擦掉已采纳的修复结果。
+手动 `Re-read folder` 是 File backend 活跃时的显式用户读取，不是普通 stale snapshot。Storage Authority 先取得全局 `tabboard-state-write` Web Lock，再入 Authority 队列执行 `reloadFromDisk()`；peer 显式重读遵守同一锁顺序，避免读取跨越文件提交。成功后用合法的 one-shot `file-reread_*` event id 写入 File ping；peer Authority 只消费一次且不 rebroadcast。这个显式 observation 允许 Authoritative Publication 在同 revision/timestamp exact tie 上替换当前 canonical base，用既有 eager preview/replay 计算发布修复后的 session，同时保留已显示 optimistic subset、checked hidden work、retry/waiter 和实际 wire mutation。普通 ping、旧 RPC 和 lower revision observation 仍按 revision-first high-water 与 incumbent-on-tie 防护处理，不能擦掉已采纳的修复结果。
 
 ### Fallback（错误自动降级）
 
@@ -577,24 +577,19 @@ All：
 
 - `parseImportedText()` 继续解析 TabBoard JSON/text、OneTab 与 URL list；`importGroups()` 用 `publication.commitChecked()` 提交 `import-groups`，等待确认后关闭弹窗。
 - `parseCompleteBackup()` / `validateCompleteBackup()` 只接受无损可规范化的完整 v1 snapshot，并校验实体、引用、顺序、设置与 ID。较早 v1 导出缺失 revision/ledger 时补默认值。 ID 复用 `isEntityId` 的非空、最多 128 UTF-8 字节契约，保留 `.`、`~`，并继续校验各实体集合的唯一性。File adapter 在恢复前备份和事务写入之前独立校验 session 文件名，拒绝 `/`、`\` 与 NUL；canonical schema 不承担平台文件名限制。
-- 完整恢复走 `restore-backup` typed mutation，带预览时的 `expectedRevision`。应用时比较权威 revision；恢复业务内容并保留当前 `storageMode` / `storageFolderName`，从当前 revision 推进，而不沿用备份 revision。
+- 完整恢复预览捕获 typed `RestorePreview` 的 revision 与 `OriginScope`；store facade 交给 Publication 冻结 `RestoreRequest`，经 worker / `StatePersistence` 在锁内核对来源、持久回执与 CAS，再执行 `restore-backup`。同一已提交请求的重试按回执确认结果；无回执时仍比较预览 revision。恢复业务内容并保留当前 `storageMode` / `storageFolderName`，从当前 revision 推进，而不沿用备份 revision。完整请求与回执规则见上文「Complete Restore commit confirmation」。
 - `StatePersistence` 在现有串行队列与写锁内保存替换前的规范化状态，通过显式 `StateWriteOptions.backupBeforeRestore` 传到当前 Storage Authority。
 - Browser adapter 在同一次 `chrome.storage.local.set()` 发布旧快照与新状态。File adapter 在已有 pending-meta/recovery-snapshot 事务前保存 `.tabboard-before-restore.json` 与损坏文件原文副本，再完整写入备份 sessions 并清理可读旧文件；无法读取的原文件不作为 orphan 删除，ID 冲突时写入前保存原文。File v1 布局和普通 mutation/replay/locked 校验不变。
-- ManagerLayout owns the full-restore completion callback: hold URL-to-store workspace reconciliation while committing, then replace navigation using the fresh restored validation state. Resume reconciliation after navigation reaches the restored workspace; ordinary add-session import keeps its navigation.
+- 零参数 `useManagerPageState()` 拥有完整恢复的 guard 和完成导航。`ManagerLayout` 组合该 hook，并把 `pageState.restoreBackup` 传给 `ImportModal`。hook 在提交期间暂停被动页面校验与工作区同步，确认后读取最新 store 投影并以 validated `replaceState` 导航到当前活动工作区的 Board；失败解除 guard、重评合法工作区同步并抛出原错误。普通追加导入保持当前导航。
 - Full restore 的业务设置不触及 backend bootstrap、目录 handle 或 active-backend status。文件提交故障继续由现有 fallback 机制报告。
 
 ### Export
 
-入口：
+入口：Manager More > Export，`ManagerLayout` 打开 `ExportModal`。
 
-- Manager top toolbar Export。
-
-流程：
-
-1. `openExportModal(state.groups)`。
-2. `groupsToText()` 生成文本。
-3. JSON 形态为 `{ exportedAt, groups }`。
-4. 用户可 copy text、download text、download JSON。
+- JSON 调用 store `exportAll()`，经 `persistedSnapshot()` 提取 canonical state，再由 `exportToJson()` 复制并序列化。内容包括全部 workspaces、active workspace、categories 及顺序、sessions/notes、settings、Bin，以及 version、revision、timestamps 和 drop replay ledger；页面临时状态与辅助 Restore 回执不进入导出。
+- Text 调用 `exportToText(snapshot)`，使用 store 的规范化状态快照生成带 workspace/category 分段的 sessions 文本。文本用于追加导入，完整备份恢复使用 JSON。
+- 用户选择 JSON 或 Text 后可复制当前格式或下载相应文件。
 
 ### Category 归属
 

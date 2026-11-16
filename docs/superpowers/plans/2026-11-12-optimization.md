@@ -163,4 +163,3 @@
 - [x] GREEN: 完成最小实现与相关当前规格更新。
 - [x] Verify: `npm test` 与 `npm run check`，需要渲染时使用 Orca browser 并保存证据。Expected: 全部 unit/build/architecture gates 通过；已知旧浏览器断言在 Task 9 修复。纯文案使用链接/差异轻量检查。
 - [x] Commit: `docs: align current product and verification contracts`，只暂存本项文件。
-
