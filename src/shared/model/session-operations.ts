@@ -11,6 +11,7 @@ import { parseImportText, parseOneTabText } from './import-export';
 import type { Group, TabBoardState, TabItem } from './types';
 import { BUILT_IN_CATEGORIES } from './categories';
 import { SCHEMA_VERSION } from './constants';
+import { isEntityId } from '../validation';
 
 export function restoreGroupFromBin(
   state: TabBoardState,
@@ -268,8 +269,7 @@ export function validateCompleteBackup(value: unknown): TabBoardState {
   if (!['system', 'light', 'dark'].includes(state.settings.theme)
     || !['store', 'popup'].includes(state.settings.actionClick)
     || !['browser', 'file'].includes(state.settings.storageMode)) return fail();
-  const validId = (id: string): boolean => /^[a-zA-Z0-9_-]+$/.test(id);
-  const unique = (ids: string[]): boolean => ids.every(validId) && new Set(ids).size === ids.length;
+  const unique = (ids: string[]): boolean => ids.every(isEntityId) && new Set(ids).size === ids.length;
   const allGroups = [...state.groups, ...state.bin.flatMap(entry => entry.kind === 'group' ? [entry.item as Group] : [])];
   const allTabs = [...allGroups.flatMap(group => group.tabs), ...state.bin.flatMap(entry => entry.kind === 'tab' ? [entry.item as TabItem] : [])];
   const datedEntities = [...state.workspaces, ...state.folders, ...allGroups, ...allTabs];

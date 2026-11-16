@@ -614,6 +614,10 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
   }
 
   private async writeCommit(nextState: TabBoardState, options?: StateWriteOptions): Promise<void> {
+    // Entity IDs are broader than single native filenames. Reject before backup/transaction writes.
+    if (nextState.groups.some(group => /[/\\\0]/.test(group.id))) {
+      throw new TypeError('Invalid session filename.');
+    }
     const start = Date.now();
     await this.refreshCommittedSnapshot();
     const cached = this.cachedState;

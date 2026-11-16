@@ -2107,7 +2107,7 @@ Accepted。
 - Problem: adding sessions from JSON cannot recover workspace/category structure, settings or Bin.
 - Decision: keep Import's default add behavior and offer complete restore for valid full backups. Preserve current storage configuration, save the previous normalized snapshot in that backend, then commit through the existing authority with an expected revision.
 - Reason: support recovery without silently replacing current work or switching storage based on exported settings.
-- Tradeoff: keep one latest complete pre-restore snapshot; preserve unread file bytes separately, retaining distinct copies on repeated filename collisions. Complete restore rejects snapshots that would lose data during normalization.
+- Tradeoff: keep one latest complete pre-restore snapshot; preserve unread file bytes separately, retaining distinct copies on repeated filename collisions. Complete restore rejects snapshots that would lose data during normalization. Backup IDs use the existing bounded entity-ID contract, retaining dot and generated tilde identities. Native filename restrictions belong to File writes and reject unsafe session names before changing original data or the prior backup.
 - Status: implemented with model, worker, browser/file persistence and UI regressions. Orca integration evidence is recorded in the Task 7 handoff.
 
 ## D073: Bound session interaction trees with stable slots

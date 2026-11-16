@@ -2026,3 +2026,10 @@ production build/check 再打包。
 - Bound source/proof failures from File, IDB or permissions carry an explicit unavailable outcome and reject the whole uncertain request. Only same-source pre-write semantic rejection permits isolation; later pending work remains separate.
 - Authority follows the origin of a refreshed File snapshot before comparing high-water clocks, preserving lower-clock newly selected content and retaining the older-snapshot guard within one scope.
 - Status: regression repair verified through real worker/Persistence/Authority paths; review/native revalidation is recorded in Task 2 fix artifacts.
+
+## 2026-11-16: Complete backups preserve canonical entity IDs
+
+- Problem: full Restore rejected own exports containing historical dot IDs or tilde IDs generated from long Drop operations.
+- Decision: reuse the bounded entity-ID validator while retaining uniqueness, reference and lossless-normalization checks. File writes reject session path separators and NUL before backup or transaction writes.
+- Reason: Export and checked Restore must preserve workspace/category/session/tab/Bin identity; native filenames have a separate platform boundary.
+- Status: covered by real Store/registered-worker Restore on Browser and File, rebuilt File reads, and unchanged original bytes on filename rejection. Parent records native acceptance separately.

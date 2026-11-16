@@ -576,7 +576,7 @@ All：
 - `ImportModal` 保持即时 text draft，以 150ms trailing timer 更新 preview text；解析结果按未变的 preview text 缓存，不因 mode、pending commit 或 revision 更新重复解析。draft 与 preview 不同则隐藏旧预览、显示更新状态并禁止提交。Clear/Close 取消等待；编辑、关闭与提交使较早的 FileReader 回调失效，避免覆盖待提交或失败后保留的输入。authority 仍在 mutation boundary 重新解析和校验，完整恢复继续使用原 expected revision 与导航确认回调。
 
 - `parseImportedText()` 继续解析 TabBoard JSON/text、OneTab 与 URL list；`importGroups()` 用 `publication.commitChecked()` 提交 `import-groups`，等待确认后关闭弹窗。
-- `parseCompleteBackup()` / `validateCompleteBackup()` 只接受无损可规范化的完整 v1 snapshot，并校验实体、引用、顺序、设置与 ID。较早 v1 导出缺失 revision/ledger 时补默认值。
+- `parseCompleteBackup()` / `validateCompleteBackup()` 只接受无损可规范化的完整 v1 snapshot，并校验实体、引用、顺序、设置与 ID。较早 v1 导出缺失 revision/ledger 时补默认值。 ID 复用 `isEntityId` 的非空、最多 128 UTF-8 字节契约，保留 `.`、`~`，并继续校验各实体集合的唯一性。File adapter 在恢复前备份和事务写入之前独立校验 session 文件名，拒绝 `/`、`\` 与 NUL；canonical schema 不承担平台文件名限制。
 - 完整恢复走 `restore-backup` typed mutation，带预览时的 `expectedRevision`。应用时比较权威 revision；恢复业务内容并保留当前 `storageMode` / `storageFolderName`，从当前 revision 推进，而不沿用备份 revision。
 - `StatePersistence` 在现有串行队列与写锁内保存替换前的规范化状态，通过显式 `StateWriteOptions.backupBeforeRestore` 传到当前 Storage Authority。
 - Browser adapter 在同一次 `chrome.storage.local.set()` 发布旧快照与新状态。File adapter 在已有 pending-meta/recovery-snapshot 事务前保存 `.tabboard-before-restore.json` 与损坏文件原文副本，再完整写入备份 sessions 并清理可读旧文件；无法读取的原文件不作为 orphan 删除，ID 冲突时写入前保存原文。File v1 布局和普通 mutation/replay/locked 校验不变。
