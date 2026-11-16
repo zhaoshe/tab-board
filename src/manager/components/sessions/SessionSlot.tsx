@@ -2,6 +2,7 @@ import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } fr
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Group } from '../../../shared/model';
+import { normalizeSearch } from '../../../shared/model';
 import type { CategoryFilter } from '../../core/selectors';
 import {
   getDragPlaceholderStyle,
@@ -90,6 +91,30 @@ export function SessionSlot({
     },
     disabled: readOnly,
   });
+  const readingPosition = useRef({ contextKey: '', scrollTop: 0 });
+  const listContextKey = JSON.stringify([
+    group.workspaceId, group.id, groupCategory, readOnly, normalizeSearch(searchQuery),
+  ]);
+  useLayoutEffect(() => {
+    if (readingPosition.current.contextKey !== listContextKey) {
+      readingPosition.current = { contextKey: listContextKey, scrollTop: 0 };
+    }
+    const list = slotElement.current?.querySelector<HTMLDivElement>('.session-card__tabs');
+    if (!list) return;
+    // This record belongs to the old context during cleanup, even if the Slot is reused.
+    const position = readingPosition.current;
+    list.scrollTop = Math.min(position.scrollTop, Math.max(0, list.scrollHeight - list.clientHeight));
+    const capture = () => {
+      // Removed/hidden Chromium nodes have no layout box and report zero, not their reading position.
+      if (list.isConnected && list.clientHeight > 0) position.scrollTop = list.scrollTop;
+    };
+    capture();
+    list.addEventListener('scroll', capture, { passive: true });
+    return () => {
+      capture();
+      list.removeEventListener('scroll', capture);
+    };
+  }, [active, isDragging, listContextKey, group]);
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,

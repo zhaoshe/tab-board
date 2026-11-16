@@ -21,6 +21,15 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-16: 稳定 Session Slot 保留内部阅读位置
+
+- 问题：普通横向浏览让完整 card 降级为 shell，再返回时内部列表回到顶部。
+- 决定：由现有 Slot-local ref 捕获阅读位置，重新挂载真实列表时在绘制前恢复，并按缩短后的实际范围 clamp。Session、workspace、category、只读模式及规范化搜索词变化重置位置。
+- 取舍：仅在同一 Slot 存活期间保留一个偏移，不持久化、不常驻已浏览 card，不改变 selection/edit/menu/focus/drag/reveal owner。
+- 验收修正：Chromium 的 detached/no-box 列表会报告零偏移，cleanup 只在节点仍连接且有布局高度时捕获，保留先前正常 scroll event 保存的位置。测试同步模拟此平台语义，纠正 happy-dom 的脱离节点读取假设。
+- 状态：Current；真实 Slot/Card/List DOM 回归覆盖节点销毁、重复往返、缩短、隔离和搜索切换，原生浏览器验收单独记录。
+
+
 ### 2026-11-13: Capture reveal 改走稳定 Session Slot
 
 - 问题：capture completion 和 URL `targetGroupId` reveal 之前等待完整 `SessionCard` 的 DOM id；大 board 中离屏目标可能只挂载 shell，导致“先有 card 才能 reveal、先 reveal 才能激活 card”的循环。

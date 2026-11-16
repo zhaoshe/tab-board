@@ -2219,3 +2219,12 @@ Proposed / Accepted / Rejected / Revisit
 
 
 D083 review correction: retry identity also applies to isolated Restore-bearing requests. Actual proof-read failures are classified at the Persistence read boundary, preserving their causes instead of inferring availability from specific error codes. Authority high-water clocks are compared only after following the refreshed source origin. This closes committed-sibling replay and retired-scope overwrite gaps without changing the approved durable metadata or ordinary same-source rules.
+
+
+## D084: Stable Session Slot owns the current list reading position
+
+- Problem: bounded card release recreated the inner list at the top during ordinary horizontal browsing.
+- Decision: retain one scroll offset in the existing Slot-local ref, capture real DOM scroll changes and release, then restore before paint with the current list range clamp. Session, workspace, category, read-only mode and normalized search changes start a new list context; canonical edits within that context retain/clamp.
+- Reason: the Slot already survives full-card unmount, so retaining its reading position needs no store or wider Card/List interface.
+- Tradeoff: removing the Slot loses the offset. Visited cards and rows still release outside overscan without a current interaction/reveal owner; the offset never enters canonical state or persistence.
+- Status: implemented with actual Slot/Card/List DOM regressions; native browsing and shortening acceptance are recorded separately.

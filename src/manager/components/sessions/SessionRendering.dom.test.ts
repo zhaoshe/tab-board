@@ -5,7 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { DndContext, useDndContext } from '@dnd-kit/core';
 import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createGroupFromTabRecords, createTabRecord, type TabItem } from '../../../shared/model';
+import { createGroupFromTabRecords, createTabRecord, type Group, type TabItem } from '../../../shared/model';
 import { DestructiveConfirmationProvider } from '../../../shared/components/DestructiveConfirmation';
 import { ToastProvider } from '../../hooks/useToast';
 import { ManagerOverlaysProvider, ManagerOverlayPortal } from '../../hooks/useManagerOverlays';
@@ -45,6 +45,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 async function render(content: React.ReactNode) {
@@ -219,5 +220,200 @@ describe('session interaction owners', () => {
     await render(createElement(CardProbe, { interactive: false }));
     expect(container.querySelector('input')).toBe(input);
     expect(document.activeElement).toBe(input);
+  });
+});
+
+
+const readingGroup = {
+  ...createGroupFromTabRecords(links.slice(0, 80), { workspaceId: 'workspace', title: 'Reading' }),
+  id: 'reading',
+};
+const readingSelectionScope = {
+  scope: null,
+  commands: { enterSavedTabs: () => {}, enterOpenTabs: () => {}, exit: () => {} },
+  registerSavedTabsClear: () => () => {}, registerOpenTabsClear: () => () => {},
+};
+function readingCard(extra: Partial<ComponentProps<typeof SessionSlot>> & { key?: string } = {}) {
+  return createElement(SessionSlot, {
+    group: readingGroup, groupCategory: 'inbox', groupIndex: 0, highlighted: false, interactive: true,
+    activate: () => {}, registerSlot: () => {}, runtime, searchQuery: '', dragMarker: null,
+    sourceRect: null, onOpenSessionTargetPicker: () => {}, selectionScope: readingSelectionScope,
+    ...extra,
+  });
+}
+function readingList(id = 'reading') {
+  const element = container.querySelector<HTMLDivElement>(`[data-session-slot-id="${id}"] .session-card__tabs`);
+  expect(element).not.toBeNull();
+  return element!;
+}
+async function scrollList(element: HTMLDivElement, offset: number) {
+  await act(async () => {
+    element.scrollTop = offset;
+    element.dispatchEvent(new Event('scroll'));
+  });
+}
+
+// Losing Slot-owned position, skipping clamp, or sharing another list's offset breaks these outcomes.
+// happy-dom has no layout; supply the real row-slot range and Chromium's detached scroll getter.
+describe('session reading position across full card release', () => {
+  beforeEach(() => {
+    const getScrollTop = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!.get!;
+    vi.spyOn(Element.prototype, 'scrollTop', 'get').mockImplementation(function (this: Element) {
+      // Chromium returns zero after removal even when its connected list was scrolled.
+      return this.classList.contains('session-card__tabs') && !this.isConnected ? 0 : getScrollTop.call(this);
+    });
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('session-card__tabs') && this.isConnected ? 220 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('session-card__tabs') && this.isConnected
+        ? this.querySelectorAll('[data-session-row-id]').length * 44 : 0;
+    });
+  });
+
+  it('restores the same stable Slot into a new full card/list on repeated ordinary leave and return', async () => {
+    await render(readingCard());
+    const slot = container.querySelector('[data-session-slot-id="reading"]');
+    let current = readingList();
+    for (const offset of [660, 1320, 440]) {
+      await scrollList(current, offset);
+      const oldCard = container.querySelector('#session-card-reading');
+      await render(readingCard({ interactive: false }));
+      expect(current.isConnected).toBe(false);
+      expect(oldCard!.isConnected).toBe(false);
+      expect(container.querySelector('.session-card__tabs')).toBeNull();
+      expect(container.querySelectorAll('.tab-item-row')).toHaveLength(0);
+      expect(container.querySelector('[data-session-shell]')).not.toBeNull();
+      expect(container.querySelector('[data-session-slot-id="reading"]')).toBe(slot);
+      await render(readingCard());
+      const restored = readingList();
+      expect(restored).not.toBe(current);
+      expect(restored.scrollTop).toBe(offset);
+      expect(container.querySelectorAll('.tab-item-row').length).toBeLessThanOrEqual(24);
+      current = restored;
+    }
+  });
+
+  it('rebinds the reading position after a real session drag placeholder releases the full card', async () => {
+    await render(readingCard());
+    const oldList = readingList();
+    await scrollList(oldList, 660);
+    await act(async () => {
+      container.querySelector('.session-card')!.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true, isPrimary: true, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100,
+      }));
+    });
+    expect(container.querySelector('.session-card__placeholder-slot')).not.toBeNull();
+    expect(oldList.isConnected).toBe(false);
+    await act(async () => {
+      document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    });
+    expect(container.querySelector('.session-card__placeholder-slot')).toBeNull();
+    expect(readingList()).not.toBe(oldList);
+    expect(readingList().scrollTop).toBe(660);
+    await scrollList(readingList(), 880);
+    await render(readingCard({ interactive: false }));
+    await render(readingCard());
+    expect(readingList().scrollTop).toBe(880);
+  });
+
+  it('captures the current DOM offset before a scroll event only while the list is still connected', async () => {
+    await render(readingCard());
+    readingList().scrollTop = 880;
+    await render(readingCard({ group: { ...readingGroup, title: 'Connected canonical edit' } }));
+    await render(readingCard({ interactive: false }));
+    await render(readingCard());
+    expect(readingList().scrollTop).toBe(880);
+  });
+
+  it('preserves the event-captured offset when cleanup sees a detached Chromium list at zero', async () => {
+    await render(readingCard());
+    const oldList = readingList();
+    await scrollList(oldList, 660);
+    await render(readingCard({ interactive: false }));
+    expect(oldList.isConnected).toBe(false);
+    expect(oldList.scrollTop).toBe(0);
+    expect(container.querySelectorAll('.tab-item-row')).toHaveLength(0);
+    await render(readingCard());
+    expect(readingList()).not.toBe(oldList);
+    expect(readingList().scrollTop).toBe(660);
+  });
+
+  it('clamps a remounted list after canonical tabs shorten while its full card is absent', async () => {
+    await render(readingCard());
+    const oldList = readingList();
+    await scrollList(oldList, 1320);
+    await render(readingCard({ interactive: false }));
+    const shortened: Group = { ...readingGroup, tabs: readingGroup.tabs.slice(0, 10) };
+    await render(readingCard({ interactive: false, group: shortened }));
+    await render(readingCard({ group: shortened }));
+    const restored = readingList();
+    expect(oldList.isConnected).toBe(false);
+    expect(restored).not.toBe(oldList);
+    expect(restored.querySelectorAll('[data-session-row-id]')).toHaveLength(10);
+    expect(restored.scrollTop).toBe(220);
+    await render(readingCard({ interactive: false, group: shortened }));
+    await render(readingCard());
+    expect(readingList().scrollTop).toBe(220);
+  });
+
+  it('retains position through same-context canonical edits and clamps a mounted shortened list to zero', async () => {
+    await render(readingCard());
+    const list = readingList();
+    await scrollList(list, 880);
+    await render(readingCard({ group: { ...readingGroup, title: 'Renamed', tabs: [...readingGroup.tabs] } }));
+    expect(readingList()).toBe(list);
+    expect(list.scrollTop).toBe(880);
+    await render(readingCard({ group: { ...readingGroup, tabs: readingGroup.tabs.slice(0, 3) } }));
+    expect(readingList()).toBe(list);
+    expect(list.scrollTop).toBe(0);
+  });
+
+  it('keeps offsets independent for two concurrently surviving Session Slots', async () => {
+    const second = { ...readingGroup, id: 'second' };
+    const cards = (interactive: boolean) => createElement('div', null,
+      readingCard({ key: 'first', interactive }), readingCard({ key: 'second', group: second, interactive }));
+    await render(cards(true));
+    await scrollList(readingList(), 440);
+    await scrollList(readingList('second'), 1100);
+    await render(cards(false));
+    await render(cards(true));
+    expect(readingList().scrollTop).toBe(440);
+    expect(readingList('second').scrollTop).toBe(1100);
+  });
+
+  it.each([
+    ['session', { group: { ...readingGroup, id: 'different' } }],
+    ['workspace', { group: { ...readingGroup, workspaceId: 'different-workspace' } }],
+    ['category', { groupCategory: 'saved' }],
+    ['read-only list', { readOnly: true }],
+  ] as const)('resets position when the surviving Slot receives a different %s context', async (_name, extra) => {
+    await render(readingCard());
+    await scrollList(readingList(), 880);
+    await render(readingCard({ interactive: false }));
+    await render(readingCard({ ...extra, interactive: false }));
+    await render(readingCard(extra));
+    expect(readingList('group' in extra ? extra.group.id : 'reading').scrollTop).toBe(0);
+    await scrollList(readingList('group' in extra ? extra.group.id : 'reading'), 440);
+    await render(readingCard());
+    expect(readingList().scrollTop).toBe(0);
+  });
+
+  it('resets changed search lists without discarding normalized same-query edits', async () => {
+    await render(readingCard());
+    await scrollList(readingList(), 880);
+    await render(readingCard({ searchQuery: 'Link' }));
+    expect(readingList().scrollTop).toBe(0);
+    await scrollList(readingList(), 440);
+    await render(readingCard({ interactive: false, searchQuery: 'Link' }));
+    await render(readingCard({ searchQuery: '  LINK  ', group: { ...readingGroup, tabs: [...readingGroup.tabs] } }));
+    expect(readingList().scrollTop).toBe(440);
+    await render(readingCard({ interactive: false, searchQuery: 'link' }));
+    await render(readingCard({ interactive: false, searchQuery: 'Link 7' }));
+    await render(readingCard({ searchQuery: 'Link 7' }));
+    expect(readingList().scrollTop).toBe(0);
+    expect(readingList().querySelectorAll('[data-session-row-id]')).toHaveLength(11);
+    await render(readingCard());
+    expect(readingList().scrollTop).toBe(0);
   });
 });
