@@ -669,7 +669,7 @@ Options 的 Storage location 读取一个轻量持久化状态投影：
 
 自动 fallback 只把 `activeBackend` 改成 Browser，不把 `configuredTarget` 改成 Browser。Options 因此仍以 `Local folder name: <name>` 为主，并显示 `updated: HH:mm:ss`、降级原因，以及同一恢复动作区中的 `Reconnect folder` 和 `Use browser storage`。长 folder name 保持单行省略，不能挤压右侧更新时间。只有显式 switch-back 成功后 configured target 才变成 Browser；fallback 期间的 browser state 时间不得覆盖 `meta.json.updatedAt`。
 
-当某些 `sessions/<id>.json` 因损坏或不可解析而被跳过时，其他数据仍照常加载，但 Options 和 Manager 都要持续提示 `Incomplete folder data`，避免把缺失 session 误认为用户删除。Manager notice 固定提供 `Open settings`，单页 dismiss 仅影响当前页面，并在 unread count 变化时重新出现。原始损坏文件在用户修复、重新读取或显式替换前保持原样，不得被恢复写入当作 orphan 自动删除。
+当某些 `sessions/<id>.json` 因损坏或不可解析而被跳过时，其他数据仍照常加载，但 Options 和 Manager 都要持续提示 `Incomplete folder data`，避免把缺失 session 误认为用户删除。Manager notice 固定提供 `Open settings`，单页 dismiss 仅影响当前页面，并在 unread count 变化时重新出现。原始损坏文件在用户修复、重新读取或显式替换前保持原样，不得被恢复写入当作 orphan 自动删除。用户修复原文件并点击 `Re-read folder` 后，即使 `meta.json` revision 和 timestamp 没变，当前 Manager 与已打开的 peer Manager 也要显示恢复的 session，并清除 unread health；普通同 revision 旧观察仍不得覆盖已采纳的修复结果。
 
 为什么考虑本地文件夹：
 

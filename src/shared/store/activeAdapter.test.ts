@@ -16,8 +16,13 @@ import {
 import { createMemoryDirectory } from '../testing/memoryFs';
 import type { MemoryDirectoryHandle } from '../testing/memoryFs';
 import {
+  createAuthoritativePublication,
+  type PublicationProjection,
+} from './authoritativePublication';
+import {
   _setActiveAdapterIdbFactory,
   _setActiveAdapterModuleLoadersForTests,
+  ensureActiveState,
   getActiveAdapter,
   getActiveDatasetIdentity,
   getStorageStatus,
@@ -27,12 +32,14 @@ import {
   reloadFileState,
   resetActiveAdapterForTests,
   resetActiveAdapter,
+  subscribeActiveState,
   switchToBrowserMode,
   switchToFileMode,
 } from './activeAdapter';
 import type { IdbFactory } from './fsDirectory';
 import { createFileStorageAdapter } from './fileStorage';
-import { atomicWriteFile } from './fsAtomic';
+import { atomicWriteFile, writeSessionFile } from './fsAtomic';
+import type { AuthoritativePublication } from './authoritativePublication';
 
 // ---------- chrome.storage + onChanged mock ----------
 
@@ -318,6 +325,108 @@ function gate() {
   return { promise, release };
 }
 
+function installQueuedLockManager() {
+  let tail: Promise<void> = Promise.resolve();
+  const request = vi.fn(async <T,>(
+    name: string,
+    options: LockOptions,
+    operation: () => Promise<T> | T,
+  ): Promise<T> => {
+    expect(name).toBe('tabboard-state-write');
+    expect(options).toEqual({ mode: 'exclusive' });
+    const previous = tail;
+    let releaseNext!: () => void;
+    tail = new Promise<void>(resolve => { releaseNext = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      releaseNext();
+    }
+  });
+  vi.stubGlobal('navigator', { locks: { request } });
+  return { request };
+}
+
+async function tick(): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, 0));
+}
+
+async function installFileBootstrap(
+  root: MemoryDirectoryHandle,
+  state: TabBoardState,
+  chromeMock: ChromeMock,
+  idbFactory: IdbFactory,
+): Promise<void> {
+  const { saveRootHandle } = await import('./fsDirectory');
+  await saveRootHandle(root, idbFactory);
+  chromeMock.storage.local.data[BOOTSTRAP_KEY] = {
+    configuredTarget: 'file',
+    activeBackend: 'file',
+    folderName: root.name,
+    fallbackReason: null,
+    fileUpdatedAt: state.updatedAt,
+  };
+}
+
+function darkRevision(state: TabBoardState): TabBoardState {
+  return normalizeState({
+    ...state,
+    mutationRevision: state.mutationRevision + 1,
+    updatedAt: '2026-07-23T10:01:00.000Z',
+    settings: {
+      ...state.settings,
+      theme: 'dark',
+    },
+  });
+}
+
+function createPublicationHarness(
+  initial: TabBoardState,
+  ports: {
+    initializeAuthoritativeState: () => Promise<TabBoardState>;
+    subscribeAuthoritativeState: (callback: (state: TabBoardState) => void) => () => void;
+    currentDataset: () => unknown;
+  },
+): {
+  publication: AuthoritativePublication;
+  getProjection: () => PublicationProjection;
+} {
+  let projection: PublicationProjection = {
+    state: initial,
+    hydrated: false,
+    persistenceError: null,
+  };
+  const publication = createAuthoritativePublication({
+    readProjection: () => projection,
+    publishProjection: (state, status = {}) => {
+      projection = {
+        state,
+        hydrated: status.hydrated ?? projection.hydrated,
+        persistenceError: status.persistenceError === undefined
+          ? projection.persistenceError
+          : status.persistenceError,
+      };
+    },
+    patchStatus: (status) => {
+      projection = { ...projection, ...status };
+    },
+    initializeAuthoritativeState: ports.initializeAuthoritativeState,
+    subscribeAuthoritativeState: ports.subscribeAuthoritativeState,
+    sendMutations: async () => {
+      throw new Error('mutations are not used in this publication harness');
+    },
+    currentContext: () => globalThis.chrome,
+    currentDataset: ports.currentDataset,
+    onPersistenceError: vi.fn(),
+    onMutationCommitted: vi.fn(),
+  });
+  return {
+    publication,
+    getProjection: () => projection,
+  };
+}
+
 async function withFileCommitGate(root: MemoryDirectoryHandle) {
   const entered = gate();
   const resume = gate();
@@ -457,10 +566,241 @@ describe('activeAdapter', () => {
     resume.release();
     await switching;
     expect(await result).toBe('reloaded');
+    const pingAfterSuccessfulReload = chromeMock.storage.local.data[FILE_PING_KEY];
     root.getDirectoryHandle = async () => { throw new Error('manual disk failure'); };
     await expect(reloadFileState()).rejects.toThrow('manual disk failure');
+    expect(chromeMock.storage.local.data[FILE_PING_KEY]).toBe(pingAfterSuccessfulReload);
     expect(await isFileModeActive()).toBe(true);
     expect((await authority.getState()).mutationRevision).toBe(40);
+  });
+
+  it('manual explicit reread waits for an external file writer lock before publishing repaired data', async () => {
+    const locks = installQueuedLockManager();
+    const root = createMemoryDirectory('manual-lock-reread');
+    withPermission(root);
+    const original = knownState();
+    const next = darkRevision(original);
+    await (await createFileStorageAdapter(root, { shouldPublishPing: () => false })).setState(original);
+    await installFileBootstrap(root, original, chromeMock, idbFactory);
+    const authority = await getActiveAdapter();
+    expect((await authority.getState()).settings.theme).toBe('system');
+
+    const entered = gate();
+    const resume = gate();
+    const writerAdapter = await createFileStorageAdapter(root, {
+      shouldPublishPing: () => false,
+      locks: { beforeFinalMeta: async () => { entered.release(); await resume.promise; } },
+    });
+    const writer = navigator.locks.request('tabboard-state-write', { mode: 'exclusive' }, () => writerAdapter.setState(next));
+    await entered.promise;
+
+    const notifications: Array<{ revision: number; theme: string; kind?: string }> = [];
+    authority.subscribeState((state, observation) => notifications.push({
+      revision: state.mutationRevision,
+      theme: state.settings.theme,
+      kind: observation?.kind,
+    }));
+    let reloadSettled = false;
+    const reload = reloadFileState().finally(() => { reloadSettled = true; });
+    await tick();
+
+    expect(reloadSettled).toBe(false);
+    expect(notifications).toEqual([]);
+    expect(chromeMock.storage.local.data[FILE_PING_KEY]).toBeUndefined();
+
+    resume.release();
+    await Promise.all([writer, reload]);
+
+    expect(locks.request).toHaveBeenCalledTimes(2);
+    expect((await authority.getState()).settings.theme).toBe('dark');
+    expect(notifications).toEqual([{
+      revision: next.mutationRevision,
+      theme: 'dark',
+      kind: 'explicit-reread',
+    }]);
+    expect(chromeMock.storage.local.data[FILE_PING_KEY]).toMatchObject({
+      mutationRevision: next.mutationRevision,
+      updatedAt: next.updatedAt,
+      kind: 'explicit-reread',
+    });
+  });
+
+  it('reset while manual explicit reread waits on the external lock prevents stale ping publication', async () => {
+    installQueuedLockManager();
+    const root = createMemoryDirectory('manual-lock-reset');
+    withPermission(root);
+    const original = knownState();
+    const next = darkRevision(original);
+    await (await createFileStorageAdapter(root, { shouldPublishPing: () => false })).setState(original);
+    await installFileBootstrap(root, original, chromeMock, idbFactory);
+    await getActiveAdapter();
+
+    const entered = gate();
+    const resume = gate();
+    const writerAdapter = await createFileStorageAdapter(root, {
+      shouldPublishPing: () => false,
+      locks: { beforeFinalMeta: async () => { entered.release(); await resume.promise; } },
+    });
+    const writer = navigator.locks.request('tabboard-state-write', { mode: 'exclusive' }, () => writerAdapter.setState(next));
+    await entered.promise;
+
+    const previousPing = chromeMock.storage.local.data[FILE_PING_KEY];
+    const reloadResult = reloadFileState().then(
+      () => 'reloaded',
+      error => error instanceof Error ? error.message : String(error),
+    );
+    await tick();
+    resetActiveAdapter();
+    resume.release();
+
+    await writer;
+    expect(await reloadResult).toBe('Storage authority was reset during the operation.');
+    expect(chromeMock.storage.local.data[FILE_PING_KEY]).toBe(previousPing);
+  });
+
+  it('peer explicit reread waits for an external file writer lock and does not rebroadcast the ping', async () => {
+    installQueuedLockManager();
+    const root = createMemoryDirectory('peer-lock-reread');
+    withPermission(root);
+    const original = knownState();
+    const next = darkRevision(original);
+    await (await createFileStorageAdapter(root, { shouldPublishPing: () => false })).setState(original);
+    await installFileBootstrap(root, original, chromeMock, idbFactory);
+    const authority = await getActiveAdapter();
+    expect((await authority.getState()).settings.theme).toBe('system');
+
+    const entered = gate();
+    const resume = gate();
+    const writerAdapter = await createFileStorageAdapter(root, {
+      shouldPublishPing: () => false,
+      locks: { beforeFinalMeta: async () => { entered.release(); await resume.promise; } },
+    });
+    const writer = navigator.locks.request('tabboard-state-write', { mode: 'exclusive' }, () => writerAdapter.setState(next));
+    await entered.promise;
+
+    const notifications: Array<{ revision: number; theme: string; kind?: string }> = [];
+    authority.subscribeState((state, observation) => notifications.push({
+      revision: state.mutationRevision,
+      theme: state.settings.theme,
+      kind: observation?.kind,
+    }));
+    const pingWritesBefore = chromeMock.storage.local.set.mock.calls.filter(
+      ([items]) => FILE_PING_KEY in (items as Record<string, unknown>),
+    ).length;
+    const explicitPing = {
+      mutationRevision: original.mutationRevision,
+      updatedAt: original.updatedAt,
+      kind: 'explicit-reread',
+      eventId: 'file-reread_lock_123',
+    } as const;
+    chromeMock.storage.onChanged._fire({
+      [FILE_PING_KEY]: { newValue: explicitPing },
+    });
+    await tick();
+
+    expect(notifications).toEqual([]);
+    expect((await authority.getState()).settings.theme).toBe('system');
+
+    resume.release();
+    await writer;
+    await vi.waitFor(() => {
+      expect(notifications).toEqual([{
+        revision: next.mutationRevision,
+        theme: 'dark',
+        kind: 'explicit-reread',
+      }]);
+    });
+
+    const pingWritesAfter = chromeMock.storage.local.set.mock.calls.filter(
+      ([items]) => FILE_PING_KEY in (items as Record<string, unknown>),
+    ).length;
+    expect(pingWritesAfter).toBe(pingWritesBefore);
+    expect((await authority.getState()).settings.theme).toBe('dark');
+  });
+
+  it('publishes explicit repaired-file rereads to current and peer publications without admitting ordinary equal-revision stale snapshots', async () => {
+    const root = createMemoryDirectory('repaired-reread');
+    withPermission(root);
+    const original = knownState();
+    await (await createFileStorageAdapter(root, { shouldPublishPing: () => false })).setState(original);
+    const sessionsDir = await root.getDirectoryHandle('sessions');
+    const unreadFileName = `${original.groups[0].id}.json`;
+    await atomicWriteFile(sessionsDir, unreadFileName, '{broken');
+    const { saveRootHandle } = await import('./fsDirectory');
+    await saveRootHandle(root, idbFactory);
+    chromeMock.storage.local.data[BOOTSTRAP_KEY] = {
+      configuredTarget: 'file',
+      activeBackend: 'file',
+      folderName: root.name,
+      fallbackReason: null,
+      fileUpdatedAt: original.updatedAt,
+    };
+    _setActiveAdapterModuleLoadersForTests({
+      loadFsDirectoryModule: () => import('./fsDirectory'),
+      loadFileStorageModule: () => import('./fileStorage'),
+    });
+
+    vi.resetModules();
+    const peer = await import('./activeAdapter');
+    peer._setActiveAdapterIdbFactory(idbFactory);
+    peer._setActiveAdapterModuleLoadersForTests({
+      loadFsDirectoryModule: () => import('./fsDirectory'),
+      loadFileStorageModule: () => import('./fileStorage'),
+    });
+
+    const currentHarness = createPublicationHarness(createEmptyState(), {
+      initializeAuthoritativeState: ensureActiveState,
+      subscribeAuthoritativeState: subscribeActiveState,
+      currentDataset: getActiveDatasetIdentity,
+    });
+    const peerHarness = createPublicationHarness(createEmptyState(), {
+      initializeAuthoritativeState: peer.ensureActiveState,
+      subscribeAuthoritativeState: peer.subscribeActiveState,
+      currentDataset: peer.getActiveDatasetIdentity,
+    });
+
+    try {
+      await currentHarness.publication.hydrate();
+      await peerHarness.publication.hydrate();
+      expect(currentHarness.getProjection().state.groups).toEqual([]);
+      expect(peerHarness.getProjection().state.groups).toEqual([]);
+      expect((await getStorageStatus()).unreadSessionCount).toBe(1);
+
+      await writeSessionFile(root, original.groups[0].id, original.groups[0]);
+      await reloadFileState();
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      expect((await getStorageStatus()).unreadSessionCount).toBeUndefined();
+      expect(currentHarness.getProjection().state.groups.map(({ id }) => id))
+        .toEqual([original.groups[0].id]);
+      expect(peerHarness.getProjection().state.groups.map(({ id }) => id))
+        .toEqual([original.groups[0].id]);
+
+      const explicitPing = chromeMock.storage.local.data[FILE_PING_KEY];
+      chromeMock.storage.onChanged._fire({
+        [FILE_PING_KEY]: { newValue: explicitPing },
+      });
+      chromeMock.storage.onChanged._fire({
+        [FILE_PING_KEY]: {
+          newValue: {
+            mutationRevision: original.mutationRevision,
+            updatedAt: original.updatedAt,
+          },
+        },
+      });
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      expect(currentHarness.getProjection().state.groups.map(({ id }) => id))
+        .toEqual([original.groups[0].id]);
+      expect(peerHarness.getProjection().state.groups.map(({ id }) => id))
+        .toEqual([original.groups[0].id]);
+    } finally {
+      currentHarness.publication.dispose();
+      peerHarness.publication.dispose();
+      peer.resetActiveAdapterForTests();
+      peer._setActiveAdapterIdbFactory(undefined);
+      peer._setActiveAdapterModuleLoadersForTests(undefined);
+    }
   });
 
   it('rejects old initialization after reset without resurrecting its backend', async () => {

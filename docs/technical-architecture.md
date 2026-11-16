@@ -449,6 +449,8 @@ Storage Authority 把 bootstrap/handle 当作 mode-switch commit point：
 
 任何 pre-commit 步骤失败都会保留原 backend、bootstrap 和 handle；UI 不会把半完成切换显示为成功。
 
+手动 `Re-read folder` 是 File backend 活跃时的显式用户读取，不是普通 stale snapshot。Storage Authority 在同一队列中执行 `reloadFromDisk()`，成功后用合法的 one-shot `file-reread_*` event id 写入 File ping；peer Authority 只消费一次且不 rebroadcast。这个显式 observation 允许 Authoritative Publication 在同 revision/timestamp exact tie 上替换当前 canonical base，用既有 eager preview/replay 计算发布修复后的 session，同时保留已显示 optimistic subset、checked hidden work、retry/waiter 和实际 wire mutation。普通 ping、旧 RPC 和 lower revision observation 仍按 revision-first high-water 与 incumbent-on-tie 防护处理，不能擦掉已采纳的修复结果。
+
 ### Fallback（错误自动降级）
 
 File backend 的初始化、读取、写入或 `reloadFromDisk()` 抛出错误（权限丢失、文件夹被删除/移动、IO 错误、配额不足等）时：

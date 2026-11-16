@@ -1993,6 +1993,13 @@ production build/check 再打包。
 - 边界：不新增 schema 或分布式切换协议；若当前 Authority 暂不可读，保留可用的新数据集观察和真实 RPC 结果，等待后续读取刷新显示。
 - 当前状态：真实 facade/Authority/worker 的 file50 → browser1 回归覆盖 checked、hydration 和 capture；本地延迟 success/partial 与重读失败另有 owner 回归。
 
+### 2026-11-16: 显式文件重读发布同 revision 修复
+
+- 问题：用户修复损坏的 `sessions/<id>.json` 后点击 `Re-read folder`，File Authority 已读回 session 并清除 unread health，但 Manager Publication 把同 revision/timestamp 快照视为 ordinary tie，当前页和 peer 页仍隐藏修复后的 session。
+- 修复：`reloadFileState()` 生成合法 one-shot explicit reread event id，经现有 File ping/storage notification 发布；当前和 peer Authority 只消费一次且不 rebroadcast。Publication 只对 explicit reread 的 same-revision exact-tie 放开替换，并复用 eager replay 发布修复 session。
+- 边界：普通同 revision stale snapshot、旧 RPC 和 lower revision observation 继续保留已采纳 incumbent；pending/in-flight 的 retry、waiter、wire mutation 和 checked hidden work 不提前结算；读失败或 retired backend 不发布 explicit success。
+- 当前状态：覆盖真实 memory File adapter + Authority + Publication、peer Chrome storage bus、deferred ordinary RPC、重复/普通旧 ping 和失败重读边界；父任务仍负责真实 OPFS + Manager native gate。
+
 ## 待观察问题
 
 - 右键菜单触发筛选是否足够容易被发现。

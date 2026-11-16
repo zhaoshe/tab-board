@@ -1,8 +1,13 @@
 import { FILE_PING_KEY, STORAGE_FALLBACK_KEY } from '../model/constants';
 
+const EXPLICIT_FILE_REREAD_EVENT_ID_PATTERN = /^file-reread_[a-z0-9]+_[a-z0-9]+$/i;
+const EXPLICIT_FILE_REREAD_EVENT_ID_MAX_LENGTH = 64;
+
 export interface FilePing {
   mutationRevision: number;
   updatedAt: string;
+  kind?: 'ordinary' | 'explicit-reread';
+  eventId?: string;
 }
 
 export interface StorageFallbackEvent {
@@ -37,9 +42,24 @@ function parseFilePing(value: unknown): FilePing | null {
     || !candidate.updatedAt) {
     return null;
   }
+  if (candidate.kind !== undefined
+    && candidate.kind !== 'ordinary'
+    && candidate.kind !== 'explicit-reread') {
+    return null;
+  }
+  if (candidate.eventId !== undefined
+    && (typeof candidate.eventId !== 'string'
+      || candidate.eventId.length > EXPLICIT_FILE_REREAD_EVENT_ID_MAX_LENGTH
+      || !EXPLICIT_FILE_REREAD_EVENT_ID_PATTERN.test(candidate.eventId))) {
+    return null;
+  }
+  if (candidate.kind === 'explicit-reread' && !candidate.eventId) return null;
+  if (candidate.eventId && candidate.kind !== 'explicit-reread') return null;
   return {
     mutationRevision: candidate.mutationRevision as number,
     updatedAt: candidate.updatedAt,
+    ...(candidate.kind ? { kind: candidate.kind } : {}),
+    ...(candidate.eventId ? { eventId: candidate.eventId } : {}),
   };
 }
 
@@ -61,9 +81,15 @@ function parseStorageFallback(value: unknown): StorageFallbackEvent | null {
 export async function writeFilePing(
   mutationRevision: number,
   updatedAt: string,
+  options: Pick<FilePing, 'kind' | 'eventId'> = {},
 ): Promise<void> {
   await chrome.storage.local.set({
-    [FILE_PING_KEY]: { mutationRevision, updatedAt } satisfies FilePing,
+    [FILE_PING_KEY]: {
+      mutationRevision,
+      updatedAt,
+      ...(options.kind ? { kind: options.kind } : {}),
+      ...(options.eventId ? { eventId: options.eventId } : {}),
+    } satisfies FilePing,
   });
 }
 

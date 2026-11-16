@@ -1,4 +1,5 @@
 import { DROP_OPERATION_LEDGER_LIMIT, type TabBoardState } from '../model';
+import type { StorageObservation } from './storageAdapter';
 import {
   applyStateMutation,
   CategoryValidationError,
@@ -34,7 +35,7 @@ export interface AuthoritativePublicationDependencies {
   publishProjection(state: TabBoardState, status?: PublicationStatus): void;
   patchStatus(status: PublicationStatus): void;
   initializeAuthoritativeState(): Promise<TabBoardState>;
-  subscribeAuthoritativeState(callback: (state: TabBoardState) => void): () => void;
+  subscribeAuthoritativeState(callback: (state: TabBoardState, observation?: StorageObservation) => void): () => void;
   sendMutations(mutations: readonly StateMutation[]): Promise<TabBoardState>;
   currentContext(): unknown;
   currentDataset(): unknown;
@@ -274,6 +275,38 @@ function newestRemoteState(
     : authoritative;
 }
 
+interface RemoteObservation {
+  state: TabBoardState;
+  explicitReread: boolean;
+}
+
+function remoteObservation(
+  state: TabBoardState,
+  observation?: StorageObservation,
+): RemoteObservation {
+  return {
+    state,
+    explicitReread: observation?.kind === 'explicit-reread',
+  };
+}
+
+function sameRemoteClock(left: TabBoardState, right: TabBoardState): boolean {
+  return left.mutationRevision === right.mutationRevision
+    && remoteStateTimestamp(left) === remoteStateTimestamp(right);
+}
+
+function newestRemoteObservation(
+  incumbent: RemoteObservation,
+  incoming: RemoteObservation,
+): RemoteObservation {
+  const newest = newestRemoteState(incumbent.state, incoming.state);
+  if (newest === incoming.state) return incoming;
+  if (incoming.explicitReread && sameRemoteClock(incumbent.state, incoming.state)) {
+    return incoming;
+  }
+  return incumbent;
+}
+
 function hasDistinctNewerRemoteState(
   authoritative: TabBoardState,
   buffered: TabBoardState | null,
@@ -292,12 +325,25 @@ interface ReconciliationFailure {
 
 function selectCanonicalState(
   incoming: TabBoardState,
-  buffered: TabBoardState | null,
+  buffered: RemoteObservation | null,
   incumbent: TabBoardState | null,
+  observation?: StorageObservation,
 ): TabBoardState {
-  let selected = incumbent || buffered || incoming;
-  if (buffered) selected = newestRemoteState(selected, buffered);
-  return newestRemoteState(selected, incoming);
+  let selected: RemoteObservation = incumbent
+    ? remoteObservation(incumbent)
+    : buffered || remoteObservation(incoming, observation);
+  if (buffered) selected = newestRemoteObservation(selected, buffered);
+  return newestRemoteObservation(selected, remoteObservation(incoming, observation)).state;
+}
+
+function selectCanonicalObservation(
+  incoming: RemoteObservation,
+  buffered: RemoteObservation | null,
+  incumbent: TabBoardState | null,
+): RemoteObservation {
+  let selected = incumbent ? remoteObservation(incumbent) : buffered || incoming;
+  if (buffered) selected = newestRemoteObservation(selected, buffered);
+  return newestRemoteObservation(selected, incoming);
 }
 
 // Preview rebases only a display copy; settlement keeps the real CAS mutation.
@@ -336,7 +382,7 @@ export function createAuthoritativePublication(
   let pendingMutations: StateMutation[] = [];
   let inFlightMutations: StateMutation[] | null = null;
   let projectedMutations = new Set<StateMutation>();
-  let pendingRemoteState: TabBoardState | null = null;
+  let pendingRemoteState: RemoteObservation | null = null;
   let lastAuthoritativeState: TabBoardState | null = null;
   let pendingPersistenceWaiters: PendingPersistenceWaiter[] = [];
   let inFlightPersistenceWaiters: PendingPersistenceWaiter[] = [];
@@ -493,7 +539,13 @@ export function createAuthoritativePublication(
     const buffered = pendingRemoteState;
     pendingRemoteState = null;
     const reconciledRemoteState = selectCanonicalState(authoritative, buffered, lastAuthoritativeState);
-    const reconciledBase = hasDistinctNewerRemoteState(authoritative, reconciledRemoteState)
+    const shouldReplayCommitted = hasDistinctNewerRemoteState(authoritative, reconciledRemoteState)
+      || Boolean(
+        buffered?.explicitReread
+        && reconciledRemoteState !== authoritative
+        && sameRemoteClock(authoritative, buffered.state),
+      );
+    const reconciledBase = shouldReplayCommitted
       ? replayCommittedMutations(
         reconciledRemoteState,
         authoritative,
@@ -530,7 +582,9 @@ export function createAuthoritativePublication(
       return selectCanonicalState(recovered, pendingRemoteState, lastAuthoritativeState);
     }
     if (lastAuthoritativeState) {
-      return newestRemoteState(lastAuthoritativeState, pendingRemoteState);
+      return pendingRemoteState
+        ? newestRemoteObservation(remoteObservation(lastAuthoritativeState), pendingRemoteState).state
+        : lastAuthoritativeState;
     }
     return null;
   };
@@ -561,15 +615,38 @@ export function createAuthoritativePublication(
     });
   };
 
-  const acceptRemoteState = (state: TabBoardState): void => {
+  const acceptRemoteState = (state: TabBoardState, observation?: StorageObservation): void => {
     if (disposed) return;
     syncCanonicalDataset();
+    const incoming = remoteObservation(state, observation);
     if (pendingMutations.length || inFlightMutations) {
-      pendingRemoteState = selectCanonicalState(state, pendingRemoteState, lastAuthoritativeState);
+      const selected = selectCanonicalObservation(incoming, pendingRemoteState, lastAuthoritativeState);
+      pendingRemoteState = selected;
+      if (incoming.explicitReread) {
+        const projection = dependencies.readProjection();
+        const outstanding = [...(inFlightMutations || []), ...pendingMutations]
+          .filter((mutation) => projectedMutations.has(mutation));
+        const preview = evaluateOrderedReplay(selected.state, outstanding, true);
+        if (!preview.failures.length) {
+          const activeWorkspaceId = preview.state.workspaces.some(({ id }) => id === projection.state.activeWorkspaceId)
+            ? projection.state.activeWorkspaceId
+            : selected.state.activeWorkspaceId;
+          const projectedState = activeWorkspaceId === preview.state.activeWorkspaceId
+            ? preview.state
+            : { ...preview.state, activeWorkspaceId };
+          dependencies.publishProjection(structurallyShareState(projection.state, projectedState), {
+            hydrated: projection.hydrated,
+            persistenceError: projection.persistenceError,
+          });
+        }
+      }
       return;
     }
     const projection = dependencies.readProjection();
-    const shared = structurallyShareState(projection.state, selectCanonicalState(state, pendingRemoteState, lastAuthoritativeState));
+    const shared = structurallyShareState(
+      projection.state,
+      selectCanonicalState(state, pendingRemoteState, lastAuthoritativeState, observation),
+    );
     lastAuthoritativeState = shared;
     dependencies.publishProjection(shared, {
       hydrated: projection.hydrated,
@@ -587,7 +664,7 @@ export function createAuthoritativePublication(
     const projection = dependencies.readProjection();
     const base = selectCanonicalState(canonical, pendingRemoteState, lastAuthoritativeState);
     // Keep even a failed observation for the existing settlement/recovery path.
-    pendingRemoteState = base;
+    pendingRemoteState = remoteObservation(base);
     lastAuthoritativeState = structurallyShareState(lastAuthoritativeState || projection.state, base);
     const outstanding = [...(inFlightMutations || []), ...pendingMutations]
       .filter((mutation) => projectedMutations.has(mutation));
@@ -1122,22 +1199,22 @@ export function createAuthoritativePublication(
       if (hydrationPromise) return hydrationPromise;
       const generation = hydrationGeneration;
       const hydration = (async () => {
-        let pendingHydrationState: TabBoardState | null = null;
+        let pendingHydrationState: RemoteObservation | null = null;
         try {
           hydrationUnsubscribe?.();
           hydrationUnsubscribe = dependencies.subscribeAuthoritativeState(
-            (state) => {
+            (state, observation) => {
               if (disposed || generation !== hydrationGeneration) return;
               if (syncCanonicalDataset()) pendingHydrationState = null;
               if (!dependencies.readProjection().hydrated) {
-                pendingHydrationState = selectCanonicalState(
-                  state,
+                pendingHydrationState = selectCanonicalObservation(
+                  remoteObservation(state, observation),
                   pendingHydrationState,
                   lastAuthoritativeState,
                 );
                 return;
               }
-              acceptRemoteState(state);
+              acceptRemoteState(state, observation);
             },
           );
           const authoritative = await dependencies.initializeAuthoritativeState();

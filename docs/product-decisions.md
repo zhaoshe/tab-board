@@ -2199,3 +2199,11 @@ Proposed / Accepted / Rejected / Revisit
 - Reason: the stable slot is already the DnD/geometry identity for every rendered session. Reusing it fixes shell-first reveal without adding public props, a second protocol, a generic reveal framework or persistence changes.
 - Tradeoff: tests must cover real hook + slot rendering rather than relying on source-string assertions. Browser/manual offscreen capture remains a separate acceptance layer.
 - Status: implemented with shell-first capture/URL reveal regression tests; see ADR 0005.
+
+## D082: Explicit file rereads can refresh exact-tie publications
+
+- Problem: repairing a damaged session file can restore valid JSON without changing `meta.json` revision or timestamp. Ordinary high-water rules correctly reject equal-revision stale observations, but that also left user-authorized `Re-read folder` results hidden in Manager publications after unread health cleared.
+- Decision: mark only manual file rereads with bounded explicit metadata and a one-shot `file-reread_*` event id on the existing File ping transport. Publication admits same revision/timestamp exact ties only for that explicit observation and keeps ordinary tie incumbent behavior for all other reads and RPC replies.
+- Reason: this preserves stale snapshot protection while letting the existing Authority/File notification path publish a user-confirmed repaired folder to current and peer Manager contexts.
+- Tradeoff: the ping payload gains optional metadata and Authority keeps a small event-id dedupe cache. Failed or retired rereads must reject or no-op before writing the explicit ping, so native acceptance still needs real OPFS and multi-Manager proof.
+- Status: implemented with File adapter, Authority, peer publication and deferred old-RPC regressions; native browser proof is recorded separately by the parent task.

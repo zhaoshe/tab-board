@@ -6,15 +6,20 @@ export interface StateWriteOptions {
   backupBeforeRestore: TabBoardState;
 }
 
+export interface StorageObservation {
+  kind?: 'ordinary' | 'explicit-reread';
+  eventId?: string;
+}
+
 export interface StorageAdapter {
   getState(): Promise<TabBoardState>;
   setState(state: TabBoardState, options?: StateWriteOptions): Promise<void>;
   ensureState(): Promise<TabBoardState>;
-  subscribeState(callback: (state: TabBoardState) => void): () => void;
+  subscribeState(callback: (state: TabBoardState, observation?: StorageObservation) => void): () => void;
 }
 
 export interface ReloadableStorageAdapter extends StorageAdapter {
-  reloadFromDisk(): Promise<void>;
+  reloadFromDisk(observation?: StorageObservation): Promise<void>;
 }
 
 export interface FileStorageAdapter extends ReloadableStorageAdapter {

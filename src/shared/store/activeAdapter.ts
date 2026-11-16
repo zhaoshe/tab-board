@@ -35,6 +35,7 @@ import type {
   ReloadableStorageAdapter,
   StorageAdapter,
   StorageMode,
+  StorageObservation,
   StateWriteOptions,
 } from './storageAdapter';
 import {
@@ -108,6 +109,7 @@ function loadFsDirectoryModule(): Promise<FsDirectoryModule> {
 }
 
 const fallbackListeners = new Set<(reason: string) => void>();
+const HANDLED_FILE_PING_EVENT_LIMIT = 128;
 
 export type ReconnectChoice = 'browser' | 'file';
 
@@ -173,8 +175,10 @@ class StorageAuthority implements StorageAdapter {
   private lifecycle = 0;
   private initPromise: Promise<AuthorityBackend> | null = null;
   private backendUnsubscribe: (() => void) | null = null;
-  private readonly subscribers = new Set<(state: TabBoardState) => void>();
+  private readonly subscribers = new Set<(state: TabBoardState, observation?: StorageObservation) => void>();
   private readonly handledFallbackEvents = new Set<string>();
+  private readonly handledFilePingEvents = new Set<string>();
+  private readonly handledFilePingEventOrder: string[] = [];
   private lastKnownState: TabBoardState | null = null;
   private lastSeenRevision = -1;
   private operationQueue: Promise<unknown> = Promise.resolve();
@@ -184,17 +188,26 @@ class StorageAuthority implements StorageAdapter {
   private bindFileEvents(binding: AuthorityBackend): void {
     this.unbindFileEvents();
     this.pingUnsubscribe = subscribeFilePing((ping) => {
-      if (this.backend !== binding || ping.mutationRevision <= this.lastSeenRevision) return;
-      void this.enqueueOperation(async () => {
+      const explicitReread = ping.kind === 'explicit-reread';
+      if (this.backend !== binding) return;
+      if (ping.eventId && !this.rememberFilePingEvent(ping.eventId)) return;
+      if (!explicitReread && ping.mutationRevision <= this.lastSeenRevision) return;
+      const lifecycle = this.lifecycle;
+      const run = () => this.enqueueOperation(async () => {
         const backend = this.backend;
+        this.assertLifecycle(lifecycle);
         if (backend !== binding || !isReloadableAdapter(backend.adapter)) return;
-        this.lastSeenRevision = ping.mutationRevision;
+        if (!explicitReread) this.lastSeenRevision = ping.mutationRevision;
         try {
-          await backend.adapter.reloadFromDisk();
+          await backend.adapter.reloadFromDisk(explicitReread
+            ? { kind: 'explicit-reread', eventId: ping.eventId }
+            : undefined);
         } catch (error: unknown) {
           if (this.backend === backend) await this.degradeToBrowser(error, true);
         }
-      }).catch(error => logWarning('activeAdapter', 'Automatic file reload failed', error));
+      }, lifecycle);
+      const reload = explicitReread ? this.withStateWriteLock(run) : run();
+      void reload.catch(error => logWarning('activeAdapter', 'Automatic file reload failed', error));
     });
     this.fallbackUnsubscribe = subscribeStorageFallback((event) => {
       if (this.backend !== binding || this.handledFallbackEvents.has(event.eventId)) return;
@@ -204,6 +217,17 @@ class StorageAuthority implements StorageAdapter {
         await this.degradeToBrowser(new Error(event.reason), false, event);
       }).catch(error => logWarning('activeAdapter', 'Remote file fallback failed', error));
     });
+  }
+
+  private rememberFilePingEvent(eventId: string): boolean {
+    if (this.handledFilePingEvents.has(eventId)) return false;
+    this.handledFilePingEvents.add(eventId);
+    this.handledFilePingEventOrder.push(eventId);
+    while (this.handledFilePingEventOrder.length > HANDLED_FILE_PING_EVENT_LIMIT) {
+      const retired = this.handledFilePingEventOrder.shift();
+      if (retired) this.handledFilePingEvents.delete(retired);
+    }
+    return true;
   }
 
   private unbindFileEvents(): void {
@@ -324,10 +348,10 @@ class StorageAuthority implements StorageAdapter {
     } else if (backend.mode === 'browser') {
       this.lastSeenRevision = -1;
     }
-    this.backendUnsubscribe = backend.adapter.subscribeState((nextState) => {
+    this.backendUnsubscribe = backend.adapter.subscribeState((nextState, observation) => {
       if (this.backend !== backend) return;
       this.recordState(nextState);
-      this.notifyState(nextState);
+      this.notifyState(nextState, observation);
     });
     return backend;
   }
@@ -344,10 +368,10 @@ class StorageAuthority implements StorageAdapter {
     this.lastSeenRevision = Math.max(this.lastSeenRevision, state.mutationRevision);
   }
 
-  private notifyState(state: TabBoardState): void {
+  private notifyState(state: TabBoardState, observation?: StorageObservation): void {
     for (const callback of Array.from(this.subscribers)) {
       try {
-        callback(state);
+        callback(state, observation);
       } catch {
         // A subscriber must not stop authority publication.
       }
@@ -493,7 +517,7 @@ class StorageAuthority implements StorageAdapter {
     });
   }
 
-  subscribeState(callback: (state: TabBoardState) => void): () => void {
+  subscribeState(callback: (state: TabBoardState, observation?: StorageObservation) => void): () => void {
     this.subscribers.add(callback);
     return () => this.subscribers.delete(callback);
   }
@@ -509,12 +533,15 @@ class StorageAuthority implements StorageAdapter {
   private async transition(operation: (lifecycle: number) => Promise<void>): Promise<void> {
     const lifecycle = this.lifecycle;
     const run = () => this.enqueueOperation(() => operation(lifecycle), lifecycle);
+    await this.withStateWriteLock(run);
+  }
+
+  private async withStateWriteLock<T>(operation: () => Promise<T>): Promise<T> {
     const locks = globalThis.navigator?.locks;
     if (typeof locks?.request === 'function') {
-      await locks.request('tabboard-state-write', { mode: 'exclusive' }, run);
-    } else {
-      await run();
+      return locks.request('tabboard-state-write', { mode: 'exclusive' }, operation);
     }
+    return operation();
   }
 
   switchToFileMode(root: FileSystemDirectoryHandle, initialState: TabBoardState): Promise<void> {
@@ -608,12 +635,26 @@ class StorageAuthority implements StorageAdapter {
   }
 
   reloadFileState(): Promise<void> {
-    return this.enqueueOperation(async () => {
+    const lifecycle = this.lifecycle;
+    const run = () => this.enqueueOperation(async () => {
+      this.assertLifecycle(lifecycle);
       const backend = await this.ensureBackend();
+      this.assertLifecycle(lifecycle);
       this.assertBackend(backend);
       if (backend.mode !== 'file' || !isReloadableAdapter(backend.adapter)) throw new Error('Reconnect the folder before re-reading saved files.');
-      await backend.adapter.reloadFromDisk();
-    });
+      const eventId = createId('file-reread');
+      this.rememberFilePingEvent(eventId);
+      await backend.adapter.reloadFromDisk({ kind: 'explicit-reread', eventId });
+      this.assertBackend(backend);
+      const state = await backend.adapter.getState();
+      this.assertBackend(backend);
+      this.recordState(state);
+      await writeFilePing(state.mutationRevision, state.updatedAt, {
+        kind: 'explicit-reread',
+        eventId,
+      });
+    }, lifecycle);
+    return this.withStateWriteLock(run);
   }
 
   resetBackend(): void {
@@ -633,6 +674,8 @@ class StorageAuthority implements StorageAdapter {
     this.resetBackend();
     this.subscribers.clear();
     this.handledFallbackEvents.clear();
+    this.handledFilePingEvents.clear();
+    this.handledFilePingEventOrder.length = 0;
   }
 
   selectedDataset(): object {
@@ -734,7 +777,7 @@ export function getActiveDatasetIdentity(): object {
 }
 
 export function subscribeActiveState(
-  callback: (state: TabBoardState) => void,
+  callback: (state: TabBoardState, observation?: StorageObservation) => void,
 ): () => void {
   return getAuthority().subscribeState(callback);
 }

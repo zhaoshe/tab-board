@@ -19,6 +19,7 @@ import {
   type AuthoritativePublicationDependencies,
   type PublicationProjection,
 } from './authoritativePublication';
+import type { StorageObservation } from './storageAdapter';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 
@@ -100,7 +101,7 @@ function createHarness(initialState: TabBoardState = createEmptyState()) {
     persistenceError: null,
   };
   let authoritative = projection.state;
-  let subscriber: ((state: TabBoardState) => void) | null = null;
+  let subscriber: ((state: TabBoardState, observation?: StorageObservation) => void) | null = null;
   const sentBatches: StateMutation[][] = [];
   const sendMutations = vi.fn(async (mutations: readonly StateMutation[]) => {
     const batch = [...mutations];
@@ -138,7 +139,7 @@ function createHarness(initialState: TabBoardState = createEmptyState()) {
   return {
     dependencies,
     getProjection: () => projection,
-    publishRemote: (state: TabBoardState) => subscriber?.(state),
+    publishRemote: (state: TabBoardState, observation?: StorageObservation) => subscriber?.(state, observation),
     setAuthoritative: (state: TabBoardState) => {
       authoritative = state;
     },
@@ -1400,6 +1401,93 @@ describe('capture commit admission', () => {
     expect(harness.getProjection().state.groups).toBe(displayed.groups);
     publication.reconcileCaptureCommit({ ...capture, groups: [group('new')], mutationRevision: 5, updatedAt: '2020-01-01T00:00:00.000Z' });
     expect(harness.getProjection().state.groups[0].id).toBe('new');
+    publication.dispose();
+  });
+
+  it('admits explicit reread exact-ties without letting ordinary stale ties erase the repaired base or optimistic work', async () => {
+    vi.useFakeTimers();
+    const initial = createEmptyState();
+    const unread = {
+      ...initial,
+      groups: [],
+      mutationRevision: 7,
+      updatedAt: timestamp,
+    };
+    const repaired = {
+      ...unread,
+      groups: [group('repaired')],
+    };
+    const harness = createHarness(unread);
+    const publication = createAuthoritativePublication(harness.dependencies);
+    await publication.hydrate();
+    publication.commit({
+      type: 'update-settings',
+      updates: { theme: 'dark' },
+      updatedAt: timestamp,
+    });
+
+    harness.publishRemote(repaired, { kind: 'explicit-reread', eventId: 'repair-1' });
+    harness.setAuthoritative(repaired);
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['repaired']);
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+
+    harness.publishRemote(unread);
+    harness.publishRemote(
+      { ...unread, groups: [group('older-explicit')], mutationRevision: 6 },
+      { kind: 'explicit-reread', eventId: 'repair-older' },
+    );
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['repaired']);
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(harness.sentBatches[0][0]).toMatchObject({ type: 'update-settings' });
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['repaired']);
+    publication.dispose();
+  });
+
+  it('keeps an explicit reread preview after a deferred ordinary RPC returns an old equal-revision snapshot', async () => {
+    vi.useFakeTimers();
+    const initial = createEmptyState();
+    const unread = {
+      ...initial,
+      groups: [],
+      mutationRevision: 7,
+      updatedAt: timestamp,
+    };
+    const repaired = {
+      ...unread,
+      groups: [group('repaired')],
+    };
+    const harness = createHarness(unread);
+    let resolveRpc!: (state: TabBoardState) => void;
+    const deferredSend = vi.fn((_mutations: readonly StateMutation[]) => new Promise<TabBoardState>((resolve) => {
+      resolveRpc = resolve;
+    }));
+    harness.dependencies.sendMutations = deferredSend;
+    const publication = createAuthoritativePublication(harness.dependencies);
+    await publication.hydrate();
+    publication.commit({
+      type: 'update-settings',
+      updates: { theme: 'dark' },
+      updatedAt: timestamp,
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(deferredSend).toHaveBeenCalledTimes(1);
+    const firstCall = deferredSend.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const sentMutation = firstCall![0][0];
+
+    harness.publishRemote(repaired, { kind: 'explicit-reread', eventId: 'repair-1' });
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['repaired']);
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+
+    resolveRpc(unread);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['repaired']);
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+    expect(deferredSend.mock.calls[0]![0][0]).toBe(sentMutation);
     publication.dispose();
   });
 

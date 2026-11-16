@@ -58,7 +58,12 @@ import {
   splitState,
   type FileParts,
 } from './fileSerialization';
-import type { AdapterInitError, FileStorageAdapter, StateWriteOptions } from './storageAdapter';
+import type {
+  AdapterInitError,
+  FileStorageAdapter,
+  StateWriteOptions,
+  StorageObservation,
+} from './storageAdapter';
 import { fileStorageStatus, projectionFromState } from './settingsProjection';
 import { readStorageStatusProjection, writeStorageStatusProjection } from './fsBootstrap';
 
@@ -503,7 +508,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
    * layer when a cross-context ping indicates another context wrote newer data.
    * Notifies same-context subscribers if the state actually changed.
    */
-  async reloadFromDisk(): Promise<void> {
+  async reloadFromDisk(observation?: StorageObservation): Promise<void> {
     // Wait for any in-flight write in THIS context to settle before reading
     // so we do not observe a writeInProgress=true meta from our own commit.
     await this.writeQueue.catch(() => undefined);
@@ -517,8 +522,8 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     this.initPromise = null;
     const changed = !statesEqual(this.cachedState, next);
     this.cachedState = next;
-    if (changed && next) {
-      this.dispatchStateChanged(clone(next));
+    if ((changed || observation?.kind === 'explicit-reread') && next) {
+      this.dispatchStateChanged(clone(next), observation);
     }
     if (this.deps.shouldPublishPing?.() !== false) {
       const status = await readStorageStatusProjection();
@@ -720,9 +725,12 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     return this.unreadSessionFiles.length;
   }
 
-  private dispatchStateChanged(state: TabBoardState): void {
+  private dispatchStateChanged(state: TabBoardState, observation?: StorageObservation): void {
     // We use a CustomEvent so subscribers get the state in event.detail.
-    const ev = new CustomEvent<TabBoardState>(STATE_CHANGED_EVENT, { detail: state });
+    const ev = new CustomEvent<{ state: TabBoardState; observation?: StorageObservation }>(
+      STATE_CHANGED_EVENT,
+      { detail: { state, ...(observation ? { observation } : {}) } },
+    );
     this.eventTarget.dispatchEvent(ev);
   }
 
@@ -743,10 +751,10 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     return clone(current);
   }
 
-  subscribeState(callback: (state: TabBoardState) => void): () => void {
+  subscribeState(callback: (state: TabBoardState, observation?: StorageObservation) => void): () => void {
     const listener = (event: Event) => {
-      const ce = event as CustomEvent<TabBoardState>;
-      callback(clone(ce.detail));
+      const ce = event as CustomEvent<{ state: TabBoardState; observation?: StorageObservation }>;
+      callback(clone(ce.detail.state), ce.detail.observation);
     };
     this.eventTarget.addEventListener(STATE_CHANGED_EVENT, listener as EventListener);
     return () => {
