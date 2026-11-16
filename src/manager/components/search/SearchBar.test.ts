@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { savedSearchQueryStore } from '../../hooks/useSearchQuery';
 import { SearchBar } from './SearchBar';
+import * as selectors from '../../core/selectors';
 
 const testHarness = vi.hoisted(() => ({
   categoryGroups: [] as Array<{
@@ -67,7 +68,7 @@ vi.mock('../../hooks/useBoardProjection', () => ({
   useBoardProjection: () => ({
     workspaceId: 'workspace',
     categoryGroups: testHarness.categoryGroups,
-    visibleGroups: testHarness.categoryGroups,
+    visibleGroups: testHarness.categoryGroups.filter(group => group.title.toLowerCase().includes(savedSearchQueryStore.getSnapshot().toLowerCase())),
     searchQuery: savedSearchQueryStore.getSnapshot(),
   }),
 }));
@@ -148,6 +149,7 @@ afterEach(async () => {
   container?.remove();
   container = null;
   savedSearchQueryStore.set('');
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -159,11 +161,18 @@ describe('SearchBar query lifecycle', () => {
     expect(input().placeholder).toBe('Search sessions, tabs, URLs, notes…');
   });
 
-  it('counts canonical category matches immediately before query debounce', async () => {
+  it('counts the published query after debounce and indicates pending input without rescanning', async () => {
+    const scan = vi.spyOn(selectors, 'filterGroupsByQuery');
     await changeInput('needle');
 
-    expect(container?.textContent).toContain('1 result');
+    expect(container?.textContent).toContain('Updating…');
+    expect(container?.textContent).not.toContain('1 result');
     expect(savedSearchQueryStore.getSnapshot()).toBe('');
+    expect(scan).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTime(150));
+    expect(container?.textContent).toContain('1 result');
+    expect(container?.textContent).not.toContain('Updating…');
+    expect(scan).not.toHaveBeenCalled();
   });
 
   it('publishes user input only after the 150 ms debounce', async () => {
@@ -196,4 +205,39 @@ describe('SearchBar query lifecycle', () => {
     expect(input().value).toBe('external');
     expect(savedSearchQueryStore.getSnapshot()).toBe('external');
   });
+});
+
+it('clears pending input immediately and never republishes it', async () => {
+  await changeInput('needle');
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Clear Search"]')?.click());
+  expect(input().value).toBe('');
+  expect(savedSearchQueryStore.getSnapshot()).toBe('');
+  expect(container?.textContent).not.toContain('Updating');
+  await act(async () => vi.advanceTimersByTime(150));
+  expect(savedSearchQueryStore.getSnapshot()).toBe('');
+});
+
+it('closes pending input immediately and never republishes it', async () => {
+  const onEscape = vi.fn();
+  await act(async () => root?.render(createElement(SearchBar, { onEscape })));
+  await changeInput('needle');
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Close Search"]')?.click());
+  expect(onEscape).toHaveBeenCalledOnce();
+  expect(input().value).toBe('');
+  expect(savedSearchQueryStore.getSnapshot()).toBe('');
+  await act(async () => vi.advanceTimersByTime(150));
+  expect(savedSearchQueryStore.getSnapshot()).toBe('');
+});
+
+it('scans bookmark counts only for the final published query', async () => {
+  const scan = vi.spyOn(selectors, 'filterGroupsByQuery');
+  await act(async () => root?.render(createElement(SearchBar, { category: 'bookmarks', bookmarkGroups: testHarness.categoryGroups })));
+  await changeInput('need');
+  await act(async () => vi.advanceTimersByTime(100));
+  await changeInput('needle');
+  expect(scan).not.toHaveBeenCalled();
+  await act(async () => vi.advanceTimersByTime(150));
+  expect(scan).toHaveBeenCalledOnce();
+  expect(scan.mock.calls[0]?.[1]).toBe('needle');
+  expect(container?.textContent).toContain('1 result');
 });

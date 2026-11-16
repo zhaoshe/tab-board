@@ -15,7 +15,7 @@ import { createMemoryDirectory } from '../testing/memoryFs';
 import type { MemoryDirectoryHandle, MemoryFileHandle } from '../testing/memoryFs';
 import { createFileStorageAdapter, initFileStorageDirectory } from './fileStorage';
 import type { AdapterInitError } from './storageAdapter';
-import { atomicWriteFile } from './fsAtomic';
+import { atomicWriteFile, deleteSessionFile, readTextFile, writeSessionFile } from './fsAtomic';
 import { projectionFromState } from './settingsProjection';
 
 // ---------- chrome.storage.local mock ----------
@@ -123,6 +123,8 @@ async function listSessionFileIds(root: MemoryDirectoryHandle): Promise<string[]
   return names.sort();
 }
 
+const topLevelDataFiles = ['settings.json', 'workspaces.json', 'folders.json', 'categoryOrder.json', 'bin.json', 'ledger.json'];
+
 // Default permission: granted.
 function withPermission(root: MemoryDirectoryHandle, state: PermissionState = 'granted'): void {
   (root as unknown as {
@@ -167,6 +169,78 @@ describe('initFileStorageDirectory', () => {
 });
 
 describe('createFileStorageAdapter', () => {
+  it('rechecks publication eligibility after the awaited reload status read', async () => {
+    const root = createMemoryDirectory('reload-retired');
+    let eligible = true;
+    const adapter = await createFileStorageAdapter(root, { shouldPublishPing: () => eligible });
+    await adapter.setState(knownState());
+    const previousStatus = chromeMock.storage.local.data[BOOTSTRAP_KEY];
+    let entered!: () => void; let release!: () => void;
+    const reading = new Promise<void>(resolve => { entered = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    chromeMock.storage.local.get.mockImplementationOnce(async keys => {
+      expect(keys).toBe(BOOTSTRAP_KEY);
+      entered(); await resume;
+      return { [BOOTSTRAP_KEY]: chromeMock.storage.local.data[BOOTSTRAP_KEY] };
+    });
+    const reloading = adapter.reloadFromDisk();
+    await reading;
+    eligible = false;
+    chromeMock.storage.local.data[BOOTSTRAP_KEY] = { ...previousStatus as object, fileUpdatedAt: 'replacement-status' };
+    release();
+    await reloading;
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toMatchObject({ fileUpdatedAt: 'replacement-status' });
+  });
+
+  it('keeps unchanged data files when only a workspace name changes', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const previous = knownState();
+    const writer = await createFileStorageAdapter(root);
+    await writer.setState(previous);
+    const names = [...topLevelDataFiles, 'meta.json'];
+    const writes = await Promise.all(names.map(async (name) => vi.spyOn(await root.getFileHandle(name), 'createWritable')));
+    const sessions = await root.getDirectoryHandle('sessions');
+    const sessionWrites = await Promise.all(previous.groups.map(async (group) => vi.spyOn(await sessions.getFileHandle(`${group.id}.json`), 'createWritable')));
+    const next = normalizeState({
+      ...previous, mutationRevision: 8,
+      workspaces: previous.workspaces.map((workspace) => ({ ...workspace, name: 'Renamed' })),
+    });
+    await writer.setState(next);
+    for (const [index, name] of names.entries()) {
+      expect(writes[index]).toHaveBeenCalledTimes(name === 'meta.json' ? 2 : name === 'workspaces.json' ? 1 : 0);
+    }
+    for (const index of previous.groups.keys()) {
+      expect(sessionWrites[index]).not.toHaveBeenCalled();
+    }
+    expect(await (await createFileStorageAdapter(root)).getState()).toEqual(next);
+  });
+
+  it.each(['restore', 'repair'] as const)('rewrites all data files for forced %s even when content is equal', async (mode) => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const previous = knownState();
+    await (await createFileStorageAdapter(root)).setState(previous);
+    let interrupt = mode === 'repair';
+    const writer = await createFileStorageAdapter(root, {
+      locks: { beforeMetaWrite: () => {
+        if (interrupt) { interrupt = false; throw new Error('Interrupted'); }
+      } },
+    });
+    if (mode === 'repair') await expect(writer.setState(previous)).rejects.toThrow('Interrupted');
+    const writes = await Promise.all(topLevelDataFiles.map(async (name) => vi.spyOn(await root.getFileHandle(name), 'createWritable')));
+    const sessions = await root.getDirectoryHandle('sessions');
+    const sessionWrites = await Promise.all(previous.groups.map(async (group) => vi.spyOn(await sessions.getFileHandle(`${group.id}.json`), 'createWritable')));
+    const next = { ...previous, mutationRevision: 9 };
+    await writer.setState(next, mode === 'restore' ? { backupBeforeRestore: previous } : undefined);
+    for (const index of topLevelDataFiles.keys()) {
+      expect(writes[index]).toHaveBeenCalledTimes(1);
+    }
+    for (const index of previous.groups.keys()) {
+      expect(sessionWrites[index]).toHaveBeenCalledTimes(1);
+    }
+    expect(await (await createFileStorageAdapter(root)).getState()).toEqual(next);
+  });
   let chromeMock: ChromeMock;
 
   beforeEach(() => {
@@ -322,6 +396,197 @@ describe('createFileStorageAdapter', () => {
     expect(JSON.parse(metaText).writeInProgress).toBeFalsy();
   });
 
+  it.each(['replace-session', 'delete-session', 'top-level-files'] as const)(
+    'recovers the complete committed snapshot after interruption at %s', async (phase) => {
+      const root = createMemoryDirectory('root');
+      withPermission(root);
+      const good = knownState();
+      const seed = await createFileStorageAdapter(root);
+      await seed.setState(good);
+      const next = normalizeState({
+        ...good,
+        mutationRevision: 8,
+        groups: good.groups.slice(1).map((group) => ({ ...group, title: 'Uncommitted title' })),
+        settings: { ...good.settings, closeTabsAfterSave: false },
+      });
+      const interrupt = async () => {
+        if (phase === 'replace-session') await writeSessionFile(root, good.groups[1].id, next.groups[0]);
+        if (phase === 'delete-session') await deleteSessionFile(root, good.groups[0].id);
+        throw new Error('Interrupted file transaction');
+      };
+      const writer = await createFileStorageAdapter(root, {
+        locks: phase === 'top-level-files'
+          ? { beforeFinalMeta: interrupt }
+          : { beforeMetaWrite: interrupt },
+      });
+
+      await expect(writer.setState(next)).rejects.toThrow('Interrupted file transaction');
+      const reader = await createFileStorageAdapter(root);
+      expect(await reader.getState()).toEqual(good);
+    },
+  );
+
+  it('repairs replaced, removed and orphan session files before the next commit', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const good = knownState();
+    await (await createFileStorageAdapter(root)).setState(good);
+    const orphan = createGroupFromTabRecords(
+      [createTabRecord({ title: 'Pending', url: 'https://pending.example' } as chrome.tabs.Tab)],
+      { title: 'Orphan', workspaceId: good.activeWorkspaceId },
+    );
+    let interrupted = false;
+    const writer = await createFileStorageAdapter(root, {
+      locks: { beforeMetaWrite: async () => {
+        if (interrupted) return;
+        interrupted = true;
+        await deleteSessionFile(root, good.groups[0].id);
+        await writeSessionFile(root, good.groups[1].id, { ...good.groups[1], title: 'Uncommitted' });
+        await writeSessionFile(root, orphan.id, orphan);
+        throw new Error('Interrupted file transaction');
+      } },
+    });
+    await expect(writer.setState({ ...good, mutationRevision: 8 })).rejects.toThrow('Interrupted');
+    const next = normalizeState({ ...good, mutationRevision: 9, settings: { ...good.settings, theme: 'dark' } });
+    await writer.setState(next);
+
+    expect(await (await createFileStorageAdapter(root)).getState()).toEqual(next);
+    expect(await listSessionFileIds(root)).not.toContain(orphan.id);
+  });
+
+  it('reads the prior snapshot while another context is publishing changed files', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const good = knownState();
+    await (await createFileStorageAdapter(root)).setState(good);
+    let resume!: () => void;
+    let entered!: () => void;
+    const paused = new Promise<void>((resolve) => { resume = resolve; });
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    const writer = await createFileStorageAdapter(root, {
+      locks: { beforeFinalMeta: async () => { entered(); await paused; } },
+    });
+    const next = normalizeState({ ...good, mutationRevision: 8, groups: [], settings: { ...good.settings, theme: 'dark' } });
+    const writing = writer.setState(next);
+    await ready;
+    let during: TabBoardState;
+    try {
+      during = await (await createFileStorageAdapter(root)).getState();
+    } finally {
+      resume();
+      await writing;
+    }
+    expect(during!).toEqual(good);
+    expect(await (await createFileStorageAdapter(root)).getState()).toEqual(next);
+  });
+
+  it('rejects an interrupted transaction whose recovery snapshot is missing', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const good = knownState();
+    await (await createFileStorageAdapter(root)).setState(good);
+    const writer = await createFileStorageAdapter(root, {
+      locks: { beforeFinalMeta: () => { throw new Error('Interrupted'); } },
+    });
+    await expect(writer.setState({ ...good, mutationRevision: 8 })).rejects.toThrow('Interrupted');
+    const meta = JSON.parse(await readTextFile(await root.getFileHandle('meta.json')));
+    await root.removeEntry(meta.recoveryFile ?? '.tabboard-recovery.json').catch(() => undefined);
+    await expect(createFileStorageAdapter(root)).rejects.toMatchObject({ code: 'FILE_CORRUPT' });
+  });
+
+  it('retains the recovery snapshot while a retry prepares its next snapshot', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const good = knownState();
+    await (await createFileStorageAdapter(root)).setState(good);
+    let fail = true;
+    const writer = await createFileStorageAdapter(root, {
+      locks: { beforeFinalMeta: () => {
+        if (fail) { fail = false; throw new Error('Interrupted'); }
+      } },
+    });
+    await expect(writer.setState({ ...good, mutationRevision: 8 })).rejects.toThrow('Interrupted');
+
+    let resume!: () => void;
+    let entered!: () => void;
+    const paused = new Promise<void>((resolve) => { resume = resolve; });
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    const getFile = root.getFileHandle.bind(root);
+    let blocked = false;
+    vi.spyOn(root, 'getFileHandle').mockImplementation(async (name, options) => {
+      const file = await getFile(name, options);
+      if (name.startsWith('.tabboard-recovery') && options?.create && !blocked) {
+        blocked = true;
+        const createWritable = file.createWritable.bind(file);
+        file.createWritable = async () => {
+          const stream = await createWritable();
+          const close = stream.close.bind(stream);
+          stream.close = async () => { await close(); entered(); await paused; };
+          return stream;
+        };
+      }
+      return file;
+    });
+    const next = normalizeState({ ...good, mutationRevision: 9, settings: { ...good.settings, theme: 'dark' } });
+    const writing = writer.setState(next);
+    await ready;
+    let during: TabBoardState | undefined;
+    let failure: unknown;
+    try {
+      during = await (await createFileStorageAdapter(root)).getState();
+    } catch (error) {
+      failure = error;
+    } finally {
+      resume();
+      await writing;
+    }
+    expect(failure).toBeUndefined();
+    expect(during).toEqual(good);
+  });
+
+  it('settles other session writes before rejecting a failed transaction', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const good = knownState();
+    const writer = await createFileStorageAdapter(root);
+    await writer.setState(good);
+    const sessions = await root.getDirectoryHandle('sessions');
+    const getFile = sessions.getFileHandle.bind(sessions);
+    let resume!: () => void;
+    let entered!: () => void;
+    const paused = new Promise<void>((resolve) => { resume = resolve; });
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    vi.spyOn(sessions, 'getFileHandle').mockImplementation(async (name, options) => {
+      const file = await getFile(name, options);
+      const createWritable = file.createWritable.bind(file);
+      file.createWritable = async () => {
+        const stream = await createWritable();
+        if (name === `${good.groups[0].id}.json`) {
+          stream.close = async () => { throw new Error('Failed session write'); };
+        } else {
+          const close = stream.close.bind(stream);
+          stream.close = async () => { entered(); await paused; await close(); };
+        }
+        return stream;
+      };
+      return file;
+    });
+    const next = normalizeState({
+      ...good, mutationRevision: 8,
+      groups: good.groups.map((group) => ({ ...group, title: 'Uncommitted' })),
+    });
+    const writing = writer.setState(next);
+    const outcome = writing.then(() => 'resolved', () => 'rejected');
+    await ready;
+    const beforeResume = await Promise.race([
+      outcome,
+      new Promise<string>((resolve) => setTimeout(() => resolve('pending'), 10)),
+    ]);
+    resume();
+    await expect(writing).rejects.toThrow('Failed session write');
+    expect(beforeResume).toBe('pending');
+  });
+
   it('corrupt meta.json throws FILE_CORRUPT', async () => {
     const root = createMemoryDirectory('root');
     withPermission(root);
@@ -379,6 +644,64 @@ describe('createFileStorageAdapter', () => {
     // One group should still be present; the corrupted group is missing
     expect(loaded.groups.map((g) => g.id)).not.toContain(victimId);
     expect(loaded.groups.map((g) => g.id)).toContain(state.groups[1].id);
+  });
+
+  it('reports unread sessions and clears the report after the original file is repaired', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const state = knownState();
+    await (await createFileStorageAdapter(root)).setState(state);
+    const sessions = await root.getDirectoryHandle('sessions');
+    const fileName = `${state.groups[0].id}.json`;
+    await atomicWriteFile(sessions, fileName, '{broken');
+
+    const info = await initFileStorageDirectory(root);
+    expect(info.unreadSessionFiles).toEqual([fileName]);
+    const reader = await createFileStorageAdapter(root);
+    expect(reader.getUnreadSessionCount()).toBe(1);
+    expect(await readTextFile(await sessions.getFileHandle(fileName))).toBe('{broken');
+
+    await writeSessionFile(root, state.groups[0].id, state.groups[0]);
+    await reader.reloadFromDisk();
+    expect(reader.getUnreadSessionCount()).toBe(0);
+    expect((await reader.getState()).groups).toHaveLength(2);
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).not.toHaveProperty('unreadSessionCount');
+  });
+
+  it('ordinary writes preserve colliding unread bytes before replacing a session', async () => {
+    const root = createMemoryDirectory('root');
+    const state = knownState();
+    const adapter = await createFileStorageAdapter(root);
+    await adapter.setState(state);
+    const sessions = await root.getDirectoryHandle('sessions');
+    const name = `${state.groups[0].id}.json`;
+    const bytes = new Uint8Array([123, 255, 254, 125]);
+    await atomicWriteFile(sessions, name, bytes);
+    await adapter.reloadFromDisk();
+    await adapter.setState({ ...state, mutationRevision: 8 });
+    const preserved = await root.getDirectoryHandle('.tabboard-unread-before-restore');
+    expect(new Uint8Array(await (await (await preserved.getFileHandle(name)).getFile()).arrayBuffer())).toEqual(bytes);
+    expect((await initFileStorageDirectory(root)).state?.groups).toEqual(state.groups);
+  });
+
+  it('preserves unread files during recovery rather than deleting them as orphan sessions', async () => {
+    const root = createMemoryDirectory('root');
+    withPermission(root);
+    const state = knownState();
+    await (await createFileStorageAdapter(root)).setState(state);
+    const sessions = await root.getDirectoryHandle('sessions');
+    const fileName = `${state.groups[0].id}.json`;
+    await atomicWriteFile(sessions, fileName, '{original broken content');
+    let interrupted = false;
+    const writer = await createFileStorageAdapter(root, {
+      locks: { beforeFinalMeta: () => {
+        if (!interrupted) { interrupted = true; throw new Error('Interrupted'); }
+      } },
+    });
+    const partial = await writer.getState();
+    await expect(writer.setState({ ...partial, mutationRevision: 8 })).rejects.toThrow('Interrupted');
+    await writer.setState({ ...partial, mutationRevision: 9 });
+    expect(await readTextFile(await sessions.getFileHandle(fileName))).toBe('{original broken content');
   });
 
   it('concurrent setStates are serialized via the write queue', async () => {

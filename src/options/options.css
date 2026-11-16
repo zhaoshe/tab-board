@@ -329,3 +329,10 @@
     align-items: stretch;
   }
 }
+
+@media (hover: none), (pointer: coarse) {
+  .options-reconnect-dialog button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Group } from '@mantine/core';
+import { Button, Group, Text } from '@mantine/core';
 import type { CategoryFilter } from '../../core/selectors';
 import {
   shouldExitForOpenTabsSource,
@@ -10,6 +10,7 @@ import { useCaptureReveal } from '../../hooks/useCaptureReveal';
 import { useManagerPageState } from '../../hooks/useManagerPageState';
 import { useManagerRuntime } from '../../hooks/useManagerRuntime';
 import { useManagerSelectionScope } from '../../hooks/useManagerSelectionScope';
+import { useBookmarkSessions } from '../../hooks/useBookmarkSessions';
 import {
   ManagerOverlayPortal,
   ManagerOverlaysProvider,
@@ -17,6 +18,7 @@ import {
 import { useOpenTabsRuntime } from '../../hooks/useOpenTabsRuntime';
 import { useSidebarDisclosure } from '../../hooks/useSidebarDisclosure';
 import { useToast } from '../../hooks/useToast';
+import { useTitleRefreshActivityListener } from '../../hooks/useTitleRefreshActivity';
 import { useCurrentWorkspace } from '../../hooks/useWorkspaceState';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import { BinView } from '../bin/BinView';
@@ -46,16 +48,8 @@ export function getWorkspaceFiltersAfterDelete(): {
   return { category: 'inbox', showBin: false };
 }
 
-export function shouldSyncActiveWorkspace(
-  pageWorkspaceId: string,
-  activeWorkspaceId: string,
-  workspaces: readonly { id: string }[],
-): boolean {
-  return pageWorkspaceId !== activeWorkspaceId
-    && workspaces.some(({ id }) => id === pageWorkspaceId);
-}
-
 export function ManagerLayout() {
+  useTitleRefreshActivityListener();
   const sidebar = useSidebarDisclosure();
   const [importModalOpened, setImportModalOpened] = useState(false);
   const [exportModalOpened, setExportModalOpened] = useState(false);
@@ -69,27 +63,15 @@ export function ManagerLayout() {
   const categoryOrderByWorkspace = useTabBoardStore(
     (state) => state.categoryOrderByWorkspace,
   );
-  const setActiveWorkspace = useTabBoardStore((state) => state.setActiveWorkspace);
   const applyDropIntent = useTabBoardStore((state) => state.applyDropIntent);
   const settings = useTabBoardStore((state) => state.settings);
-  const pageValidationState = useMemo(() => ({
-    activeWorkspaceId,
-    workspaces,
-    folders,
-    groups: allGroups,
-    categoryOrderByWorkspace,
-  }), [
-    activeWorkspaceId,
-    allGroups,
-    categoryOrderByWorkspace,
-    folders,
-    workspaces,
-  ]);
-  const pageState = useManagerPageState(pageValidationState);
+  const pageState = useManagerPageState();
   const selectedCategory = pageState.state.category;
   const showBin = pageState.state.view === 'bin';
   const groups = useFilteredGroups(showBin ? 'inbox' : selectedCategory);
   const workspace = useCurrentWorkspace();
+  const bookmarkSessions = useBookmarkSessions(workspace?.id ?? activeWorkspaceId);
+  const bookmarkGroups = bookmarkSessions.groups;
   const runtime = useManagerRuntime();
   const openTabsWorkflow = useOpenTabsRuntime();
   const selectionScope = useManagerSelectionScope();
@@ -154,21 +136,6 @@ export function ManagerLayout() {
     showError,
   });
 
-  useEffect(() => {
-    if (shouldSyncActiveWorkspace(
-      pageState.state.workspaceId,
-      activeWorkspaceId,
-      workspaces,
-    )) {
-      setActiveWorkspace(pageState.state.workspaceId);
-    }
-  }, [
-    activeWorkspaceId,
-    pageState.state.workspaceId,
-    setActiveWorkspace,
-    workspaces,
-  ]);
-
   useToastNotifications();
 
   useEffect(() => {
@@ -221,6 +188,7 @@ export function ManagerLayout() {
           <WorkspaceHeader
             selectedCategory={selectedCategory}
             showBin={showBin}
+            bookmarkGroups={bookmarkGroups}
             dragMarker={dnd.dragUiState.marker}
             onSelectCategory={(category: CategoryFilter) =>
               pageState.navigate({ category, view: 'board' })}
@@ -237,6 +205,33 @@ export function ManagerLayout() {
             onOpenImport={() => setImportModalOpened(true)}
             onOpenExport={() => setExportModalOpened(true)}
           />
+          {selectedCategory === 'bookmarks'
+            && (bookmarkSessions.loading || bookmarkSessions.error) && (
+              <Group className="manager-bookmark-status" gap="xs" wrap="nowrap">
+                <Text
+                  className="manager-bookmark-status__label"
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                  size="xs"
+                  c={bookmarkSessions.error ? 'red' : 'dimmed'}
+                >
+                  {bookmarkSessions.loading
+                    ? 'Loading bookmarks…'
+                    : 'Could not load bookmarks'}
+                </Text>
+                {bookmarkSessions.error && (
+                  <Button
+                    className="manager-bookmark-status__retry"
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={bookmarkSessions.retry}
+                  >
+                    Retry
+                  </Button>
+                )}
+              </Group>
+            )}
         </Group>
       )}
       sidebar={(
@@ -266,12 +261,18 @@ export function ManagerLayout() {
             <BinView />
           ) : (
             <WorkspaceContent
+              bookmarkGroups={bookmarkGroups}
               category={selectedCategory}
               workspaceName={workspace?.name || 'Workspace'}
               runtime={runtime}
               registerBoardElement={dnd.registerBoardElement}
               activeDragPayload={dnd.dragUiState.payload}
               activeDropTarget={dnd.dragUiState.target}
+              retainedGroupIds={sessionTargetPicker?.source.kind === 'session'
+                ? [sessionTargetPicker.source.groupId]
+                : sessionTargetPicker?.source.kind === 'saved-tabs'
+                  ? sessionTargetPicker.source.refs.map((ref) => ref.groupId)
+                  : []}
               highlightedGroupId={highlightedGroupId}
               dragMarker={dnd.dragUiState.marker}
               sourceRect={dnd.dragUiState.sourceRect}
@@ -290,6 +291,7 @@ export function ManagerLayout() {
             opened={importModalOpened}
             onClose={() => setImportModalOpened(false)}
             category={selectedCategory}
+            onRestoreBackup={pageState.restoreBackup}
           />
           <ExportModal
             opened={exportModalOpened}

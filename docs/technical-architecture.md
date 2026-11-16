@@ -9,9 +9,11 @@ TabBoard 是 Chrome Manifest V3 extension，使用 React + TypeScript 开发，�
 运行环境：
 
 - Chrome 115+。
+- Source builds require Node.js 20+.
 - Manifest V3 service worker。
-- Vite + `@crxjs/vite-plugin` 构建链；`manager.html` 的生产入口是 `src/manager/main.tsx`。
-- React 18、Mantine v7、Zustand、`@dnd-kit`、`lucide-react`。
+- Vite `6.4.6` + `@crxjs/vite-plugin` `2.7.1` 构建链；`manager.html` 的生产入口是 `src/manager/main.tsx`。
+- React `18.3.x`、Mantine v7、Zustand `4.5.x`、`@dnd-kit`、`lucide-react`。
+- Vitest `4.1.12` + happy-dom `21.0.4` 作为默认源码测试栈。
 - `chrome.storage.local`（默认后端，也存放 bootstrap key）。
 - File System Access API（可选本地文件后端）和 IndexedDB（持久化目录句柄）。
 - `chrome.tabs` / `chrome.windows` / `chrome.tabGroups` / `chrome.contextMenus` / `chrome.omnibox` / `chrome.runtime`。
@@ -54,6 +56,7 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 
 - `tabs`: 查询、创建、关闭 tabs。
 - `tabGroups`: 读取和恢复 Chrome tab group 元数据。
+- `bookmarks`: 读取 Chrome 书签树并投影为只读 Bookmark category。
 - `storage`: 本地持久化。
 - `unlimitedStorage`: 避免 sessions 较多时过早触达 quota。
 - `contextMenus`: 右键菜单保存入口。
@@ -86,24 +89,27 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
   - `ChromeStorageAdapter`（`chromeStorageAdapter.ts`）：封装 `chrome.storage.local["tabboardState"]`，是默认后端。
   - `FileStorageAdapter`（`fileStorage.ts` + `fileSerialization.ts` + `fsAtomic.ts`）：通过 File System Access API 把数据写入用户选择的本地文件夹；详见下文「File Store Layout」。
 - `activeAdapter` 是稳定的 Storage Authority。启动时读 `chrome.storage.local["tabboardStorageConfig"]`（BOOTSTRAP_KEY）中的 `StorageStatusProjection` 决定内部 backend；callers 可长期持有同一个 authority interface，backend 切换不会让 subscription 或缓存引用失效。旧 `{ mode }` 记录只作为兼容输入解析。
+- Storage Authority 的同一队列排序 backend 选择、读取与 fallback、写入、显式切换、reconnect 和手动重读。显式切换先在队列外取得 `tabboard-state-write` Web Lock，再把准备、复制、bootstrap commit 和安装作为完整操作入队；手动重读与 peer 显式重读同样在入队前取得该锁。内部只调用 backend，不重入公开 facade。锁顺序保持 State Persistence queue → Web Lock → Authority queue。
+- 候选 File adapter 准备期间静默，旧 backend 在提交成功前继续有效。File 发布资格同时检查 lifecycle 和已安装 adapter 身份；旧 subscription、ping/fallback binding 和 reset 前的异步结果不能更新新 backend。同步 reset 撤销旧资格但保留在途 IO 的队列顺序，新 lifecycle 的初始化与读写等待旧操作退出，避免同目录双 writer 和旧缓存差异比较。旧 promise 的清理只作用于自身；已开始的 disk/transport 写入仍按实际结果完成。
 - `settingsProjection.ts` 持有可丢弃的 `tabboardSettingsProjection` read model（settings + mutationRevision + updatedAt）。Chrome commit 与 canonical state 原子写入 projection；File commit 在 final meta commit 后发布 projection。projection 缺失或损坏时只允许一次 canonical state repair，不成为第二写入真相。
 - 同一模块还定义 `StorageStatusProjection`：`configuredTarget` 表达用户正式选择，`activeBackend` 表达当前实际 writer，并持久化 `folderName`、`fallbackReason` 和最后一次成功 File commit 的 `fileUpdatedAt`。DirectoryHandle 只存 IndexedDB，不进入该 projection。
+- `StorageStatusProjection` 额外允许 `unreadSessionCount`，用于把“本次目录读取跳过了多少损坏 session 文件”的结果持久化给 Manager/Options；Browser target 不携带该字段。
 - 页面 context 中，`activeAdapter` 只在 file bootstrap、迁移、reconnect 或 handle 清理分支通过 literal dynamic import 加载 `fileStorage` / `fsDirectory`；browser mode 不执行 file backend 模块。MV3 service worker 不支持 dynamic `import()`，因此 worker 入口静态导入这两个模块，并通过既有 module-loader seam 注入 Storage Authority。
 - `storageEvents.ts` 独立承载 file commit ping 与跨 context fallback event；authority 只在 File backend 活跃时绑定这两类 transport，并按 event id 去重。
 - File backend 在初始化、读取、写入或 ping reload 时失败，authority 会切换 backend、重绑 subscription 并通知 UI。本 context 首次发现故障时先把最后一次有效 snapshot 保存到 Chrome；收到其他 context 的 fallback event 时直接读取对方已提交的 Chrome state，禁止用旧 File snapshot 反向覆盖。本次失败写仍 reject，避免把未提交 mutation 误报为成功；既有 persistence retry 会在 Chrome backend 上重试。
-- `authoritativePublication.ts` 是 Manager-side publication owner。它不依赖 Zustand、React、DOM event 或具体 Chrome adapter，独占 optimistic queue、in-flight batch、remote buffer、drop/category waiter、bounded retry、terminal isolation、authoritative reconciliation、structural sharing 和 hydration generation。
-- `stateMutations.ts` 以 immutable commands 应用普通 state mutation，并拒绝无效引用、locked 目标和 link/note URL 形态错误。
+- `authoritativePublication.ts` 是 Manager-side publication owner。它不依赖 Zustand、React、DOM event 或具体 Chrome adapter，独占 optimistic queue、in-flight batch、remote buffer、drop/category waiter、bounded retry、terminal isolation、authoritative reconciliation、structural sharing 和 hydration generation。Capture runtime 完成现有 canonical read 与 created-ID/source-workspace 校验后，调用 facade 的同步 `reconcileCaptureCommit(canonical)`；即时 projection 不等待无关 mutation RPC。
+- `stateMutations.ts` 以 immutable commands 应用普通 state mutation，只复制变化分支、复用未变化的对象，并克隆新增或 patch payload，避免共享调用方的可变对象。revision 比较先检查顶层引用，仅序列化替换的分支；相等 patch 与已确认 replay 不推进 revision。无效引用、locked 目标和 link/note URL 形态错误仍在 mutation 边界拒绝，authority/persistence 继续 normalize。`createMutationBatch(raw)` 是 mutation batch 的深模块 interface：同步 `evaluate()` 集中 raw drop gap、revision/replay、原始索引和 partial failure；异步 `verify()` 只接受 worker 注入的 live Open Tabs reader，并返回 verified continuation 给 persistence 重新基于 fresh state 提交。
 - `mutationValidation.ts` 负责 mutation-batch candidate boundary；DropIntent/OpenTab raw shape由 shared model `drop-validation.ts` 负责。
 - `stateMutationFeedback.ts` 把 committed `StateMutation` 纯映射为 typed `ApplicationFeedback`；不决定commit时机。
 - `useTabBoardStore.ts` 只提供 Zustand UI projection、领域 action facade、restore/import/export 准备和publication ports；它在publication确认commit/surface error后publish typed feedback，不拥有 persistence queue、retry timer、waiter 或 hydration subscription。
 
 三类 ownership 不应混淆：
 
-1. **Storage Authority** 决定 browser/file backend，维护稳定 adapter identity、backend migration、fallback 和 backend subscription。
+1. **Storage Authority** 决定 browser/file backend，以同一队列拥有完整 backend lifecycle，维护稳定 adapter identity、migration、fallback 和 backend subscription。
 2. **Authoritative Publication** 决定 Manager projection 的 optimistic/authoritative 时序，串行发送 mutation、处理 retry/waiter/remote publication/hydration。
-3. **Worker State Persistence** 在 service worker 内对 mutation batch 做 validation、revision/replay 判定和 normalized atomic write。
+3. **Worker State Persistence** 在 service worker 内串行提交 verified mutation batch，持有锁、fresh state 读取、normalize 和唯一写入；batch validation、revision/replay、index mapping 和 partial failure 合并由 `stateMutations.ts` 的 Mutation Batch 拥有。
 
-所有写入最终交给 Storage Authority 当前 backend 原子提交；跨页面更新由 Authoritative Publication 按 revision/hydration 规则合并。Storage Authority 的 last-known snapshot 与 publication 的 last-authoritative projection 都按 revision/updatedAt 单调推进，不能让旧快照覆盖较新 state。
+所有写入最终交给 Storage Authority 当前 backend 原子提交；跨页面更新由 Authoritative Publication 按 revision/hydration 规则合并。同一所选数据集内，Storage Authority 的 last-known snapshot 与 Publication canonical high-water 按 revision/updatedAt 单调推进。Authority 提供同步、本地的 dataset identity：初始化和普通 IO 不改变它，已安装 backend 的选择替换与 reset 改变它；Publication 只撤销旧 incumbent/buffer，保留队列、checked waiter 和 retry。跨选择返回的旧 RPC 保留真实成功/partial outcome，但用当前 Authority 重读代替旧快照，已在旧数据集提交的 mutation 不重放到新数据集。此标识不持久化、不跨页面传输，也不增加自动 backend 切换协议。
 
 ### `src/background/`
 
@@ -111,7 +117,20 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 
 - `service-worker.ts` 处理 install/startup、toolbar action、context menu、commands、runtime message、omnibox、capture、restore 和 Chrome tab-group metadata。
 - runtime message 先验证 extension sender id 与内部 extension URL；不可信 sender 在 storage 或 Chrome side effect 前拒绝。
-- `statePersistence.ts` 串行化 mutation batch，使用可用的 Web Locks，执行 normalized atomic writes，并返回 committed/invalid/replay evidence。
+- `refresh-saved-tab-title` 先查询精确 URL 的已打开 tab；无匹配时创建
+  minimized/unfocused `popup` 临时窗口。Open Tabs 只通过
+  `windows.getAll({ windowTypes: ['normal'] })` 投影 normal windows，因此 helper
+  不进入 window selector。Worker 监听 `tabs.onUpdated`，在 complete + 非 URL title
+  保持 400ms 后返回，15s 无结果则失败；临时窗口始终在 `finally` 中删除。
+- `statePersistence.ts` 串行化 mutation batch，使用可用的 Web Locks，执行 normalized atomic writes，并返回 committed evaluation。它不重新实现 revision/index/replay policy；raw `applyMutations()` 和 worker verified continuation 都通过 Mutation Batch 的 `evaluate()` 得到 committed/invalid/replay evidence。
+
+### Complete Restore commit confirmation
+
+- `restoreCommit.ts` defines auxiliary `OriginScope`, `RestorePreview`, frozen `RestoreRequest` and durable whole-request receipts. Canonical state and File v1 core layout are unchanged. Publication captures revision and origin together after an explicit bound preview read and projected pending replay; ordinary Import/hydration keeps its existing reads.
+- Worker fingerprints the full raw request with SHA-256. StatePersistence checks receipts and source identity inside the write lock before lazy Mutation Batch verification. A matching receipt returns the stored accepted/invalid raw indexes with fresh current state; a miss retains strict Restore CAS. Historical full/partial ACKs never replay already committed ordinary siblings onto newer observations. A request whose source/proof is unavailable or inconsistent rejects as a whole rather than isolating possibly committed siblings into another source; later pending work remains independent.
+- Browser commits state, restore-before snapshot and auxiliary `tabboardRestoreMetadata` in one `storage.local.set`. File publishes candidate receipts only in final committed `meta.json`; recovery snapshots retain the prior state, origin and receipts together. Ordinary File reads inspect the commit point before evaluation and reload complete data only when clocks, pending status or origin changed, preserving equal-file write skipping. Authority records the same completed read's origin before high-water selection; a new scope resets the incumbent/dataset even at a lower clock, while same-scope older observations remain guarded.
+- Explicit selection/reconnect/fallback creates a new origin. File origin, native root handle association and `StorageStatusProjection.activeOrigin` must agree across restart. The existing native IDB handle key/API remains readable; its fixed auxiliary association row shares the same completed transaction. Cross-platform registration/selection is not atomic: inconsistent intermediate metadata blocks unknown Restore until reconnection rather than inventing an origin. Legacy complete files register auxiliary meta without advancing canonical clocks; legacy pending files require recovery/selection first.
+- Receipts are retained for Restore-bearing requests rather than ordinary edits. Unknown transport outcomes resend every actually sent Restore-bearing envelope, including semantic-isolation requests, before recovery replay can prune it or later pending work can join it. Persistence marks actual bound-read failures as `restoreOutcome: proof-unavailable`, retaining their original code/message; only successful proof reads followed by pre-write semantic rejection are `not-committed`. Publication uses this boundary instead of an error-code allowlist. Page destruction does not persist UI pending attempts. File restore-before preparation still precedes phase 1; its existence does not prove a commit, and failed later independent restore preparation retains the existing backup limitations.
 
 ### `src/manager/`
 
@@ -124,10 +143,12 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - core modules 提供 selectors、capture snapshot ownership、Open Tabs workflow reducer/projection、typed DnD interaction resolution、overlay/focus contracts；这些模块可在无 Chrome DOM 的测试中执行。
 - `core/searchQueryStore.ts` 是 framework-neutral saved-session query owner，只暴露 `getSnapshot()` / `subscribe()` / `set()`，通过注入 ports 初始化 URL/session storage；它不依赖 React、Zustand、DOM global 或 TabBoard store。
 - `hooks/useSearchQuery.ts` 是 browser/React adapter，唯一持有 `tabboardSearch` storage key，并用 `useSyncExternalStore` 把同一 snapshot 提供给 React consumers。Open Tabs capture/filter 的 imperative path直接读该 owner，不依赖 effect-updated ref。
-- `core/selectors.ts` 的 `getBoardProjection()` 先复用 shared `groupsForCategory()` 得到 canonical `categoryGroups`，再得到 query-filtered `visibleGroups`；`hooks/useBoardProjection.ts` 保持 query变化时未过滤 category projection引用稳定。
+- `core/selectors.ts` 的 `getBoardProjection()` 先复用 shared `groupsForCategory()` 得到 canonical `categoryGroups`，再得到 query-filtered `visibleGroups`；`hooks/useBoardProjection.ts` 保持 query变化时未过滤 category projection引用稳定。Bookmark category 是例外：`useBookmarkSessions()` 从 service worker 读取 Chrome bookmarks runtime projection，Manager 将其作为 read-only groups 注入 Header/Search/Board，不写入 canonical state。该 hook 自己拥有 `groups/loading/error/retry` page-local state，保留最后一次成功列表，并用请求代次与 mount cleanup 忽略旧的 resolve/reject/finally。
 - `WorkspaceContent` 只消费 board projection；Zustand selector仅用于当前自定义 category标题，不再读取全部 groups或手写 `starred` / `archived` / `folderId` membership。render、card insertion index和end target因此共享 orphan-folder → Inbox语义。
 - `src/shared/applicationFeedback.ts` 是 page-local application feedback owner，提供typed `publish()` / `subscribe()`；channel无DOM/React/Zustand/Chrome依赖、同步且不replay，listener异常被隔离。
 - `useToastNotifications.ts` 只把 `ApplicationFeedback` discriminated union映射为现有toast copy；Store与Manager不再通过window event names通信。
+- `StorageRecoveryNotice` 通过 shared `useStorageStatusProjection()` 直接订阅 bootstrap projection，在 Manager shell 里独立渲染持久化的文件恢复提示；dismiss 只存在当前页面内存，不进入 Zustand、canonical state 或 storage projection。
+- `ManagerApp` 还拥有一次性的 `FirstSavedHint`：只在当前浏览器第一次出现 saved-session context 时显示紧凑提示，持久化到 page-local `localStorage` key `tabboard.firstSavedHint`；dismiss 后不再复现，也不进入 Zustand、canonical state 或 storage projection。
 - DnD 不复用未类型化 payload；resolver 先校验 workspace/ownership/URL/locked/index 边界，session body 不产生 merge intent。
 - Manager production 不拥有 session/drop execution module；`src/manager/core/commands.ts` 已删除。Shared/background production modules不得导入 Manager。
 - `ManagerLayout` 持有一个 Open Tabs workflow，并通过 `useManagerSelectionScope()` 只拥有当前 active `SelectionScope`。Open Tab IDs 仍由 workflow 持有，saved item IDs 仍由各 `SessionCard` 持有；clear callback 只用于 scope replacement / Exit 同步通知旧 owner，不进入 Zustand、canonical state 或 persistence。
@@ -135,6 +156,41 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `ManagerLayout` 也是唯一 `SessionTargetPicker` owner。Open Tabs `Save to` 和 Session toolbar `Move` 只上报 typed source/trigger；picker从 active workspace canonical category/session order生成choices，只保留能通过当前 DropIntent execution/locked/no-op语义的目标。展示label单独从Session title、Category name与before/between/after位置派生，不进入persistent wire。
 - Target picker的preview index和`aria-live` announcement只属于portaled modal UI，不创建或修改Dnd `DropTarget`、collision geometry、Gap Anchor、auto-scroll或persistent state。Existing/New commit分别映射到既有 `move-tabs` / `copy-open-tabs` / `create-session` intents并统一调用 `applyDropIntent`；Saved All Source Tabs只抑制New choices。
 - `useManagerRuntime.restoreTabs(refs)`只发送一次background `restore-refs`，并把`restoredTabs`成功证据返回给Session toolbar；runtime失败走现有toast并继续reject。Preview Chrome harness实现同一批量语义。
+- `SessionCardHeader` 始终保留 Session title，并把 owner-local
+  `SessionSelectionToolbar` 放到与 `SessionCardMeta` 相同的第二个 grid row；
+  selection mode 只隐藏普通 actions/meta，不卸载 title。Meta 与 toolbar 共享 32px
+  行高，因此进入/退出 selection scope 不改变 header 或首条 tab 的几何。
+- `useManagerRuntime.refreshSavedTabTitle(url)` 发送一次
+  `refresh-saved-tab-title`；Saved row 成功后通过既有 `update-tab` 只持久化 title，
+  失败由 runtime toast 处理且不修改 canonical state。Preview Chrome harness 实现同一
+  action，并清理其临时 window fixture。
+- Persisted Saved Tab title click 不再由 Manager 直接 `tabs.create`，而是发送
+  `restore-tab`；read-only Bookmark row 保留 direct open。
+- `restore-tab` / `restore-group` / `restore-refs` / `restore-all` 在创建 Chrome tabs
+  并完成可选的 `remove-restored-refs` 后统一调用 `syncRestoredTabTitles()`。Helper
+  先从最新 canonical state 筛出仍存在且 group/tab/URL 精确匹配的记录，再对创建的
+  Chrome tab IDs 并发复用 `waitForStableTabTitle()`，最后一次性提交 title-only
+  `update-tab` mutation batch。`Promise.allSettled()` 隔离单页超时/失败，整个同步
+  失败也不改变 restore 结果。
+- `src/manager/core/restoreActionCopy.ts` 单独拥有 Restore tooltip copy，把 source setting
+  `deleteRestoredTabs`、locked override 和 read-only Bookmark override 收敛成稳定文案；
+  `SessionCard` 只传 `tooltip`，继续保留 `Restore` 作为原 accessible name。
+- Locked Session 的 mutation safety 仅对 own keys 恰好为 `{ title }` 的
+  `update-tab` 放行；URL、note、favicon、mixed patch 和其它 group/tab mutation
+  继续返回 `GROUP_LOCKED`。
+- `refresh-saved-group-titles` 是 Session menu 的批量 action。Worker 从 canonical
+  group 快照提取 Links，用固定 3-worker queue 复用 `refreshSavedTabTitle(url)`，
+  然后重读 group/tab/URL identity。成功解析且仍匹配的记录计入 `refreshed`，失败、
+  删除或 URL 变化计入 `failed`；只有变化 title 进入一次 `update-tab` mutation
+  batch。Manager 根据 `{refreshed,failed}` 显示 success 或 partial-failure toast。
+- 所有实际 title resolver 通过 `withTitleRefreshActivity()` 广播
+  `tabboard-title-refresh-activity` start/finish，payload 包含 group/tab/operation
+  identity；finish 位于 `finally`。ManagerLayout 只安装一个 runtime listener，
+  `titleRefreshActivityStore` 用 `Map<recordKey,Set<operationId>>` 维护 page-local
+  activity；TabItemRow 通过 `useSyncExternalStore` 只订阅自己的 key。该状态不进入
+  Zustand/Storage Authority。重叠 operation 必须全部 finish 后才恢复 Delete。
+- 行尾使用 `AccessibleIconAction loading`，因此 spinner 复用现有 32px geometry 与
+  Mantine reduced-motion/accessibility 行为；loading class 强制在 resting 状态可见。
 - Selected item批量删除使用单一`delete-tabs` mutation。Store facade在调用时复制refs与Bin snapshots，先拒绝locked/missing/duplicate输入，再由Authoritative Publication `commitChecked()`无optimistic地直接等待worker authority。worker在任何写入前验证整个batch；成功一次性更新groups/Bin，reject不产生部分删除，exact replay不重复Bin entries。
 - `SessionSlot` 是普通 session 唯一的 group `useSortable` owner；`useSessionActivation` 保留所有 slot/insertion target，但只为初始、近视口、搜索/高亮或显式激活的 session 挂载完整 `SessionCard`。远端 `SessionCardShell` 不挂载 tab rows、tab sortables、per-row overlays 或 overflow observers。
 - `CategoryNav` 让整个 category tab 同时拥有 navigation click 和 pointer/touch `useDraggable` activator，并持续挂载 `category-column` 与 before/after reorder targets；PointerSensor 的 5px activation constraint区分点击和mouse drag，TouchSensor提供200ms/5px long-press contract，不增加drag-handle focus stop。Keyboard排序由`CategoryManager`的Move Up / Move Down命令拥有。
@@ -142,6 +198,8 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - Compound-control rendered tests 测量相邻可见槽位的 `getBoundingClientRect()`，覆盖默认与 ZWJ emoji、长名称、desktop/compact、Category count 和 Session metadata。父容器无 overflow、axe 通过或 DOM boxes 存在不能单独证明彩色 emoji 字形和相邻文字之间有安全间距。
 - Category rename/color 与完整 order 使用 compare-and-set mutation：Edit modal 在打开时捕获 expected `{name,color}`；Manage Move/native drop 从 rendered categories 捕获完整 expected order；topbar resolver 把其 state snapshot 的 canonical order 写入 typed `reorder-category` intent。Store facade 只复制并序列化这些快照，不重读最新 Zustand 来补 expected 值。
 - Authority 在 replay 判定前验证 folder ownership、normalized supported name/color，以及 expected/target complete canonical order。Expected 匹配才应用；target 匹配还必须有同一 mutation timestamp witness（folder 使用 `folder.updatedAt`，order 使用 top-level `state.updatedAt`）才视为 exact replay且不推进 revision/timestamp。其它状态以 `CATEGORY_MUTATION_CONFLICT` 拒绝；unrelated mutation 推进 order witness 后允许保守冲突，安全优先于宽松 replay。
+- `useSessionActivation()` 分别保存视口集合与临时 forced IDs；IntersectionObserver 的离开通知会移除视口成员，owner 释放无需再次相交即可降级。Board 使用 6 个初始 card 和横向 720px overscan；`SessionTabList` 使用 24 个初始 link row 与纵向 440px overscan。稳定横向 slot 与共享响应式 link slot（普通链接桌面 44px、窄屏或 coarse-pointer 52px；附注链接在全部布局预留 76px，保留最多两行附注）保持滚动/插入几何，notes 继续按内容高度完整挂载。`SessionSlot` 保留焦点与 card/row 编辑 owner；overlay 使用所属 group 的 primitive key 订阅，`WorkspaceContent` 接收拖拽和移动对话框 owner。Search 在 canonical state 过滤后挂载匹配链接，未挂载文本不进入浏览器 Ctrl+F。
+- `useCaptureReveal()` 拥有 capture completion 与 URL `targetGroupId` 的共同 reveal lifecycle。它用 `data-session-slot-id` 精确匹配既有稳定 `SessionSlot`，先滚动 shell/card 共用 slot，再把 group 加入 highlight forced owner；因此 reveal 不依赖完整 `SessionCard` 先挂载。Workspace/category/filter/group-existence 取消、reduced-motion scroll、URL 参数清理和 3000ms highlight release 仍在同一 hook 内完成。
 - `src/shared/components/Favicon.tsx` 是 Open Tabs、saved links 与 info overlays 的固定尺寸 favicon owner，统一 lazy loading、decorative alt 和 failure fallback；inactive `SessionCardShell` 不挂载图片。
 
 ### `src/options/`
@@ -152,13 +210,13 @@ React Manager 是唯一 Manager 实现，由 `manager.html` 加载 `src/manager/
 - `useOptionsSettings()` 同时拥有 settings mutation queue 的 `loading / idle / saving / saved / error` 状态和失败 retry patch；Options 不再用 component-local state 猜测 persistence 时序。自定义过滤草稿只在 debounce owner 中维护 draft pending。
 - `RestoreSettingsSection` 把现有 `restoreGroupsInNewWindow` / `restoreNextToCurrent` booleans 投影为 Destination / Placement 策略；New window 只禁用不适用的 Placement UI，不改 schema，也不清除用户偏好。
 - `OptionsApp` 只在 Advanced disclosure 打开时 lazy-load `AdvancedSettingsContent`。Storage location、file migration、disconnect/reset dialogs 和 Storage Authority 都不进入默认 Options preload graph；Advanced 打开后直接渲染 Storage、deletion confirmation、Keyboard shortcuts 和 Reset 四个 A2 setting rows，不增加单项二级 section。
-- `DataStorageCard` 只读取/订阅 `StorageStatusProjection`，不读取 canonical state、Zustand 或 IndexedDB handle。Fallback 时 configured target 仍是 File，active backend 才是 Browser；UI 保留 folder identity、reason 和 `meta.json.updatedAt` freshness。
+- `DataStorageCard` 只读取/订阅 `StorageStatusProjection`，不读取 canonical state、Zustand 或 IndexedDB handle。Fallback 时 configured target 仍是 File，active backend 才是 Browser；UI 保留 folder identity、reason、`meta.json.updatedAt` freshness，以及 unread session recovery notice。只有 File backend 仍活跃时才提供 `Re-read folder`，避免在 Browser fallback 下给出无效动作。
 
 ### `src/popup/`
 
 - `popup.html` 在 React 执行前直接提供 320×180 的不可交互静态 loading shell，让 Chrome 能立即确定原生 Popup 尺寸并绘制启动反馈；React 首次 commit 后替换该内容。
 - `usePopupSettings()` 只读并订阅 `tabboardSettingsProjection`。投影有效时不导入 Zustand application store、Authoritative Publication 或 Storage Authority；投影缺失或损坏时才动态导入 `activeAdapter` 执行一次 canonical repair。
-- `PopupApp` 首次挂载时并行启动 settings projection 和 `chrome.tabs.query({ currentWindow: true })`。同一在途读取和查询在 Strict Mode effect replay 中复用；新的 Popup page generation 仍重新读取当前窗口。
+- `PopupApp` 首次挂载时并行启动 settings projection 和 `chrome.tabs.query({ currentWindow: true })`。同一在途读取和查询在 Strict Mode effect replay 中复用；新的 Popup page generation 仍重新读取当前窗口。Save 请求携带这份快照的 `selectedWindowId`，避免 worker 把 tab IDs 校验到另一个 focused normal window。
 - 两项输入 settle 前保持 loading；settings 失败时使用 `DEFAULT_SETTINGS` 并显示错误，Tab 查询失败时以 0 tabs 渲染并显示错误。Save/Remove 继续使用既有 worker actions。
 
 ### 图标
@@ -251,6 +309,7 @@ State canonical key 在浏览器存储后端下是 `chrome.storage.local["tabboa
 
 - Inbox。
 - Saved。
+- Bookmark（Chrome bookmarks runtime projection）。
 - Archive。
 
 ### Tab Items
@@ -360,22 +419,25 @@ Bin entry 用于恢复删除内容。
   categoryOrder.json
   bin.json
   ledger.json
+  .tabboard-recovery-<commitId>.json
   sessions/
     <groupId>.json
     ...
 ```
 
-- `meta.json` 是提交点（commit point），字段包括 `version`、`mutationRevision`、`createdAt`、`updatedAt`、`sessionOrder`、`writeInProgress`。`sessionOrder` 持久化 `sessions/<id>.json` 对应的 canonical Session 顺序，读取时不得依赖文件系统目录枚举顺序；旧数据缺少该字段时先兼容加载，并在下一次成功提交时自动回填。
+- `meta.json` 是提交点（commit point），字段包括 `version`、`mutationRevision`、`createdAt`、`updatedAt`、`sessionOrder`、`writeInProgress`、`commitId`、`recoveryFile`。`sessionOrder` 持久化 `sessions/<id>.json` 对应的 canonical Session 顺序，读取时不得依赖文件系统目录枚举顺序；旧数据缺少该字段时先兼容加载，并在下一次成功提交时自动回填。
 - 顶层文件分别对应 state 中同名字段；`categoryOrder.json` 存储 `categoryOrderByWorkspace`，`ledger.json` 存储 `dropOperationLedger`。
 - `sessions/<id>.json` 存储单个 group/session 对象；文件名为 group id。
 
 所有文件写入采用两阶段提交（参见「Persistence / 两阶段提交」）：
 
-1. 写 `meta.json` 置 `writeInProgress: true`、记录 `pendingRevision`。
-2. 对本次需要变更的每个数据文件，先写同目录临时文件（如 `settings.json.tmp-<uuid>`），完成后 rename 覆盖目标文件，保证单文件原子替换。
+1. 先将上一份完整 normalized state 写到本次独立的隐藏 recovery 文件；再写 `meta.json` 置 `writeInProgress: true`，保留旧 `mutationRevision` 和顺序，记录新 `pendingRevision` 与 recovery 引用。
+2. 对本次需要变更的每个数据文件，使用 File System Access API 的 staged writable stream 写入，并在 `close()` 成功时发布；写入失败时 abort，始终保留已有目标文件，不依赖用户目录中的 `move()` 支持。
 3. 最后写 `meta.json` 置 `writeInProgress: false`，把 `revision` 推进到 `pendingRevision`。
 
-加载时若 `meta.json.writeInProgress === true`，表示上一次写入未完成，丢弃该批次，以上一次 `revision` 对应的文件集合为准。`sessions/` 中未被任何 workspace/group 索引引用的孤立文件不会被加载，也不会在正常写入中主动删除；清理动作通过显式的 garbage collect 路径触发。
+普通提交使用 session ID Map 比较新旧 session 内容，跳过内容相等的 session 和顶层 settings/workspaces/folders/categoryOrder/bin/ledger 文件；独立 recovery snapshot 与两次 meta 写仍每次执行。首次写入、失败后的修复和完整备份恢复强制写入完整数据文件集合，保留 unread 文件与完整恢复前的原始字节备份。
+
+新事务中断时，加载器校验 recovery 的 commit identity 与 revision，并返回完整旧 snapshot；恢复文件缺失或损坏则拒绝加载。下一次成功提交强制修复全部 session 与顶层文件，并清理中断产生的 orphan session，随后保留本次 recovery、删除更旧 recovery。正常读取前后复核 meta，遇到并发发布重读，禁止将不同事务的数据混合。同批并发 IO 全部收敛后才 reject，禁止尚未完成的旧写入覆盖后续重试。旧布局中只有 `writeInProgress`、没有 recovery 引用时仍兼容读取可读数据，但无法保证恢复到旧版本；会记录 warning，并在后续写入修复文件集合。
 
 文件夹句柄通过原生 IndexedDB（单 database、单 object store，仅 put/get/delete）持久化，不引入额外依赖。启动时 `activeAdapter` 先读取 status projection 的 `activeBackend`，只有 File 时才加载 IndexedDB handle/file modules；若句柄缺失、权限被撤销或 IO 失败，自动降级为 `ChromeStorageAdapter`，同时保持 configured target 为 File。
 
@@ -391,9 +453,11 @@ Storage Authority 把 bootstrap/handle 当作 mode-switch commit point：
 
 - 切到 File：先创建并验证 File adapter、写入完整目标 state（暂不广播 ping），再保存 handle、写完整 File status projection，最后安装 File backend 并广播 committed ping。
 - 切回 Browser：如需 copy-back，先完成 Chrome state 写入，再写 Browser status projection、清 handle，最后安装 Chrome backend。
-- Reconnect：先验证目录权限并读取 File state，再保存 handle 与包含 folder name / file freshness 的 File projection，最后安装 File backend。
+- Reconnect：先验证目录权限并读取、必要时提交选定 state，再保存 handle；用一次 Chrome storage 写入发布选定 settings projection、完整 File status 与 committed ping，最后安装 File backend。候选仅在准备阶段静默，安装后的提交和重读恢复正常发布。
 
 任何 pre-commit 步骤失败都会保留原 backend、bootstrap 和 handle；UI 不会把半完成切换显示为成功。
+
+手动 `Re-read folder` 是 File backend 活跃时的显式用户读取，不是普通 stale snapshot。Storage Authority 先取得全局 `tabboard-state-write` Web Lock，再入 Authority 队列执行 `reloadFromDisk()`；peer 显式重读遵守同一锁顺序，避免读取跨越文件提交。成功后用合法的 one-shot `file-reread_*` event id 写入 File ping；peer Authority 只消费一次且不 rebroadcast。这个显式 observation 允许 Authoritative Publication 在同 revision/timestamp exact tie 上替换当前 canonical base，用既有 eager preview/replay 计算发布修复后的 session，同时保留已显示 optimistic subset、checked hidden work、retry/waiter 和实际 wire mutation。普通 ping、旧 RPC 和 lower revision observation 仍按 revision-first high-water 与 incumbent-on-tie 防护处理，不能擦掉已采纳的修复结果。
 
 ### Fallback（错误自动降级）
 
@@ -406,7 +470,7 @@ File backend 的初始化、读取、写入或 `reloadFromDisk()` 抛出错误�
 5. 触发失败的 File 写仍 reject；现有 mutation retry 负责在新 Chrome backend 上重试，避免误报 commit。
 6. Manager toast提示降级；Options 仍把 Local Folder 作为主上下文，并提供 `Reconnect folder` 与 `Use browser storage`。
 
-降级状态下，`Reconnect folder` 重新授权并验证 File state；`Use browser storage` 走安全 copy-back 后正式把 configured target 改成 Browser。
+降级状态下，`Reconnect folder` 重新授权并比较 File 与 Browser state；忽略时间戳、revision 和 legacy backend settings 的差异。数据相同直接重连，数据不同抛出 typed conflict，由 Options 明确选择。选择前在目录中写入 `.tabboard-reconnect-browser.json` 和 `.tabboard-reconnect-file.json`，再将选定 state 推进到大于两侧 revision 的新版本并提交。重连写入若命中未读 session 的同名文件，先在 `.tabboard-unread-before-restore/` 唯一命名保存精确原字节，备份失败则不替换或切换；不冲突的未读原件仍留在 `sessions/`。整个重连共享 `tabboard-state-write` 锁，数据和 handle 提交前不广播 ping。旧 worker 故障的自动恢复在浏览器数据有分歧时保留 Browser backend，等待显式选择。`Use browser storage` 走安全 copy-back 后正式把 configured target 改成 Browser。
 
 ## 关键流程
 
@@ -456,7 +520,7 @@ File backend 的初始化、读取、写入或 `reloadFromDisk()` 抛出错误�
 8. Open Tabs Exit、sidebar collapse 或 selected source window 改变/失效会 exit + clear。Same-window refresh 即使把 selected IDs prune 到 0，也保留 active scope；drag overlay `SessionCard` 不接收 coordinator，因此不注册 saved clear callback。Selection/Filter 从 `peek` 开始时调用不写 preference 的 `promote()` 并 reflow；只有显式 Expand/Pin 调用 `pin()` 或 desktop `toggle(true)` 更新下次启动偏好，只有 `drawer` 让 topbar/main surface `inert`。
 9. Selected window 使用与 selected capture 相同的 `saveSelectedTabs` worker contract。`captureWindow()` 只建立 selection/capture snapshot，不建立第二条 persistence path；completion 经 `Sidebar.onCaptureCompleted()` 进入 authoritative reveal。
 10. Selected capture 在请求前快照 selected tab ids、window、workspace 和 select mode，并以 pending guard 防止重复提交；返回 `CaptureCompletion` 后仅在 snapshot 与当前选择一致时清空 IDs。ManagerLayout 直接消费 completion 做 toast/reveal，不经过 window event。
-11. `chrome.storage.onChanged` 直接恢复正常 manager render。
+11. Capture read/ID 校验后由 Authoritative Publication 按 canonical mutationRevision 优先、parsed updatedAt 次优、exact tie 保留 incumbent 选择基线，并依次重放已显示的 optimistic in-flight subset 与 pending work。checked/category additional 未显示时不参与 preview。drop preview 只对显示副本调整 expectedRevision；queue、wire、waiter、retry/timer 与实际 CAS 仍由原 settlement 路径处理。有效当前 Workspace 只覆盖 eager projection，不改 canonical base；后续旧 RPC/subscription/recovery 保留已接纳的 capture。语义 replay 失败保留最新 canonical observation、原 projection 和 outstanding work，让 hook 返回 committed-but-unreconciled；Open Tabs refresh 与 reveal/selection 条件保持。
 12. Open Tabs refresh 不清空当前 `windows` state，也不渲染 loading row。并发 refresh 保持一个 active run + 一个 queued rerun，请求成功后 reducer 一次替换 rows，请求失败则保留旧列表并显示错误；UI 不提供手动 Refresh command。
 13. Shared preview portal 的 layout measurement 只在 `position === null` 时提交一次定位 state；后续 commits 仍检查 trigger 是否已脱离 DOM，但不得重复派发同一 preview 的 position。Saved-link activation 会停止冒泡并先关闭 preview，避免 document-level preview click handler 在同一事件末尾将其重新打开。Window blur / document hidden 会关闭 overlay 并暂时抑制 CSS hover/focus disclosure；只有后续真实 pointer/keyboard interaction 才解除，避免 Chrome 返回前台时复用失焦前的 stale hover target。
 14. `OpenTabsPanel` 只保留 workflow、selection coordinator、confirmation 与 focus orchestration；它不拥有 Chrome API、ScrollArea、row rendering 或 filter input。Open Tab info actions复用 overlay focus lifecycle，但使用命名普通 button 语义，不伪装成 menuitem。
@@ -506,31 +570,26 @@ All：
 
 ### Import
 
-入口：
+入口：Manager More > Import，`ImportModal` 默认追加 sessions。
 
-- Manager top toolbar Import。
+- `ImportModal` 对少于 65,536 字符的文本保持原 autosize/minRows 展示；达到该长度后使用 6 行、可滚动的原生 textarea，不做 autosize 测量，也不限制输入或导入大小。
+- `ImportModal` 保持即时 text draft，以 150ms trailing timer 更新 preview text；解析结果按未变的 preview text 缓存，不因 mode、pending commit 或 revision 更新重复解析。draft 与 preview 不同则隐藏旧预览、显示更新状态并禁止提交。Clear/Close 取消等待；编辑、关闭与提交使较早的 FileReader 回调失效，避免覆盖待提交或失败后保留的输入。authority 仍在 mutation boundary 重新解析和校验，完整恢复继续使用原 expected revision 与导航确认回调。
 
-流程：
-
-1. `openImportModal()` 收集文本。
-2. `parseImportPayload()` 尝试 JSON。
-3. JSON 包含 `groups` 或数组时走 `normalizeState({ groups })`。
-4. JSON 失败时走 `parseOneTabText(text)`。
-5. `parseOneTabText()` 可解析 OneTab blocks；如果未解析出 groups，会回退 `parseImportText()`。
-6. 导入 groups 加上当前 `workspaceId`，插入 groups 头部。
+- `parseImportedText()` 继续解析 TabBoard JSON/text、OneTab 与 URL list；`importGroups()` 用 `publication.commitChecked()` 提交 `import-groups`，等待确认后关闭弹窗。
+- `parseCompleteBackup()` / `validateCompleteBackup()` 只接受无损可规范化的完整 v1 snapshot，并校验实体、引用、顺序、设置与 ID。较早 v1 导出缺失 revision/ledger 时补默认值。 ID 复用 `isEntityId` 的非空、最多 128 UTF-8 字节契约，保留 `.`、`~`，并继续校验各实体集合的唯一性。File adapter 在恢复前备份和事务写入之前独立校验 session 文件名，拒绝 `/`、`\` 与 NUL；canonical schema 不承担平台文件名限制。
+- 完整恢复预览捕获 typed `RestorePreview` 的 revision 与 `OriginScope`；store facade 交给 Publication 冻结 `RestoreRequest`，经 worker / `StatePersistence` 在锁内核对来源、持久回执与 CAS，再执行 `restore-backup`。同一已提交请求的重试按回执确认结果；无回执时仍比较预览 revision。恢复业务内容并保留当前 `storageMode` / `storageFolderName`，从当前 revision 推进，而不沿用备份 revision。完整请求与回执规则见上文「Complete Restore commit confirmation」。
+- `StatePersistence` 在现有串行队列与写锁内保存替换前的规范化状态，通过显式 `StateWriteOptions.backupBeforeRestore` 传到当前 Storage Authority。
+- Browser adapter 在同一次 `chrome.storage.local.set()` 发布旧快照与新状态。File adapter 在已有 pending-meta/recovery-snapshot 事务前保存 `.tabboard-before-restore.json` 与损坏文件原文副本，再完整写入备份 sessions 并清理可读旧文件；无法读取的原文件不作为 orphan 删除，ID 冲突时写入前保存原文。File v1 布局和普通 mutation/replay/locked 校验不变。
+- 零参数 `useManagerPageState()` 拥有完整恢复的 guard 和完成导航。`ManagerLayout` 组合该 hook，并把 `pageState.restoreBackup` 传给 `ImportModal`。hook 在提交期间暂停被动页面校验与工作区同步，确认后读取最新 store 投影并以 validated `replaceState` 导航到当前活动工作区的 Board；失败解除 guard、重评合法工作区同步并抛出原错误。普通追加导入保持当前导航。
+- Full restore 的业务设置不触及 backend bootstrap、目录 handle 或 active-backend status。文件提交故障继续由现有 fallback 机制报告。
 
 ### Export
 
-入口：
+入口：Manager More > Export，`ManagerLayout` 打开 `ExportModal`。
 
-- Manager top toolbar Export。
-
-流程：
-
-1. `openExportModal(state.groups)`。
-2. `groupsToText()` 生成文本。
-3. JSON 形态为 `{ exportedAt, groups }`。
-4. 用户可 copy text、download text、download JSON。
+- JSON 调用 store `exportAll()`，经 `persistedSnapshot()` 提取 canonical state，再由 `exportToJson()` 复制并序列化。内容包括全部 workspaces、active workspace、categories 及顺序、sessions/notes、settings、Bin，以及 version、revision、timestamps 和 drop replay ledger；页面临时状态与辅助 Restore 回执不进入导出。
+- Text 调用 `exportToText(snapshot)`，使用 store 的规范化状态快照生成带 workspace/category 分段的 sessions 文本。文本用于追加导入，完整备份恢复使用 JSON。
+- 用户选择 JSON 或 Text 后可复制当前格式或下载相应文件。
 
 ### Category 归属
 
@@ -539,6 +598,7 @@ Session category 推导规则：
 ```text
 archived true      -> Archive
 starred true       -> Saved
+Bookmark           -> runtime projection only
 folderId exists    -> folder:<folderId>
 otherwise          -> Inbox
 ```
@@ -593,6 +653,10 @@ Intent 解析与提交：
 - session body 不会产出 merge intent：拖 session 只能落到 `group-insert` / `category-column`，不能落进另一张 session 内部，从根本上排除"把 A 合并进 B"的误操作。
 - `new-session-insert` 只接受 `tab` / `tabs` / `open-tabs`。若 `tabs` 是一个源 Session 的全部 canonical tabs，`isAllSourceTabs()` 同时从 pointer Gap Anchors 与 keyboard New choices移除创建路径，但保留 Existing Session merge。
 - 提交走 `useTabBoardStore.applyDropIntent(intent, openTabs)` → `AuthoritativePublication.commitDrop()`（带 `operationId` 与 `expectedRevision`）。publication 的 Promise 等待 worker authoritative commit；worker `statePersistence` 调用 shared `stateMutations`，最终由 `drop-operations.ts` 执行 intent并生成replay evidence。`persistDropWithFeedback()` 统一 success/error toast。
+- `move-tabs` / `copy-open-tabs` 写入已有 Session 时，`drop-operations.ts` 在插入前
+  合并 exact-URL links：目标中第一个旧 link 保持 identity、位置和除 title 外的全部
+  字段，title 取第一个 incoming link；同 URL incoming links 不再插入。该规则与
+  target insertion index 无关，之后仍经过现有 normalize/dedupe。
 
 拖拽期间的一致性保护：
 
@@ -630,7 +694,9 @@ manager.html
         -> SessionCard / TabItemRow
 ```
 
-Manager page-local navigation state 由 `src/manager/core/managerPageState.ts` 纯 owner 与 `src/manager/hooks/useManagerPageState.ts` React adapter 负责。它只管理 URL 中的 `workspace/category/view/q`，不进入 `TabBoardState`、Storage Authority 或 Zustand persistent projection。Navigation 使用 `pushState`，搜索使用 `replaceState`，`popstate` 反向恢复页面；history side effect 在 state updater 外执行，避免 StrictMode 重放 updater 时重复写入。Workspace create/select 以一个 atomic state push workspace/category/view，active delete replacement 以一个 atomic replace 覆盖已失效 entry；ManagerLayout 只把仍存在于 workspace projection 的 page Workspace 同步到 store。validation 复用 shared category ownership，拒绝不存在或跨 workspace 的 folder category。
+Manager 导航由 `src/manager/core/managerPageState.ts` 的纯 parsing/validation/serialization 与零参数 `useManagerPageState()` 负责。公开 controller 提供 `state`、`navigate(update)`、`replace(update)`、`setQuery(query)` 和 `restoreBackup(text, preview)` (captured revision and origin)。hook 订阅已有 store 的五个导航相关分支，命令、popstate 与 effect 在执行时读取最新 navigation ref、store 和 query snapshot。ref 在命令中同步更新，render 不覆盖它；页面导航不进入 persistent schema。
+
+普通导航使用 `pushState`，搜索、校验和完整恢复使用 `replaceState`；保留其它 URL 参数、路径、hash 与 history state，支持 Bookmark 和合法的自定义分类刷新与历史恢复。hook 延续 D046：合法页面工作区与全局活动工作区不同则同步 store，不同步已删除的工作区。完整恢复在调用 store 前同步启用私有 guard，暂停被动校验和工作区同步；等待确认后，读取最新投影并通过同一 validated navigation update 切到 Board，沿用分类偏好并保留搜索。失败立即重新评估合法工作区同步，再抛出原错误；同步的次要错误只记录 diagnostics，ImportModal 随后读取更新后的 retry revision。ManagerLayout 只调用 controller，不再拥有恢复 guard、快照校验或工作区同步 effect。底层 Publication、Storage Authority 和 CAS 合约保持既有职责。
 
 Workspace create/rename UI 由 `WorkspaceMenu` 管理 validated modal；不使用 `window.prompt`。Sidebar disclosure 由 `useSidebarDisclosure` 单一拥有 `collapsed / peek / pinned / drawer`：desktop pointer/focus intent 共享可清理的 350ms timer，任一 intent 保持时 peek 不收回；pinned 进入 grid，peek/drawer 使用 overlay，只有 drawer 产生 inert。Selection/Filter 使用 `promote()` 从 peek 进入本次页面的 pinned layout 但不写 preference；只有显式 Expand/Pin 或 desktop Collapse 更新 `tabboard.sidebarCollapsed`。Header global actions 固定为 direct Bin + More，More 只包含 Import、Export、Options。
 
@@ -658,9 +724,11 @@ Options 的 Advanced disclosure 使用页面 URL 中的 `advanced=1`，通过 `r
 
 ### 大 board 性能
 
-`WorkspaceContent` 为当前 category 的每个 session 保留一个稳定 `SessionSlot` 和全部 group insertion targets，维持 `@dnd-kit` horizontal collision/measurement 与 reorder geometry。`useSessionActivation()` 初始激活前 6 个 session，并以 board 为 root、左右 720px overscan 的 `IntersectionObserver` 单调激活接近视口的 slot；搜索/高亮/显式 shell title activation会强制升级目标，当前 active saved selection scope 的 group 也进入 forced set，避免仍在 board 中的 owner 因 activation context reset 被卸载。若 filter/category 使 active owner 真正离开 render tree，其 unregister cleanup 会同步 exit scope。active slot 渲染完整 `SessionCard`，inactive slot 渲染 `SessionCardShell`，后者保留 whole-surface pointer/touch drag、title与summary，但不创建 tab rows、tab sortables、row subscriptions 或 observers。缺少 IntersectionObserver 时退化为全部激活。
+`WorkspaceContent` 为当前 category 的每个 session 保留一个稳定 `SessionSlot` 和全部 group insertion targets，维持 `@dnd-kit` horizontal collision/measurement 与 reorder geometry。`useSessionActivation()` 初始激活前 6 个 session，并以 board 为 root、左右 720px overscan 的 `IntersectionObserver` 按进入/离开 viewport + overscan 激活或回退 slot；搜索/高亮/显式 shell title activation会强制升级目标，当前 active saved selection scope 的 group 也进入 forced set，避免仍在 board 中的 owner 因 activation context reset 被卸载。若 filter/category 使 active owner 真正离开 render tree，其 unregister cleanup 会同步 exit scope。active slot 渲染完整 `SessionCard`，inactive slot 渲染 `SessionCardShell`，后者保留 whole-surface pointer/touch drag、title与summary，但不创建 tab rows、tab sortables、row subscriptions 或 observers。缺少 IntersectionObserver 时退化为全部激活。
 
-所有 session slot 仍留在 DOM，完整 tab row 不再常驻。TabBoard search 继续扫描 canonical state并激活匹配 session；浏览器 find-in-page 只能看到已激活 tab rows和远端 shell summary，这是用初次 mount 上限换取的明确取舍。Trash 最多保留 80 项，并继续使用 `content-visibility`。该行为由 `useSessionActivation.test.ts`、session ownership tests 和 `tests/e2e/large-board.e2e.ts`（60 slots、6 initial cards、远端 shell upgrade）守护。
+`SessionSlot` 在本地 ref 保留 `.session-card__tabs` 的 scrollTop。Layout effect 在真实列表挂载及 group 更新后，按当前 scrollHeight/clientHeight clamp 并恢复位置；scroll listener 与 cleanup 仅在列表仍连接且有布局高度时捕获最新 DOM 偏移。Chromium 脱离 DOM 或无布局盒时返回的零值不得覆盖已捕获位置；仍连接的 same-context cleanup 可在 scroll event 前读取偏移，但不承诺保留脚本同一 tick 设值、事件未送达就卸载的位置。Cleanup 只更新它绑定的旧 context record，Session/workspace/category/read-only/normalized search context 切换重置为零。Drag placeholder 释放后同样重新绑定列表；不延长 card/row 挂载，不引入持久化 UI 状态。
+
+所有 session slot 仍留在 DOM，完整 tab row 不再常驻。TabBoard search 继续扫描 canonical state并激活匹配 session；浏览器 find-in-page 只能看到已激活 tab rows和远端 shell summary，这是用初次 mount 上限换取的明确取舍。Trash 最多保留 80 项，并继续使用 `content-visibility`。该行为由 `useSessionActivation.test.ts`、session ownership tests 和 `tests/e2e/large-board.e2e.ts`（60 slots、首屏及横向往返后 6–8 个完整 cards、远端 shell upgrade）守护。
 
 Open Tabs 同样保留全部 rows 与每行的 DnD/focus/preview hooks。`useOpenTabsRuntime()` 用 `useDeferredValue` 延后 query，`openTabsWorkflow.ts` projection 统一派生 filtered rows 与 selection drag records；`.manager-open-tab-row` 使用 `content-visibility: auto` 与 intrinsic size 跳过 off-screen layout/paint。Overlay provider 的 document/window listeners 在生命周期内只绑定一次；commands 与 menu/preview observable state 分离，普通 row/card 只订阅自身 key 的 open boolean。
 
@@ -668,10 +736,12 @@ Board、session tab list 与 Open Tabs list使用同一条件 overflow cue模型
 
 ## Search
 
+- `SearchBar` 立即显示 local draft，停止输入 150ms 后发布 saved query。结果计数复用同一 query：普通分类直接读取 board projection 的 `visibleGroups.length`，Bookmark 按 query 与只读 groups memoize 匹配。输入等待时显示 `Updating…`，Clear/Close 即时清空 draft 与 query，不执行旧 draft 的计数扫描。
+
 Manager search：
 
 - `searchQuery` 由 `SearchQueryStore` 单一拥有。初始化时非空 URL `?q=` 优先；URL缺失或为空时回退 `sessionStorage["tabboardSearch"]`。非空 initial snapshot会best-effort写回session storage，空初始化不创建key。
-- 顶部 SearchBar 保留本地 input value和150ms debounce；external store更新会同步local value，clear/close立即更新两者。match count使用local input即时过滤canonical category groups，不等待debounce。
+- 顶部 SearchBar 保留本地 input value和150ms debounce；external store更新会同步local value，clear/close立即更新两者。match count使用同一已发布query：普通分类复用board projection的visibleGroups数量，Bookmark按query缓存匹配；等待期间显示Updating…，不扫描即时local draft。
 - `openTabsQuery` 来自 sidebar footer，只过滤 selected browser window 的 pinned/regular rows。
 - `openTabFilter` 来自可保存 open tab 的右键菜单：workflow记录 `tabFilterUrl`，同一 command同步把URL写入 `SearchQueryStore`。window切换和 Open Tabs refresh不自动清除它；capture snapshot直接读取owner，避免setter与React effect之间的竞态。
 - `getBoardProjection()` 先按fallback-safe active workspace和shared category semantics产生未过滤 `categoryGroups`，再用 `filterGroupsByQuery()`产生 `visibleGroups`。空normalized query直接复用category array引用。
@@ -713,6 +783,9 @@ Icons：
 npm test
 npm run build
 npm run check
+npm run test:release
+npm run test:runtime-contract
+npm run test:e2e
 git diff --check
 ```
 
@@ -721,7 +794,8 @@ git diff --check
 - `npm test`（Vitest，happy-dom）：React/core contracts，包括 selectors、state mutations、Authoritative Publication queue/retry/waiter/reconciliation/lifecycle、worker persistence、capture ownership/feedback、typed DnD、Open Tabs policy、overlays、layout 和 hydration。
 - `build`：`tsc --noEmit` 类型检查加 Vite/CRX 产物构建。
 - `dev` / `build` / `preview` 显式使用 `vite.config.ts`；跟踪的 `vite.config.js` 只 re-export 该配置，防止 CLI 默认配置与程序化测试配置分叉。页面继续保留 modulepreload 与 file-only lazy chunks；生产 service worker chunk 必须静态引用 file/fs chunks，且不得包含指向它们的 dynamic `import()`。
-- `check`：先 `build`，再由 `scripts/check-extension.mjs` 校验 Manifest entry、构建产物引用和 extension sanity；strict import graph gate拒绝任何 source SCC，并禁止 publication依赖UI/concrete storage、shared/background反向依赖Manager。
+- `check`：先 `build`，再运行 `scripts/check-extension.mjs`、`check:cycles`、`check:architecture` 和 `test:release`；strict import graph gate拒绝任何 source SCC，并禁止 publication依赖UI/concrete storage、shared/background反向依赖Manager。
+- `test:release`：Node release/package/startup contract tests；`test:runtime-contract`：命名的 worker/store contract 记录；`test:e2e`：按需执行 Playwright 浏览器套件与 CI browser gate。
 
 当前测试空白：
 

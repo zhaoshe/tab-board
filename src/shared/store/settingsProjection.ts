@@ -1,3 +1,4 @@
+import { isOrigin, type OriginScope } from './restoreCommit';
 import {
   DEFAULT_SETTINGS,
   SETTINGS_PROJECTION_KEY,
@@ -12,11 +13,13 @@ export interface SettingsProjection {
 }
 
 export interface StorageStatusProjection {
+  activeOrigin?: OriginScope;
   configuredTarget: 'browser' | 'file';
   activeBackend: 'browser' | 'file';
   folderName: string | null;
   fallbackReason: string | null;
   fileUpdatedAt: string | null;
+  unreadSessionCount?: number;
 }
 
 export const BROWSER_STORAGE_STATUS: Readonly<StorageStatusProjection> = {
@@ -49,6 +52,8 @@ export function parseStorageStatusProjection(
   }
   const configuredTarget = candidate.configuredTarget;
   const activeBackend = candidate.activeBackend;
+  const unreadSessionCount = candidate.unreadSessionCount;
+  if (unreadSessionCount !== undefined && (!Number.isSafeInteger(unreadSessionCount) || Number(unreadSessionCount) < 0)) return null;
   if (
     (configuredTarget !== 'browser' && configuredTarget !== 'file')
     || (activeBackend !== 'browser' && activeBackend !== 'file')
@@ -73,25 +78,33 @@ export function parseStorageStatusProjection(
   return {
     configuredTarget,
     activeBackend,
+    ...(isOrigin(candidate.activeOrigin) ? { activeOrigin: candidate.activeOrigin } : {}),
     folderName: candidate.folderName,
     fallbackReason: candidate.fallbackReason,
     fileUpdatedAt: candidate.fileUpdatedAt,
+    ...(configuredTarget === 'file' && Number(unreadSessionCount) > 0 ? { unreadSessionCount: Number(unreadSessionCount) } : {}),
   };
 }
 
 export function fileStorageStatus({
   folderName,
   fileUpdatedAt,
+  unreadSessionCount = 0,
+  activeOrigin,
 }: {
   folderName: string | null;
   fileUpdatedAt: string | null;
+  unreadSessionCount?: number;
+  activeOrigin?: OriginScope;
 }): StorageStatusProjection {
   return {
     configuredTarget: 'file',
     activeBackend: 'file',
+    ...(activeOrigin ? { activeOrigin } : {}),
     folderName,
     fallbackReason: null,
     fileUpdatedAt,
+    ...(unreadSessionCount > 0 ? { unreadSessionCount } : {}),
   };
 }
 

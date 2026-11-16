@@ -11,7 +11,7 @@ TabBoard is a React 18 + TypeScript app built with Vite and packaged with `@crxj
 ## Requirements
 
 - Google Chrome (or a Chromium-based browser) version 115 or newer.
-- Node.js 18 or newer, only to build the extension from source.
+- Node.js 20 or newer, only to build the extension from source.
 
 ## Install
 
@@ -53,17 +53,29 @@ Chrome shortcut keys can be customized at `chrome://extensions/shortcuts`.
 
 ## Permissions and Privacy
 
-TabBoard is local-first and does not make any network requests. All saved sessions
-stay on your machine in `chrome.storage.local` or in a local folder you select.
+TabBoard is local-first. Saved sessions stay on your machine in
+`chrome.storage.local` or in a local folder you select, and TabBoard does not
+upload them to a TabBoard-operated service. It does not require an account or
+sell data.
+
+Some browser-driven network activity still happens as part of normal features:
+
+- Restoring a saved tab or session opens the target page in Chrome.
+- Refreshing a saved tab title may briefly open the saved URL in a minimized
+  popup window so Chrome can read the final page title.
+- Saved favicon URLs may load from the original site or a Chrome-provided
+  favicon URL when TabBoard displays them.
 
 It requests only the permissions it needs to manage tabs:
 
 - `tabs` and `tabGroups`: read and restore tabs and tab groups.
+- `bookmarks`: show Chrome bookmark folders as a read-only Bookmark category.
 - `storage` and `unlimitedStorage`: persist sessions locally without a size cap.
 - `contextMenus`: add right-click capture actions.
 - `clipboardWrite`: support copy/export actions.
 
-TabBoard requests no host permissions, so it cannot read the contents of any web page.
+TabBoard requests no host permissions, so it cannot read the contents of web
+pages.
 
 ## Screenshots
 
@@ -97,6 +109,7 @@ The compact popup for saving the current window, and the settings page:
 - Keep restored records when a group is locked.
 - Preserve Chrome tab group metadata where Chrome allows it.
 - Organize saved groups in a tabExtend-style manager with workspace/category controls in the top bar, a collapsible full-height Open Tabs sidebar, and horizontal session columns.
+- Browse Chrome bookmark folders in a read-only Bookmark category, with nested folders flattened as `Parent/Child` sessions.
 - Switch Chrome windows from sidebar chips and window actions, or create a new browser window without leaving the manager.
 - Review one selected window in a single vertical Open Tabs list; pinned tabs stay inline with a badge.
 - Attempt to save every tab with a URL except extension pages, including pinned tabs.

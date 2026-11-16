@@ -6,6 +6,7 @@ import { TabBoardTooltip } from '../../../shared/components/TabBoardTooltip';
 import type { CategoryFilter } from '../../core/selectors';
 import { useSearchQuery } from '../../hooks/useSearchQuery';
 import { SearchBar } from '../search/SearchBar';
+import type { Group as SessionGroup } from '../../../shared/model';
 
 export const SEARCH_INPUT_ID = 'manager-search-input';
 
@@ -25,9 +26,11 @@ export function shouldExpandSearchShortcut(target: EventTarget | null): boolean 
 
 export function ManagerSearchCommand({
   category,
+  bookmarkGroups = [],
   onExpandedChange,
 }: {
   category: CategoryFilter;
+  bookmarkGroups?: readonly SessionGroup[];
   onExpandedChange?: (expanded: boolean) => void;
 }) {
   const query = useSearchQuery();
@@ -81,6 +84,7 @@ export function ManagerSearchCommand({
             inputId={SEARCH_INPUT_ID}
             autoFocus
             category={category}
+            bookmarkGroups={bookmarkGroups}
             fullWidth={false}
             onEscape={() => setSearchExpanded(collapseSearchState(query).isExpanded)}
           />

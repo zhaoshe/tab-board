@@ -92,6 +92,7 @@ export interface TabHoverTooltipModel {
   domain: string;
   link: string;
   savedAt?: string;
+  action?: string;
 }
 
 export function getTabHoverDomain(url: string): string {
@@ -116,6 +117,9 @@ export function renderTabHoverTooltipContent(model: TabHoverTooltipModel): React
     createElement('strong', { className: 'manager-tab-tooltip__title' }, model.title),
     model.domain
       ? createElement('span', { className: 'manager-tab-tooltip__domain' }, model.domain)
+      : null,
+    model.action
+      ? createElement('p', { className: 'manager-tab-tooltip__action' }, model.action)
       : null,
     model.link ? createElement('p', { className: 'manager-tab-tooltip__link' }, model.link) : null,
     savedTime
@@ -955,9 +959,10 @@ export function useManagerOverlayCommands(): ManagerOverlayCommands {
   return commands;
 }
 
-function useManagerOverlayOpenState(
-  getSnapshot: (store: ManagerOverlayStateStore) => boolean,
-): boolean {
+function useManagerOverlayOpenState<T>(
+  getSnapshot: (store: ManagerOverlayStateStore) => T,
+  serverSnapshot: T,
+): T {
   const store = useContext(ManagerOverlayStateStoreContext);
   if (!store) throw new Error('ManagerOverlaysProvider is required.');
   const subscribe = useCallback((listener: () => void) => {
@@ -967,7 +972,7 @@ function useManagerOverlayOpenState(
   return useSyncExternalStore(
     subscribe,
     () => getSnapshot(store),
-    () => false,
+    () => serverSnapshot,
   );
 }
 
@@ -976,7 +981,7 @@ export function useManagerMenuOpen(id: string): boolean {
     (store: ManagerOverlayStateStore) => store.menu?.itemKey === id,
     [id],
   );
-  return useManagerOverlayOpenState(getSnapshot);
+  return useManagerOverlayOpenState(getSnapshot, false);
 }
 
 export function useManagerPreviewOpen(id: string): boolean {
@@ -984,7 +989,18 @@ export function useManagerPreviewOpen(id: string): boolean {
     (store: ManagerOverlayStateStore) => store.preview?.id === id,
     [id],
   );
-  return useManagerOverlayOpenState(getSnapshot);
+  return useManagerOverlayOpenState(getSnapshot, false);
+}
+
+// The primitive key keeps unrelated cards out of overlay updates.
+export function useManagerOwnedOverlayTabId(groupId: string): string | null {
+  const getSnapshot = useCallback((store: ManagerOverlayStateStore) => {
+    const trigger = store.menu?.trigger ?? store.preview?.trigger;
+    const card = trigger?.closest<HTMLElement>('.session-card');
+    if (card?.dataset.groupId !== groupId) return null;
+    return trigger?.closest<HTMLElement>('[data-tab-id]')?.dataset.tabId ?? '';
+  }, [groupId]);
+  return useManagerOverlayOpenState(getSnapshot, null);
 }
 
 export function useManagerInfoTrigger(

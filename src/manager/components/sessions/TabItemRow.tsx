@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Button,
   Checkbox,
@@ -12,6 +12,7 @@ import {
   FilePenLine,
   FileText as IconFileText,
   Link as IconLink,
+  RefreshCw,
   Trash,
   Trash as IconTrash,
   X,
@@ -40,6 +41,7 @@ import { useDestructiveConfirmation } from '../../../shared/components/Destructi
 import { AccessibleIconAction } from '../../../shared/components/AccessibleIconAction';
 import { Favicon } from '../../../shared/components/Favicon';
 import { TabBoardIcon } from '../../../shared/components/TabBoardIcon';
+import { useIsTitleRefreshing } from '../../hooks/useTitleRefreshActivity';
 
 export function getTabDropMarkerPlacement(
   marker: DragMarker | null | undefined,
@@ -82,6 +84,9 @@ interface TabItemRowProps {
   selectedRefs: SavedTabRef[];
   runtime: ManagerRuntime;
   locked?: boolean;
+  readOnly?: boolean;
+  deleteRestoredTabs?: boolean;
+  savedLinkRestoreTooltip?: string;
   selectionMode?: boolean;
   selected?: boolean;
   dropMarker?: DragMarker | null;
@@ -90,6 +95,7 @@ interface TabItemRowProps {
   sourceRect?: DragSourceRect | null;
   isDragOverlay?: boolean;
   commands?: SessionTabCommands;
+  onInteractionChange?: (tabId: string, retained: boolean) => void;
 }
 
 export interface SessionTabCommands {
@@ -110,6 +116,8 @@ export function TabItemRow({
   selectedRefs,
   runtime,
   locked = false,
+  readOnly = false,
+  savedLinkRestoreTooltip = '',
   selectionMode = false,
   selected = false,
   dropMarker = null,
@@ -118,13 +126,19 @@ export function TabItemRow({
   sourceRect = null,
   isDragOverlay = false,
   commands,
+  onInteractionChange,
 }: TabItemRowProps) {
   const [isEditingNote, setIsEditingNote] = useState(false);
+  useLayoutEffect(() => {
+    onInteractionChange?.(tab.id, isEditingNote);
+    return () => onInteractionChange?.(tab.id, false);
+  }, [isEditingNote, onInteractionChange, tab.id]);
   const [noteValue, setNoteValue] = useState(tab.note);
   const noteTextareaRef = useRef<HTMLTextAreaElement>(null);
   const titleTriggerRef = useRef<HTMLButtonElement | null>(null);
   const { closeOverlays, openMenu } = useManagerOverlayCommands();
   const infoKey = `saved:${groupId}:${tab.id}`;
+  const isTitleRefreshing = useIsTitleRefreshing(groupId, tab.id);
   const { showError, showSuccess } = useToast();
   const confirmDestructive = useDestructiveConfirmation();
   const displayText = tab.note || tab.title;
@@ -155,7 +169,7 @@ export function TabItemRow({
         }],
       },
     },
-    disabled: isDragOverlay,
+    disabled: isDragOverlay || readOnly,
   });
 
   const style = {
@@ -177,7 +191,8 @@ export function TabItemRow({
       event.stopPropagation();
       if (event.detail !== 0) event.currentTarget.blur();
       closeOverlays();
-      void runtime.openSavedTab(tab.url);
+      if (readOnly) void runtime.openSavedTab(tab.url);
+      else void runtime.restoreTab(groupId, tab.id);
     }
   };
 
@@ -240,11 +255,27 @@ export function TabItemRow({
     }
   };
 
+  const handleRefreshTitle = async () => {
+    if (tab.itemType !== ITEM_LINK || !commands) return;
+    closeOverlays();
+    try {
+      const title = await runtime.refreshSavedTabTitle(
+        tab.url,
+        groupId,
+        tab.id,
+      );
+      if (title !== tab.title) commands.updateTab(groupId, tab.id, { title });
+    } catch {
+      return;
+    }
+  };
+
   const registerInfoTrigger = useManagerInfoTrigger(infoKey, {
     kind: 'saved',
     model: {
       title: tab.itemType === ITEM_LINK ? tab.title : displayText,
       domain: getTabHoverDomain(tab.url),
+      action: tab.itemType === ITEM_LINK ? savedLinkRestoreTooltip : '',
       link: tab.itemType === ITEM_LINK ? tab.url : '',
       savedAt: tab.createdAt,
     },
@@ -255,21 +286,33 @@ export function TabItemRow({
   }, [registerInfoTrigger]);
   const menuItems = (
     <>
-      <ManagerMenuItem
-        description={tab.itemType === ITEM_LINK && !tab.note
-          ? 'Attach context to this saved tab'
-          : 'Edit saved tab context'}
-        icon={FilePenLine}
-        label={tab.itemType === ITEM_LINK && !tab.note ? 'Add Note' : 'Edit Note'}
-        onClick={handleEditNote}
-      />
-      {tab.itemType === ITEM_LINK ? (
+      {!readOnly && (
         <ManagerMenuItem
-          description="Copy the saved address"
-          icon={Copy}
-          label="Copy URL"
-          onClick={handleCopy}
+          description={tab.itemType === ITEM_LINK && !tab.note
+            ? 'Attach context to this saved tab'
+            : 'Edit saved tab context'}
+          icon={FilePenLine}
+          label={tab.itemType === ITEM_LINK && !tab.note ? 'Add Note' : 'Edit Note'}
+          onClick={handleEditNote}
         />
+      )}
+      {tab.itemType === ITEM_LINK ? (
+        <>
+          {!readOnly && (
+            <ManagerMenuItem
+              description="Reload the page title"
+              icon={RefreshCw}
+              label="Refresh Title"
+              onClick={handleRefreshTitle}
+            />
+          )}
+          <ManagerMenuItem
+            description="Copy the saved address"
+            icon={Copy}
+            label="Copy URL"
+            onClick={handleCopy}
+          />
+        </>
       ) : (
         <ManagerMenuItem
           description="Copy the saved text"
@@ -278,17 +321,19 @@ export function TabItemRow({
           onClick={handleCopy}
         />
       )}
-      <ManagerMenuItem
-        description="Move this item to Bin"
-        icon={Trash}
-        label={tab.itemType === ITEM_LINK
-          ? 'Delete Saved Tab'
-          : 'Delete Saved Note'}
-        danger
-        disabled={locked}
-        lifecycleAllowance="saved-tab-removal"
-        onClick={handleDelete}
-      />
+      {!readOnly && (
+        <ManagerMenuItem
+          description="Move this item to Bin"
+          icon={Trash}
+          label={tab.itemType === ITEM_LINK
+            ? 'Delete Saved Tab'
+            : 'Delete Saved Note'}
+          danger
+          disabled={locked}
+          lifecycleAllowance="saved-tab-removal"
+          onClick={handleDelete}
+        />
+      )}
     </>
   );
   const openSavedTabMenu = (
@@ -408,6 +453,7 @@ export function TabItemRow({
         onPointerDown={(event) => {
           if (
             isDragOverlay
+            || readOnly
             || event.pointerType === 'touch'
             || (
               event.target instanceof Element
@@ -421,6 +467,7 @@ export function TabItemRow({
         onTouchStart={(event) => {
           if (
             isDragOverlay
+            || readOnly
             || (
               event.target instanceof Element
               && event.target.closest('button, input, textarea, a, [data-no-drag]')
@@ -449,7 +496,10 @@ export function TabItemRow({
             );
             return;
           }
-          if (event.target instanceof Element && event.target.closest('button, input, textarea, a, [data-no-drag]')) {
+          if (
+            readOnly
+            || (event.target instanceof Element && event.target.closest('button, input, textarea, a, [data-no-drag]'))
+          ) {
             return;
           }
           listeners?.onKeyDown?.(event);
@@ -467,7 +517,7 @@ export function TabItemRow({
             )
             : <IconFileText size={16} aria-hidden="true" />}
           </span>
-          {!isDragOverlay && (
+          {!isDragOverlay && !readOnly && (
             <Checkbox
               size="sm"
               name="saved-tab-selection"
@@ -524,11 +574,15 @@ export function TabItemRow({
             </Text>
           )}
         </div>
-        {!isDragOverlay ? (
+        {!isDragOverlay && !readOnly ? (
           <AccessibleIconAction
-            label="Delete"
-            danger
-            className="tab-item-row__delete"
+            label={isTitleRefreshing ? 'Refreshing title' : 'Delete'}
+            danger={!isTitleRefreshing}
+            loading={isTitleRefreshing}
+            className={[
+              'tab-item-row__delete',
+              isTitleRefreshing ? 'tab-item-row__delete--loading' : '',
+            ].filter(Boolean).join(' ')}
             disabled={locked}
             onClick={handleDelete}
           >

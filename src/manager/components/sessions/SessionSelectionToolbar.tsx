@@ -86,8 +86,9 @@ export function SessionSelectionToolbar({
   };
 
   return (
-    <header
-      className="session-card__header session-selection-toolbar"
+    <div
+      className="session-selection-toolbar"
+      role="toolbar"
       aria-label="Session Selection"
       data-no-drag
     >
@@ -162,6 +163,6 @@ export function SessionSelectionToolbar({
           <TabBoardIcon icon={X} />
         </AccessibleIconAction>
       </div>
-    </header>
+    </div>
   );
 }

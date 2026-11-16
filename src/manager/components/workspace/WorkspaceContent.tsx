@@ -11,9 +11,10 @@ import { useDroppable } from '@dnd-kit/core';
 import { useShallow } from 'zustand/react/shallow';
 import { useBoardProjection } from '../../hooks/useBoardProjection';
 import type { ManagerRuntime } from '../../hooks/useManagerRuntime';
+import type { Group as SessionGroup } from '../../../shared/model';
 import { useTabBoardStore } from '../../../shared/store/useTabBoardStore';
 import type { CategoryFilter } from '../../core/selectors';
-import { getCanonicalGroupIndexById } from '../../core/selectors';
+import { filterGroupsByQuery, getCanonicalGroupIndexById } from '../../core/selectors';
 import type {
   DndData,
   DragMarker,
@@ -31,11 +32,13 @@ import { NewSessionGapTarget } from './NewSessionGapTarget';
 
 interface WorkspaceContentProps {
   category: CategoryFilter;
+  bookmarkGroups?: readonly SessionGroup[];
   workspaceName: string;
   runtime: ManagerRuntime;
   registerBoardElement?: (element: HTMLElement | null) => void;
   activeDragPayload?: DragPayload | null;
   activeDropTarget?: DropTarget | null;
+  retainedGroupIds?: readonly string[];
   highlightedGroupId?: string | null;
   dragMarker?: DragMarker | null;
   sourceRect?: DragSourceRect | null;
@@ -135,12 +138,14 @@ export function getSessionCardDragMarker(
 
 export function WorkspaceContent({
   category,
+  bookmarkGroups = [],
   workspaceName,
   runtime,
   registerBoardElement,
   activeDragPayload = null,
   activeDropTarget = null,
   highlightedGroupId,
+  retainedGroupIds = [],
   dragMarker = null,
   sourceRect = null,
   selectionScope,
@@ -148,10 +153,15 @@ export function WorkspaceContent({
 }: WorkspaceContentProps) {
   const {
     workspaceId,
-    categoryGroups,
-    visibleGroups,
+    categoryGroups: savedCategoryGroups,
+    visibleGroups: savedVisibleGroups,
     searchQuery,
   } = useBoardProjection(category);
+  const isBookmarkCategory = category === 'bookmarks';
+  const categoryGroups = isBookmarkCategory ? [...bookmarkGroups] : savedCategoryGroups;
+  const visibleGroups = isBookmarkCategory
+    ? filterGroupsByQuery(categoryGroups, searchQuery)
+    : savedVisibleGroups;
   const folderId = category.startsWith('folder:') ? category.slice('folder:'.length) : null;
   const { currentFolder } = useTabBoardStore(
     useShallow((state) => ({
@@ -172,9 +182,10 @@ export function WorkspaceContent({
     [categoryGroups],
   );
   const canonicalGroups = useTabBoardStore.getState().groups;
-  const suppressNewSessionTargets = activeDragPayload?.kind === 'tabs'
+  const suppressNewSessionTargets = isBookmarkCategory || activeDragPayload?.kind === 'tabs'
     && isAllSourceTabs(activeDragPayload, canonicalGroups);
   const newSessionAnchorsEnabled = !suppressNewSessionTargets
+    && !isBookmarkCategory
     && (activeDragPayload?.kind === 'tab'
     || activeDragPayload?.kind === 'tabs'
     || activeDragPayload?.kind === 'open-tabs');
@@ -189,12 +200,16 @@ export function WorkspaceContent({
   ), [activeDropTarget, category, workspaceId]);
   const forcedIds = useMemo(
     () => [
+      ...retainedGroupIds,
+      ...(activeDragPayload?.kind === 'group' || activeDragPayload?.kind === 'tab' ? [activeDragPayload.groupId] : []),
+      ...(activeDragPayload?.kind === 'tabs' ? activeDragPayload.refs.map((ref) => ref.groupId) : []),
+      ...(activeDropTarget?.kind === 'group-body' || activeDropTarget?.kind === 'tab-before' ? [activeDropTarget.groupId] : []),
       ...(highlightedGroupId ? [highlightedGroupId] : []),
       ...(selectionScope.scope?.kind === 'saved-tabs'
         ? [selectionScope.scope.groupId]
         : []),
     ],
-    [highlightedGroupId, selectionScope.scope],
+    [activeDragPayload, activeDropTarget, highlightedGroupId, retainedGroupIds, selectionScope.scope],
   );
   const sessionActivation = useSessionActivation({
     contextKey: activationContextKey,
@@ -213,6 +228,7 @@ export function WorkspaceContent({
 
   const getTitle = () => {
     if (category === 'saved') return 'Saved';
+    if (category === 'bookmarks') return 'Bookmark';
     if (category === 'archive') return 'Archive';
     if (category === 'inbox') return 'Inbox';
     return currentFolder?.name || 'Category';
@@ -268,6 +284,16 @@ export function WorkspaceContent({
       );
     }
 
+    if (category === 'bookmarks') {
+      return (
+        <Box {...emptyStateProps}>
+          <IconFolder size={48} aria-hidden="true" style={{ opacity: 0.3 }} />
+          <Text mt={primaryCopyMargin} fw={500}>No bookmark folders yet</Text>
+          <Text size="sm" c="dimmed">Chrome bookmark folders will appear here</Text>
+        </Box>
+      );
+    }
+
     if (category.startsWith('folder:')) {
       return (
         <Box {...emptyStateProps}>
@@ -315,18 +341,20 @@ export function WorkspaceContent({
           <div className="manager-board__empty-content">
             {getEmptyState()}
             <div className="session-board" tabIndex={-1}>
-              <GroupInsertionTarget
-                id={`group-insert-end-${workspaceId}-${category}`}
-                category={category}
-                index={categoryGroups.length}
-                workspaceId={workspaceId}
-                isMarker={
-                  activeDragPayload?.kind === 'group'
-                  && dragMarker?.kind === 'group'
-                  && dragMarker.index === categoryGroups.length
-                }
-                isEndTarget
-              />
+              {!isBookmarkCategory && (
+                <GroupInsertionTarget
+                  id={`group-insert-end-${workspaceId}-${category}`}
+                  category={category}
+                  index={categoryGroups.length}
+                  workspaceId={workspaceId}
+                  isMarker={
+                    activeDragPayload?.kind === 'group'
+                    && dragMarker?.kind === 'group'
+                    && dragMarker.index === categoryGroups.length
+                  }
+                  isEndTarget
+                />
+              )}
             </div>
           </div>
         )
@@ -346,17 +374,19 @@ export function WorkspaceContent({
                       active={isNewSessionAnchorActive(groupIndex)}
                     />
                   )}
-                  <GroupInsertionTarget
-                    id={`group-insert-${group.id}`}
-                    category={category}
-                    index={groupIndex}
-                    workspaceId={workspaceId}
-                    isMarker={
-                      activeDragPayload?.kind === 'group'
-                      && dragMarker?.kind === 'group'
-                      && dragMarker.index === groupIndex
-                    }
-                  />
+                  {!isBookmarkCategory && (
+                    <GroupInsertionTarget
+                      id={`group-insert-${group.id}`}
+                      category={category}
+                      index={groupIndex}
+                      workspaceId={workspaceId}
+                      isMarker={
+                        activeDragPayload?.kind === 'group'
+                        && dragMarker?.kind === 'group'
+                        && dragMarker.index === groupIndex
+                      }
+                    />
+                  )}
                   <SessionSlot
                     activate={() => sessionActivation.activate(group.id)}
                     group={group}
@@ -370,6 +400,7 @@ export function WorkspaceContent({
                     dragMarker={getSessionCardDragMarker(dragMarker, group.id)}
                     sourceRect={sourceRect}
                     selectionScope={selectionScope}
+                    readOnly={isBookmarkCategory}
                     onOpenSessionTargetPicker={onOpenSessionTargetPicker}
                   />
                 </div>
@@ -386,18 +417,20 @@ export function WorkspaceContent({
                 />
               </div>
             )}
-            <GroupInsertionTarget
-              id={`group-insert-end-${workspaceId}-${category}`}
-              category={category}
-              index={categoryGroups.length}
-              workspaceId={workspaceId}
-              isMarker={
-                activeDragPayload?.kind === 'group'
-                && dragMarker?.kind === 'group'
-                && dragMarker.index === categoryGroups.length
-              }
-              isEndTarget
-            />
+            {!isBookmarkCategory && (
+              <GroupInsertionTarget
+                id={`group-insert-end-${workspaceId}-${category}`}
+                category={category}
+                index={categoryGroups.length}
+                workspaceId={workspaceId}
+                isMarker={
+                  activeDragPayload?.kind === 'group'
+                  && dragMarker?.kind === 'group'
+                  && dragMarker.index === categoryGroups.length
+                }
+                isEndTarget
+              />
+            )}
           </div>
         </SortableContext>
       )}

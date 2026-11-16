@@ -1,10 +1,8 @@
 /**
  * Atomic file-write helpers used by FileStorageAdapter.
  *
- * All writes go through a temp sibling file that is created, fully written,
- * then renamed (or copied on browsers without FileSystemFileHandle.move())
- * into place. A crashed write leaves behind the old file plus a tmp sibling;
- * cleanupOrphanTempFiles() sweeps those up on startup.
+ * FileSystemWritableFileStream stages writes and publishes them on close.
+ * Never remove an existing target before that publication succeeds.
  */
 
 import type { Group } from '../model/types';
@@ -22,69 +20,40 @@ function isNotFoundError(err: unknown): boolean {
   );
 }
 
-// ---------- random suffix ----------
-
-function randomHex6(): string {
-  const bytes = new Uint8Array(3);
-  globalThis.crypto.getRandomValues(bytes);
-  let out = '';
-  for (const b of bytes) {
-    out += b.toString(16).padStart(2, '0');
-  }
-  return out;
-}
-
-function tmpNameFor(filename: string): string {
-  return `.${filename}.tmp.${randomHex6()}`;
-}
-
 // ---------- core primitives ----------
 
 /**
- * Atomically write `content` to `filename` inside `parent`. Writes to a
- * temp sibling first, then replaces the target. If the process crashes
- * mid-write the old file (if any) remains intact and the tmp is reclaimed
- * later by cleanupOrphanTempFiles().
+ * Publish content by closing the platform's staged writable stream.
+ * This also works for user-picked folders that cannot move file handles.
  */
 export async function atomicWriteFile(
   parent: FileSystemDirectoryHandle,
   filename: string,
-  content: string,
+  content: string | BufferSource,
 ): Promise<void> {
-  let tmpName: string | null = null;
+  let created = false;
+  let writable: FileSystemWritableFileStream | undefined;
   try {
-    tmpName = tmpNameFor(filename);
-    const tmpHandle = await parent.getFileHandle(tmpName, { create: true });
-    const w = await tmpHandle.createWritable();
-    await w.write(content);
-    await w.close();
-
-    // Remove existing target (best-effort; NotFoundError is fine).
+    let target: FileSystemFileHandle;
     try {
-      await parent.removeEntry(filename);
+      target = await parent.getFileHandle(filename);
     } catch (err) {
       if (!isNotFoundError(err)) throw err;
+      target = await parent.getFileHandle(filename, { create: true });
+      created = true;
     }
-
-    // Move tmp to final name.
-    const moveable = tmpHandle as unknown as { move?: (dir: FileSystemDirectoryHandle, name: string) => Promise<void> };
-    if (typeof moveable.move === 'function') {
-      await moveable.move.call(tmpHandle, parent, filename);
-    } else {
-      // Fallback for browsers without FileSystemFileHandle.move():
-      // read back tmp content, write to new target, then delete tmp.
-      const text = await (await tmpHandle.getFile()).text();
-      const target = await parent.getFileHandle(filename, { create: true });
-      const w2 = await target.createWritable();
-      await w2.write(text);
-      await w2.close();
-      await parent.removeEntry(tmpName);
-    }
-    tmpName = null;
+    writable = await target.createWritable();
+    await writable.write(content);
+    await writable.close();
   } catch (err) {
-    if (tmpName) {
+    try {
+      await writable?.abort();
+    } catch {
+      // Preserve the original failure even if abort also fails.
+    }
+    if (created) {
       try {
-        await parent.removeEntry(tmpName);
+        await parent.removeEntry(filename);
       } catch {
         // secondary cleanup failure is ignored
       }
@@ -110,8 +79,7 @@ export async function atomicDeleteFile(
 
 /**
  * Remove any files in `parent` whose names match the orphan-tmp pattern
- * produced by atomicWriteFile (i.e. `.name.tmp.xxxxxx`). Called on startup
- * to clean up leftovers from interrupted writes.
+ * produced by older atomicWriteFile versions (i.e. `.name.tmp.xxxxxx`).
  */
 // TypeScript's bundled DOM lib (as of 5.5) does not yet expose the async
 // iterable methods on FileSystemDirectoryHandle, even though browsers
@@ -127,8 +95,7 @@ function asIterable(dir: FileSystemDirectoryHandle): IterableDirectoryHandle {
 
 /**
  * Remove any files in `parent` whose names match the orphan-tmp pattern
- * produced by atomicWriteFile (i.e. `.name.tmp.xxxxxx`). Called on startup
- * to clean up leftovers from interrupted writes.
+ * produced by older atomicWriteFile versions (i.e. `.name.tmp.xxxxxx`).
  */
 export async function cleanupOrphanTempFiles(
   parent: FileSystemDirectoryHandle,

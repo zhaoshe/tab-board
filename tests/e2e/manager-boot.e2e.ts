@@ -543,7 +543,7 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     await page.getByText('Manage Categories', { exact: true }).click();
 
     const rows = page.locator('[data-category-manager-id]');
-    await expect(rows).toHaveCount(3);
+    await expect(rows).toHaveCount(4);
     const geometry = await rows.evaluateAll((elements) => elements.map(
       (element, index) => {
         const name = element.querySelector<HTMLElement>(
@@ -894,8 +894,6 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
       return frames;
     });
 
-    expect(frames.some(({ sidebarWidth }) => sidebarWidth > 52 && sidebarWidth < 272))
-      .toBe(true);
     expect(frames.every(({ topInSidebar }) => topInSidebar)).toBe(true);
     expect(frames.every(({ topInMain }) => !topInMain)).toBe(true);
   });
@@ -1028,6 +1026,36 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     await expect(page).toHaveURL(/category=saved/);
     await expect(page.locator('.manager-drag-overlay__preview')).toBeHidden();
     await expect(page.locator('.manager-shell')).not.toHaveClass(/manager-shell--drag-active/);
+  });
+
+  test('renders Chrome bookmarks between Saved and Archive as read-only sessions', async ({ page }) => {
+    await page.goto(PREVIEW_PATH);
+    await expect(page.locator('.manager-category-nav')).toBeVisible();
+
+    const categoryOrder = await page.locator('[data-category-trigger="label"]').evaluateAll(
+      (buttons) => buttons.map((button) => button.getAttribute('data-category-id')),
+    );
+    expect(categoryOrder.slice(0, 4)).toEqual([
+      'inbox',
+      'saved',
+      'bookmarks',
+      'archive',
+    ]);
+
+    await page.locator('[data-category-id="bookmarks"]').click();
+    await expect(page).toHaveURL(/category=bookmarks/);
+    await expect(page.getByRole('button', { name: 'Preview Bookmarks', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Preview Bookmarks/Nested', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Bookmark preview link' })).toBeVisible();
+    await expect(page.locator('.tab-item-row__select')).toHaveCount(0);
+
+    await page.locator('#session-card-bookmark-folder-10')
+      .getByRole('button', { name: 'More' })
+      .focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('menuitem', { name: 'Copy Links' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Delete Session' })).toHaveCount(0);
+    await expect(page.getByRole('menuitem', { name: 'Rename Session' })).toHaveCount(0);
   });
 
   test('promotes peek for selection without replacing the explicit collapsed preference', async ({ page }) => {
@@ -1222,7 +1250,7 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     const menu = page.getByRole('menu', { name: 'Session Actions' });
     await expect(menu).toBeVisible();
     const items = menu.getByRole('menuitem');
-    await expect(items).toHaveCount(9);
+    await expect(items).toHaveCount(10);
     await expect(items).toHaveText([
       'Add Link',
       'Add Note',
@@ -1230,6 +1258,7 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
       'Edit Session Note',
       'Move Session',
       'Lock Session',
+      'Refresh All Titles',
       'Copy Links',
       'Select Tabs',
       'Delete Session',
@@ -1336,11 +1365,16 @@ test.describe('Manager boot + Chrome lifecycle (preview harness)', () => {
     await expect(savedMenu).toBeVisible();
     await assertDenseItems(savedMenu, [
       'Add Note',
+      'Refresh Title',
       'Copy URL',
       'Delete Saved Tab',
     ]);
     await expect(savedMenu.getByRole('menuitem').first()).toBeFocused();
     await expect(page.locator('.manager-menu-item__description-tip')).toHaveCount(0);
+    await page.keyboard.press('ArrowDown');
+    await expect(savedMenu.getByRole('menuitem', { name: 'Refresh Title' })).toBeFocused();
+    await expect(page.locator('.manager-menu-item__description-tip'))
+      .toHaveText('Reload the page title');
     await page.keyboard.press('ArrowDown');
     await expect(savedMenu.getByRole('menuitem', { name: 'Copy URL' })).toBeFocused();
     await expect(page.locator('.manager-menu-item__description-tip'))

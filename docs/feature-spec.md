@@ -16,10 +16,12 @@ TabBoard 当前能力分为七组：
 
 ## 实现与验证边界
 
+- 当前源码版本以 `package.json` / `manifest.json` 为准，现行为 `0.1.6`；Chrome 运行基线是 `115+`，从源码构建需 Node.js `20+`。
 - 生产 Manager 只有 React + Mantine 入口：`manager.html` 加载 `src/manager/main.tsx`，并由 Manifest V3 new-tab override 指向 `manager.html`。
 - workspace/category/session、Open Tabs、capture、import/export、Bin、overlay、DnD 与 persistence 行为由 typed React contracts 和现有 core tests 覆盖；状态更新保持 immutable，普通 mutation 经过引用、locked 和 URL 边界校验。
-- capture feedback 以后台 commit 与 manager reconciliation 的权威结果为准：成功、已提交但未定位、失败分别产生不同结果，不用乐观 toast 冒充保存完成。
-- 自动化 proof（Vitest core contracts）与真实 Chrome 手工验收是两层证据：自动化通过不等于完整 UI parity，DnD 事件时序、Shadow DOM/focus、capture/restore 与 sender 集成仍需 unpacked extension 手工回归。
+- capture feedback 以后台 commit 与 manager reconciliation 的权威结果为准：成功、已提交但未定位、失败分别产生不同结果，不用乐观 toast 冒充保存完成。确认保存后，Manager 在现有 canonical read、created-ID 校验和 Open Tabs refresh 流程中即时展示 capture，保留已经显示的普通编辑，不等待无关保存 RPC；尚未确认的 checked 批量操作不会因 capture preview 提前显示。工作区、category、filter 与 selection 已变化时仍不强制 reveal。
+- 默认自动化 proof 是 `npm test` 与 `npm run check`：后者会顺序执行 `build`、extension sanity、`check:cycles`、`check:architecture` 和 `test:release`。`tests/e2e/` 浏览器套件与 PR browser gate 已配置，但不是每次本地文档或代码改动的默认命令。
+- 自动化 proof 与真实 Chrome 手工验收是两层证据：自动化通过不等于完整 UI parity，DnD 事件时序、Shadow DOM/focus、capture/restore 与 sender 集成仍需 unpacked extension 手工回归。
 
 ## 页面和入口
 
@@ -48,8 +50,9 @@ TabBoard 使用 `chrome_url_overrides.newtab` 替换 Chrome 新标签页。
 Manager 是 tabExtend-style visual board 主工作台，分为：
 
 - 左侧 Open Tabs sidebar：desktop pinned 展开时占据 grid column 并推动 board；collapsed 是固定 52px rail。Pinned 展开/收起同时对 shell track 与 sidebar width 使用 `180ms cubic-bezier(.2,.8,.2,1)` 连续过渡；Open Tab copy、context actions、header utilities 和 Filter 在容器展开 75ms 后用 80ms `ease-out` 淡入，收起时立即反向淡出。Fine pointer hover/focus rail 约 350ms 后进入 temporary peek，作为不阻塞 topbar/main 的 overlay，离开即关闭；Peek 只动画 sidebar width + shadow，Board 始终留在 52px offset。显式 Expand 会 pin 并 reflow。Selection 或 Filter 从 peek 开始时自动 pin。900px 及以下显式 Expand 打开阻塞 topbar/main 的 drawer，并由 Close Sidebar 关闭；Drawer 与 Peek 一样覆盖 Board、不改变 52px main offset。所有过渡支持中途反向，并在 `prefers-reduced-motion: reduce` 下关闭；peek/drawer 都不写入持久化偏好。
-- 右侧 48px toolbar：Workspace、Categories + Category Options、Search、Bin、More 按固定顺序排列；Import、Export、Options 只在 More 中。桌面 workspace trigger 使用独立 emoji / name / chevron slots，emoji 与名称至少间隔 6px，名称与 chevron 至少间隔 4px；紧凑断点只显示居中的 emoji。Category label 与 count 使用独立间距，compact topbar 保留当前 count 并自动把 active Category 滚入可视区。全部 controls 对齐同一基线。Search 静止态无边框/底色，展开时独占 category 区域但不改变 toolbar 高度。
+- 右侧 48px toolbar：Workspace、Categories + Category Options、Search、Bin、More 按固定顺序排列；Import、Export、Options 只在 More 中。内置 category 顺序为 Inbox、Saved、Bookmark、Archive。桌面 workspace trigger 使用独立 emoji / name / chevron slots，emoji 与名称至少间隔 6px，名称与 chevron 至少间隔 4px；紧凑断点只显示居中的 emoji。Category label 与 count 使用独立间距，compact topbar 保留当前 count 并自动把 active Category 滚入可视区。全部 controls 对齐同一基线。Search 静止态无边框/底色，展开时独占 category 区域但不改变 toolbar 高度。Bookmark category 刷新期间在 topbar 显示 `Loading bookmarks…`；失败时保留上一份成功列表，并在 topbar 显示 `Could not load bookmarks` 与 `Retry`。
 - 右侧 active category board：只展示当前 category 的 saved sessions；sessions 直接位于 A1/D1 canvas 上，单行横向排列并滚动，不再有 category outer frame。
+- 第一次出现 saved session context 时，Manager 只显示一次可关闭的紧凑帮助提示：说明 Session/card body 是拖拽表面，更多次级动作在右键菜单里；dismiss 持久化后不会在后续 save/reload 中反复打扰。
 
 Window selector 只用 window glyph + 内部 tab count 表示 Chrome normal windows；focused Chrome window 在 glyph 角落显示 accent badge，selected window 使用 quiet `aria-pressed` 状态。可见/accessible 文案不显示 `Window N`、raw Chrome window ID、Current 或 Active。Header 只负责 window selector，不提供手动 Refresh 或重复的整窗保存动作；唯一 Save All 位于下方 Open Tabs context bar。一次只渲染 selected window 的 Open Tabs。
 
@@ -61,7 +64,13 @@ Open Tabs context bar 在 normal expanded/peek/drawer 状态显示 open-tab coun
 
 Open Tabs 自动刷新期间保留上一份 window/tab rows，不插入 loading 文案或空白占位；请求成功后再原子替换列表，失败时保留旧 rows 并显示错误。
 
-大分类中的每个 session 都保留稳定的横向 slot、pointer/touch surface listeners 和 insertion geometry。初次只激活前 6 个以及 viewport + 720px overscan 附近的完整 card/tab 交互树；远端 slot 显示包含 title、link/note count 和 lock 状态的轻量 shell，整个 shell 的非交互表面仍可拖拽，接近视口、被搜索/高亮或点击 title 后升级为完整 card。TabBoard 自身搜索仍扫描全部 canonical state；浏览器 Ctrl+F 只能命中已经激活的完整 card 和远端 shell 的 session summary，不能命中尚未激活的 tab row。
+大分类中的每个 session 都保留稳定的横向 slot、pointer/touch surface listeners 和 insertion geometry。初次激活前 6 个，之后完整 card 按 viewport + 横向 720px overscan 挂载，离开后回退为 title、link/note count 和 lock 状态的轻量 shell，不累积已浏览的完整树。选中、编辑、附注草稿、composer、焦点、菜单/preview、移动对话框、capture/URL reveal highlight 及拖拽来源/目标暂时保留所属 card；释放 owner 后重新按视口收敛。Shell title 可通过键盘聚焦升级，并把焦点交给完整 title。Capture completion 和 URL `targetGroupId` reveal 先按已有稳定 slot 定位和滚动，因此目标 session 即使还只是 shell，也能被激活、高亮并在 3000ms 后释放。
+
+同一稳定 SessionSlot 存活期间，完整 card 降级为 shell 后保留其内部列表阅读位置，重新激活时在绘制前恢复。列表数据缩短会按当前实际可滚动范围收敛位置；后续滚动更新保留值。Session、workspace、category、只读模式或规范化搜索词变化会从顶部开始，同一上下文的 canonical 编辑保留位置。Slot 本身卸载后不保存此状态。
+
+Session 内链接初次挂载前 24 行，之后按列表 viewport + 纵向 440px overscan 挂载；远端 link 使用共享响应式高度 slot（普通链接桌面 44px、窄屏或 coarse-pointer 52px；附注链接在全部布局预留 76px，保留最多两行附注），保留按顺序可聚焦的激活按钮，进入后焦点转到真实链接。选中、编辑、焦点、菜单/preview 和拖拽来源/目标保留所属行。Note item 保持完整挂载及变量高度，附注编辑允许行临时增高；此取舍保证笔记和编辑几何，但大量 notes 或显式选中全部链接时完整树仍会增长。Canonical tab ID/index 和全部排序 ID 保持不变。
+
+TabBoard 搜索始终扫描全部 canonical state；匹配链接先过滤再渐进挂载，因此尾部匹配也能直接进入首屏。浏览器 Ctrl+F 只能搜索当前完整 card/row 及远端 session shell 的摘要，不能搜索暂未挂载的链接文本；全库搜索使用 TabBoard Search。
 
 Manager 页面上下文同步到 URL：
 
@@ -111,6 +120,7 @@ Options 分为 Basic 和 Advanced：
 - Toolbar、Capture、Restore、Appearance 保持在 Basic 区；Restore 以 Destination 和 Placement 策略呈现，New window 下禁用只适用于 Current window 的 Placement，但不清除既有偏好。
 - Advanced 使用 A2 flat list，不增加只有一个选项的 Safety、Keyboard Shortcuts 或 Recovery 二级 section。Storage location 本身也是普通并列 row。
 - Browser storage 状态把 `Choose folder` 放在 `Storage location` primary row；detail row 只显示 `Browser storage` 和 Chrome profile 说明。Folder ready/fallback 继续使用 configured-target-first 两层结构。
+- `configuredTarget === file` 且存在 unread session files 时，Storage location 会持续显示 `Incomplete folder data` 提示。File backend 仍活跃时提供 `Re-read folder`；已 fallback 到 Browser 时保留缺失提示和原文件身份，但不提供误导性的本地重读按钮。
 - `Exclude URL rules` 明确说明命中的 tabs 不进入 Open Tabs selection/drag/save，并说明规则用逗号或换行分隔。
 - Advanced Settings 展开状态同步到 `?advanced=1`；刷新和浏览器 Back/Forward 保持同一 disclosure context。
 - Basic 从轻量 settings projection 启动，不读取与页面无关的 sessions/folders/bin。Advanced 关闭时不挂载 storage UI、migration dialogs 或 file backend；首次展开时再异步加载，并在 chunk 加载失败时提供 Reload。
@@ -215,6 +225,10 @@ Options > Capture 默认开启 capture 时 tab 去重。
 
 - 只有 `itemType: "link"` 且有 URL 的条目可恢复。
 - Note 不可恢复。
+- Persisted Saved Tab 点击通过 worker restore；新页面 `status=complete` 且非 URL
+  title 稳定 400ms 后，若原记录仍存在且 URL 未变，只更新其 title。
+- Read-only Bookmark projection 只打开 URL，不写入 canonical state。
+- Restore action 的说明文案保持原 accessible name，不重命名 title/link 本身；tooltip 只额外解释 restore 后是 keep/remove 哪一种结果。
 
 ### Session restore
 
@@ -222,13 +236,27 @@ Options > Capture 默认开启 capture 时 tab 去重。
 
 - Session card 的 Restore。
 - Popup recent sessions 的 restore。
+- Session More > Refresh All Titles。
 
 规则：
 
 - 恢复 session 中所有 restorable links。
+- Session Restore tooltip 按实际语义显示：
+  - 普通 session + `deleteRestoredTabs=true`：`Open and remove saved links`
+  - 普通 session + `deleteRestoredTabs=false`：`Open and keep saved links`
+  - Locked session：始终 `Open and keep saved links`
+  - Read-only Bookmark session：`Open without removing bookmarks`
 - 可配置是否在新窗口恢复。
 - 可配置是否恢复到当前 tab 旁边。
 - 可配置是否 focus 第一个恢复 tab。
+- 每个成功创建的 tab 并行等待最终稳定 title；一次 restore 最多等待 15s。单个
+  title 失败或超时不影响其它 tab，也不改变 restore 成功结果。
+- `Refresh All Titles` 不打开可见 tabs：复用已打开的同 URL tab，其余使用隐藏
+  popup helper；Note 跳过，最多 3 个 Link 并发。成功项一次性回写，部分失败提示
+  refreshed/failed 数量。Locked Session 可用，Bookmark Session 隐藏。
+- 任一 title resolver 实际开始后，对应 Saved Tab 行右侧 Delete 槽原位显示 spinner；
+  Session 批量刷新中仍在队列等待的行不显示。完成、失败或超时后恢复 Delete，不改变
+  行宽。Spinner 无需 hover 即可见，accessible name 为 `Refreshing title`。
 
 ### Restore 后删除
 
@@ -239,6 +267,7 @@ Options > Capture 默认开启 capture 时 tab 去重。
 - 恢复后从 saved session 中移除已恢复 link。
 - 如果 session 被 lock，则恢复后保留记录。
 - 如果 session 恢复后没有 tabs、没有 note、也没有 lock，会被清掉。
+- 已删除的 link 不再等待或回写 title；仍保留的 link 会同步最终 title。
 
 ## Workspaces
 
@@ -267,6 +296,7 @@ Categories 是 session 的导航目录。
 
 - Inbox：没有 category 且未归档的 sessions。
 - Saved：被标为 starred 的 sessions。
+- Bookmark：Chrome 书签的只读镜像。每个包含链接的书签文件夹显示为一个 session；嵌套文件夹按 `一级文件夹/二级文件夹` 打平命名。Chrome 书签变化会实时刷新该 category；刷新请求按发起顺序分代，旧的 resolve/reject/finally 不得覆盖当前结果。失败时保留最后一次成功列表，允许从 topbar `Retry` 重试。Bookmark sessions 不写入 TabBoard saved data，不支持重命名、删除、移动、拖拽或编辑。
 - Archive：被归档的 sessions。
 
 自定义 categories：
@@ -285,6 +315,7 @@ Categories 是 session 的导航目录。
 - 移动到 Saved 会设置 `starred: true`、`archived: false` 并清空 `folderId`。
 - 移动到 Archive 会设置 `archived: true`、`starred: false` 并清空 `folderId`。
 - 移动到 Inbox 或自定义 category 会取消 Starred 和 Archive。
+- Bookmark 是运行时投影，不是可移动目标。
 
 排序：
 
@@ -373,6 +404,10 @@ Link：
 
 - 点击 title 直接打开 URL。
 - Saved title 保持单行，过长时省略；URL 显示在副标题行。
+- 右键菜单可 Refresh Title：优先读取同 URL 的已打开 tab；若不存在，则在
+  minimized/unfocused popup 临时窗口中加载页面。Popup window 不进入 Open Tabs
+  的 normal-window selector；标题稳定后自动关闭窗口并只更新 saved item 的 title。
+  失败保留旧 title；Locked Session 也允许手动 Refresh Title。
 - 支持复制 URL、编辑 note、删除、进入 select mode。
 
 Note：
@@ -393,7 +428,7 @@ Selection mode：
 - 显式 Exit 或 scope replacement 会退出 mode 并清空 IDs；sidebar collapse 还会退出 Open Tabs scope。
 - 当前 Session 自己持有 saved item IDs；Manager scope 不进入 Zustand、canonical state 或任何持久化后端。
 - Active saved scope 的 Session 在仍属于当前 board 时，activation context reset 会保持 full card 挂载，避免 owner-local IDs 因降级为 shell 而丢失；若 filter/category 让 owner 真正离开 render tree，则同步 exit scope。
-- Active Session header 原位替换为一个 icon toolbar：selected count、Select/Unselect All Visible、Restore Selected Links、Copy Selected URLs、Move Selected Items、Delete Selected Items 和 Exit。不会额外增加第二条 toolbar。
+- Active Session 保留原 Session title；原 links/notes/date 元信息行替换为 icon toolbar：selected count、Select/Unselect All Visible、Restore Selected Links、Copy Selected URLs、Move Selected Items、Delete Selected Items 和 Exit。普通态元信息行与多选 toolbar 使用同一 32px 行高，切换时 header 和 tab list 不位移。
 - Restore/Copy 只处理 selected restorable Links；Notes 仍可 Move/Delete。Locked Session 禁用 Restore/Move/Delete，但 Copy 保持可用。
 - Select/Unselect All Visible 保留 hidden IDs。Restore/Delete 仅在实际成功后清 IDs并保持 `0 selected` scope；Copy 保留 IDs；任何 async reject 保留 IDs/mode。
 - Restore Selected 通过一次 background `restore-refs` batch 执行。Copy Selected URLs 只调用一次 clipboard write。Delete Selected Items 使用单一 atomic `delete-tabs` mutation并等待 authoritative commit，不循环 fire-and-forget `deleteTab`。
@@ -425,6 +460,8 @@ Selection mode：
 语义：
 
 - Open tab 拖拽是 copy，不会关闭浏览器中的 tab。
+- 若目标 Session 已有同 URL link，保留旧 link 的 ID、位置、note、favicon 和其它
+  metadata，只用第一个 dragged tab 的 title 刷新它；不新增重复 link。
 
 ### Saved tab 拖拽
 
@@ -439,6 +476,8 @@ Selection mode：
 - 当前 session selection mode 下可批量拖动。
 - 顺序按源 session 内原顺序保留。
 - 若所选项等于一个源 Session 的全部 tabs，则隐藏全部 New Session anchors，但仍允许明确合并到已有 Session。
+- 若目标 Session 已有同 URL link，沿用同一 dedupe 规则：移除 dragged duplicate，
+  保留目标中的旧 link，并只刷新其 title；多个同 URL incoming items 以第一个为准。
 
 ### Session 拖拽
 
@@ -499,7 +538,7 @@ Session card 可以在 horizontal track 中拖拽排序：
 
 ### 顶部搜索
 
-Workspace header 右侧搜索框过滤当前 workspace 的 sessions。搜索默认收起为 icon button；关闭搜索时清空筛选条件，收起状态不保留上次 query。
+Workspace header 右侧搜索框过滤当前 workspace 的 sessions。搜索默认收起为 icon button；关闭搜索时清空筛选条件，收起状态不保留上次 query。输入停止 150ms 后更新筛选和结果计数，等待期间显示 `Updating…`；Clear 和 Close 立即清空输入与筛选。
 
 匹配范围：
 
@@ -548,27 +587,23 @@ Command palette 风格搜索：
 
 ### Import
 
-入口：
+入口：Manager 顶部 More > Import。
 
-- 右侧顶部 toolbar 的 Import。
-
-支持格式：
-
-- TabBoard JSON export。
-- TabBoard text export。
-- OneTab export text。
-- 简单 URL list。
-
-规则：
-
-- 导入结果插入当前 workspace 头部。
-- OneTab 文本中由空行分隔的 blocks 会变成多个 sessions。
+- 少于 65,536 字符的导入文本保持自动增高；大文本使用固定 6 行的滚动编辑器，仍可完整编辑和导入，不设数据大小限制。
+- 输入文本或读取文件后，停止修改 150ms 才计算导入预览；等待期间显示 `Updating preview…` 并禁用提交，旧预览不代表当前文本。修正格式错误后自动恢复预览；清空文本和取消立即生效。
+- 默认向当前 workspace/category 追加 sessions，兼容 TabBoard JSON/text、OneTab text 和简单 URL list；空行分隔的 OneTab blocks 形成多个 sessions。
+- 完整 TabBoard JSON 会出现 `Restore complete TabBoard backup` 选项。选择后明确提示替换全部数据，再点击 `Restore Backup` 确认。
+- 完整恢复保留工作区、分类及顺序、sessions/notes、Saved/Archive/lock 等 flags、设置、Bin 与 active workspace；当前存储位置和配置不随备份改变。 实体 ID 原样保留，包括历史 dot ID 与长拖拽 operation 生成的 `~` ID。文件模式在写入前拒绝包含路径分隔符或 NUL 的 session 文件名，保留原数据与原恢复前备份。
+- 替换前在当前后端保存一份规范化旧快照。浏览器存储为 `tabboardBackupBeforeRestore`；文件目录为 `.tabboard-before-restore.json`。文件模式另将损坏原文复制到 `.tabboard-unread-before-restore/`，重名副本使用唯一前缀；未与备份 ID 冲突的原文件继续保留。
+- 完整恢复等待期间暂停页面校验与工作区同步；成功后以 replace 导航到备份中的活动工作区和 Board，沿用该工作区的分类偏好，保留当前搜索、其它 URL 参数、hash 和 history state。旧 effect 不会把恢复结果切回原工作区。默认追加导入保持当前导航。
+- 完整恢复预览同时固定当前数据 revision 与实际存储来源。切换后端、重选或 reconnect 后，旧预览不能仅凭相同 revision 执行；需重新查看恢复预览。普通追加导入不登记或读取恢复来源。
+- 完整恢复提交后的回复丢失时，自动重试相同请求会通过当前来源的持久回执确认原结果，正常关闭弹窗并导航，不再次替换数据或改写原恢复前快照。已确认提交之后的新编辑保留，成功导航使用当前权威状态。
+- 恢复预览之后发生的新写入会使完整恢复拒绝提交。用户查看错误后可保留输入和恢复方式重试；不支持的版本、残缺 JSON、无效引用或实体均拒绝完整恢复。
+- 追加和完整恢复都等待后台权威提交成功才关闭弹窗；失败保留文本、方式和错误。完整恢复失败先恢复合法页面工作区与全局活动工作区的同步，再更新重试 revision。
 
 ### Export
 
-入口：
-
-- 右侧顶部 toolbar 的 Export。
+入口：Manager 顶部 More > Export。
 
 支持：
 
@@ -578,7 +613,8 @@ Command palette 风格搜索：
 
 当前 Export 范围：
 
-- 所有 state groups。
+- JSON 通过 store `exportAll()` 导出完整 canonical state，包括所有 workspaces、active workspace、categories 及顺序、sessions/notes、settings、Bin，以及 version、revision、timestamps 和 drop replay ledger，可用于完整备份恢复。
+- Text 导出 OneTab-compatible 的 titles/URLs 文本，用于追加导入；文本不保留完整 JSON 的工作区、分类、设置、Bin 等结构。
 
 ## Bin
 
@@ -623,15 +659,20 @@ Advanced：
 
 ### Data Storage
 
+- 文件降级后重连会比较浏览器与目录的数据；数据不同则明确选择 Keep browser data 或 Use folder data，Cancel 保留当前状态。两侧 normalized 数据先以完整 JSON 保存在目录中；选定结果若替换同 ID 的未读文件，必须先唯一命名保留精确原字节，备份失败阻止替换和重连。成功时立即发布选定设置及文件状态；同一页面后续重读会更新损坏文件计数，提交会继续发布新版本。写入失败保持对话框和错误，以便重试。
+- 重连对话框关闭按钮有可访问名称，触控模式下操作目标至少 44px，异步状态只显示在实际执行的选择上。
+
 TabBoard 默认把数据保存在浏览器内置的 `chrome.storage.local` 中；数据仅存在本机，卸载扩展会被浏览器清除。TabBoard 也支持把数据保存到你自己选择的本地文件夹，作为可选替代后端。
 
 Options 的 Storage location 读取一个轻量持久化状态投影：
 
 - `configuredTarget`：用户正式选择 Browser 或 Local Folder。
 - `activeBackend`：当前实际写入 Browser 或 File。
-- `folderName`、`fallbackReason`、`fileUpdatedAt`：本地文件夹身份、自动降级原因和最后一次成功文件提交时间。
+- `folderName`、`fallbackReason`、`fileUpdatedAt`、`unreadSessionCount`：本地文件夹身份、自动降级原因、最后一次成功文件提交时间，以及本次加载中无法读取的 session 文件数量。
 
 自动 fallback 只把 `activeBackend` 改成 Browser，不把 `configuredTarget` 改成 Browser。Options 因此仍以 `Local folder name: <name>` 为主，并显示 `updated: HH:mm:ss`、降级原因，以及同一恢复动作区中的 `Reconnect folder` 和 `Use browser storage`。长 folder name 保持单行省略，不能挤压右侧更新时间。只有显式 switch-back 成功后 configured target 才变成 Browser；fallback 期间的 browser state 时间不得覆盖 `meta.json.updatedAt`。
+
+当某些 `sessions/<id>.json` 因损坏或不可解析而被跳过时，其他数据仍照常加载，但 Options 和 Manager 都要持续提示 `Incomplete folder data`，避免把缺失 session 误认为用户删除。Manager notice 固定提供 `Open settings`，单页 dismiss 仅影响当前页面，并在 unread count 变化时重新出现。原始损坏文件在用户修复、重新读取或显式替换前保持原样，不得被恢复写入当作 orphan 自动删除。用户修复原文件并点击 `Re-read folder` 后，即使 `meta.json` revision 和 timestamp 没变，当前 Manager 与已打开的 peer Manager 也要显示恢复的 session，并清除 unread health；普通同 revision 旧观察仍不得覆盖已采纳的修复结果。
 
 为什么考虑本地文件夹：
 

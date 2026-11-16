@@ -4,7 +4,7 @@ This file is the shared operating guide for AI agents working in this repo. `CLA
 
 ## Project Snapshot
 
-TabBoard is a local-first Chrome Manifest V3 tab manager inspired by OneTab and tabExtend. It saves browser tabs into recoverable sessions, then lets the user organize them with workspaces, categories, search, notes, drag and drop, import/export, and a new-tab manager page.
+TabBoard is a local-first Chrome Manifest V3 tab manager inspired by OneTab and tabExtend. It saves browser tabs into recoverable sessions, then lets the user organize them with workspaces, categories, a read-only Bookmark view, search, notes, drag and drop, import/export, and a new-tab manager page.
 
 The project is a React + TypeScript app built with Vite. It uses React 18, Mantine v7, Zustand, `@dnd-kit`, `lucide-react`, Chrome extension APIs, and a browser/file Storage Authority. The extension is packaged with `@crxjs/vite-plugin`.
 
@@ -39,13 +39,17 @@ Use these from the repo root:
 
 ```sh
 npm run dev
+npm run preview
 npm run build
 npm run check
 npm test
+npm run test:release
+npm run test:runtime-contract
+npm run test:e2e
 npm run icons
 ```
 
-`npm run dev` starts the Vite dev server. `npm run build` runs `tsc --noEmit` then `vite build`. `npm run check` builds and then validates required files and build output via `scripts/check-extension.mjs`. `npm test` runs the Vitest suite (`vitest run`, happy-dom environment). `npm run icons` regenerates extension icons if needed.
+`npm run dev` starts the Vite dev server. `npm run preview` serves the built app for manual checks. `npm run build` runs `tsc --noEmit` then `vite build`. `npm run check` runs `build`, extension sanity, import-cycle gates, architecture gates, and release-contract tests. `npm test` runs the Vitest suite (`vitest run`, happy-dom environment). `npm run test:release` runs the Node release/package/startup contract tests, `npm run test:runtime-contract` records the named worker/store contract cases, and `npm run test:e2e` runs the Playwright browser suite when a browser gate is needed. `npm run icons` regenerates extension icons if needed.
 
 ## Architecture Rules
 
@@ -65,6 +69,7 @@ npm run icons
 - Built-in categories:
   - `Inbox`: sessions with no custom category and not starred.
   - `Saved`: sessions marked as starred.
+  - `Bookmark`: read-only Chrome bookmark folders projected at runtime.
   - `Archive`: sessions marked as archived.
 - There is no separate `All items` category in the sidebar.
 - Quick list / pinned workflow was removed; do not rebuild it unless explicitly requested.
@@ -107,6 +112,7 @@ Drag and drop is one of the most fragile areas. Be conservative.
 
 - Import should support TabBoard JSON/text and OneTab export text through the normal Import entry.
 - Do not add a separate "Import from OneTab" entry unless explicitly requested.
+- Default Import appends sessions into the current workspace/category; complete restore is a separate explicit action for valid full TabBoard backups.
 - Export should preserve enough data for round-tripping TabBoard sessions.
 - Bin is direct in the manager top bar; Import, Export, and Options live in the global More menu.
 - Import icon semantics should point inward/down; Export should point outward/up.

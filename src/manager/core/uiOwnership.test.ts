@@ -15,6 +15,14 @@ describe('Manager UI ownership', () => {
     expect(source).not.toContain('highlightTimeoutRef');
   });
 
+  it('keeps ManagerApp owning lightweight global notices around the manager shell', () => {
+    const source = read('src/manager/ManagerApp.tsx');
+    expect(source).toContain('<StorageRecoveryNotice />');
+    expect(source).toContain('<FirstSavedHint savedSessionCount={savedSessionCount} />');
+    expect(source).toContain("useTabBoardStore((state) => state.groups.length)");
+    expect(source).not.toContain('localStorage.getItem(');
+  });
+
   it('keeps WorkspaceHeader focused on composing workspace, category, search, and actions', () => {
     const source = read('src/manager/components/workspace/WorkspaceHeader.tsx');
     expect(source).toContain('<WorkspaceMenu');

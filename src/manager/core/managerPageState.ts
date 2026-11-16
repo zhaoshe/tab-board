@@ -19,7 +19,7 @@ type ValidationState = Pick<
 >;
 
 function categoryFromParam(value: string | null): CategoryFilter {
-  if (value === 'saved' || value === 'archive' || value === 'inbox') return value;
+  if (value === 'bookmarks' || value === 'saved' || value === 'archive' || value === 'inbox') return value;
   return value?.startsWith('folder:') ? value as CategoryFilter : 'inbox';
 }
 
@@ -66,4 +66,13 @@ export function serializeManagerPageState(state: ManagerPageState): string {
   params.set('view', state.view);
   if (state.query) params.set('q', state.query);
   return params.toString();
+}
+
+export function shouldSyncActiveWorkspace(
+  pageWorkspaceId: string,
+  activeWorkspaceId: string,
+  workspaces: readonly { id: string }[],
+): boolean {
+  return pageWorkspaceId !== activeWorkspaceId
+    && workspaces.some(({ id }) => id === pageWorkspaceId);
 }

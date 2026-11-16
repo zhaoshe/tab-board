@@ -1,6 +1,7 @@
 import type {
   KeyboardEvent,
   MouseEvent,
+  ReactNode,
   RefObject,
 } from 'react';
 import { TextInput } from '@mantine/core';
@@ -29,6 +30,8 @@ export function SessionCardHeader({
   onTitleDoubleClick,
   onTitleInputKeyDown,
   restorableTabCount,
+  restoreTooltip,
+  selectionToolbar,
   title,
   titleInputRef,
   titleValue,
@@ -52,12 +55,17 @@ export function SessionCardHeader({
   onTitleDoubleClick: (event: MouseEvent) => void;
   onTitleInputKeyDown: (event: KeyboardEvent) => void;
   restorableTabCount: number;
+  restoreTooltip: string;
+  selectionToolbar?: ReactNode;
   title: string;
   titleInputRef: RefObject<HTMLInputElement>;
   titleValue: string;
 }) {
   return (
-    <header className="session-card__header">
+    <header
+      className="session-card__header"
+      data-selection-mode={selectionToolbar ? true : undefined}
+    >
       <div className="session-card__heading">
         {isEditingTitle ? (
           <TextInput
@@ -92,6 +100,7 @@ export function SessionCardHeader({
         {restorableTabCount > 0 && (
           <AccessibleIconAction
             label="Restore"
+            tooltip={restoreTooltip}
             disabled={isDragOverlay}
             onClick={onRestore}
           >
@@ -124,6 +133,7 @@ export function SessionCardHeader({
         locked={locked}
         noteCount={noteCount}
       />
+      {selectionToolbar}
     </header>
   );
 }

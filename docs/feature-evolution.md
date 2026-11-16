@@ -21,6 +21,214 @@ TabBoard 是一个 local-first Chrome tab manager。它以 OneTab 的"快速收�
 
 ## 变迁时间线
 
+### 2026-11-16: 稳定 Session Slot 保留内部阅读位置
+
+- 问题：普通横向浏览让完整 card 降级为 shell，再返回时内部列表回到顶部。
+- 决定：由现有 Slot-local ref 捕获阅读位置，重新挂载真实列表时在绘制前恢复，并按缩短后的实际范围 clamp。Session、workspace、category、只读模式及规范化搜索词变化重置位置。
+- 取舍：仅在同一 Slot 存活期间保留一个偏移，不持久化、不常驻已浏览 card，不改变 selection/edit/menu/focus/drag/reveal owner。
+- 验收修正：Chromium 的 detached/no-box 列表会报告零偏移，cleanup 只在节点仍连接且有布局高度时捕获，保留先前正常 scroll event 保存的位置。测试同步模拟此平台语义，纠正 happy-dom 的脱离节点读取假设。
+- 状态：Current；真实 Slot/Card/List DOM 回归覆盖节点销毁、重复往返、缩短、隔离和搜索切换，原生浏览器验收单独记录。
+
+
+### 2026-11-13: Capture reveal 改走稳定 Session Slot
+
+- 问题：capture completion 和 URL `targetGroupId` reveal 之前等待完整 `SessionCard` 的 DOM id；大 board 中离屏目标可能只挂载 shell，导致“先有 card 才能 reveal、先 reveal 才能激活 card”的循环。
+- 决定：继续复用现有 reveal owner，但按既有 `data-session-slot-id` 精确定位稳定 `SessionSlot`。先滚动 slot，再通过 highlight forced owner 激活完整 card，并保持 3000ms 后释放。
+- 取舍：不新增公开 hook/props/protocol，也不引入通用 reveal 框架；slot contract 需要由真实 render 测试覆盖 selector-sensitive ID、capture 与 URL 两个入口、释放和取消。
+- 状态：Current；自动化覆盖 shell-first capture reveal、URL `targetGroupId`、reduced motion、target disappearance cancellation 和 card-only lookup 删除突变。
+
+### 2026-11-13: Manager 导航集中完整恢复时序
+
+- 问题：Layout 管恢复 guard 与 fresh replace，hook effect 却依据 render 快照校验 URL；恢复期间的投影更新和失败重试需要跨组件协调。
+- 决定：零参数 `useManagerPageState()` 拥有订阅、导航、恢复等待、成功 replace 与失败后的即时工作区同步；每次执行读取最新 ref/store/query。修正 Bookmark URL 解析，使刷新与历史导航保留分类。
+- 取舍：hook 具体依赖已有 React/store/history，纯解析仍留在 core；保留 D046 全局活动工作区同步和 D072 持久化/CAS，不建立第二个 owner。
+- 状态：Current；hook 与真实 preview publication 恢复窗口覆盖 guard、原错误、重试 revision 和 history/query 保留。
+
+### 2026-11-13: Mutation Batch 集中 revision/replay 与 partial commit 规则
+
+- 问题：`applyStateMutations`、worker verification 和 `statePersistence` 各自维护 revision gap、原始索引、Replay 与 partial failure 循环，调用方必须理解 `DropMutationBatchContext`、prepare/mark 和二次 index remap。
+- 决定：新增 `createMutationBatch(raw)` 作为深模块 interface；同步 `evaluate()` 负责普通持久化候选状态、accepted original indexes、失败证据和 restore-before snapshot，异步 `verify()` 由 worker 注入 live Open Tabs reader 后返回 verified continuation，再交给 persistence 基于 fresh state 提交。
+- 取舍：逻辑先留在 `stateMutations.ts`，避免引入 runtime cycle 或 pass-through facade；persistence 仍保留队列、锁、normalize 和唯一写入，worker 仍保留 Chrome live tab reader。
+- 状态：Current；回归覆盖 raw gap 前后、stale latch、Replay 零 live read、运行时拒绝、ordinary hard error 零写入、verification/commit fresh state、原始索引、restore-before snapshot 和写入失败语义。
+
+### 2026-11-13: 重连保留冲突原件并恢复投影发布
+
+- 问题：选择浏览器副本可能覆盖同 ID 的未读文件；重连候选保持静默，导致选定设置和后续修复状态未发布。
+- 决定：在同名替换前复用原字节备份目录，重复冲突保留不同文件，备份失败阻止替换和切换；准备阶段保持静默，数据与 handle 提交后一起发布选定设置、状态和 ping，并恢复候选的正常发布。
+- 取舍：重连只为冲突原件增加字节备份，未冲突原件继续留在原目录；完整 Restore 仍保存全部未读原件。原字节恢复副本会随重复冲突增长。
+- 状态：Current；回归覆盖重复无效 UTF-8 原件、备份失败、重读清除提示、两种选定设置、后续直接提交与投影提交失败回滚。
+
+### 2026-11-13: 当前规范与执行契约完成最终对齐
+
+- 问题：优化 1-13 已全部落地，但当前文档、Agent Guide 和实现账本仍残留少量机械偏差，例如版本号、Bookmark 内置分类、默认追加导入顺序，以及 `npm run check` 的实际门禁组成。
+- 决定：把当前规格统一到 `0.1.6` / Chrome `115+` / Node `20+` 的真实源码基线，明确 Bookmark 是只读运行时分类，默认 Import 继续向当前 workspace/category 追加 sessions，`npm run check` 继续包含 extension sanity、cycle、architecture 和 release contracts；同时补全优化 1-14 的最终 implementation record。
+- 取舍：历史评审和旧决策仍保留原始背景，但当前规格只描述最终行为，不回写已移除的 Todo、Quick list 或 `All items` 导航。
+- 状态：Current；本项只更新文档与交付记录，不改变运行时代码。
+
+### 2026-11-13: Bookmark 请求状态改为保留旧列表并显式重试
+
+- 问题：Bookmark category 之前在请求失败时会清空已显示列表，多个并发刷新也可能让较旧响应覆盖较新结果，用户看不到明确的加载/失败状态。
+- 决定：Bookmark runtime projection 改为保留最后一次成功列表；topbar 在刷新时显示 `Loading bookmarks…`，失败时显示 `Could not load bookmarks` 和 `Retry`。请求按代次生效，旧的 resolve/reject/finally 以及 workspace 切换或 unmount 后的回调都被忽略。
+- 取舍：状态只存在 Manager page hook 内存，不进入 canonical state；Bookmark 仍然是只读 runtime projection，不增加持久化写入。
+- 状态：Current；hook 与 ManagerLayout 回归覆盖倒序响应、失败保留、显式重试、workspace 切换和 unmount 清理。
+
+### 2026-11-13: 延后导入预览和搜索计数
+
+- 问题：逐字输入时同步解析导入文本，搜索计数也在既有 query debounce 前重新扫描数据。
+- 决定：导入预览在最后一次编辑 150ms 后解析，未变文本复用解析结果；等待期间标明更新中并禁止提交旧预览。搜索计数复用延后的 query 和 board projection。清空、取消和关闭即时生效。
+- 验收修正：真实大 JSON 编辑在预览解析前仍阻塞输入；达到 65,536 字符后关闭 textarea autosize，改为 6 行滚动编辑器，小文本沿用原展示，不限制输入大小。
+- 取舍：最终一次解析仍在主线程执行；大备份完成预览后，提交仍经过 authority 校验。追加导入、完整 Restore、失败保留输入和 CAS/navigation 保护继续执行。
+- 状态：Current；组件回归覆盖延后、输入纠错、stale preview、清空/关闭、较早文件读取和 pending/failed commit。
+
+### 2026-11-13: Restore tooltip 改为反映真实 keep/remove 语义，并补一次性 saved-session 帮助提示
+
+- 问题：Restore 默认会在普通 session 中移除已恢复 links，但 locked session 与只读 Bookmark 是两个例外；密集 icon-first 界面也让新用户不容易马上发现 Session body 拖拽和右键二级动作。
+- 决定：Session Restore 保持 `Restore` 的可访问名称，同时把 tooltip 改为按普通设置、locked override 和 Bookmark override 呈现真实结果；Manager 在第一次出现 saved session context 时显示一次可关闭的紧凑帮助提示，说明从 Session body 拖拽、以及通过右键进入更多动作。
+- 取舍：帮助提示只做一次，不在每次 save/reload 后反复打扰；提示状态仅保存在 manager page 的 localStorage，不进入 canonical state。
+- 状态：Current。
+
+### 2026-11-13: 隐私文案改为准确描述浏览器侧网络行为
+
+- 问题：README 和 PRIVACY 之前把产品写成“完全不发网络请求”，但现有实现里，restore 和 title refresh 会让 Chrome 访问目标 URL，保存的 favicon 也可能通过图片地址加载。
+- 决定：隐私文案改为强调 saved sessions 仍然本地保存、不上传到 TabBoard 服务、不需要账号、不卖数据、也不增加 host permissions，同时明确说明 restore、title refresh 和 favicon 展示带来的浏览器侧访问。
+- 状态：Current。
+
+### 2026-11-12: 开发工具链升级到已修复安全版本
+
+- 问题：`npm audit` 在 Vite、Vitest、happy-dom 及其开发链路转依赖上报告 12 条可修复漏洞，`npm audit --omit=dev` 虽然为 0，但本地开发、测试与 CI 工具链仍落在已知受影响版本上。
+- 决定：将构建与测试工具链升级到兼容修复版本：Vite 6.4.6、`@vitejs/plugin-react` 4.7.0、Vitest 4.1.12、happy-dom 21.0.4，并用 npm `overrides` 将仍被旧范围解析到的 `browserslist`、`baseline-browser-mapping`、`postcss`、`nanoid` 与 `source-map-js` 固定到安全补丁版。
+- 取舍：最低源码构建 Node 版本提升到 20；Chrome 运行基线维持 115，不改 MV3 静态 worker import/build 契约。个别测试按更严格的 modal/mocks 时序与类型约束更新兼容写法，但保留原有行为断言。
+- 状态：`npm audit`、`npm audit --omit=dev`、`npm test` 与 `npm run check` 已通过。
+
+### 2026-11-12: 限制已浏览 session 与超大链接列表的完整交互树
+
+- 问题：横向浏览后完整 card 持续累积，单个 3000-link session 首屏也挂载全部行。
+- 决定：离开 viewport + overscan 后回退稳定 shell；链接按响应式稳定高度 slot 渐进挂载（普通链接桌面 44px、窄屏或 coarse-pointer 52px；附注链接在全部布局预留 76px，保留最多两行附注），临时 owner 保留选中、编辑、焦点、overlay 与拖拽工作。
+- 取舍：notes 保持变量高度完整挂载；浏览器 Ctrl+F 不包含未挂载链接，TabBoard Search 仍扫描全部数据。显式 owner 可突破视口数量上限。
+- 状态：新增视口退出、owner 释放、3000-link 首屏、键盘激活与搜索回归；真实 Chrome DnD 由独立验收记录覆盖。
+
+### 2026-11-12: 同一 Import 入口支持完整备份恢复
+
+- 问题：已有 JSON 导入只追加 sessions，丢失工作区、分类顺序与全局设置，无法完整恢复长期保存的数据。
+- 决定：保持默认追加和 OneTab 兼容；完整 JSON 提供明确的完整恢复选择，恢复业务状态并保持当前存储配置。
+- 原因：恢复使用现有 checked publication 与序列化写入，在替换前保存当前快照；revision 冲突阻止覆盖预览后的新编辑，失败保留输入用于重试。
+- 约束：损坏文件原文另存且不按 orphan 删除；不添加新的迁移入口或依赖。
+- 状态：模型、两种后端、worker 与弹窗回归已实现；真实浏览器验收由 Task 7 集成流程记录。
+
+### 2026-11-12: 文件恢复提示明确区分“跳过损坏文件”与“用户删除”
+
+- 问题：损坏的 `sessions/<id>.json` 会在加载时被跳过，但普通用户只能看到 session 消失，无法判断是删除、筛选还是文件损坏。
+- 决定：File bootstrap/status projection 持久化 `unreadSessionCount`；Options 的 Storage location 和 Manager notice 都持续显示 `Incomplete folder data`。File backend 活跃时允许 `Re-read folder`，Manager 统一引导到 Settings。
+- 约束：原始损坏文件在恢复、重读或后续成功提交前保持原样；修复流程不能把未读文件当作 orphan 自动删除。
+- 状态：损坏文件保留、重读清除提示、Options active/fallback 提示和 Manager dismiss/重显生命周期均有回归。
+
+### 2026-11-12: 重连先处理浏览器与文件数据分歧
+
+- 问题：降级期间的新写入会在重连后被旧文件数据遮蔽，worker 旧故障的自动恢复也可能绕过比较。
+- 决定：数据相同直接重连；不同则选择浏览器或文件数据，并先在目录中保留两份完整 JSON。
+- 约束：选择过程使用现有写锁；选定结果推进 revision，提交前不广播 File ping。
+- 状态：新增、笔记修改、删除、两种选择及自动恢复均有回归；Orca 原生文件系统验证两种选择和备份，窄屏操作目标至少 44px。
+
+### 2026-11-12: 中断文件事务使用完整恢复快照
+
+- 问题：多文件替换或删除后中断，加载到新旧混合状态；仅修改 writeInProgress 的测试未覆盖真实中断点。
+- 决定：发布 pending meta 前保存独立 recovery snapshot；读取中断事务返回完整旧状态，后续提交强制修复文件集合。
+- 权衡：保持 v1 可读文件布局，每次提交增加一份恢复快照写入；成功后只保留最近一份，限制空间占用。
+- 状态：覆盖 session 替换/删除、顶层文件、并发读取、恢复后重试及缺失恢复文件。
+
+### 2026-11-12: 文件写入失败保留已提交内容
+
+- 问题：旧文件在替换前被删除，move 或最终写入失败会丢失已保存内容。
+- 决定：使用 File System Access API writable stream 的 `close()` 发布语义；失败时 abort，首次创建失败时清理空目标。
+- 原因：兼容没有可用 `move()` 的用户目录，同时保留最后成功写入的文件。
+- 状态：单文件故障回归已覆盖；多文件事务恢复单独处理。
+
+### 2026-09-14: Popup 保存绑定来源窗口
+
+- Popup Save 把查询 tab 时得到的 window ID 随 `saveSelectedTabs` 请求提交，不再让
+  worker 用点击时的 focused window 猜测来源。
+- worker 拒绝 selected capture 时写入不含 URL/title 的结构化 diagnostics，区分 tab
+  缺失、跨窗口和 capture policy 拒绝。
+
+当前状态：Current。
+
+### 2026-08-18: Session 多选工具栏覆盖元信息行
+
+- 多选态继续显示最多两行的 Session title，不再用工具栏替换整个 header。
+- selected count 与批量 actions 覆盖原 links/notes/date 元信息行。
+- 普通 meta 与多选 toolbar 共用 32px 第二行；进入/退出多选时 header 与 tab list
+  坐标保持不变。
+
+当前状态：Current。
+
+### 2026-08-11: Title 刷新显示逐行 loading
+
+- 手动单 Tab、Session 批量和 restore 自动同步统一广播逐条 start/finish。
+- 正在解析的 Saved Tab 用 spinner 原位替换右侧 Delete；无需 hover 可见，不改变行宽。
+- Session 批量中排队项不提前显示，最多只有当前 3 个 resolver 转动。
+- operation ID 支持重叠刷新；全部 operation 结束后才恢复 Delete。
+- Activity 只存在 Manager page memory，不持久化，不进入 canonical state。
+
+当前状态：Current。
+
+### 2026-08-11: Session 菜单批量刷新全部 Link 标题
+
+- Persisted Session More 新增 `Refresh All Titles`，Locked Session 也可用；
+  Bookmark/read-only Session 不显示。
+- 复用已打开的同 URL tab；缺失 URL 使用 minimized/unfocused popup helper。
+- 一个 Session 最多 3 个并发，Note 跳过；稳定 title 规则仍为 complete + 400ms，
+  单页最长 15s。
+- 成功项在一次 mutation batch 中回写；失败、删除或 URL 变化不覆盖旧记录。
+- 全部成功提示 `Titles refreshed`；部分失败提示 refreshed/failed 数量。
+
+当前状态：Current。
+
+### 2026-08-10: Restore 后自动同步最终网页标题
+
+问题：
+
+- 手动 Refresh Title 可以修复旧记录，但每次打开 Saved Tab/Session 后仍可能继续保留
+  capture 时的临时 title。
+- Chrome 创建 tab 时返回的 title 常是 URL 或 loading 占位，不能直接持久化。
+
+变化：
+
+- 单个 Saved Tab 点击、Session Restore、Restore Selected 和 Restore All 统一在
+  worker restore pipeline 中等待新 tab 的最终稳定 title。
+- 每个 title 必须在 `status=complete` 后保持 400ms；同批并行等待、总上限 15s。
+  单页失败或超时不影响 restore，也不覆盖旧 title。
+- `deleteRestoredTabs` 已删除的 unlocked 记录直接跳过；仍保留的记录自动回写，
+  包括 Locked Session。
+- Locked Session 现在允许手动/自动 title-only 更新，其它编辑、移动和删除保护不变。
+- Read-only Bookmark 仍只打开 URL，不写入 Saved state。
+
+当前状态：Current。
+
+### 2026-08-09: Saved Tab 标题刷新与重复拖拽修复
+
+问题：
+
+- Save 可能发生在网页最终 title 加载前，导致 Saved Tab 长期保留 URL、loading
+  文案或临时 title。
+- 将同 URL 的 Saved/Open Tab 拖入已有 Session 时，旧实现先插入 incoming item，
+  再由 normalize 去重；旧 item 通常被保留，但 incoming 的正确 title 同时被丢弃。
+  若落点在旧 item 前，甚至可能反向保留 incoming ID。
+
+变化：
+
+- Saved Link 右键菜单新增 Refresh Title。优先复用同 URL 的已打开 tab；没有匹配时
+  在 minimized/unfocused popup 临时窗口加载，标题稳定后自动关闭。Popup helper
+  不进入只展示 normal windows 的 Open Tabs selector。失败不修改旧 title；Locked
+  Session 禁用。
+- 重复 URL 拖入已有 Session 时，不再依赖插入顺序决定去重结果。目标旧 link 的
+  ID、位置、note、favicon 和其它 metadata 保持不变，仅采用第一个 incoming title；
+  同 URL incoming item 不插入。
+- Manager、MV3 worker 与 preview harness 使用同一 runtime action；持久化复用既有
+  `update-tab`，没有 schema、permission 或 dependency 变化。
+
+当前状态：Current。纯模型、worker、preview、runtime 和真实 Saved Tab menu DOM
+回归均已覆盖。
+
 ### 2026-08-05: Popup 静态首帧与并行轻量启动
 
 问题：
@@ -1766,6 +1974,41 @@ production build/check 再打包。
 
 当前状态：Current。
 
+### 2026-11-12: 降低普通编辑与文件提交成本
+
+- 普通 state mutation 只复制变化分支，隔离新增 payload；workspace 重命名不再复制或序列化未变化的 sessions。相等 patch、locked、CAS 与 replay 规则保留。
+- File backend 使用 session ID Map 做差异比较，普通提交跳过未变化的数据文件；独立事务 recovery snapshot、meta 提交点、强制修复与完整恢复前备份继续执行。
+- 取舍：authority normalization 和每次文件事务的完整旧快照仍保留，单次大 session 内容比较仍随其数据量增长。
+- 当前状态：实现并加入引用复用、冻结输入、payload 隔离、普通文件写入范围及强制完整写入回归。
+
+### 2026-11-13: Storage Authority 排序完整后端生命周期
+
+- 切换和重连原先只有最后的安装入队，准备期间的保存或重读可能仍使用旧 backend。现在 backend 选择、读取、fallback、完整切换和手动重读由同一 authority queue 排序；显式切换先在队列外取得既有 Web Lock。
+- 候选 File adapter 保持静默，提交成功后才有发布资格。替换与同步 reset 撤销旧 callback、binding 和初始化结果的本地资格；手动重读仍直接报告失败，自动 ping 重读仍执行 fallback。
+- 取舍：读取会等待本上下文的生命周期操作。已开始的 disk/transport 写入不能撤销；其他上下文继续通过现有 storage-switched 消息刷新，不引入分布式 backend 切换协议。
+- 当前状态：实现并加入真实 browser/file adapter 的队列、锁、reset、旧来源隔离及 publication 回归。Mutation Batch 和 State Persistence 职责保持，见 ADR 0002。
+
+### 2026-11-13: Capture projection 回到 Authoritative Publication
+
+- Capture hook 原先按 UI timestamp 选择整份 state 或补入 created groups，可能覆盖在途编辑，且旧 RPC settle 会再次丢失已保存的 session。现有 read/ID 校验之后统一调用同步 `reconcileCaptureCommit(canonical)`，由 Publication 选择 canonical high-water 并即时重放已显示的 outstanding work。
+- Preview 只使用 optimistic in-flight subset，未显示的 checked/category additional 继续等待原确认；drop expectedRevision 只改临时显示副本。selection、source snapshot、refresh、feedback/reveal、实际 CAS、retry 和 waiter 保持原职责。
+- 取舍：Publication 需区分 preview 求值与 settlement effects，以及 canonical 基线和临时 Workspace overlay；语义 preview 失败保留观察快照并返回 committed-but-unreconciled。
+- 当前状态：实现并加入 direct owner 与真实 facade/capture DOM 并发回归；Chrome 原生 capture 验收另行记录。见 D080 与 ADR 0004。
+
+### 2026-11-13: Canonical 高水位限定在所选数据集
+
+- 问题：显式选回较旧的 browser 数据后，Publication 仍可能保留 file 的更高 revision，导致确认提交后显示旧工作区。
+- 修复：现有 Authority 生命周期提供本地 dataset identity，选择替换/reset 后撤销旧 canonical incumbent/buffer；同一数据集的旧回复保护、pending/checked/drop 与 retry 保留。跨选择期间迟到的旧 RPC 用当前 Authority 重读完成显示，其原成功/partial 结果不改变。
+- 边界：不新增 schema 或分布式切换协议；若当前 Authority 暂不可读，保留可用的新数据集观察和真实 RPC 结果，等待后续读取刷新显示。
+- 当前状态：真实 facade/Authority/worker 的 file50 → browser1 回归覆盖 checked、hydration 和 capture；本地延迟 success/partial 与重读失败另有 owner 回归。
+
+### 2026-11-16: 显式文件重读发布同 revision 修复
+
+- 问题：用户修复损坏的 `sessions/<id>.json` 后点击 `Re-read folder`，File Authority 已读回 session 并清除 unread health，但 Manager Publication 把同 revision/timestamp 快照视为 ordinary tie，当前页和 peer 页仍隐藏修复后的 session。
+- 修复：`reloadFileState()` 生成合法 one-shot explicit reread event id，经现有 File ping/storage notification 发布；当前和 peer Authority 只消费一次且不 rebroadcast。Publication 只对 explicit reread 的 same-revision exact-tie 放开替换，并复用 eager replay 发布修复 session。
+- 边界：普通同 revision stale snapshot、旧 RPC 和 lower revision observation 继续保留已采纳 incumbent；pending/in-flight 的 retry、waiter、wire mutation 和 checked hidden work 不提前结算；读失败或 retired backend 不发布 explicit success。
+- 当前状态：覆盖真实 memory File adapter + Authority + Publication、peer Chrome storage bus、deferred ordinary RPC、重复/普通旧 ping 和失败重读边界；父任务仍负责真实 OPFS + Manager native gate。
+
 ## 待观察问题
 
 - 右键菜单触发筛选是否足够容易被发现。
@@ -1776,3 +2019,26 @@ production build/check 再打包。
 - icon-only 动作在新用户第一次使用时是否足够清晰。
 - `Inbox` 是否比 `Unfiled` 更符合用户对“没有 category”的直觉。
 - 2026-07-19：收敛 Open Tabs URL policy 为单一自定义过滤规则。pinned、`chrome://` 与 `file://` 不再因内建规则不可选；命中自定义规则的 tab 直接从列表隐藏。
+
+
+## 2026-11-16: Confirm complete Restore after lost commit replies
+
+- Problem: a successful Restore whose worker reply was lost retried its old revision and surfaced CAS failure, leaving the normal modal/navigation completion unfinished.
+- Decision: preserve a frozen Restore-bearing request and atomic durable receipt; replay confirms the original outcome and uses fresh current state without another Restore or before snapshot write.
+- Scope: bind the explicit full Restore preview to its actual Browser/File selection, keep strict CAS for unwitnessed requests, preserve mixed/raw-gap/partial and last-before multi-Restore semantics. Ordinary Import/hydration, canonical schema and File v1 layout stay intact.
+- Status: implemented with real worker, Persistence, adapters, Publication, Modal/navigation and restart/rollback regression coverage; native acceptance is recorded separately.
+
+
+### Task 2 review correction, round 1
+
+- Isolated complete Restore requests now retain their actual sent envelope after an unknown reply; receipt confirmation precedes recovery pruning and preserves the original waiter/feedback identity.
+- Bound source/proof failures from File, IDB or permissions carry an explicit unavailable outcome and reject the whole uncertain request. Only same-source pre-write semantic rejection permits isolation; later pending work remains separate.
+- Authority follows the origin of a refreshed File snapshot before comparing high-water clocks, preserving lower-clock newly selected content and retaining the older-snapshot guard within one scope.
+- Status: regression repair verified through real worker/Persistence/Authority paths; review/native revalidation is recorded in Task 2 fix artifacts.
+
+## 2026-11-16: Complete backups preserve canonical entity IDs
+
+- Problem: full Restore rejected own exports containing historical dot IDs or tilde IDs generated from long Drop operations.
+- Decision: reuse the bounded entity-ID validator while retaining uniqueness, reference and lossless-normalization checks. File writes reject session path separators and NUL before backup or transaction writes.
+- Reason: Export and checked Restore must preserve workspace/category/session/tab/Bin identity; native filenames have a separate platform boundary.
+- Status: covered by real Store/registered-worker Restore on Browser and File, rebuilt File reads, and unchanged original bytes on filename rejection. Parent records native acceptance separately.

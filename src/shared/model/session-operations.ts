@@ -9,6 +9,9 @@ import {
 } from './schema';
 import { parseImportText, parseOneTabText } from './import-export';
 import type { Group, TabBoardState, TabItem } from './types';
+import { BUILT_IN_CATEGORIES } from './categories';
+import { SCHEMA_VERSION } from './constants';
+import { isEntityId } from '../validation';
 
 export function restoreGroupFromBin(
   state: TabBoardState,
@@ -240,4 +243,51 @@ export function importText(
     groups: [...state.groups, ...groups],
     updatedAt: timestamp,
   });
+}
+
+/** Full restore accepts a complete, lossless current-schema snapshot only. */
+export function validateCompleteBackup(value: unknown): TabBoardState {
+  const fail = (): never => { throw new Error('Choose a complete, compatible TabBoard JSON backup.'); };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fail();
+  const raw = value as Record<string, unknown>;
+  if (raw.version !== SCHEMA_VERSION || !Array.isArray(raw.workspaces) || !raw.workspaces.length
+    || !Array.isArray(raw.groups) || !Array.isArray(raw.folders) || !Array.isArray(raw.bin)
+    || !raw.settings || typeof raw.settings !== 'object'
+    || !raw.categoryOrderByWorkspace || typeof raw.categoryOrderByWorkspace !== 'object'
+    || typeof raw.activeWorkspaceId !== 'string'
+    || typeof raw.createdAt !== 'string' || !Number.isFinite(Date.parse(raw.createdAt))
+    || typeof raw.updatedAt !== 'string' || !Number.isFinite(Date.parse(raw.updatedAt))) return fail();
+  const state = normalizeState(raw);
+  const canonicalJson = (input: unknown): string => JSON.stringify(input, (_key, item: unknown) => {
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      return Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b)));
+    }
+    return item;
+  });
+  // Older v1 exports predate revision and the replay ledger.
+  if (canonicalJson({ mutationRevision: 0, dropOperationLedger: [], ...raw }) !== canonicalJson(state)) return fail();
+  if (!['system', 'light', 'dark'].includes(state.settings.theme)
+    || !['store', 'popup'].includes(state.settings.actionClick)
+    || !['browser', 'file'].includes(state.settings.storageMode)) return fail();
+  const unique = (ids: string[]): boolean => ids.every(isEntityId) && new Set(ids).size === ids.length;
+  const allGroups = [...state.groups, ...state.bin.flatMap(entry => entry.kind === 'group' ? [entry.item as Group] : [])];
+  const allTabs = [...allGroups.flatMap(group => group.tabs), ...state.bin.flatMap(entry => entry.kind === 'tab' ? [entry.item as TabItem] : [])];
+  const datedEntities = [...state.workspaces, ...state.folders, ...allGroups, ...allTabs];
+  if (datedEntities.some(item => !Number.isFinite(Date.parse(item.createdAt)) || !Number.isFinite(Date.parse(item.updatedAt)))
+    || state.bin.some(entry => !Number.isFinite(Date.parse(entry.deletedAt)))
+    || Object.entries(state.categoryOrderByWorkspace).some(([workspaceId, order]) => order.some(id =>
+      !BUILT_IN_CATEGORIES.some(category => category === id)
+      && !state.folders.some(folder => folder.workspaceId === workspaceId && folder.id === id.replace(/^folder:/, ''))))) return fail();
+  if (!unique(state.workspaces.map(item => item.id)) || !unique(state.folders.map(item => item.id))
+    || !unique(state.bin.map(item => item.id)) || !unique(allGroups.map(item => item.id)) || !unique(allTabs.map(item => item.id))
+    || state.folders.some(folder => !state.workspaces.some(workspace => workspace.id === folder.workspaceId))
+    || state.groups.some(group => group.starred && group.archived || group.archived && group.folderId !== null)
+    || allTabs.some(tab => tab.itemType === 'link' ? !tab.url.trim() : tab.url !== '')) return fail();
+  return state;
+}
+
+export function parseCompleteBackup(text: string): TabBoardState {
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { throw new Error('Choose a complete TabBoard JSON backup.'); }
+  return validateCompleteBackup(value);
 }

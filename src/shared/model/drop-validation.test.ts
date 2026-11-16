@@ -34,7 +34,7 @@ const intents = {
     targetCategoryId: 'saved',
     placement: 'after',
     workspaceId: 'workspace-a',
-    expectedCategoryOrder: ['inbox', 'saved', 'archive'],
+    expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'],
   },
   moveTabs: {
     kind: 'move-tabs',
@@ -84,6 +84,8 @@ describe('shared drop validation', () => {
   it('rejects extra keys, malformed categories, IDs, placements, and indexes', () => {
     expect(isDropIntentShape({ ...intents.moveSession, extra: true })).toBe(false);
     expect(isDropIntentShape({ ...intents.moveSession, category: 'folder:' })).toBe(false);
+    expect(isDropIntentShape({ ...intents.moveSession, category: 'bookmarks' })).toBe(false);
+    expect(isDropIntentShape({ ...intents.createOpenSession, category: 'bookmarks' })).toBe(false);
     expect(isDropIntentShape({ ...intents.moveSession, groupId: '' })).toBe(false);
     expect(isDropIntentShape({ ...intents.moveSession, index: -1 })).toBe(false);
     expect(isDropIntentShape({

@@ -9,7 +9,6 @@ import {
   createCaptureSnapshot,
   getCaptureMessage,
   getCaptureOutcome,
-  mergeCapturedGroups,
   sameCaptureCategorySnapshot,
   sameCaptureFilterSnapshot,
   sameCaptureSnapshot,
@@ -39,7 +38,6 @@ import {
 } from '../core/openTabsWorkflow';
 import { groupMatchesQuery, normalizeState, type TabBoardState } from '../../shared/model';
 import { getState as getPersistedState } from '../../shared/store/chromeStorage';
-import { structurallyShareState } from '../../shared/store/stateStructuralSharing';
 import { useTabBoardStore } from '../../shared/store/useTabBoardStore';
 import {
   createRefreshCoalescer,
@@ -470,20 +468,7 @@ export function useOpenTabsRuntime(): OpenTabsWorkflow {
         if (createdGroupIds.length !== result.createdGroupIds.length) {
           throw new Error('Created session was not found in persisted state.');
         }
-        const currentState = useTabBoardStore.getState();
-        if (currentState.activeWorkspaceId === captureSnapshot.workspaceId) {
-          const stateToApply = currentState.updatedAt <= nextState.updatedAt
-            ? nextState
-            : mergeCapturedGroups(
-              currentState,
-              nextState,
-              createdGroupIds,
-              captureSnapshot.workspaceId,
-            );
-          if (stateToApply !== currentState) {
-             useTabBoardStore.setState(structurallyShareState(currentState, stateToApply));
-          }
-        }
+        useTabBoardStore.getState().reconcileCaptureCommit(nextState);
         refreshFailureRef.current = null;
         await refresh();
         if (refreshFailureRef.current) throw refreshFailureRef.current;

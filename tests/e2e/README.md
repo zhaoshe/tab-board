@@ -14,7 +14,21 @@ npm run test:e2e:ui     # Playwright UI mode
 ```
 
 The config (`playwright.config.ts`) starts `npm run dev` itself and points at
-`http://localhost:5173/dev/manager-preview.html`.
+the resolved preview origin. By default that is
+`http://127.0.0.1:5173/dev/manager-preview.html`.
+
+Optional overrides:
+
+```sh
+TABBOARD_DEV_PORT=5394 TABBOARD_HMR_PORT=5395 npm run dev
+TABBOARD_E2E_PORT=5394 npm run test:e2e
+TABBOARD_E2E_PORT=5394 TABBOARD_HMR_PORT=5395 npm run test:e2e
+```
+
+Playwright now verifies that the target is the real TabBoard manager preview
+page before any browser test starts. The check uses a dedicated preview marker
+that survives the Vite + CRX dev HTML rewrite, so a random `200 OK` page on the
+same port is not accepted.
 
 First-time setup (once per machine):
 

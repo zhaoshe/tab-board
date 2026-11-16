@@ -1,3 +1,4 @@
+import { restoreError, isOrigin, restoreOutcome, type RestoreOutcome, type OriginScope, type RestoreRequest, type MutationCommitAck } from './restoreCommit';
 import { normalizeState, type TabBoardState } from '../model';
 import { logBreadcrumb, logWarning } from '../utils/diagnostics';
 import {
@@ -28,6 +29,9 @@ let localHarnessChrome: unknown;
 let localHarnessState: TabBoardState | null = null;
 
 export class StatePersistenceError extends Error {
+  readonly restoreOutcome?: RestoreOutcome;
+  readonly committedOrigin?: OriginScope;
+  readonly confirmedByReceipt: boolean;
   readonly code?: string;
   readonly invalidMutationIndexes: number[];
   readonly committedMutationIndexes: number[];
@@ -39,10 +43,16 @@ export class StatePersistenceError extends Error {
     invalidMutationIndexes: readonly number[] = [],
     committedMutationIndexes: readonly number[] = [],
     committedState?: TabBoardState,
+    confirmedByReceipt = false,
+    committedOrigin?: OriginScope,
+    outcome?: RestoreOutcome,
   ) {
     super(message);
     this.name = 'StatePersistenceError';
     this.code = code;
+    this.restoreOutcome = outcome;
+    this.confirmedByReceipt = confirmedByReceipt;
+    this.committedOrigin = committedOrigin;
     this.invalidMutationIndexes = [...invalidMutationIndexes];
     this.committedMutationIndexes = [...committedMutationIndexes];
     this.committedState = committedState;
@@ -56,6 +66,8 @@ function responseError(response: unknown): StatePersistenceError {
     invalidMutationIndexes?: unknown;
     committedMutationIndexes?: unknown;
     state?: unknown;
+    confirmedByReceipt?: unknown;
+    origin?: unknown;
   } : {};
   const committedState = value.state && typeof value.state === 'object'
     ? normalizeState(value.state)
@@ -70,6 +82,9 @@ function responseError(response: unknown): StatePersistenceError {
       (index): index is number => Number.isSafeInteger(index) && index >= 0,
     ) : [],
     committedState,
+    value.confirmedByReceipt === true,
+    isOrigin(value.origin) ? value.origin : undefined,
+    restoreOutcome(response),
   );
 }
 
@@ -82,8 +97,10 @@ async function applyMutationsLocally(
 
 export async function sendStateMutations(
   mutations: readonly unknown[],
-): Promise<TabBoardState> {
+  restoreRequest?: RestoreRequest,
+): Promise<TabBoardState | MutationCommitAck> {
   if (typeof chrome.runtime?.sendMessage !== 'function') {
+    if (restoreRequest) throw restoreError('RESTORE_TRANSPORT_UNAVAILABLE', 'Complete restore requires the extension worker transport. Reload the manager and try again.');
     if (localHarnessChrome !== chrome) {
       localHarnessChrome = chrome;
       localHarnessState = null;
@@ -91,7 +108,8 @@ export async function sendStateMutations(
     const current = localHarnessState || await getState();
     try {
       const next = await applyMutationsLocally(current, mutations);
-      await setState(next);
+      const restore = mutations.some(value => value && typeof value === 'object' && 'type' in value && value.type === 'restore-backup');
+      await setActiveState(next, restore ? { backupBeforeRestore: normalizeState(current) } : undefined);
       localHarnessState = next;
       return next;
     } catch (error: unknown) {
@@ -105,9 +123,13 @@ export async function sendStateMutations(
   const response = await chrome.runtime.sendMessage({
     type: 'tabboard-state-mutations',
     mutations,
+    ...(restoreRequest ? { restoreRequest } : {}),
   });
   if (!response?.ok) {
     throw responseError(response);
+  }
+  if (restoreRequest && response.result?.state && typeof response.result.confirmedByReceipt === 'boolean') {
+    return { ...response.result, state: normalizeState(response.result.state) } as MutationCommitAck;
   }
   return normalizeState(response.result);
 }

@@ -118,7 +118,7 @@ Trade-offs:
 - 未来如果要恢复类似能力，需要重新定义 copy/move/reference 的关系。
 
 Data handling:
-`quickList` 仍作为 state schema 字段保留（normalize 补齐为空数组），当前 UI 不再暴露。插件未上线，不再保留历史数据迁移逻辑。
+`quickList` 已从当前 schema 移除。`normalizeState()` 读到历史 `quickList` 时，会把遗留 items 迁移成一个普通 `Former Quick list` session，之后不再保留该字段。
 
 Status:
 Accepted。
@@ -1967,8 +1967,208 @@ Status:
 
 Accepted。
 
+## D066: Saved title refresh uses a minimized temporary browser context
+
+Context:
+
+Capture 可能在最终 document title 可用前完成。直接 `fetch` 不能可靠处理登录态、
+SPA、脚本生成 title 和无 host permission 的页面；把普通 background tab 插入现有
+窗口又会被用户看到并扰动 tab strip。
+
+Decision:
+
+- 手动 Refresh Title 先复用精确 URL 的已打开 tab。
+- 没有匹配时创建 `type: popup`、`focused: false`、`state: minimized` 的临时窗口，
+  等待 complete 且非 URL title 稳定后返回，并无条件关闭临时窗口。Open Tabs 只
+  投影 normal windows，因此不显示该 helper。
+- 失败保留旧 title；Locked Session 不允许刷新。
+- 同 URL drag dedupe 保留目标旧 item，只从第一个 incoming item 复制 title。
+
+Rationale:
+
+真实浏览器 context 能执行页面脚本并复用用户会话；minimized/unfocused window 比插入
+用户当前窗口更不可见。复用现有 item 与 `update-tab` 避免 schema/mutation 扩展，并
+保留用户 note、位置和记录 identity。
+
+Trade-offs:
+
+- 首次刷新未打开的页面可能产生网络请求、短暂 worker 工作和最多 15s 等待。
+- Chrome/OS 仍可能在任务栏或窗口管理器中短暂记录该 minimized window；产品保证是
+  不抢焦点、不展开可见页面，并在成功或失败后清理，而不是完全无系统级痕迹。
+- 自动 capture 不增加后台加载；隐藏加载只在用户显式 Refresh Title 时发生。
+
+Status:
+
+Accepted。
+
+## D067: Restore synchronizes final titles through the worker pipeline
+
+Context:
+
+Saved Tab/Session 打开后，Chrome 创建 API 先返回 URL 或 loading title。若 UI 立即写回，
+会把占位值当成正确 title；若每个 UI 入口自行监听，又会造成重复 lifecycle owner。
+
+Decision:
+
+- 所有 persisted Saved restore 入口在 worker 创建 tab 后，按 tab ID 等待 stable final
+  title，并一次性回写仍存在、URL 未变的 Saved records。
+- `deleteRestoredTabs` 已删除的记录跳过；Locked/保留记录自动更新。
+- Locked Session 放行 title-only `update-tab`，其它 mutation lock 不变。
+- title 同步是 best-effort：单页或整批同步失败不改变 restore 成功。
+- Bookmark runtime projection 不参与 canonical title write。
+
+Rationale:
+
+Worker 已拥有 restore queue、Chrome tab IDs、稳定 title waiter 和 authoritative
+persistence，能在一个边界解决所有 UI/Popup/Omnibox 入口，并保持最终 title 规则一致。
+
+Trade-offs:
+
+- 保留 Saved records 的 restore response 最多延后 15s；已删除 records 不等待。
+- 自动同步只更新 title，不更新 favicon 或其它 captured metadata。
+
+Status:
+
+Accepted。
+
+## D068: Session title refresh uses a bounded worker queue
+
+Context:
+
+Session 可能包含大量 Link。若批量刷新同时为所有未打开 URL 创建 helper window，会造成
+突发窗口、网络和内存压力；串行执行又会让大 Session 过慢。
+
+Decision:
+
+- Session menu 批量刷新复用单 URL resolver，固定最多 3 个并发。
+- Note 跳过；成功项一次性写回；失败/竞态只进入结果计数。
+- Manager 不持有 URL queue 或 helper IDs，只显示 worker 返回的
+  `{refreshed,failed}`。
+
+Rationale:
+
+固定小并发避免新依赖和复杂调度，同时保留 open-tab reuse、popup 隐藏、稳定 title、
+cleanup 和 Locked title-only 规则的单一 owner。
+
+Trade-offs:
+
+- 大 Session 的总耗时随 Link 数量增长。
+- 结果只报告数量，不逐条列出失败 URL；需要逐条处理时仍可使用 Tab 级 Refresh Title。
+
+Status:
+
+Accepted。
+
+## D069: Title refresh activity is page-local and operation-counted
+
+Context:
+
+Title refresh 可由 Manager、Popup、Omnibox 或 restore worker path 发起。组件本地 loading
+无法覆盖非 Manager 入口；持久化 loading 又会污染 canonical state。并发操作还可能
+让较早 finish 提前清掉后开始的 spinner。
+
+Decision:
+
+- Worker 为每条实际 resolver 广播带 operation ID 的 start/finish。
+- Manager 用 page-local record-key -> operation-ID Set 保存 activity，每行独立订阅。
+- loading 原位复用 Delete 的 32px action slot；不 hover 也可见。
+
+Rationale:
+
+该模型覆盖所有入口、支持重叠、保持 row geometry，并把瞬时 UI 状态留在正确边界。
+
+Trade-offs:
+
+- Manager 未打开时 activity 消息无人消费，这是预期行为；下次打开无需恢复历史 spinner。
+- Runtime message 增加两条/每次 resolver，但只携带小型 identity payload。
+
+Status:
+
+Accepted。
+
+## D070: Keep a complete recovery snapshot for file transactions
+
+- Problem: replacing multiple live files cannot roll back a partially published transaction from a flag alone.
+- Decision: persist the previous normalized snapshot under an independent commit identity before pending meta; readers use that snapshot while pending, and the next commit repairs the complete file set.
+- Reason: preserve the readable v1 folder layout and stop mixed-version loads without adding a storage dependency.
+- Tradeoff: one additional snapshot write per commit; after successful publication keep the latest recovery file and clean older files. Interrupted legacy data without a recovery snapshot remains a limited compatibility path.
+- Status: implemented with interruption, concurrent-read and retry regressions.
+
+## D071: Reconnect data conflicts require an explicit source choice
+
+- Problem: browser writes made during file fallback must not disappear behind older folder data.
+- Decision: compare content before reconnecting; when different, preserve both copies in the folder and explicitly choose the active copy. Matching data reconnects directly.
+- Reason: reuse the existing backend switch and file transaction mechanisms without silently merging conflicting same-ID data.
+- Tradeoff: one dialog for real divergence and two bounded normalized recovery JSON files; colliding unread originals also retain exact bytes under unique names in `.tabboard-unread-before-restore/`, accumulating on repeated conflicts. Byte preservation must succeed before replacement. Automatic worker recovery stays in browser mode when content differs.
+- Status: implemented with core, UI and Orca native filesystem verification. Final integration regressions verify selected settings/status/ping publication after durable data/handle commit, restored publication on subsequent commits/rereads, and failed-transition handle rollback.
+
+## D072: Complete restore is explicit and saves current data first
+
+- Problem: adding sessions from JSON cannot recover workspace/category structure, settings or Bin.
+- Decision: keep Import's default add behavior and offer complete restore for valid full backups. Preserve current storage configuration, save the previous normalized snapshot in that backend, then commit through the existing authority with an expected revision.
+- Reason: support recovery without silently replacing current work or switching storage based on exported settings.
+- Tradeoff: keep one latest complete pre-restore snapshot; preserve unread file bytes separately, retaining distinct copies on repeated filename collisions. Complete restore rejects snapshots that would lose data during normalization. Backup IDs use the existing bounded entity-ID contract, retaining dot and generated tilde identities. Native filename restrictions belong to File writes and reject unsafe session names before changing original data or the prior backup.
+- Status: implemented with model, worker, browser/file persistence and UI regressions. Orca integration evidence is recorded in the Task 7 handoff.
+
+## D073: Bound session interaction trees with stable slots
+
+- Problem: visiting every session kept every interaction tree alive; a very large session mounted all links on its first screen.
+- Decision: retain slot geometry, mount cards/links near the viewport, and keep explicit selection, editing, focus, overlay and drag owners until they release their work.
+- Reason: reduce mounted React/DnD/overlay rows without changing canonical identities, persistence or insertion anchors, and without a runtime dependency.
+- Tradeoff: native browser Find sees mounted link text only; TabBoard Search still scans all data. Notes retain variable height and complete trees; explicit owners such as selecting all links can exceed the viewport bound.
+- Status: implemented with regression tests; real Chrome drag acceptance is tracked separately.
+
+## D074: Reuse unchanged state branches and skip equal file writes
+
+- Problem: renaming a workspace copied every saved tab; ordinary file commits searched old sessions repeatedly and rewrote unchanged top-level files.
+- Decision: ordinary immutable mutations retain unchanged branches and isolate incoming payloads. Compare revisions by replaced branches and file sessions by ID Map; skip equal data files only on ordinary commits.
+- Reason: reduce editing and file IO costs with the existing schema and persistence boundaries.
+- Tradeoff: normalization and a complete previous transaction snapshot remain required; forced repair and complete restore still write the complete file set. Changed large branches still require content comparison.
+- Status: implemented with structural sharing, frozen-input, payload isolation and file write/recovery regressions.
+
+## D075: Defer import previews and count the published search query
+
+- Problem: typing repeatedly parsed import text and scanned result counts before the existing search debounce completed.
+- Decision: preview import text after 150ms without edits and cache unchanged parsing; show pending status and prevent stale submission. Count saved results from the board projection and memoize bookmark counts for the published query. Clear and close remain immediate.
+- Reason: reduce repeated work using local React state and existing selectors, while preserving ordinary Add Sessions and explicit complete Restore.
+- Tradeoff: final parsing and authority validation still run on the main thread; 150ms is a trailing delay, not a parsing time limit. No worker, index or runtime dependency is introduced.
+- Status: implemented with component regressions; large JSON paste and real typing acceptance are tracked by the parent task.
+
+## D076: Keep current docs aligned with executable contracts
+
+- Problem: current docs and agent guidance drifted from the shipped source on version, built-in Bookmark behavior, default import placement, and the actual `npm run check` pipeline.
+- Decision: current-facing docs must follow the executable source contract: version `0.1.6`, Chrome `115+`, Node `20+` source builds, Bookmark as a read-only runtime category, default Import appending into the current workspace/category, and `npm run check` including extension sanity, cycle, architecture and release-contract gates. Implementation history stays in dedicated review records instead of being implied by the current spec.
+- Reason: reduce future maintenance errors and stop agents or reviewers from rebuilding removed flows such as Todo, Quick list or `All items` navigation from stale docs.
+- Tradeoff: every product or tooling contract change now needs a matching docs update; browser-proof claims remain limited to recorded evidence rather than inferred from configured tests alone.
+- Status: implemented as docs-only alignment at the end of the 2026-11-12 optimization cycle.
+
+## D077: Mutation Batch owns ordered evaluation and verification
+
+- Problem: three mutation loops duplicated drop revision rebasing, Replay detection, invalid-index mapping and partial commit reporting across pure state mutations, worker verification and persistence.
+- Decision: use `createMutationBatch(raw)` as the small interface. Callers can synchronously evaluate a batch or ask the worker to verify live Open Tabs through an injected reader, then persistence commits the verified continuation against fresh state. The old `DropMutationBatchContext` and prepare/mark helpers are no longer exported to callers.
+- Reason: keep raw validation, original coordinates, failure merging, replay exemptions and restore-before snapshots local to one implementation while preserving the existing worker, storage and feedback protocols.
+- Tradeoff: `stateMutations.ts` becomes the first home for both sync and async batch policy. A later split should create a real module seam only if it avoids cycles and does not re-expose policy knobs.
+- Status: implemented with pure, persistence, worker and publication regressions.
+
+## D078: Storage Authority owns ordered backend transitions
+
+- Problem: only enqueueing installation lets saves, reads and reloads overlap migration preparation against the wrong backend.
+- Decision: preserve the public facade and order complete transitions, reads and reloads in Storage Authority. Explicit switches and reconnect acquire the existing Web Lock before entering its queue. Candidate file adapters stay silent; publication checks installed identity and lifecycle.
+- Reason: keep backend selection, copy, bootstrap commit, installation and fallback local to the existing Chrome/File seam. State Persistence keeps transaction locking and Mutation Batch keeps pure evaluation, as in ADR 0001 and ADR 0002.
+- Tradeoff: reads wait for same-context lifecycle work. Synchronous reset revokes the old lifecycle but retains the IO queue; new initialization and writes wait for old operations, preventing two adapters from writing one folder. Stale work cannot install or publish locally. Handle rollback finishes before the queue releases, including failed bootstrap commits during reset; actual IO errors remain. Other contexts still refresh through existing switch messages.
+- Status: implemented with real-adapter lifecycle, lock ordering, reset and retired-source regressions.
+
+## D079: Manager page-state hook owns complete restore navigation
+
+- Problem: Layout's restore guard and fresh replace depend on hook effects that can still observe an older render; failure reconciliation must precede ImportModal's retry revision read.
+- Decision: deepen the existing zero-argument hook with `restoreBackup(text, expectedRevision)`. Its subscriptions wake effects, while commands and effects read latest navigation ref/store/query. Restore guards before store invocation, validates one success replace, and immediately reconciles valid workspace mismatch before rethrowing the original error.
+- Reason: keep navigation and its full recovery sequencing in one existing module, with real hook and publication integration tests. Bookmark uses the same URL round-trip contract.
+- Tradeoff: the runtime hook concretely depends on React/store/history. D046 global workspace synchronization and D072 authority/CAS remain; multi-page arbitration is unchanged. Secondary reconciliation failures are diagnostic and cannot replace the restore error.
+- Status: implemented; see ADR 0003.
+
 ```md
 ## D00X: Title
+
 
 Context:
 
@@ -1982,3 +2182,49 @@ Status:
 Proposed / Accepted / Rejected / Revisit
 ```
 - D029（2026-07-19）：Open Tabs 不再提供 pinned、Chrome URL、file URL 三组捕获开关，仅保留自定义 URL 过滤规则。原因：多组“能否选择”的特例造成列表、批量操作与设置的认知负担；过滤应是统一的隐藏规则。取舍：Chrome 对部分 URL 的实际操作限制仍由平台返回错误。
+
+
+## D080: Authoritative Publication owns capture projection
+
+- Problem: capture hook compared optimistic UI timestamps and merged created groups itself, outside the existing canonical buffer/replay rules. Unrelated in-flight RPC settlement could lose the captured session or replace displayed edits.
+- Decision: add synchronous `reconcileCaptureCommit(canonical)` to the existing owner/facade after the hook's canonical read and created-ID/source-workspace check. Select by canonical revision, parsed timestamp, then incumbent on ties. A shared private ordered replay calculator drives eager preview and the existing settlement path.
+- Reason: a single owner can preserve capture high-water across later replies and replay only outstanding work already displayed, without waiting for unrelated RPC. Preview never publishes untouched checked/category additional mutations or changes queue/wire/drop CAS, waiter, timer or feedback policy.
+- Tradeoff: track projected mutation identities separately from the existing transport batch. Preserve valid current Workspace only in the eager projection; canonical base remains independent. Semantic replay failure keeps newest canonical observation for settlement while leaving projection/outstanding work unchanged and returning the existing committed-but-unreconciled outcome. Existing settlement pruning, retry and checked-retry display policy are preserved.
+- Status: implemented with direct Publication and real Zustand/Storage Authority/capture DOM contracts. Native Chrome proof is recorded separately. See ADR 0004.
+
+## D081: Reveal targets stable Session Slots
+
+- Problem: capture completion and URL `targetGroupId` reveal used the complete SessionCard DOM id. With bounded activation, an offscreen target can be represented only by its stable shell slot, so reveal could wait for a card that only reveal/highlight would activate.
+- Decision: use the existing `data-session-slot-id` contract as the reveal lookup target, then keep the current scroll, highlight ownership and release lifecycle. The slot can initially contain either a shell or a full card.
+- Reason: the stable slot is already the DnD/geometry identity for every rendered session. Reusing it fixes shell-first reveal without adding public props, a second protocol, a generic reveal framework or persistence changes.
+- Tradeoff: tests must cover real hook + slot rendering rather than relying on source-string assertions. Browser/manual offscreen capture remains a separate acceptance layer.
+- Status: implemented with shell-first capture/URL reveal regression tests; see ADR 0005.
+
+## D082: Explicit file rereads can refresh exact-tie publications
+
+- Problem: repairing a damaged session file can restore valid JSON without changing `meta.json` revision or timestamp. Ordinary high-water rules correctly reject equal-revision stale observations, but that also left user-authorized `Re-read folder` results hidden in Manager publications after unread health cleared.
+- Decision: mark only manual file rereads with bounded explicit metadata and a one-shot `file-reread_*` event id on the existing File ping transport. Publication admits same revision/timestamp exact ties only for that explicit observation and keeps ordinary tie incumbent behavior for all other reads and RPC replies.
+- Reason: this preserves stale snapshot protection while letting the existing Authority/File notification path publish a user-confirmed repaired folder to current and peer Manager contexts.
+- Tradeoff: the ping payload gains optional metadata and Authority keeps a small event-id dedupe cache. Failed or retired rereads must reject or no-op before writing the explicit ping, so native acceptance still needs real OPFS and multi-Manager proof.
+- Status: implemented with File adapter, Authority, peer publication and deferred old-RPC regressions; native browser proof is recorded separately by the parent task.
+
+
+## D083: Confirm complete Restore from a durable request receipt
+
+- Problem: losing the success reply after a destructive Restore made its retry indistinguishable from a stale new replacement.
+- Decision: keep a Restore-bearing frozen request with independent request/attempt IDs and source scope. Commit its whole-batch receipt with Browser state/backup or File final-meta, retain prior receipts in recovery, and confirm historical full/partial outcomes before live validation. New unwitnessed requests retain strict CAS and must match their captured preview origin.
+- Reason: confirm an actual commit across worker restart without repeating committed ordinary siblings, overwriting later edits, replacing the original backup, or inferring success from equal content.
+- Tradeoff: auxiliary receipts grow with complete Restore count. File/IDB/status selection cannot share a platform transaction, so inconsistent intermediate bindings fail closed and require explicit reconnect. Unverifiable old-source requests reject as a whole instead of resending potentially committed siblings in the new source. UI attempts are not persisted across page destruction; pre-phase-1 File backup preparation retains its existing limits.
+- Status: implemented; native lost-reply confirmation remains a separate recorded acceptance gate.
+
+
+D083 review correction: retry identity also applies to isolated Restore-bearing requests. Actual proof-read failures are classified at the Persistence read boundary, preserving their causes instead of inferring availability from specific error codes. Authority high-water clocks are compared only after following the refreshed source origin. This closes committed-sibling replay and retired-scope overwrite gaps without changing the approved durable metadata or ordinary same-source rules.
+
+
+## D084: Stable Session Slot owns the current list reading position
+
+- Problem: bounded card release recreated the inner list at the top during ordinary horizontal browsing.
+- Decision: retain one scroll offset in the existing Slot-local ref, capture real DOM scroll changes and release, then restore before paint with the current list range clamp. Session, workspace, category, read-only mode and normalized search changes start a new list context; canonical edits within that context retain/clamp.
+- Reason: the Slot already survives full-card unmount, so retaining its reading position needs no store or wider Card/List interface.
+- Tradeoff: removing the Slot loses the offset. Visited cards and rows still release outside overscan without a current interaction/reveal owner; the offset never enters canonical state or persistence.
+- Status: implemented with actual Slot/Card/List DOM regressions; native browsing and shortening acceptance are recorded separately.

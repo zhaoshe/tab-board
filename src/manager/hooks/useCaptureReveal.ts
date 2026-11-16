@@ -26,7 +26,7 @@ interface UseCaptureRevealInput {
   showBin: boolean;
   searchQuery: string;
   tabFilterUrl: string | null;
-  pageState: ManagerPageStateController;
+  pageState: Pick<ManagerPageStateController, 'replace' | 'setQuery'>;
   showSuccess: (message: string, title?: string) => void;
   showInfo: (message: string, title?: string) => void;
   showError: (message: string, title?: string) => void;
@@ -46,6 +46,13 @@ function replaceUrlParams(params: URLSearchParams): void {
     document.title,
     `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
   );
+}
+
+function findSessionSlotElement(groupId: string): HTMLElement | null {
+  for (const element of document.querySelectorAll<HTMLElement>('[data-session-slot-id]')) {
+    if (element.dataset.sessionSlotId === groupId) return element;
+  }
+  return null;
 }
 
 export function useCaptureReveal({
@@ -209,7 +216,7 @@ export function useCaptureReveal({
       clearPendingTarget();
       return;
     }
-    const element = document.getElementById(`session-card-${pendingTargetGroupId}`);
+    const element = findSessionSlotElement(pendingTargetGroupId);
     if (!element) return;
     element.scrollIntoView({
       behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches

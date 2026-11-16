@@ -295,21 +295,21 @@ test.describe('Open tab preview positioning', () => {
     expect(evidence.linkClamp).toBe('4');
   });
 
-  test('keeps Open and Saved Tab titles above separate metadata rows', async ({ page }) => {
+  test('balances resting Tab row insets and overlays the trailing action on hover', async ({ page }) => {
     await page.goto(PREVIEW_PATH);
     await expect(page.locator('.manager-shell')).toBeVisible();
 
     const readRowGeometry = async (
       rowSelector: string,
       detailsSelector: string,
+      actionSelector: string,
     ) => page.locator(rowSelector).first().evaluate((row, selector) => {
-      const details = row.querySelector<HTMLElement>(selector);
+      const { actionSelector, detailsSelector } = selector;
+      const details = row.querySelector<HTMLElement>(detailsSelector);
       const title = details?.children.item(0);
       const metadata = details?.children.item(1);
       const owner = row.querySelector<HTMLElement>('.manager-tab-owner-slot');
-      const trailingAction = row.querySelector<HTMLElement>(
-        '.manager-open-tab-close, .tab-item-row__delete',
-      );
+      const trailingAction = row.querySelector<HTMLElement>(actionSelector);
       if (!details || !title || !metadata || !owner || !trailingAction) {
         throw new Error('Tab row is missing its title, metadata, or action slot.');
       }
@@ -329,7 +329,12 @@ test.describe('Open tab preview positioning', () => {
         detailsLeft: detailsRect.left,
         detailsRight: detailsRect.right,
         ownerRight: ownerRect.right,
+        leadingInset: ownerRect.left - rowRect.left,
+        trailingInset: rowRect.right - detailsRect.right,
         actionLeft: actionRect.left,
+        actionRight: actionRect.right,
+        actionOpacity: Number.parseFloat(getComputedStyle(trailingAction).opacity),
+        actionPosition: getComputedStyle(trailingAction).position,
         titleFontSize: titleStyle.fontSize,
         titleLineHeight: titleStyle.lineHeight,
         titleWeight: Number(titleStyle.fontWeight),
@@ -338,23 +343,75 @@ test.describe('Open tab preview positioning', () => {
         withinRow: detailsRect.top >= rowRect.top
           && detailsRect.bottom <= rowRect.bottom,
       };
-    }, detailsSelector);
+    }, { actionSelector, detailsSelector });
+
+    for (const [rowSelector, detailsSelector, actionSelector] of [
+      [
+        '.manager-open-tab-row',
+        '.manager-open-tab-details',
+        '.manager-open-tab-close',
+      ],
+      [
+        '.tab-item-row__content',
+        '.tab-item-row__details',
+        '.tab-item-row__delete',
+      ],
+    ] as const) {
+      const resting = await readRowGeometry(
+        rowSelector,
+        detailsSelector,
+        actionSelector,
+      );
+      expect(resting.childCount).toBeGreaterThanOrEqual(2);
+      expect(resting.rowHeight).toBeGreaterThanOrEqual(44);
+      expect(resting.titleBottom).toBeLessThanOrEqual(resting.metadataTop);
+      expect(resting.detailsLeft).toBeGreaterThan(resting.ownerRight);
+      expect(resting.trailingInset).toBeCloseTo(resting.leadingInset, 1);
+      expect(resting.actionOpacity).toBe(0);
+      expect(resting.titleFontSize).toBe('14px');
+      expect(resting.titleLineHeight).toBe('20px');
+      expect(resting.titleWeight).toBeGreaterThanOrEqual(600);
+      expect(resting.metadataFontSize).toBe('12px');
+      expect(resting.metadataLineHeight).toBe('16px');
+      expect(resting.withinRow).toBe(true);
+
+      await page.locator(rowSelector).first().hover();
+      const hovered = await readRowGeometry(
+        rowSelector,
+        detailsSelector,
+        actionSelector,
+      );
+      expect(hovered.actionOpacity).toBe(1);
+      expect(hovered.actionPosition).toBe('absolute');
+      expect(hovered.actionLeft).toBeLessThan(hovered.detailsRight);
+      expect(await page.locator(actionSelector).first().evaluate((action) => {
+        const rect = action.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2,
+        );
+        return Boolean(hit && (hit === action || action.contains(hit)));
+      })).toBe(true);
+
+      await page.mouse.move(1000, 700);
+    }
 
     for (const geometry of [
       await readRowGeometry(
         '.manager-open-tab-row',
         '.manager-open-tab-details',
+        '.manager-open-tab-close',
       ),
       await readRowGeometry(
         '.tab-item-row__content',
         '.tab-item-row__details',
+        '.tab-item-row__delete',
       ),
     ]) {
       expect(geometry.childCount).toBeGreaterThanOrEqual(2);
       expect(geometry.rowHeight).toBeGreaterThanOrEqual(44);
       expect(geometry.titleBottom).toBeLessThanOrEqual(geometry.metadataTop);
       expect(geometry.detailsLeft).toBeGreaterThan(geometry.ownerRight);
-      expect(geometry.detailsRight).toBeLessThan(geometry.actionLeft);
       expect(geometry.titleFontSize).toBe('14px');
       expect(geometry.titleLineHeight).toBe('20px');
       expect(geometry.titleWeight).toBeGreaterThanOrEqual(600);
@@ -389,6 +446,17 @@ test.describe('Open tab preview positioning', () => {
 
     const openRow = page.locator('.manager-open-tab-row').first();
     const savedRow = page.locator('.tab-item-row__content').first();
+    const outerInsets = await openRow.evaluate((row) => {
+      const scroll = row.closest('.manager-open-tabs-scroll');
+      if (!scroll) throw new Error('Open Tabs scroll owner is missing.');
+      const rowRect = row.getBoundingClientRect();
+      const scrollRect = scroll.getBoundingClientRect();
+      return {
+        left: rowRect.left - scrollRect.left,
+        right: scrollRect.right - rowRect.right,
+      };
+    });
+    expect(outerInsets.right).toBeCloseTo(outerInsets.left, 1);
     await expect(openRow).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(savedRow).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
 

@@ -168,10 +168,12 @@ describe('Task108 session rendering contracts', () => {
     expect(plus).not.toMatch(/z-index:\s*(?:999|\d{4,})/);
   });
 
-  it('keeps targetGroupId reveals addressable by the session card id', () => {
-    expect(layout).toContain('getElementById(`session-card-${pendingTargetGroupId}`)');
+  it('keeps targetGroupId reveals addressable by the stable session slot id', () => {
+    expect(layout).toContain('findSessionSlotElement(pendingTargetGroupId)');
+    expect(layout).toContain("[data-session-slot-id]");
+    expect(layout).toContain('element.dataset.sessionSlotId === groupId');
     expect(layout).toContain('setPendingTargetGroupId(targetGroupId)');
-    expect(card).toContain('id={`session-card-${group.id}`}');
+    expect(slot).toContain('data-session-slot-id={group.id}');
   });
 
   it('renders insertion-target highlight only for confirmed drag markers', () => {
@@ -253,18 +255,50 @@ describe('Task108 session rendering contracts', () => {
     expect(css).not.toContain(
       '.tab-item-row__content[data-selection-mode] .tab-item-row__delete',
     );
-    expect(row).toContain('className="tab-item-row__delete"');
+    expect(row).toContain("'tab-item-row__delete'");
+    expect(row).toContain("'tab-item-row__delete--loading'");
     expect(row).toContain('disabled={locked}');
+  });
+
+  it('shares link row and shell height across desktop, compact and coarse layouts', () => {
+    expect(cssBlock('.session-card__tabs')).toContain('--session-link-row-height: 44px');
+    expect(cssBlock('.session-card__row-shell')).toContain('height: var(--session-link-row-height)');
+    expect(cssBlock('.tab-item-row__content')).toContain('min-height: var(--session-link-row-height, 44px)');
+    for (const media of ['@media (hover: none), (pointer: coarse)', '@media (max-width: 760px)']) {
+      const mediaStart = css.indexOf(media, css.indexOf('.session-card__row-shell'));
+      expect(mediaStart).toBeGreaterThan(-1);
+      const nextMedia = css.indexOf('@media', mediaStart + media.length);
+      const section = css.slice(mediaStart, nextMedia === -1 ? undefined : nextMedia);
+      expect(section).toMatch(/\.session-card__tabs\s*\{[^}]*--session-link-row-height: 52px;/);
+    }
+  });
+
+  it('reserves both existing note lines for annotated links in full and shell geometry', () => {
+    expect(cssBlock(".session-card__tabs > [data-link-note='true']"))
+      .toContain('--session-link-row-height: 76px');
+    expect(cssBlock('.tab-item-row__note')).toContain('line-height: 16px');
+    expect(row).toContain('lineClamp={2}');
+    expect(row).toContain('{tab.note}');
   });
 
   it('uses the shared 32px neutral quick action for Saved Tab deletion', () => {
     expect(row).toContain("from '../../../shared/components/AccessibleIconAction'");
     expect(row).not.toContain('<ActionIcon');
     expect(row).toContain('<AccessibleIconAction');
-    expect(row).toContain('className="tab-item-row__delete"');
-    expect(row).toContain('label="Delete"');
+    expect(row).toContain("'tab-item-row__delete'");
+    expect(row).toContain("label={isTitleRefreshing ? 'Refreshing title' : 'Delete'}");
+    expect(row).toContain('loading={isTitleRefreshing}');
     expect(cssBlock('.tab-item-row__content'))
-      .toContain('grid-template-columns: 20px minmax(0, 1fr) 32px');
+      .toContain('grid-template-columns: 20px minmax(0, 1fr)');
+    expect(css).toMatch(
+      /\.tab-item-row__delete\.accessible-icon-action\s*\{[\s\S]*?position: absolute;[\s\S]*?inset-inline-end: 6px;/,
+    );
+    expect(css).toMatch(
+      /@media \(hover: none\), \(pointer: coarse\)[\s\S]*?\.tab-item-row__content\s*\{[\s\S]*?grid-template-columns: 20px minmax\(0, 1fr\) 32px;/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 760px\)[\s\S]*?\.tab-item-row__content\s*\{[\s\S]*?grid-template-columns: 20px minmax\(0, 1fr\) 44px;/,
+    );
     expect(css).toMatch(
       /\.tab-item-row__delete\.accessible-icon-action\s*\{[\s\S]*?opacity: 0;[\s\S]*?pointer-events: none;/,
     );
@@ -394,6 +428,8 @@ describe('Task108 session rendering contracts', () => {
     expect(row).not.toMatch(/\bchrome\./);
     expect(runtime).toContain('openSavedTab');
     expect(runtime).toContain('openSavedTabs');
+    expect(runtime).toContain('refreshSavedTabTitle');
+    expect(runtime).toContain("type: 'refresh-saved-tab-title'");
     expect(runtime).toContain('restoreGroup');
     expect(runtime).toContain('restoreTab');
     expect(runtime).toContain('restoreTabs');
@@ -404,9 +440,15 @@ describe('Task108 session rendering contracts', () => {
   });
 
   it('keeps the approved session and tab action surfaces', () => {
-    for (const label of ['Add Link', 'Add Note', 'Rename Session', 'Edit Session Note', 'Move Session', 'Lock Session', 'Unlock Session', 'Copy Links', 'Select Tabs', 'Delete Session']) {
+    for (const label of ['Add Link', 'Add Note', 'Rename Session', 'Edit Session Note', 'Move Session', 'Lock Session', 'Unlock Session', 'Refresh All Titles', 'Copy Links', 'Select Tabs', 'Delete Session']) {
       expect(card).toContain(label);
     }
+    expect(card).toContain('runtime.refreshSavedGroupTitles(group.id)');
+    expect(card).toContain("showSuccess('Titles refreshed')");
+    expect(card).toContain('`${result.refreshed} titles refreshed, ${result.failed} failed`');
+    expect(card).toMatch(
+      /\{!readOnly && \(\s*<ManagerMenuItem[\s\S]*?label="Refresh All Titles"/,
+    );
     expect(card).not.toContain('Move to Category');
     expect(card).not.toContain('categoryOptions');
     expect(card).not.toContain('handleMoveToCategory');
@@ -424,9 +466,13 @@ describe('Task108 session rendering contracts', () => {
     expect(cardHeader).toContain('tooltipDisabled={isMenuOpen}');
     expect(card).toContain('icon={Trash}');
     expect(card).not.toContain('icon={Trash2}');
-    for (const label of ['Add Note', 'Edit Note', 'Copy URL', 'Copy Text', 'Delete Saved Tab', 'Delete Saved Note']) {
+    for (const label of ['Add Note', 'Edit Note', 'Refresh Title', 'Copy URL', 'Copy Text', 'Delete Saved Tab', 'Delete Saved Note']) {
       expect(row).toContain(label);
     }
+    expect(row).toMatch(
+      /label="Refresh Title"[\s\S]*?onClick=\{handleRefreshTitle\}/,
+    );
+    expect(row).toContain('else void runtime.restoreTab(groupId, tab.id)');
     expect(row).toContain('icon={Trash}');
     expect(row).not.toContain('icon={Trash2}');
     expect(row).toContain("ariaLabel: 'Saved Tab Actions'");
@@ -440,11 +486,22 @@ describe('Task108 session rendering contracts', () => {
     expect(row).not.toContain('preview');
   });
 
-  it('replaces the Session header in place with the shared selection toolbar', () => {
+  it('replaces Session metadata with selection actions without changing header height', () => {
     expect(card).toContain('<SessionSelectionToolbar');
-    expect(card).toMatch(/selectionMode\s*\?\s*\(\s*<SessionSelectionToolbar/);
-    expect(card).not.toMatch(
-      /<SessionCardHeader[\s\S]*?<SessionSelectionToolbar/,
+    expect(card).toMatch(
+      /<SessionCardHeader[\s\S]*?selectionToolbar=\{selectionMode\s*\?\s*\(\s*<SessionSelectionToolbar/,
+    );
+    expect(css).toMatch(
+      /\.session-card__meta\s*\{[\s\S]*?grid-row: 2;[\s\S]*?min-height: 32px;/,
+    );
+    expect(css).toMatch(
+      /\.session-selection-toolbar\s*\{[\s\S]*?grid-column: 1 \/ -1;[\s\S]*?grid-row: 2;/,
+    );
+    expect(css).toMatch(
+      /\.session-card__header\[data-selection-mode\] > :is\([\s\S]*?\.session-card__actions,[\s\S]*?\.session-card__meta[\s\S]*?\)[\s\S]*?visibility: hidden;/,
+    );
+    expect(css).not.toContain(
+      '.session-card__header[data-selection-mode] > .session-card__heading',
     );
     expect(selectionToolbar).toContain('Restore Selected Links');
     expect(selectionToolbar).toContain('Copy Selected URLs');
@@ -493,6 +550,10 @@ describe('Task108 session rendering contracts', () => {
     const moreMenu = card.match(/const menuItems = [\s\S]*?\n\n  if \(isDragging/)?.[0] || '';
     expect(moreMenu).not.toContain('Restore');
     expect(cardHeader).toContain('label="Restore"');
+    expect(cardHeader).toContain('tooltip={restoreTooltip}');
+    expect(card).toContain('const restoreTooltip = getSessionRestoreTooltip({');
+    expect(card).toContain('const savedLinkRestoreTooltip = getSavedLinkRestoreTooltip({');
+    expect(card).toContain('savedLinkRestoreTooltip={savedLinkRestoreTooltip}');
   });
 
   it('guards destructive tab actions for locked groups', () => {

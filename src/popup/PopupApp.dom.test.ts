@@ -342,6 +342,19 @@ describe('PopupApp save response protocol', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('records the source window and tab count before requesting a save', async () => {
+    const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    sendMessage.mockResolvedValue({ ok: true, result: { storedTabs: 1 } });
+
+    await mountPopup('Save');
+    await clickSave();
+
+    expect(consoleInfo).toHaveBeenCalledWith(
+      '[tabboard:capture] popup save requested',
+      { selectedWindowId: 1, tabCount: 1 },
+    );
+  });
+
   it('announces a loading action while saving', async () => {
     let resolveSave!: (value: { ok: true }) => void;
     sendMessage.mockImplementation(() => new Promise((resolve) => {
@@ -431,6 +444,7 @@ describe('PopupApp save response protocol', () => {
 
     expect(sendMessage).toHaveBeenCalledWith({
       action: 'saveSelectedTabs',
+      selectedWindowId: 1,
       tabIds: [7, 8],
     });
   });

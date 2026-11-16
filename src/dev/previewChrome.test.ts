@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  createEmptyState,
   createGroupFromTabRecords,
   createTabRecord,
   normalizeState,
@@ -67,6 +68,150 @@ describe('preview Chrome fixture', () => {
     await expect(request).resolves.toMatchObject({ ok: true, result: { restoredTabs: 1 } });
   });
 
+  it('refreshes a saved title from an exact-URL preview tab', async () => {
+    const harness = install({
+      tabs: [{
+        id: 71,
+        url: 'https://refresh.example/article',
+        title: 'Loaded article title',
+        status: 'complete',
+      }],
+    });
+
+    await expect(harness.chrome.runtime.sendMessage({
+      type: 'refresh-saved-tab-title',
+      url: 'https://refresh.example/article',
+    })).resolves.toEqual({
+      ok: true,
+      result: 'Loaded article title',
+    });
+  });
+
+  it('uses a popup helper that stays out of Open Tabs and removes it when title loading finishes', async () => {
+    const harness = install({ tabs: [] });
+    const windowsBefore = harness.windows.map(({ id }) => id);
+    let resolveTabUpdate: (() => void) | undefined;
+    const originalUpdate = harness.chrome.tabs.update;
+    harness.chrome.tabs.update = async (...args) => {
+      await new Promise<void>((resolve) => {
+        resolveTabUpdate = resolve;
+      });
+      return originalUpdate(...args);
+    };
+
+    const refresh = harness.chrome.runtime.sendMessage({
+      type: 'refresh-saved-tab-title',
+      url: 'https://refresh.example/article',
+    });
+    await vi.waitFor(() => {
+      expect(resolveTabUpdate).toBeTypeOf('function');
+    });
+    const duringRefresh = await harness.chrome.runtime.sendMessage({
+      type: 'list-open-tabs',
+    }) as PreviewResponse<{ windows: Array<{ id: number }> }>;
+
+    expect(harness.windows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'popup', focused: false }),
+    ]));
+    expect(duringRefresh.result?.windows.map(({ id }) => id))
+      .toEqual(windowsBefore);
+
+    resolveTabUpdate?.();
+    await expect(refresh).resolves.toEqual({
+      ok: true,
+      result: 'refresh.example',
+    });
+    expect(harness.windows.map(({ id }) => id)).toEqual(windowsBefore);
+  });
+
+  it('refreshes all persisted Session link titles while skipping Notes', async () => {
+    const harness = install();
+    const locked = harness.state.groups.find((group) => group.locked)!;
+    const link = locked.tabs.find((tab) => tab.itemType === 'link')!;
+    const note = locked.tabs.find((tab) => tab.itemType === 'note')!;
+
+    await expect(harness.chrome.runtime.sendMessage({
+      type: 'refresh-saved-group-titles',
+      groupId: locked.id,
+    })).resolves.toEqual({
+      ok: true,
+      result: { refreshed: 1, failed: 0 },
+    });
+    expect(harness.state.groups.find(({ id }) => id === locked.id)?.tabs)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: link.id,
+          title: new URL(link.url).hostname,
+        }),
+        expect.objectContaining({
+          id: note.id,
+          title: note.title,
+        }),
+      ]));
+    const activities = harness.sentMessages.filter((message) =>
+      (message as { type?: string }).type
+        === 'tabboard-title-refresh-activity');
+    expect(activities).toEqual([
+      expect.objectContaining({
+        groupId: locked.id,
+        tabId: link.id,
+        status: 'start',
+      }),
+      expect.objectContaining({
+        groupId: locked.id,
+        tabId: link.id,
+        status: 'finish',
+      }),
+    ]);
+  });
+
+  it('starts only three Session title refresh activities before the next queued link', async () => {
+    const seed = install();
+    const state = structuredClone(seed.state);
+    const group = state.groups.find((item) => item.locked)!;
+    const link = group.tabs.find((tab) => tab.itemType === 'link')!;
+    group.tabs = [
+      link,
+      ...[2, 3, 4].map((index) => ({
+        ...link,
+        id: `preview-loading-${index}`,
+        title: `Loading ${index}`,
+        url: `https://preview-loading-${index}.example/`,
+      })),
+    ];
+    seed.uninstall();
+    installed.pop();
+    const harness = install({ state });
+    const pending: Array<() => void> = [];
+    const originalUpdate = harness.chrome.tabs.update;
+    harness.chrome.tabs.update = async (...args) => {
+      await new Promise<void>((resolve) => pending.push(resolve));
+      return originalUpdate(...args);
+    };
+
+    const refresh = harness.chrome.runtime.sendMessage({
+      type: 'refresh-saved-group-titles',
+      groupId: group.id,
+    });
+    await vi.waitFor(() => {
+      expect(pending).toHaveLength(3);
+    });
+    const starts = () => harness.sentMessages.filter((message) =>
+      (message as {
+        type?: string;
+        status?: string;
+      }).type === 'tabboard-title-refresh-activity'
+      && (message as { status?: string }).status === 'start');
+    expect(starts()).toHaveLength(3);
+
+    pending.shift()?.();
+    await vi.waitFor(() => {
+      expect(starts()).toHaveLength(4);
+    });
+    pending.forEach((resolve) => resolve());
+    await expect(refresh).resolves.toMatchObject({ ok: true });
+  });
+
   it('uninstalls nested harnesses in LIFO order', () => {
     const originalChrome = (globalThis as { chrome?: unknown }).chrome;
     install();
@@ -116,6 +261,39 @@ describe('preview Chrome fixture', () => {
     expect(harness.windows).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 77, tabs: [expect.objectContaining({ windowId: 77 })] }),
     ]));
+  });
+
+  it('lists preview bookmarks through the runtime harness', async () => {
+    const harness = install({
+      bookmarks: [{
+        id: '0',
+        title: '',
+        children: [{
+          id: '10',
+          title: 'Folder',
+          children: [{
+            id: '11',
+            title: 'Bookmark',
+            url: 'https://bookmark.example/',
+          }],
+        }],
+      }],
+    });
+
+    const response = await harness.chrome.runtime.sendMessage({
+      type: 'list-bookmarks',
+      workspaceId: 'workspace_default',
+    }) as PreviewResponse<{ groups: Array<{ title: string; tabs: Array<{ url: string }> }> }>;
+
+    expect(response).toMatchObject({
+      ok: true,
+      result: {
+        groups: [{
+          title: 'Folder',
+          tabs: [{ url: 'https://bookmark.example/' }],
+        }],
+      },
+    });
   });
 
   it('replaces invalid custom tab identity and index values with safe defaults', () => {
@@ -250,6 +428,48 @@ describe('preview Chrome fixture', () => {
     expect(harness.listenerCount('storage.onChanged')).toBe(0);
   });
 
+  it('complete restore through the preview worker atomically saves old data and rejects a stale replacement', async () => {
+    let persisted = '';
+    const before = normalizeState({ ...createEmptyState(), mutationRevision: 4 });
+    const incomingBase = createEmptyState();
+    const second = { ...incomingBase.workspaces[0], id: 'workspace-second', name: 'Second' };
+    const incoming = normalizeState({ ...incomingBase, mutationRevision: 90, workspaces: [second], activeWorkspaceId: second.id,
+      settings: { ...incomingBase.settings, theme: 'dark', storageMode: 'file', storageFolderName: 'Other folder' } });
+    const harness = install({ state: before, storagePersistence: { read: () => persisted || null, write: value => { persisted = value; } } });
+    const { getActiveRestoreSnapshot } = await import('../shared/store/activeAdapter');
+    const origin = (await getActiveRestoreSnapshot()).metadata.origin;
+    const changes: unknown[] = [];
+    harness.chrome.storage.onChanged.addListener(change => changes.push(change));
+    const mutation = { type: 'restore-backup', backup: incoming, expectedRevision: 4, updatedAt: incoming.updatedAt };
+    const restoreRequest = { requestId: crypto.randomUUID(), origin, mutations: [mutation], restoreAttempts: [{ originalIndex: 0, attemptId: crypto.randomUUID() }] };
+    const restored = await harness.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations: [mutation], restoreRequest });
+    expect(restored).toMatchObject({ ok: true, result: { state: { mutationRevision: 5, activeWorkspaceId: 'workspace-second', settings: { theme: 'dark', storageMode: 'browser', storageFolderName: '' } } } });
+    const stored = await harness.chrome.storage.local.get(['tabboardState', 'tabboardBackupBeforeRestore']);
+    expect(stored.tabboardBackupBeforeRestore).toEqual(before);
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ tabboardState: { newValue: harness.state }, tabboardBackupBeforeRestore: { newValue: before } });
+    expect(JSON.parse(persisted).tabboardBackupBeforeRestore).toEqual(before);
+    await expect(harness.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations: [mutation], restoreRequest: { ...restoreRequest, requestId: crypto.randomUUID(), restoreAttempts: [{ originalIndex: 0, attemptId: crypto.randomUUID() }] } })).resolves.toMatchObject({ ok: false, code: 'BACKUP_REVISION_CONFLICT' });
+    expect(await harness.chrome.storage.local.get(['tabboardState', 'tabboardBackupBeforeRestore'])).toEqual(stored);
+    expect(changes).toHaveLength(1);
+  });
+
+  it('failed preview backup publication keeps current data and permits retry', async () => {
+    const before = createEmptyState();
+    const incoming = normalizeState({ ...before, settings: { ...before.settings, theme: 'dark' } });
+    const harness = install({ state: before });
+    const { getActiveRestoreSnapshot } = await import('../shared/store/activeAdapter');
+    const origin = (await getActiveRestoreSnapshot()).metadata.origin;
+    vi.spyOn(harness.chrome.storage.local, 'set').mockRejectedValueOnce(new Error('Preview publication failed'));
+    const mutations = [{ type: 'restore-backup', backup: incoming, expectedRevision: 0, updatedAt: incoming.updatedAt }];
+    const request = { type: 'tabboard-state-mutations', mutations, restoreRequest: { requestId: crypto.randomUUID(), origin, mutations, restoreAttempts: [{ originalIndex: 0, attemptId: crypto.randomUUID() }] } };
+    await expect(harness.chrome.runtime.sendMessage(request)).resolves.toMatchObject({ ok: false, error: 'Preview publication failed' });
+    expect(harness.state).toEqual(before);
+    expect(await harness.chrome.storage.local.get('tabboardBackupBeforeRestore')).toEqual({});
+    await expect(harness.chrome.runtime.sendMessage(request)).resolves.toMatchObject({ ok: true, result: { state: { mutationRevision: 1, settings: { theme: 'dark' } } } });
+    expect((await harness.chrome.storage.local.get('tabboardBackupBeforeRestore')).tabboardBackupBeforeRestore).toEqual(before);
+  });
+
   it('honors storage.local.get defaults and preserves failed mutation envelopes', async () => {
     const harness = install();
 
@@ -346,7 +566,10 @@ describe('preview Chrome fixture', () => {
     expect(harness.state.groups.find(({ id }) => id === unlocked.id)?.tabs)
       .not.toContainEqual(expect.objectContaining({ id: unlockedLink.id }));
     expect(harness.state.groups.find(({ id }) => id === locked.id)?.tabs)
-      .toContainEqual(expect.objectContaining({ id: lockedLink.id }));
+      .toContainEqual(expect.objectContaining({
+        id: lockedLink.id,
+        title: new URL(lockedLink.url).hostname,
+      }));
   });
 
   it('keeps successful source refs when deleteRestoredTabs is disabled', async () => {
@@ -384,13 +607,39 @@ describe('preview Chrome fixture', () => {
     });
 
     expect(harness.state.groups.find(({ id }) => id === source.id)?.tabs)
-      .toContainEqual(expect.objectContaining({ id: success.id }));
+      .toContainEqual(expect.objectContaining({
+        id: success.id,
+        title: new URL(success.url).hostname,
+      }));
     const removeMutations = harness.sentMessages.filter((message) =>
       (message as {
         type?: string;
         mutations?: Array<{ type?: string }>;
       }).mutations?.some(({ type }) => type === 'remove-restored-refs'));
     expect(removeMutations).toEqual([]);
+  });
+
+  it('restores all links, removes unlocked records, and refreshes retained locked titles', async () => {
+    const harness = install();
+    const unlocked = harness.state.groups[0];
+    const locked = harness.state.groups[1];
+    const unlockedLink = unlocked.tabs.find((tab) => tab.itemType === 'link')!;
+    const lockedLink = locked.tabs.find((tab) => tab.itemType === 'link')!;
+
+    await expect(harness.chrome.runtime.sendMessage({
+      type: 'restore-all',
+    })).resolves.toMatchObject({
+      ok: true,
+      result: { restoredTabs: 2 },
+    });
+
+    expect(harness.state.groups.find(({ id }) => id === unlocked.id)?.tabs)
+      .not.toContainEqual(expect.objectContaining({ id: unlockedLink.id }));
+    expect(harness.state.groups.find(({ id }) => id === locked.id)?.tabs)
+      .toContainEqual(expect.objectContaining({
+        id: lockedLink.id,
+        title: new URL(lockedLink.url).hostname,
+      }));
   });
 
   it('reports one ordered outcome per valid restore ref and rejects duplicate requests atomically', async () => {
@@ -867,4 +1116,54 @@ describe('preview Chrome fixture', () => {
     expect(harness.listenerCount('tabs.onCreated')).toBe(0);
     expect(harness.listenerCount('windows.onFocusChanged')).toBe(0);
   });
+});
+
+it('preview worker confirms a committed complete Restore receipt after restart without another write', async () => {
+  let bytes = '';
+  const before = normalizeState({ ...createEmptyState(), mutationRevision: 7 });
+  const persistence = { read: () => bytes || null, write: (value: string) => { bytes = value; } };
+  const first = install({ state: before, storagePersistence: persistence });
+  const origin = { mode: 'browser' as const, scopeId: 'durable-preview-origin' };
+  await first.chrome.storage.local.set({ tabboardRestoreMetadata: { origin, receipts: [] }, tabboardStorageConfig: { configuredTarget: 'browser', activeBackend: 'browser', folderName: null, fallbackReason: null, fileUpdatedAt: null, activeOrigin: origin } });
+  const backup = normalizeState({ ...before, settings: { ...before.settings, theme: 'dark' } });
+  const mutations = [{ type: 'restore-backup', backup, expectedRevision: 7, updatedAt: before.updatedAt }];
+  const restoreRequest = { requestId: crypto.randomUUID(), origin, mutations, restoreAttempts: [{ originalIndex: 0, attemptId: crypto.randomUUID() }] };
+  await first.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations, restoreRequest });
+  uninstallInstalledHarnesses();
+  const second = install({ storagePersistence: persistence });
+  const beforeReplay = bytes;
+  expect(await second.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations, restoreRequest })).toMatchObject({ ok: true, result: { confirmedByReceipt: true, state: { mutationRevision: 8 } } });
+  expect(bytes).toBe(beforeReplay);
+  expect((await second.chrome.storage.local.get('tabboardBackupBeforeRestore')).tabboardBackupBeforeRestore).toEqual(before);
+});
+
+it('preview complete Restore uses the actual bound File Authority and persists its receipt outside browser mirrors', async () => {
+  const { restoreMemoryIdb } = await import('../shared/testing/restoreMemoryIdb');
+  const { createMemoryDirectory } = await import('../shared/testing/memoryFs');
+  const { switchToFileMode, getActiveRestoreSnapshot, resetActiveAdapter } = await import('../shared/store/activeAdapter');
+  const { initFileStorageDirectory } = await import('../shared/store/fileStorage');
+  const { readTextFile } = await import('../shared/store/fsAtomic');
+  const previousIdb = globalThis.indexedDB;
+  Object.defineProperty(globalThis, 'indexedDB', { value: restoreMemoryIdb().factory, configurable: true });
+  try {
+    let bytes = '';
+    const storagePersistence = { read: () => bytes || null, write: (value: string) => { bytes = value; } };
+    const browser = normalizeState({ ...createEmptyState(), mutationRevision: 7 });
+    const fileWorkspace = { ...browser.workspaces[0], id: 'file-source', name: 'File source' };
+    const file = normalizeState({ ...browser, workspaces: [fileWorkspace], activeWorkspaceId: fileWorkspace.id });
+    const harness = install({ state: browser, storagePersistence });
+    const root = createMemoryDirectory('actual-file');
+    await switchToFileMode(root, file);
+    const origin = (await getActiveRestoreSnapshot()).metadata.origin;
+    const backup = normalizeState({ ...file, settings: { ...file.settings, theme: 'dark' } });
+    const mutations = [{ type: 'restore-backup', backup, expectedRevision: 7, updatedAt: backup.updatedAt }];
+    const restoreRequest = { requestId: crypto.randomUUID(), origin, mutations, restoreAttempts: [{ originalIndex: 0, attemptId: crypto.randomUUID() }] };
+    expect(await harness.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations, restoreRequest })).toMatchObject({ ok: true, result: { state: { mutationRevision: 8, activeWorkspaceId: 'file-source', settings: { theme: 'dark' } } } });
+    expect(JSON.parse(await readTextFile(await root.getFileHandle('.tabboard-before-restore.json')))).toEqual(file);
+    expect((await initFileStorageDirectory(root)).restoreMetadata?.receipts).toHaveLength(1);
+    expect(await harness.chrome.storage.local.get('tabboardBackupBeforeRestore')).toEqual({});
+    uninstallInstalledHarnesses(); resetActiveAdapter();
+    const restarted = install({ storagePersistence });
+    expect(await restarted.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations, restoreRequest })).toMatchObject({ ok: true, result: { confirmedByReceipt: true, origin, state: { mutationRevision: 8, activeWorkspaceId: 'file-source' } } });
+  } finally { Object.defineProperty(globalThis, 'indexedDB', { value: previousIdb, configurable: true }); }
 });

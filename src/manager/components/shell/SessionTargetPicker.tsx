@@ -271,6 +271,7 @@ export function createSessionTargetChoices({
     const choices: SessionTargetChoice[] = [];
 
     for (const rawCategory of categoryOrder(state, workspaceId)) {
+      if (rawCategory === 'bookmarks') continue;
       const category = rawCategory as CategoryFilter;
       const remaining = groupsForCategory(state, category, workspaceId)
         .filter(({ id }) => id !== sourceGroup.id);
@@ -298,6 +299,7 @@ export function createSessionTargetChoices({
   const choices: SessionTargetChoice[] = [];
 
   for (const rawCategory of categoryOrder(state, workspaceId)) {
+    if (rawCategory === 'bookmarks') continue;
     const category = rawCategory as CategoryFilter;
     const groups = groupsForCategory(state, category, workspaceId);
     groups.forEach((group, groupIndex) => {

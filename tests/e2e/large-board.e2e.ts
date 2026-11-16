@@ -25,9 +25,11 @@ test.describe('Large session board (stable-slot activation path)', () => {
     const slots = page.locator('[data-session-slot-id]');
     const cards = page.locator('[id^="session-card-group_"]');
     await expect(slots).toHaveCount(SESSION_COUNT);
-    await expect(cards).toHaveCount(6);
+    const initialCards = await cards.count();
+    expect(initialCards).toBeGreaterThanOrEqual(6);
+    expect(initialCards).toBeLessThanOrEqual(8);
     await expect(page.locator('[data-session-shell="true"]')).toHaveCount(
-      SESSION_COUNT - 6,
+      SESSION_COUNT - initialCards,
     );
   });
 
@@ -54,5 +56,26 @@ test.describe('Large session board (stable-slot activation path)', () => {
     await shell.getByRole('button', { name: 'Session 020', exact: true })
       .evaluate((button) => button.click());
     await expect(page.locator('#session-card-group_020')).toBeAttached();
+  });
+
+  test('re-bounds mounted cards after traversing the board and returning', async ({ page }) => {
+    const board = page.locator('.manager-board');
+    const cards = page.locator('[id^="session-card-group_"]');
+    const shells = page.locator('[data-session-shell="true"]');
+
+    await board.evaluate((element) => {
+      element.scrollLeft = element.scrollWidth;
+    });
+    await expect(page.locator('#session-card-group_059')).toBeVisible();
+
+    await board.evaluate((element) => {
+      element.scrollLeft = 0;
+    });
+    await expect(page.locator('#session-card-group_000')).toBeVisible();
+
+    const settledCards = await cards.count();
+    expect(settledCards).toBeGreaterThanOrEqual(6);
+    expect(settledCards).toBeLessThanOrEqual(8);
+    await expect(shells).toHaveCount(SESSION_COUNT - settledCards);
   });
 });

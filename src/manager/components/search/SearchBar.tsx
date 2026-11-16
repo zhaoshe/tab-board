@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { TextInput, ActionIcon, Badge } from '@mantine/core';
 import {
   Keyboard as IconKeyboard,
@@ -11,26 +11,36 @@ import { filterGroupsByQuery, type CategoryFilter } from '../../core/selectors';
 import { normalizeSearch } from '../../../shared/model';
 import { formatNumber } from '../../../shared/utils/formatters';
 import { TabBoardTooltip } from '../../../shared/components/TabBoardTooltip';
+import type { Group as SessionGroup } from '../../../shared/model';
 
 interface SearchBarProps {
   autoFocus?: boolean;
   inputId?: string;
   category?: CategoryFilter;
+  bookmarkGroups?: readonly SessionGroup[];
   fullWidth?: boolean;
   onEscape?: () => void;
 }
 
-export function SearchBar({ autoFocus = false, inputId, category = 'inbox', fullWidth = false, onEscape }: SearchBarProps) {
+export function SearchBar({
+  autoFocus = false,
+  inputId,
+  category = 'inbox',
+  bookmarkGroups = [],
+  fullWidth = false,
+  onEscape,
+}: SearchBarProps) {
   const query = useSearchQuery();
   const setQuery = useSetSearchQuery();
   const [localValue, setLocalValue] = useState(query);
   const inputRef = useRef<HTMLInputElement>(null);
-  const { categoryGroups } = useBoardProjection(category);
-
-  const normalized = normalizeSearch(localValue);
-  const matchCount = normalized
-    ? filterGroupsByQuery(categoryGroups, localValue).length
-    : 0;
+  const { visibleGroups } = useBoardProjection(category);
+  const normalized = normalizeSearch(query);
+  const bookmarkMatchCount = useMemo(() => category === 'bookmarks' && normalized
+    ? filterGroupsByQuery([...bookmarkGroups], query).length
+    : 0, [category, bookmarkGroups, query, normalized]);
+  const matchCount = normalized ? category === 'bookmarks' ? bookmarkMatchCount : visibleGroups.length : 0;
+  const isQueryPending = localValue !== query;
 
   useEffect(() => {
     setLocalValue(query);
@@ -106,8 +116,9 @@ export function SearchBar({ autoFocus = false, inputId, category = 'inbox', full
         }}
         style={{ width: '100%' }}
       />
-      {normalized && matchCount > 0 && (
+      {localValue && (isQueryPending || normalized && matchCount > 0) && (
         <Badge
+          role="status"
           className="tabular-nums"
           size="sm"
           variant="light"
@@ -119,7 +130,7 @@ export function SearchBar({ autoFocus = false, inputId, category = 'inbox', full
             pointerEvents: 'none',
           }}
         >
-          {formatNumber(matchCount)} {matchCount === 1 ? 'result' : 'results'}
+          {isQueryPending ? 'Updating…' : `${formatNumber(matchCount)} ${matchCount === 1 ? 'result' : 'results'}`}
         </Badge>
       )}
     </div>

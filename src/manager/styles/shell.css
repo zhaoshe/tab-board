@@ -83,14 +83,14 @@
   min-height: 0;
   height: calc(100% - 8px);
   margin-block: 3px 5px;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 340px auto 600px;
 }
 
 .session-slot {
   min-width: 0;
   min-height: 0;
   height: 100%;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 340px auto 600px;
 }
 
 .session-board__group-insert-target {

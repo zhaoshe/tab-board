@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { theme } from '../../shared/styles/theme';
 import type { StorageStatusProjection } from '../../shared/store/settingsProjection';
 import { DataStorageCard } from './DataStorageCard';
+import { createEmptyState, createGroupFromTabRecords, createTabRecord } from '../../shared/model';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -20,6 +21,7 @@ const harness = vi.hoisted(() => ({
   statusListener: null as null | ((status: StorageStatusProjection) => void),
   getActiveAdapter: vi.fn(),
   reconnectFolder: vi.fn(),
+  reloadFileState: vi.fn(),
 }));
 
 vi.mock('../../shared/store/fsBootstrap', () => ({
@@ -40,6 +42,7 @@ vi.mock('../../shared/store/activeAdapter', () => ({
     reason === 'File storage error: document is not defined'
     || reason === 'File storage error: window is not defined',
   reconnectFolder: harness.reconnectFolder,
+  reloadFileState: harness.reloadFileState,
 }));
 
 vi.mock('./FolderPickerDialog', () => ({
@@ -85,6 +88,7 @@ beforeEach(() => {
   harness.getActiveAdapter.mockReset();
   harness.getActiveAdapter.mockResolvedValue({});
   harness.reconnectFolder.mockReset();
+  harness.reloadFileState.mockReset();
   vi.stubGlobal('chrome', {
     runtime: { sendMessage: vi.fn(async () => ({ ok: true })) },
   });
@@ -100,6 +104,22 @@ afterEach(async () => {
 });
 
 describe('DataStorageCard status composition', () => {
+  it('shows incomplete folder data and re-reads without hiding the original files', async () => {
+    harness.status = {
+      configuredTarget: 'file', activeBackend: 'file', folderName: 'TabBoard',
+      fallbackReason: null, fileUpdatedAt: null, unreadSessionCount: 1,
+    };
+    harness.reloadFileState.mockImplementation(async () => {
+      harness.statusListener?.({ ...harness.status, unreadSessionCount: 0 });
+    });
+    await mountCard();
+    expect(document.body.textContent).toContain('1 saved session could not be read');
+    const retry = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find(button => button.textContent?.trim() === 'Re-read folder');
+    expect(retry).toBeDefined();
+    await act(async () => { retry?.click(); });
+    expect(document.body.textContent).not.toContain('saved session could not be read');
+  });
   it('renders Browser storage without folder metadata or fallback actions', async () => {
     await mountCard();
 
@@ -238,6 +258,37 @@ describe('DataStorageCard status composition', () => {
 
     expect(harness.getActiveAdapter).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('Reconnect folder');
+  });
+
+  it.each(['browser', 'file'] as const)('offers an explicit %s choice when reconnect data differs', async (choice) => {
+    harness.status = {
+      configuredTarget: 'file', activeBackend: 'browser', folderName: 'TabBoard',
+      fallbackReason: 'Permission was denied.', fileUpdatedAt: null,
+    };
+    const fileState = createEmptyState();
+    const browserState = { ...fileState, groups: [createGroupFromTabRecords(
+      [createTabRecord({ title: 'New tab', url: 'https://new.example' } as chrome.tabs.Tab)],
+      { title: 'New session', workspaceId: fileState.activeWorkspaceId },
+    )] };
+    const conflict = Object.assign(new Error('Copies differ'), {
+      code: 'RECONNECT_DATA_CONFLICT', browserState, fileState,
+    });
+    harness.reconnectFolder.mockRejectedValueOnce(conflict).mockResolvedValueOnce(undefined);
+    const folder = { name: 'TabBoard' } as FileSystemDirectoryHandle;
+    vi.stubGlobal('showDirectoryPicker', vi.fn(async () => folder));
+    await mountCard();
+    const button = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((item) => item.textContent?.trim() === 'Reconnect folder');
+    await act(async () => { button?.click(); });
+
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.textContent).toContain('Both copies will be saved in the folder');
+    const resolution = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((item) => item.textContent?.trim() === (choice === 'browser' ? 'Keep browser data' : 'Use folder data'));
+    expect(resolution).toBeDefined();
+    await act(async () => { resolution?.click(); });
+    expect(harness.reconnectFolder).toHaveBeenLastCalledWith(folder, choice);
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it('shows an explicit progress label while reconnecting the folder', async () => {

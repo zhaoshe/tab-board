@@ -705,6 +705,34 @@ function savedRefKey(groupId: string, tabId: string): string {
   return JSON.stringify([groupId, tabId]);
 }
 
+function mergeDuplicateTitles(
+  existingTabs: readonly TabItem[],
+  incomingTabs: readonly TabItem[],
+): { existingTabs: TabItem[]; incomingTabs: TabItem[] } {
+  const incomingTitles = new Map<string, string>();
+  incomingTabs.forEach((tab) => {
+    if (tab.itemType === 'link' && !incomingTitles.has(tab.url)) {
+      incomingTitles.set(tab.url, tab.title);
+    }
+  });
+  const existingUrls = new Set(existingTabs.flatMap((tab) =>
+    tab.itemType === 'link' ? [tab.url] : []));
+  const refreshedUrls = new Set<string>();
+  return {
+    existingTabs: existingTabs.map((tab) => {
+      if (tab.itemType !== 'link'
+        || refreshedUrls.has(tab.url)
+        || !incomingTitles.has(tab.url)) {
+        return tab;
+      }
+      refreshedUrls.add(tab.url);
+      return { ...tab, title: incomingTitles.get(tab.url)! };
+    }),
+    incomingTabs: incomingTabs.filter((tab) =>
+      tab.itemType !== 'link' || !existingUrls.has(tab.url)),
+  };
+}
+
 function moveSavedTabsToSession(
   state: TabBoardState,
   refs: readonly SavedTabRef[],
@@ -740,12 +768,13 @@ function moveSavedTabsToSession(
         0,
         Math.min(Math.trunc(targetIndex), group.tabs.length),
       );
+      const merged = mergeDuplicateTitles(group.tabs, movedTabs);
       return {
         ...group,
         tabs: [
-          ...group.tabs.slice(0, insertionIndex),
-          ...movedTabs,
-          ...group.tabs.slice(insertionIndex),
+          ...merged.existingTabs.slice(0, insertionIndex),
+          ...merged.incomingTabs,
+          ...merged.existingTabs.slice(insertionIndex),
         ],
         updatedAt,
       };
@@ -860,15 +889,16 @@ function copyOpenTabsToSession(
     0,
     Math.min(Math.trunc(intent.targetIndex), target.tabs.length),
   );
+  const merged = mergeDuplicateTitles(target.tabs, tabs);
   return {
     ...state,
     groups: state.groups.map((group) => group.id === target.id
       ? {
         ...group,
         tabs: [
-          ...group.tabs.slice(0, index),
-          ...tabs,
-          ...group.tabs.slice(index),
+          ...merged.existingTabs.slice(0, index),
+          ...merged.incomingTabs,
+          ...merged.existingTabs.slice(index),
         ],
         updatedAt,
       }

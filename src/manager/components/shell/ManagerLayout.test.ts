@@ -12,8 +12,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getWorkspaceFiltersAfterDelete,
   ManagerLayout,
-  shouldSyncActiveWorkspace,
 } from './ManagerLayout';
+import { shouldSyncActiveWorkspace } from '../../core/managerPageState';
+import type { CategoryFilter } from '../../core/selectors';
 import { ManagerFrame } from './ManagerFrame';
 import {
   createGeometryCollisionDetection,
@@ -82,11 +83,39 @@ const testHarness = vi.hoisted(() => {
     setSearchQuery: vi.fn(),
     state,
     useStore,
+    bookmarkState: {
+      groups: [],
+      loading: false,
+      error: null as string | null,
+      retry: vi.fn(),
+    },
+    pageState: {
+      state: {
+        workspaceId: 'workspace_default',
+        category: 'inbox' as CategoryFilter,
+        view: 'board' as const,
+        query: '',
+      },
+      navigate: vi.fn(),
+      replace: vi.fn(),
+      restoreBackup: vi.fn(),
+      setQuery: vi.fn(),
+    },
   };
 });
 
 vi.mock('@mantine/core', () => ({
   Group: ({ children }: { children?: ReactNode }) => children,
+  Text: ({
+    children,
+    ...props
+  }: { children?: ReactNode; [key: string]: unknown }) => createElement('span', props, children),
+  Button: ({
+    children,
+    onClick,
+    ...props
+  }: { children?: ReactNode; onClick?: () => void; [key: string]: unknown }) =>
+    createElement('button', { type: 'button', onClick, ...props }, children),
 }));
 
 vi.mock('@dnd-kit/core', () => ({
@@ -180,8 +209,14 @@ vi.mock('./SessionTargetPicker', () => ({
 vi.mock('../../hooks/useBoardProjection', () => ({
   useFilteredGroups: () => [],
 }));
+vi.mock('../../hooks/useManagerPageState', () => ({
+  useManagerPageState: () => testHarness.pageState,
+}));
 vi.mock('../../hooks/useWorkspaceState', () => ({
   useCurrentWorkspace: () => ({ id: 'workspace_default', name: 'Workspace' }),
+}));
+vi.mock('../../hooks/useBookmarkSessions', () => ({
+  useBookmarkSessions: () => testHarness.bookmarkState,
 }));
 vi.mock('../../hooks/useSearchQuery', () => ({
   savedSearchQueryStore: {
@@ -288,6 +323,7 @@ let container: HTMLDivElement | null = null;
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  window.history.replaceState(window.history.state, '', '/manager.html');
   container = document.createElement('div');
   document.body.append(container);
   testHarness.autoScroll = null;
@@ -309,6 +345,19 @@ beforeEach(() => {
   testHarness.showError.mockClear();
   testHarness.setSearchQuery.mockClear();
   testHarness.completeDrop.mockClear();
+  testHarness.bookmarkState.groups = [];
+  testHarness.bookmarkState.loading = false;
+  testHarness.bookmarkState.error = null;
+  testHarness.bookmarkState.retry.mockClear();
+  testHarness.pageState.state = {
+    workspaceId: 'workspace_default',
+    category: 'inbox',
+    view: 'board',
+    query: '',
+  };
+  testHarness.pageState.navigate.mockClear();
+  testHarness.pageState.replace.mockClear();
+  testHarness.pageState.setQuery.mockClear();
   testHarness.state.applyDropIntent.mockReset();
   testHarness.state.applyDropIntent.mockResolvedValue(undefined);
 });
@@ -1964,6 +2013,46 @@ describe('workspace deletion filters', () => {
       'workspace-replacement',
       [{ id: 'workspace-replacement' }],
     )).toBe(false);
+  });
+});
+
+describe('bookmark status UI', () => {
+  it('shows a loading label while bookmark folders are refreshing', async () => {
+    testHarness.bookmarkState.loading = true;
+    testHarness.pageState.state = {
+      workspaceId: 'workspace_default',
+      category: 'bookmarks',
+      view: 'board',
+      query: '',
+    };
+
+    await mountManagerLayout();
+
+    expect(document.body.textContent).toContain('Loading bookmarks…');
+  });
+
+  it('shows a retry affordance when bookmark loading fails', async () => {
+    testHarness.bookmarkState.error = 'Unable to load bookmarks.';
+    testHarness.pageState.state = {
+      workspaceId: 'workspace_default',
+      category: 'bookmarks',
+      view: 'board',
+      query: '',
+    };
+
+    await mountManagerLayout();
+
+    expect(document.body.textContent).toContain('Could not load bookmarks');
+    const retryButton = [...document.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Retry');
+    expect(retryButton).toBeDefined();
+    expect(retryButton?.className).toContain('manager-bookmark-status__retry');
+
+    await act(async () => {
+      retryButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(testHarness.bookmarkState.retry).toHaveBeenCalledTimes(1);
   });
 });
 

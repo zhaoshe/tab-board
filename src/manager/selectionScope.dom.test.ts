@@ -385,7 +385,10 @@ describe('Manager selection scope integration', () => {
     );
     expect(firstAction).not.toBeNull();
     await vi.waitFor(() => expect(document.activeElement).toBe(firstAction));
-    expect(firstSession?.querySelector('.session-card__actions')).toBeNull();
+    expect(
+      firstSession?.querySelector('.session-card__header')
+        ?.hasAttribute('data-selection-mode'),
+    ).toBe(true);
   });
 
   it('clears only successful restored IDs and keeps failed links selected in mode', async () => {

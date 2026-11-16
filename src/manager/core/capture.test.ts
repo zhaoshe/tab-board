@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   canRevealCapture,
   createCaptureSnapshot,
-  mergeCapturedGroups,
   shouldKeepPendingCaptureTarget,
   getCaptureMessage,
   getCaptureOutcome,
@@ -14,7 +13,6 @@ import {
   type CaptureFilterSnapshot,
   type OpenTabsCaptureSnapshot,
 } from './capture';
-import { createEmptyState, type Group, type TabBoardState } from '../../shared/model';
 
 function snapshot(input: Partial<OpenTabsCaptureSnapshot> = {}): OpenTabsCaptureSnapshot {
   return {
@@ -42,33 +40,6 @@ function filterSnapshot(input: Partial<CaptureFilterSnapshot> = {}): CaptureFilt
   };
 }
 
-function group(id: string, workspaceId: string): Group {
-  return {
-    id,
-    title: id,
-    note: '',
-    workspaceId,
-    folderId: null,
-    locked: false,
-    starred: false,
-    archived: false,
-    collapsed: false,
-    tabs: [],
-    createdAt: `${id}-created`,
-    updatedAt: `${id}-updated`,
-  };
-}
-
-function boardState(updatedAt: string, groups: Group[], theme: TabBoardState['settings']['theme']): TabBoardState {
-  const base = createEmptyState();
-  return {
-    ...base,
-    updatedAt,
-    groups,
-    settings: { ...base.settings, theme },
-  };
-}
-
 describe('capture contracts', () => {
   it('sorts and deduplicates IDs without mutating the input snapshot', () => {
     const input = snapshot();
@@ -83,35 +54,6 @@ describe('capture contracts', () => {
     expect(input.selectedTabIds).toEqual([7, 2, 7]);
     expect(result).not.toBe(input);
     expect(result.selectedTabIds).not.toBe(input.selectedTabIds);
-  });
-
-  it('merges only missing captured groups into a newer optimistic state', () => {
-    const currentBase = createEmptyState();
-    const workspaceId = currentBase.activeWorkspaceId;
-    const existingCapturedGroup = group('captured-existing', workspaceId);
-    const optimisticGroup = group('optimistic-group', workspaceId);
-    const missingCapturedGroup = group('captured-missing', workspaceId);
-    const persistedOldGroup = group('persisted-old', workspaceId);
-    const currentState = boardState('2026-07-16T12:00:02.000Z', [existingCapturedGroup, optimisticGroup], 'dark');
-    const persistedState = boardState('2026-07-16T12:00:01.000Z', [missingCapturedGroup, existingCapturedGroup, persistedOldGroup], 'light');
-
-    const merged = mergeCapturedGroups(
-      currentState,
-      persistedState,
-      ['captured-missing', 'captured-existing'],
-      workspaceId,
-    );
-
-    expect(merged.groups.map((item) => item.id)).toEqual([
-      'captured-missing',
-      'captured-existing',
-      'optimistic-group',
-    ]);
-    expect(merged.groups.filter((item) => item.id === 'captured-existing')).toHaveLength(1);
-    expect(merged.settings.theme).toBe('dark');
-    expect(merged.updatedAt).toBe(currentState.updatedAt);
-    expect(currentState.groups.map((item) => item.id)).toEqual(['captured-existing', 'optimistic-group']);
-    expect(currentState.groups).not.toBe(merged.groups);
   });
 
   it('compares normalized snapshots regardless of selection order', () => {

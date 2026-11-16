@@ -12,10 +12,12 @@ import type { SessionSortableBindings } from './SessionSortableBindings';
 export function SessionCardShell({
   activate,
   group,
+  readOnly = false,
   sortable,
 }: {
   activate: () => void;
   group: Group;
+  readOnly?: boolean;
   sortable: SessionSortableBindings;
 }) {
   let linkCount = 0;
@@ -36,10 +38,12 @@ export function SessionCardShell({
     return Boolean(button && !button.matches('.session-card__title, .session-card__note'));
   };
   const handlePointerDown = (event: PointerEvent<HTMLElement>) => {
+    if (readOnly) return;
     if (event.pointerType === 'touch' || blocksSessionDrag(event.target)) return;
     sortable.listeners?.onPointerDown?.(event);
   };
   const handleTouchStart = (event: TouchEvent<HTMLElement>) => {
+    if (readOnly) return;
     if (blocksSessionDrag(event.target)) return;
     sortable.listeners?.onTouchStart?.(event);
   };

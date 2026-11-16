@@ -121,9 +121,17 @@ async function changeInput(
   });
 }
 
+async function flushFakeTimers(): Promise<void> {
+  if (!vi.isFakeTimers()) return;
+  await act(async () => {
+    vi.runAllTimers();
+  });
+}
+
 async function openManager(): Promise<void> {
   await act(async () => action('Category Options').click());
   await act(async () => buttonWithText('Manage Categories').click());
+  await flushFakeTimers();
 }
 
 async function mountManager(
@@ -632,6 +640,7 @@ describe('CategoryManager delete safety', () => {
     await openManager();
     const deleteTrigger = action('Delete Work');
     await act(async () => deleteTrigger.click());
+    await flushFakeTimers();
 
     await act(async () => buttonWithText('Cancel').click());
     await act(async () => vi.runAllTimers());
@@ -692,12 +701,14 @@ describe('CategoryManager focus and nested modal ownership', () => {
 
     await act(async () => trigger.click());
     await act(async () => buttonWithText('Manage Categories').click());
+    await flushFakeTimers();
     await act(async () => buttonWithText('Done').click());
     await act(async () => vi.runAllTimers());
     expect(document.activeElement).toBe(trigger);
 
     await act(async () => trigger.click());
     await act(async () => buttonWithText('Add Category').click());
+    await flushFakeTimers();
     await act(async () => buttonWithText('Cancel').click());
     await act(async () => vi.runAllTimers());
     expect(document.activeElement).toBe(trigger);
@@ -708,6 +719,7 @@ describe('CategoryManager focus and nested modal ownership', () => {
     await mountManager();
     await openManager();
     await act(async () => action('Edit Work').click());
+    await flushFakeTimers();
 
     const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"]');
     expect(dialogs).toHaveLength(2);

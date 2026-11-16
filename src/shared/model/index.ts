@@ -36,6 +36,7 @@ export * from './search';
 export * from './import-export';
 export * from './capture-policy';
 export * from './window-dedupe';
+export * from './bookmarks';
 export * from './category-colors';
 export * from './categories';
 export * from './drop-intent';

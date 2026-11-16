@@ -11,6 +11,10 @@
  * substitute an in-memory stub without pulling in fake-indexeddb.
  */
 
+import type { OriginScope } from './restoreCommit';
+const ROOT_BINDING_KEY = 'root-restore-binding';
+export interface RootBinding { handle: FileSystemDirectoryHandle; origin: OriginScope }
+
 import {
   FILE_STORE_DB,
   FILE_STORE_STORE,
@@ -70,7 +74,7 @@ function runTx<T>(
     const tx = db.transaction(FILE_STORE_STORE, mode);
     const store = tx.objectStore(FILE_STORE_STORE);
     const req = work(store);
-    req.onsuccess = () => resolve(req.result);
+    tx.oncomplete = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error('IndexedDB request failed'));
     tx.onabort = () => reject(tx.error ?? new Error('IndexedDB transaction aborted'));
     tx.onerror = () => reject(tx.error ?? req.error ?? new Error('IndexedDB transaction failed'));
@@ -84,10 +88,16 @@ function runTx<T>(
 export async function saveRootHandle(
   handle: FileSystemDirectoryHandle,
   idbFactory: IdbFactory = defaultIdbFactory as IdbFactory,
+  origin?: OriginScope,
 ): Promise<void> {
   const db = await openDb(idbFactory);
   try {
-    await runTx(db, 'readwrite', (store) => store.put(handle, FILE_STORE_HANDLE_KEY));
+    await runTx(db, 'readwrite', (store) => {
+      const request = store.put(handle, FILE_STORE_HANDLE_KEY);
+      if (origin) store.put({ handle, origin }, ROOT_BINDING_KEY);
+      else store.delete(ROOT_BINDING_KEY);
+      return request;
+    });
   } finally {
     db.close();
   }
@@ -117,8 +127,17 @@ export async function clearRootHandle(
 ): Promise<void> {
   const db = await openDb(idbFactory);
   try {
-    await runTx(db, 'readwrite', (store) => store.delete(FILE_STORE_HANDLE_KEY));
+    await runTx(db, 'readwrite', (store) => {
+      store.delete(ROOT_BINDING_KEY);
+      return store.delete(FILE_STORE_HANDLE_KEY);
+    });
   } finally {
     db.close();
   }
+}
+
+export async function loadRootBinding(idbFactory: IdbFactory = defaultIdbFactory as IdbFactory): Promise<RootBinding | null> {
+  const db = await openDb(idbFactory);
+  try { return (await runTx(db, 'readonly', store => store.get(ROOT_BINDING_KEY))) ?? null; }
+  finally { db.close(); }
 }

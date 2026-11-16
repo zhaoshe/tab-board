@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   BIN_LIMIT,
   createEmptyState,
@@ -10,6 +10,7 @@ import type { BinEntry, Folder, Group, TabBoardState, TabItem, Workspace } from 
 import {
   applyStateMutation,
   applyStateMutations,
+  createMutationBatch,
   InvalidDropMutationError,
   RestoreCollisionError,
   isStateMutation,
@@ -300,6 +301,7 @@ describe('state mutations', () => {
     const expectedCategoryOrder = [
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
       `folder:${existing.id}`,
     ];
@@ -307,6 +309,7 @@ describe('state mutations', () => {
       `folder:${existing.id}`,
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
     ];
     const mutation: StateMutation = {
@@ -326,7 +329,7 @@ describe('state mutations', () => {
     const newer: TabBoardState = {
       ...base,
       categoryOrderByWorkspace: {
-        workspace_default: ['saved', 'inbox', 'archive', existing.id],
+        workspace_default: ['saved', 'inbox', 'bookmarks', 'archive', existing.id],
       },
       mutationRevision: base.mutationRevision + 1,
       updatedAt: '2026-01-03T00:00:00.000Z',
@@ -349,6 +352,7 @@ describe('state mutations', () => {
       expectedCategoryOrder: [
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
         `folder:${existing.id}`,
       ],
@@ -356,6 +360,7 @@ describe('state mutations', () => {
         `folder:${existing.id}`,
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
       ],
       updatedAt: '2026-01-02T00:00:00.000Z',
@@ -367,6 +372,7 @@ describe('state mutations', () => {
           existing.id,
           'inbox',
           'saved',
+        'bookmarks',
           'archive',
         ],
       },
@@ -400,7 +406,7 @@ describe('state mutations', () => {
     expect(() => applyStateMutation(currentTarget, {
       type: 'set-category-order',
       workspaceId: 'workspace_default',
-      expectedCategoryOrder: ['inbox', 'saved', 'archive'],
+      expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'],
       categoryOrder: [
         `folder:${existing.id}`,
         'inbox',
@@ -415,8 +421,8 @@ describe('state mutations', () => {
     const mutation = {
       type: 'set-category-order',
       workspaceId: 'workspace_default',
-      expectedCategoryOrder: ['inbox', 'saved', 'archive'],
-      categoryOrder: ['saved', 'inbox', 'archive'],
+      expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'],
+      categoryOrder: ['saved', 'inbox', 'bookmarks', 'archive'],
       updatedAt: timestamp,
     };
     expect(isStateMutation(mutation)).toBe(true);
@@ -446,6 +452,7 @@ describe('state mutations', () => {
     const expectedCategoryOrder = [
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
       'folder:folder-a',
     ];
@@ -453,7 +460,7 @@ describe('state mutations', () => {
       type: 'set-category-order',
       workspaceId: 'workspace_default',
       expectedCategoryOrder,
-      categoryOrder: ['folder:folder-a', 'inbox', 'saved', 'archive'],
+      categoryOrder: ['folder:folder-a', 'inbox', 'saved', 'bookmarks', 'archive'],
       updatedAt: timestamp,
     });
 
@@ -461,6 +468,7 @@ describe('state mutations', () => {
       'folder-a',
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
     ]);
   });
@@ -2871,14 +2879,14 @@ describe('state mutations', () => {
         targetCategoryId: 'inbox',
         placement: 'before',
         workspaceId: 'workspace_default',
-        expectedCategoryOrder: ['inbox', 'saved', 'archive'],
+        expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'],
       },
       openTabs: [],
       updatedAt: timestamp,
     };
     const reorderBefore = {
       ...createEmptyState(),
-      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved', 'archive'] },
+      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved', 'bookmarks', 'archive'] },
     };
     const reorderOnce = applyStateMutations(reorderBefore, [reorderMutation]);
     expect(applyStateMutations(reorderOnce, [reorderMutation])).toEqual(reorderOnce);
@@ -3078,7 +3086,7 @@ describe('state mutations', () => {
         targetCategoryId: 'inbox',
         placement: 'before',
         workspaceId: 'workspace_default',
-        expectedCategoryOrder: ['inbox', 'saved', 'archive'],
+        expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'],
       },
       openTabs: [],
       updatedAt: timestamp,
@@ -3093,14 +3101,14 @@ describe('state mutations', () => {
         targetCategoryId: 'saved',
         placement: 'before',
         workspaceId: 'workspace_default',
-        expectedCategoryOrder: ['saved', 'inbox', 'archive'],
+        expectedCategoryOrder: ['saved', 'inbox', 'bookmarks', 'archive'],
       },
       openTabs: [],
       updatedAt: timestamp,
     };
     const reordered = applyStateMutation({
       ...createEmptyState(),
-      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved'] },
+      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved', 'bookmarks', 'archive'] },
     }, reorder);
     const orderAfterIntervening = applyStateMutation(reordered, reorderBack);
     expect(applyStateMutation(orderAfterIntervening, reorder)).toEqual(orderAfterIntervening);
@@ -3738,6 +3746,177 @@ describe('state mutations', () => {
       committedMutationIndexes: [0, 2],
     });
     expect((thrown as InvalidDropMutationError).committedState?.folders[0].name).toBe('Renamed');
+  });
+
+  it('evaluates mutation batches with original coordinates and failure evidence', () => {
+    const before = createEmptyState();
+    const batch = createMutationBatch([
+      { type: 'add-folder', folder: folder('batch-valid') },
+      { type: 'drop-intent', intent: null },
+      { type: 'rename-folder', id: 'batch-valid', name: 'Renamed', updatedAt: timestamp },
+    ]);
+
+    const evaluation = batch.evaluate(before, timestamp);
+
+    expect(evaluation.state.folders[0]).toMatchObject({ id: 'batch-valid', name: 'Renamed' });
+    expect(evaluation.acceptedMutationIndexes).toEqual([0, 2]);
+    expect(evaluation.failure).toMatchObject({
+      code: 'INVALID_DROP_INTENT',
+      invalidMutationIndexes: [1],
+      committedMutationIndexes: [0, 2],
+    });
+  });
+
+  it('verifies exact replay without live Open Tabs reads', async () => {
+    const mutation: StateMutation = {
+      type: 'drop-intent',
+      operationId: 'batch-replay-live-copy',
+      expectedRevision: 0,
+      intent: {
+        kind: 'copy-open-tabs',
+        tabIds: [101],
+        windowId: 7,
+        targetGroupId: 'batch-replay-target',
+        targetIndex: 0,
+        workspaceId: 'workspace_default',
+      },
+      openTabs: [{
+        id: 101,
+        windowId: 7,
+        title: 'Live',
+        url: 'https://live.test',
+        favIconUrl: '',
+        pinned: false,
+        index: 0,
+        browserGroup: null,
+        storable: true,
+        reason: null,
+      }],
+      updatedAt: timestamp,
+    };
+    const applied = applyStateMutations({ ...createEmptyState(), groups: [group('batch-replay-target')] }, [mutation]);
+    const replay = createMutationBatch([{ ...mutation, openTabs: [] }]);
+    const readLiveOpenTabs = vi.fn(async () => {
+      throw new Error('live read should not happen for replay');
+    });
+
+    const continuation = await replay.verify(applied, readLiveOpenTabs);
+    const evaluation = continuation.evaluate(applied, timestamp);
+
+    expect(readLiveOpenTabs).not.toHaveBeenCalled();
+    expect(evaluation.acceptedMutationIndexes).toEqual([0]);
+    expect(evaluation.failure).toBeUndefined();
+    expect(evaluation.state).toEqual(applied);
+  });
+
+  it('rejects empty live Open Tabs drops without accepting a continuation', async () => {
+    const before = { ...createEmptyState(), groups: [group('batch-live-target')] };
+    const continuation = await createMutationBatch([{
+      type: 'drop-intent',
+      operationId: 'batch-live-unavailable',
+      expectedRevision: 0,
+      intent: {
+        kind: 'copy-open-tabs',
+        tabIds: [101],
+        windowId: 7,
+        targetGroupId: 'batch-live-target',
+        targetIndex: 0,
+        workspaceId: 'workspace_default',
+      },
+      openTabs: [],
+      updatedAt: timestamp,
+    }]).verify(before, async () => {
+      throw new Error('live tabs unavailable');
+    });
+
+    expect(continuation.hasAcceptedMutations()).toBe(false);
+    expect(continuation.failureWithoutCommit(before)).toMatchObject({
+      code: 'INVALID_DROP_INTENT',
+      invalidMutationIndexes: [0],
+      committedMutationIndexes: [],
+      committedState: before,
+    });
+  });
+
+  it('soft-fails non-live drop execution errors only during verification', async () => {
+    const before = {
+      ...createEmptyState(),
+      mutationRevision: Number.MAX_SAFE_INTEGER,
+      groups: [group('batch-max-revision-drop')],
+    };
+    const mutation: StateMutation = {
+      type: 'drop-intent',
+      operationId: 'batch-max-revision-drop-operation',
+      expectedRevision: Number.MAX_SAFE_INTEGER,
+      intent: {
+        kind: 'move-session',
+        groupId: 'batch-max-revision-drop',
+        category: 'saved',
+        index: 0,
+        workspaceId: 'workspace_default',
+      },
+      openTabs: [],
+      updatedAt: timestamp,
+    };
+
+    const continuation = await createMutationBatch([mutation]).verify(before, vi.fn());
+
+    expect(continuation.hasAcceptedMutations()).toBe(false);
+    expect(continuation.failureWithoutCommit(before)).toMatchObject({
+      code: 'INVALID_DROP_INTENT',
+      invalidMutationIndexes: [0],
+      committedMutationIndexes: [],
+      committedState: before,
+    });
+    expect(() => createMutationBatch([mutation]).evaluate(before, timestamp))
+      .toThrow('Mutation revision exhausted.');
+    await expect(createMutationBatch([{
+      type: 'add-folder',
+      folder: { ...folder('ordinary-hard-abort'), workspaceId: 'missing-workspace' },
+    }]).verify(createEmptyState(), vi.fn())).rejects.toThrow('Workspace not found.');
+  });
+
+  it('does not double-count verified failure gaps when evaluating accepted continuation', async () => {
+    const before = {
+      ...createEmptyState(),
+      mutationRevision: 7,
+      groups: [group('batch-continuation-valid')],
+    };
+    const valid: StateMutation = {
+      type: 'drop-intent',
+      operationId: 'batch-continuation-valid-operation',
+      expectedRevision: 8,
+      intent: {
+        kind: 'move-session',
+        groupId: 'batch-continuation-valid',
+        category: 'saved',
+        index: 0,
+        workspaceId: 'workspace_default',
+      },
+      openTabs: [],
+      updatedAt: timestamp,
+    };
+    const continuation = await createMutationBatch([
+      {
+        type: 'drop-intent',
+        operationId: 'batch-continuation-invalid-operation',
+        expectedRevision: 7,
+        intent: { kind: 'move-session', groupId: 'missing-continuation-valid', category: 'saved', index: 0, workspaceId: 'workspace_default' },
+        openTabs: [],
+        updatedAt: timestamp,
+      },
+      valid,
+    ]).verify(before, vi.fn());
+
+    const evaluation = continuation.evaluate(before, timestamp);
+
+    expect(evaluation.state.groups[0].starred).toBe(true);
+    expect(evaluation.state.mutationRevision).toBe(8);
+    expect(evaluation.acceptedMutationIndexes).toEqual([1]);
+    expect(evaluation.failure).toMatchObject({
+      invalidMutationIndexes: [0],
+      committedMutationIndexes: [1],
+    });
   });
 
   it('enforces monotonic expected revisions and exact replay no-op', () => {
@@ -4799,7 +4978,7 @@ describe('state mutations', () => {
       { type: 'delete-group', id: locked.id, binEntry: deleteGroupEntry, updatedAt: timestamp },
       { type: 'move-group', groupId: locked.id, targetFolderId: null, starred: true, archived: false, index: 0, updatedAt: timestamp },
       { type: 'add-tab', groupId: locked.id, tab: tab('new-locked-tab'), updatedAt: timestamp },
-      { type: 'update-tab', groupId: locked.id, tabId: lockedTab.id, updates: { title: 'changed' }, updatedAt: timestamp },
+      { type: 'update-tab', groupId: locked.id, tabId: lockedTab.id, updates: { note: 'changed' }, updatedAt: timestamp },
       { type: 'delete-tab', groupId: locked.id, tabId: lockedTab.id, binEntry: deleteTabEntry, updatedAt: timestamp },
       { type: 'move-tab', groupId: locked.id, tabId: lockedTab.id, targetGroupId: target.id, targetIndex: 0, updatedAt: timestamp },
       { type: 'move-tab', groupId: target.id, tabId: unlockedTab.id, targetGroupId: locked.id, targetIndex: 0, updatedAt: timestamp },
@@ -4817,6 +4996,45 @@ describe('state mutations', () => {
       type: 'update-group', id: target.id, updates: { title: 'updated' }, updatedAt: timestamp,
     });
     expect(updated.groups.find(({ id }) => id === target.id)?.title).toBe('updated');
+  });
+
+  it('allows only title-only tab updates in locked groups', () => {
+    const lockedTab = tab('locked-title-tab');
+    const locked = {
+      ...group('locked-title-group', 'workspace_default', [lockedTab]),
+      locked: true,
+    };
+    const state = { ...createEmptyState(), groups: [locked] };
+
+    const updated = applyStateMutation(state, {
+      type: 'update-tab',
+      groupId: locked.id,
+      tabId: lockedTab.id,
+      updates: { title: 'Final loaded title' },
+      updatedAt: timestamp,
+    });
+
+    expect(updated.groups[0]?.tabs[0]).toMatchObject({
+      id: lockedTab.id,
+      title: 'Final loaded title',
+      note: lockedTab.note,
+      url: lockedTab.url,
+    });
+
+    for (const updates of [
+      { note: 'changed' },
+      { url: 'https://changed.test' },
+      { favIconUrl: 'https://changed.test/icon.png' },
+      { title: 'Changed', note: 'changed' },
+    ]) {
+      expect(() => applyStateMutation(state, {
+        type: 'update-tab',
+        groupId: locked.id,
+        tabId: lockedTab.id,
+        updates,
+        updatedAt: timestamp,
+      })).toThrowError(expect.objectContaining({ code: 'GROUP_LOCKED' }));
+    }
   });
 
   it('rejects cascading mutations that would change locked groups', () => {

@@ -72,6 +72,60 @@ describe('storage event transport', () => {
     expect(received).toHaveLength(1);
   });
 
+  it('publishes explicit reread pings only with valid one-shot event ids', async () => {
+    const received: unknown[] = [];
+    subscribeFilePing((ping) => received.push(ping));
+
+    chromeMock.storage.onChanged.fire({
+      [FILE_PING_KEY]: {
+        newValue: {
+          mutationRevision: 7,
+          updatedAt: '2026-07-26T10:00:00.000Z',
+          kind: 'explicit-reread',
+          eventId: 'not-a-reread-id',
+        },
+      },
+    });
+    chromeMock.storage.onChanged.fire({
+      [FILE_PING_KEY]: {
+        newValue: {
+          mutationRevision: 7,
+          updatedAt: '2026-07-26T10:00:00.000Z',
+          kind: 'ordinary',
+          eventId: 'file-reread_mwiv_123',
+        },
+      },
+    });
+    chromeMock.storage.onChanged.fire({
+      [FILE_PING_KEY]: {
+        newValue: {
+          mutationRevision: 7,
+          updatedAt: '2026-07-26T10:00:00.000Z',
+          kind: 'explicit-reread',
+          eventId: `file-reread_${'a'.repeat(80)}_123`,
+        },
+      },
+    });
+
+    await writeFilePing(7, '2026-07-26T10:00:00.000Z', {
+      kind: 'explicit-reread',
+      eventId: 'file-reread_mwiv_123',
+    });
+
+    expect(chromeMock.storage.local.data[FILE_PING_KEY]).toEqual({
+      mutationRevision: 7,
+      updatedAt: '2026-07-26T10:00:00.000Z',
+      kind: 'explicit-reread',
+      eventId: 'file-reread_mwiv_123',
+    });
+    expect(received).toEqual([{
+      mutationRevision: 7,
+      updatedAt: '2026-07-26T10:00:00.000Z',
+      kind: 'explicit-reread',
+      eventId: 'file-reread_mwiv_123',
+    }]);
+  });
+
   it('publishes canonical fallback events and ignores malformed or non-local changes', async () => {
     const received: unknown[] = [];
     subscribeStorageFallback((event) => received.push(event));

@@ -23,6 +23,14 @@ function projection(overrides: Partial<SettingsProjection> = {}): SettingsProjec
 }
 
 describe('settings projection', () => {
+  it('retains an incomplete file read count in the small storage projection', () => {
+    const status = {
+      configuredTarget: 'file', activeBackend: 'file', folderName: 'TabBoard',
+      fallbackReason: null, fileUpdatedAt: '2026-11-12T12:00:00Z', unreadSessionCount: 2,
+    };
+    expect(parseStorageStatusProjection(status)).toEqual(status);
+    expect(parseStorageStatusProjection({ ...status, unreadSessionCount: -1 })).toBeNull();
+  });
   it('derives an isolated settings snapshot from canonical state', () => {
     const state = createEmptyState();
     state.mutationRevision = 9;

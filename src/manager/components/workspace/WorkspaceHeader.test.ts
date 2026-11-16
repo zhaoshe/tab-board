@@ -321,9 +321,9 @@ describe('WorkspaceHeader source contracts', () => {
     expect(source).not.toMatch(/useTabBoardStore\(\s*\)/);
     expect(boardProjectionSource).not.toMatch(/useTabBoardStore\(\s*\)/);
 
-    expect(selectorsSource).toMatch(/export type CategoryStripState = Pick<\s*TabBoardState,\s*'activeWorkspaceId'\s*\|\s*'workspaces'\s*\|\s*'folders'\s*\|\s*'groups'\s*\|\s*'categoryOrderByWorkspace'\s*>;/);
+    expect(selectorsSource).toMatch(/export type CategoryStripState = Pick<\s*TabBoardState,\s*'activeWorkspaceId'\s*\|\s*'workspaces'\s*\|\s*'folders'\s*\|\s*'groups'\s*\|\s*'categoryOrderByWorkspace'\s*>\s*&\s*\{\s*bookmarkGroups\?: readonly Group\[\];\s*\};/);
     expect(selectorsSource).toContain('getCategoryStrip(state: CategoryStripState)');
-    expect(source).toMatch(/const categories = getCategoryStrip\(\{\s*activeWorkspaceId: state\.activeWorkspaceId,\s*workspaces: state\.workspaces,\s*folders: state\.folders,\s*groups: state\.groups,\s*categoryOrderByWorkspace: state\.categoryOrderByWorkspace,\s*\}\);/);
+    expect(source).toMatch(/const categories = getCategoryStrip\(\{\s*activeWorkspaceId: state\.activeWorkspaceId,\s*workspaces: state\.workspaces,\s*folders: state\.folders,\s*groups: state\.groups,\s*bookmarkGroups,\s*categoryOrderByWorkspace: state\.categoryOrderByWorkspace,\s*\}\);/);
   });
 
   it('orchestrates category validation, locking, errors, and cleanup', async () => {

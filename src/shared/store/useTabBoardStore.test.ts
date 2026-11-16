@@ -97,7 +97,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
       ...createEmptyState(),
       folders: [folder],
       categoryOrderByWorkspace: {
-        workspace_default: ['inbox', 'saved', folder.id, 'archive'],
+        workspace_default: ['inbox', 'saved', 'bookmarks', folder.id, 'archive'],
       },
     };
     const sentBatches: StateMutation[][] = [];
@@ -122,6 +122,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     const expectedCategoryOrder = [
       'inbox',
       'saved',
+      'bookmarks',
       `folder:${folder.id}`,
       'archive',
     ];
@@ -143,12 +144,14 @@ describe('TabBoard store remote persistence reconciliation', () => {
       expectedCategoryOrder: [
         'inbox',
         'saved',
+        'bookmarks',
         `folder:${folder.id}`,
         'archive',
       ],
       categoryOrder: [
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
         `folder:${folder.id}`,
       ],
@@ -160,8 +163,8 @@ describe('TabBoard store remote persistence reconciliation', () => {
       label: 'manager',
       run: (store: typeof useTabBoardStore) => store.getState().updateCategoryOrder(
         'workspace_default',
-        ['saved', 'inbox', 'archive'],
-        { expectedCategoryOrder: ['inbox', 'saved', 'archive'] },
+        ['saved', 'inbox', 'bookmarks', 'archive'],
+        { expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'] },
       ),
     },
     {
@@ -172,7 +175,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
         targetCategoryId: 'inbox',
         placement: 'before',
         workspaceId: 'workspace_default',
-        expectedCategoryOrder: ['inbox', 'saved', 'archive'],
+        expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'],
       }),
     },
   ])('rejects a stale $label order snapshot and retains newer authority', async ({ run }) => {
@@ -215,8 +218,8 @@ describe('TabBoard store remote persistence reconciliation', () => {
     });
     expect(sentMutation).toMatchObject({
       type: 'set-category-order',
-      expectedCategoryOrder: ['inbox', 'saved', 'archive'],
-      categoryOrder: ['saved', 'inbox', 'archive'],
+      expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'],
+      categoryOrder: ['saved', 'inbox', 'bookmarks', 'archive'],
     });
     expect(store.getState().categoryOrderByWorkspace.workspace_default)
       .toEqual(['archive', 'inbox', 'saved']);
@@ -226,7 +229,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     const independentTarget: TabBoardState = {
       ...createEmptyState(),
       categoryOrderByWorkspace: {
-        workspace_default: ['saved', 'inbox', 'archive'],
+        workspace_default: ['saved', 'inbox', 'bookmarks', 'archive'],
       },
       mutationRevision: 1,
       updatedAt: '2026-01-03T00:00:00.000Z',
@@ -260,8 +263,8 @@ describe('TabBoard store remote persistence reconciliation', () => {
 
     const waiter = store.getState().updateCategoryOrder(
       'workspace_default',
-      ['saved', 'inbox', 'archive'],
-      { expectedCategoryOrder: ['inbox', 'saved', 'archive'] },
+      ['saved', 'inbox', 'bookmarks', 'archive'],
+      { expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'] },
     );
 
     await expect(waiter).rejects.toMatchObject({
@@ -286,7 +289,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
       ...createEmptyState(),
       folders: [folder],
       categoryOrderByWorkspace: {
-        workspace_default: ['inbox', 'saved', 'archive', folder.id],
+        workspace_default: ['inbox', 'saved', 'bookmarks', 'archive', folder.id],
       },
     };
     let sentMutation: StateMutation | undefined;
@@ -310,11 +313,13 @@ describe('TabBoard store remote persistence reconciliation', () => {
       `folder:${folder.id}`,
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
     ];
     const expectedCategoryOrder = [
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
       `folder:${folder.id}`,
     ];
@@ -333,6 +338,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
       expectedCategoryOrder: [
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
         `folder:${folder.id}`,
       ],
@@ -340,6 +346,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
         `folder:${folder.id}`,
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
       ],
     });
@@ -940,7 +947,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
     let stored: TabBoardState = {
       ...createEmptyState(),
       groups: [group('local-group')],
-      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved', 'archive'] },
+      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved', 'bookmarks', 'archive'] },
     };
     const listeners: Array<(changes: Record<string, { newValue: TabBoardState }>, area: string) => void> = [];
     let sentMutations: StateMutation[] | undefined;
@@ -966,8 +973,8 @@ describe('TabBoard store remote persistence reconciliation', () => {
     await useTabBoardStore.getState().hydrate();
     const orderPromise = useTabBoardStore.getState().updateCategoryOrder(
       'workspace_default',
-      ['saved', 'inbox', 'archive'],
-      { expectedCategoryOrder: ['inbox', 'saved', 'archive'] },
+      ['saved', 'inbox', 'bookmarks', 'archive'],
+      { expectedCategoryOrder: ['inbox', 'saved', 'bookmarks', 'archive'] },
     );
     await vi.waitFor(() => expect(sentMutations).toBeDefined());
 
@@ -975,7 +982,7 @@ describe('TabBoard store remote persistence reconciliation', () => {
       ...stored,
       mutationRevision: stored.mutationRevision + 1,
       groups: [group('remote-group')],
-      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved', 'archive'] },
+      categoryOrderByWorkspace: { workspace_default: ['inbox', 'saved', 'bookmarks', 'archive'] },
       updatedAt: '9999-01-01T00:00:00.000Z',
     };
     listeners.forEach((listener) => listener({ tabboardState: { newValue: remoteState } }, 'local'));
@@ -986,7 +993,12 @@ describe('TabBoard store remote persistence reconciliation', () => {
     await orderPromise;
 
     const result = useTabBoardStore.getState();
-    expect(result.categoryOrderByWorkspace.workspace_default).toEqual(['saved', 'inbox', 'archive']);
+    expect(result.categoryOrderByWorkspace.workspace_default).toEqual([
+      'saved',
+      'inbox',
+      'bookmarks',
+      'archive',
+    ]);
     expect(result.groups.map(({ id }) => id)).toEqual(['remote-group']);
     expect(result.mutationRevision).toBe(remoteState.mutationRevision);
   });

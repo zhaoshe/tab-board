@@ -471,6 +471,12 @@ describe('project UI accessibility markup', () => {
     expect(accessibilityCss).toContain('min-width: 44px');
     expect(accessibilityCss).toContain('min-height: 44px');
     expect(accessibilityCss).toContain('gap: 8px');
+    expect(accessibilityCss).toMatch(
+      /@media \(hover: none\), \(pointer: coarse\)[\s\S]*?\.manager-storage-notice \.mantine-Notification-closeButton,[\s\S]*?\.manager-storage-notice \.mantine-Button-root,[\s\S]*?\.manager-bookmark-status__retry\s*\{[\s\S]*?min-width:\s*44px;[\s\S]*?min-height:\s*44px;/,
+    );
+    expect(accessibilityCss).toMatch(
+      /@media \(hover: none\), \(pointer: coarse\)[\s\S]*?\.manager-first-saved-hint \.mantine-Notification-closeButton,[\s\S]*?\{[\s\S]*?min-width:\s*44px;[\s\S]*?min-height:\s*44px;/,
+    );
     expect(sidebarCss).toMatch(
       /@media \(hover: none\), \(pointer: coarse\)[\s\S]*?\.manager-open-tab-row\s*\{[\s\S]*?gap: 8px;/,
     );

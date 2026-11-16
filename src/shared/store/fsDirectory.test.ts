@@ -27,6 +27,7 @@ interface FakeReq<T> {
 }
 
 interface FakeTx {
+  oncomplete: ((ev: Event) => void) | null;
   objectStore(name: string): {
     put(value: unknown, key?: IDBValidKey): FakeReq<IDBValidKey>;
     get(key: IDBValidKey): FakeReq<unknown>;
@@ -129,10 +130,12 @@ class FakeIDBFactoryInstance {
               },
             };
           },
+          oncomplete: null,
           onabort: null,
           onerror: null,
           error: null,
         };
+        queueMicrotask(() => queueMicrotask(() => tx.oncomplete?.(new Event('complete'))));
         return tx;
       },
       close() {

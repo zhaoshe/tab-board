@@ -411,6 +411,29 @@ test.describe('Required DnD acceptance paths', () => {
     ]);
   });
 
+  test('keeps the between-session plus hit-testable at its center', async ({ page }) => {
+    await selectOpenTab(page, 101, 'Open One');
+    await startDrag(
+      page,
+      '.manager-open-tab-row[data-open-tab-id="101"]:visible',
+    );
+    const target = page.locator(
+      '.session-board__group-slot:nth-child(2) > .new-session-gap-target',
+    );
+
+    await expect(target).toBeVisible();
+    expect(await target.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return document.elementFromPoint(
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+      ) === element;
+    })).toBe(true);
+
+    await page.keyboard.press('Escape');
+    await page.mouse.up().catch(() => undefined);
+  });
+
   test('activates the exact end plus from the last Session body, clears on leave, dwells, and creates only on release', async ({ page }) => {
     await selectOpenTab(page, 101, 'Open One');
     await selectOpenTab(page, 102, 'Open Two');

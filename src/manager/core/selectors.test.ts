@@ -422,6 +422,7 @@ describe('getCategoryStrip', () => {
           'missing',
           'folder:other-folder',
           'folder-a',
+        'bookmarks',
           'archive',
         ],
       },
@@ -446,6 +447,7 @@ describe('getCategoryStrip', () => {
       { id: 'folder:folder-b', label: 'Beta', count: 3, kind: 'folder', folderId: 'folder-b' },
       { id: 'inbox', label: 'Inbox', count: 3, kind: 'inbox' },
       { id: 'folder:folder-a', label: 'Alpha', count: 2, kind: 'folder', folderId: 'folder-a' },
+      { id: 'bookmarks', label: 'Bookmark', count: 0, kind: 'bookmarks' },
       { id: 'archive', label: 'Archive', count: 1, kind: 'archive' },
       { id: 'folder:folder-c', label: 'Gamma', count: 0, kind: 'folder', folderId: 'folder-c' },
     ]);
@@ -461,8 +463,29 @@ describe('getCategoryStrip', () => {
       'folder:folder-b',
       'inbox',
       'saved',
+      'bookmarks',
       'archive',
       'folder:folder-a',
+    ]);
+  });
+
+  it('counts runtime Bookmark projection without mixing it into saved Sessions', () => {
+    const state = makeState({
+      groups: [
+        makeGroup('inbox', 'workspace-1'),
+        makeGroup('saved', 'workspace-1', { starred: true }),
+      ],
+      bookmarkGroups: [
+        makeGroup('bookmark-a', 'workspace-1'),
+        makeGroup('bookmark-b', 'workspace-1'),
+      ],
+    } as Partial<TabBoardState> & { bookmarkGroups: Group[] });
+
+    expect(getCategoryStrip(state).slice(0, 4).map(({ id, count }) => ({ id, count }))).toEqual([
+      { id: 'inbox', count: 1 },
+      { id: 'saved', count: 1 },
+      { id: 'bookmarks', count: 2 },
+      { id: 'archive', count: 0 },
     ]);
   });
 

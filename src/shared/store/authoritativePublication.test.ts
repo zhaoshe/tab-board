@@ -19,6 +19,7 @@ import {
   type AuthoritativePublicationDependencies,
   type PublicationProjection,
 } from './authoritativePublication';
+import type { StorageObservation } from './storageAdapter';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 
@@ -100,7 +101,7 @@ function createHarness(initialState: TabBoardState = createEmptyState()) {
     persistenceError: null,
   };
   let authoritative = projection.state;
-  let subscriber: ((state: TabBoardState) => void) | null = null;
+  let subscriber: ((state: TabBoardState, observation?: StorageObservation) => void) | null = null;
   const sentBatches: StateMutation[][] = [];
   const sendMutations = vi.fn(async (mutations: readonly StateMutation[]) => {
     const batch = [...mutations];
@@ -131,13 +132,14 @@ function createHarness(initialState: TabBoardState = createEmptyState()) {
     },
     sendMutations,
     currentContext: () => 'test-context',
+    currentDataset: () => 'test-dataset',
     onPersistenceError: vi.fn(),
     onMutationCommitted: vi.fn(),
   };
   return {
     dependencies,
     getProjection: () => projection,
-    publishRemote: (state: TabBoardState) => subscriber?.(state),
+    publishRemote: (state: TabBoardState, observation?: StorageObservation) => subscriber?.(state, observation),
     setAuthoritative: (state: TabBoardState) => {
       authoritative = state;
     },
@@ -666,7 +668,7 @@ describe('authoritative publication persistence outcomes', () => {
       ...createEmptyState(),
       folders: [custom],
       categoryOrderByWorkspace: {
-        workspace_default: ['inbox', 'saved', 'archive', custom.id],
+        workspace_default: ['inbox', 'saved', 'bookmarks', 'archive', custom.id],
       },
     };
     const harness = createHarness(initial);
@@ -688,6 +690,7 @@ describe('authoritative publication persistence outcomes', () => {
       expectedCategoryOrder: [
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
         `folder:${custom.id}`,
       ],
@@ -695,6 +698,7 @@ describe('authoritative publication persistence outcomes', () => {
         `folder:${custom.id}`,
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
       ],
       updatedAt: '2026-01-02T00:00:00.000Z',
@@ -715,13 +719,13 @@ describe('authoritative publication persistence outcomes', () => {
       ...createEmptyState(),
       folders: [custom],
       categoryOrderByWorkspace: {
-        workspace_default: ['inbox', 'saved', 'archive', custom.id],
+        workspace_default: ['inbox', 'saved', 'bookmarks', 'archive', custom.id],
       },
     };
     const newer: TabBoardState = {
       ...initial,
       categoryOrderByWorkspace: {
-        workspace_default: ['saved', 'inbox', 'archive', custom.id],
+        workspace_default: ['saved', 'inbox', 'bookmarks', 'archive', custom.id],
       },
       mutationRevision: initial.mutationRevision + 1,
       updatedAt: '2026-01-03T00:00:00.000Z',
@@ -745,6 +749,7 @@ describe('authoritative publication persistence outcomes', () => {
       expectedCategoryOrder: [
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
         `folder:${custom.id}`,
       ],
@@ -752,6 +757,7 @@ describe('authoritative publication persistence outcomes', () => {
         `folder:${custom.id}`,
         'inbox',
         'saved',
+        'bookmarks',
         'archive',
       ],
       updatedAt: '2026-01-02T00:00:00.000Z',
@@ -766,7 +772,7 @@ describe('authoritative publication persistence outcomes', () => {
       code: 'CATEGORY_MUTATION_CONFLICT',
     });
     expect(harness.getProjection().state.categoryOrderByWorkspace.workspace_default)
-      .toEqual(['saved', 'inbox', 'archive', custom.id]);
+      .toEqual(['saved', 'inbox', 'bookmarks', 'archive', custom.id]);
   });
 
   it('settles drop waiters by partial-commit indexes and publishes committed siblings', async () => {
@@ -1305,5 +1311,501 @@ describe('authoritative publication lifecycle', () => {
       message: 'Authoritative publication is disposed.',
     });
     expect(harness.dependencies.sendMutations).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('capture commit admission', () => {
+  it('eagerly replays optimistic in-flight and queued work but leaves checked additional work and waiters untouched', async () => {
+    vi.useFakeTimers();
+    const initial = createEmptyState();
+    initial.groups = [group('existing')];
+    const harness = createHarness(initial);
+    let resolve!: (state: TabBoardState) => void;
+    const send = vi.fn((_: readonly StateMutation[]) => new Promise<TabBoardState>((done) => { resolve = done; }));
+    harness.dependencies.sendMutations = send;
+    const publication = createAuthoritativePublication(harness.dependencies);
+    await publication.hydrate();
+    publication.commit({ type: 'update-group', id: 'existing', updates: { title: 'optimistic' }, updatedAt: timestamp });
+    let settled = false;
+    const checked = publication.commitChecked({ type: 'update-settings', updates: { theme: 'dark' }, updatedAt: timestamp });
+    void checked.then(() => { settled = true; });
+    await Promise.resolve();
+    publication.commit({ type: 'update-group', id: 'existing', updates: { note: 'later' }, updatedAt: timestamp });
+    const canonical = { ...initial, groups: [group('capture'), ...initial.groups], mutationRevision: 8, updatedAt: '2025-01-01T00:00:00.000Z' };
+    const wire = send.mock.calls[0];
+    const timers = vi.getTimerCount();
+    publication.reconcileCaptureCommit(canonical);
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['capture', 'existing']);
+    expect(harness.getProjection().state.groups[1]).toMatchObject({ title: 'optimistic', note: 'later' });
+    expect(harness.getProjection().state.settings.theme).toBe(initial.settings.theme);
+    expect(harness.getProjection().state.workspaces[0]).toBe(initial.workspaces[0]);
+    expect(settled).toBe(false);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]).toBe(wire);
+    expect(vi.getTimerCount()).toBe(timers);
+    resolve(applyStateMutations(initial, wire![0]));
+    await checked;
+    await Promise.resolve();
+    expect(harness.getProjection().state.groups[0].id).toBe('capture');
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+    expect(harness.getProjection().state.groups[1].note).toBe('later');
+    expect(harness.dependencies.onPersistenceError).not.toHaveBeenCalled();
+    publication.dispose();
+  });
+
+  it('previews pending and in-flight drops using copies and settles only the real CAS outcome', async () => {
+    vi.useFakeTimers();
+    const initial = createEmptyState();
+    initial.groups = [group('existing'), group('later')];
+    const harness = createHarness(initial);
+    let reject!: (error: unknown) => void;
+    const send = vi.fn((_: readonly StateMutation[]) => new Promise<TabBoardState>((_, fail) => { reject = fail; }));
+    harness.dependencies.sendMutations = send;
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const first = dropMutation('drop-first', 'existing');
+    let settled = false;
+    const waiter = publication.commitDrop(first);
+    void waiter.then(() => { settled = true; }, () => { settled = true; });
+    await vi.advanceTimersByTimeAsync(100);
+    const second = dropMutation('drop-second', 'later', 1);
+    const secondWaiter = publication.commitDrop(second);
+    void secondWaiter.catch(() => undefined);
+    const serialized = JSON.stringify([first, second]);
+    const canonical = { ...initial, groups: [group('capture'), ...initial.groups], mutationRevision: 9 };
+    publication.reconcileCaptureCommit(canonical);
+    expect(harness.getProjection().state.groups.find(({ id }) => id === 'existing')?.starred).toBe(true);
+    expect(harness.getProjection().state.groups.find(({ id }) => id === 'later')?.starred).toBe(true);
+    expect(harness.getProjection().state.dropOperationLedger?.map(({ operationId }) => operationId)).toEqual(['drop-first', 'drop-second']);
+    expect(JSON.stringify([first, second])).toBe(serialized);
+    expect(send.mock.calls[0][0][0]).toBe(first);
+    expect(first.expectedRevision).toBe(0);
+    expect(settled).toBe(false);
+    reject(new InvalidDropMutationError('CAS rejected', [0]));
+    await expect(waiter).rejects.toThrow('CAS rejected');
+    expect(settled).toBe(true);
+    publication.dispose();
+  });
+
+  it('keeps revision-first canonical high-water and exact-tie incumbent across repeated and older subscription observations', async () => {
+    const initial = createEmptyState();
+    const harness = createHarness(initial);
+    const publication = createAuthoritativePublication(harness.dependencies);
+    await publication.hydrate();
+    const capture = { ...initial, groups: [group('capture')], mutationRevision: 4, updatedAt: timestamp };
+    publication.reconcileCaptureCommit(capture);
+    const displayed = harness.getProjection().state;
+    publication.reconcileCaptureCommit({ ...initial, mutationRevision: 3, updatedAt: '2099-01-01T00:00:00.000Z' });
+    publication.reconcileCaptureCommit({ ...capture, groups: [group('tie')] });
+    harness.publishRemote(initial);
+    expect(harness.getProjection().state).toEqual(displayed);
+    expect(harness.getProjection().state.groups).toBe(displayed.groups);
+    publication.reconcileCaptureCommit({ ...capture, groups: [group('new')], mutationRevision: 5, updatedAt: '2020-01-01T00:00:00.000Z' });
+    expect(harness.getProjection().state.groups[0].id).toBe('new');
+    publication.dispose();
+  });
+
+  it('admits explicit reread exact-ties without letting ordinary stale ties erase the repaired base or optimistic work', async () => {
+    vi.useFakeTimers();
+    const initial = createEmptyState();
+    const unread = {
+      ...initial,
+      groups: [],
+      mutationRevision: 7,
+      updatedAt: timestamp,
+    };
+    const repaired = {
+      ...unread,
+      groups: [group('repaired')],
+    };
+    const harness = createHarness(unread);
+    const publication = createAuthoritativePublication(harness.dependencies);
+    await publication.hydrate();
+    publication.commit({
+      type: 'update-settings',
+      updates: { theme: 'dark' },
+      updatedAt: timestamp,
+    });
+
+    harness.publishRemote(repaired, { kind: 'explicit-reread', eventId: 'repair-1' });
+    harness.setAuthoritative(repaired);
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['repaired']);
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+
+    harness.publishRemote(unread);
+    harness.publishRemote(
+      { ...unread, groups: [group('older-explicit')], mutationRevision: 6 },
+      { kind: 'explicit-reread', eventId: 'repair-older' },
+    );
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['repaired']);
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(harness.sentBatches[0][0]).toMatchObject({ type: 'update-settings' });
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['repaired']);
+    publication.dispose();
+  });
+
+  it('keeps an explicit reread preview after a deferred ordinary RPC returns an old equal-revision snapshot', async () => {
+    vi.useFakeTimers();
+    const initial = createEmptyState();
+    const unread = {
+      ...initial,
+      groups: [],
+      mutationRevision: 7,
+      updatedAt: timestamp,
+    };
+    const repaired = {
+      ...unread,
+      groups: [group('repaired')],
+    };
+    const harness = createHarness(unread);
+    let resolveRpc!: (state: TabBoardState) => void;
+    const deferredSend = vi.fn((_mutations: readonly StateMutation[]) => new Promise<TabBoardState>((resolve) => {
+      resolveRpc = resolve;
+    }));
+    harness.dependencies.sendMutations = deferredSend;
+    const publication = createAuthoritativePublication(harness.dependencies);
+    await publication.hydrate();
+    publication.commit({
+      type: 'update-settings',
+      updates: { theme: 'dark' },
+      updatedAt: timestamp,
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(deferredSend).toHaveBeenCalledTimes(1);
+    const firstCall = deferredSend.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const sentMutation = firstCall![0][0];
+
+    harness.publishRemote(repaired, { kind: 'explicit-reread', eventId: 'repair-1' });
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['repaired']);
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+
+    resolveRpc(unread);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['repaired']);
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+    expect(deferredSend.mock.calls[0]![0][0]).toBe(sentMutation);
+    publication.dispose();
+  });
+
+  it('preserves current valid workspace only in the eager projection, without seeding the next canonical base', async () => {
+    vi.useFakeTimers();
+    const initial = createEmptyState();
+    initial.workspaces = [...initial.workspaces, { ...initial.workspaces[0], id: 'other' }];
+    const harness = createHarness({ ...initial, activeWorkspaceId: 'other' });
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const canonical = { ...initial, groups: [group('capture')], mutationRevision: 4 };
+    publication.reconcileCaptureCommit(canonical);
+    expect(harness.getProjection().state.activeWorkspaceId).toBe('other');
+    publication.commit({ type: 'update-settings', updates: { theme: 'dark' }, updatedAt: timestamp });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(harness.getProjection().state.activeWorkspaceId).toBe(initial.activeWorkspaceId);
+    expect(harness.getProjection().state.groups[0].id).toBe('capture');
+    publication.reconcileCaptureCommit({ ...canonical, workspaces: [initial.workspaces[0]], mutationRevision: 6 });
+    expect(harness.getProjection().state.activeWorkspaceId).toBe(initial.activeWorkspaceId);
+    publication.dispose();
+  });
+
+  it('retains failed capture observation for settlement without changing projection, queue, feedback or timers', async () => {
+    vi.useFakeTimers();
+    const initial = createEmptyState();
+    initial.groups = [group('existing')];
+    const harness = createHarness(initial);
+    const publication = createAuthoritativePublication(harness.dependencies);
+    publication.commit({ type: 'update-group', id: 'existing', updates: { title: 'edit' }, updatedAt: timestamp });
+    const displayed = harness.getProjection().state;
+    const canonical = { ...initial, groups: [group('capture')], mutationRevision: 8 };
+    expect(() => publication.reconcileCaptureCommit(canonical)).toThrow();
+    expect(harness.getProjection().state).toBe(displayed);
+    expect(vi.getTimerCount()).toBe(1);
+    expect(harness.dependencies.onPersistenceError).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(harness.sentBatches[0][0]).toMatchObject({ type: 'update-group', id: 'existing' });
+    expect(harness.getProjection().state.groups.some(({ id }) => id === 'capture')).toBe(true);
+    publication.dispose();
+  });
+
+  it('rejects disposed and changed-context admission without ordinary error feedback and clears preview tracking', async () => {
+    vi.useFakeTimers();
+    const initial = createEmptyState();
+    const harness = createHarness(initial);
+    let context = 'first';
+    harness.dependencies.currentContext = () => context;
+    const publication = createAuthoritativePublication(harness.dependencies);
+    publication.commit({ type: 'update-settings', updates: { theme: 'dark' }, updatedAt: timestamp });
+    context = 'second';
+    expect(() => publication.reconcileCaptureCommit({ ...initial, mutationRevision: 8 })).toThrow('context');
+    publication.commit({ type: 'update-settings', updates: { closeTabsAfterSave: false }, updatedAt: timestamp });
+    publication.reconcileCaptureCommit({ ...initial, mutationRevision: 9 });
+    expect(harness.getProjection().state.settings.theme).toBe(initial.settings.theme);
+    expect(harness.getProjection().state.settings.closeTabsAfterSave).toBe(false);
+    publication.dispose();
+    expect(() => publication.reconcileCaptureCommit(initial)).toThrow('disposed');
+    expect(harness.dependencies.onPersistenceError).not.toHaveBeenCalled();
+  });
+});
+
+describe('capture replay concurrency boundaries', () => {
+  it('uses buffered canonical high-water instead of an optimistic future clock and keeps the save deadline', async () => {
+    vi.useFakeTimers();
+    const initial = createEmptyState();
+    const harness = createHarness(initial);
+    const publication = createAuthoritativePublication(harness.dependencies);
+    await publication.hydrate();
+    publication.commit({ type: 'update-settings', updates: { theme: 'dark' }, updatedAt: '2099-01-01T00:00:00.000Z' });
+    await vi.advanceTimersByTimeAsync(70);
+    const buffered = { ...initial, groups: [group('buffered-capture')], mutationRevision: 9, updatedAt: timestamp };
+    harness.publishRemote(buffered);
+    publication.reconcileCaptureCommit({ ...initial, groups: [group('older-capture')], mutationRevision: 8, updatedAt: '2098-01-01T00:00:00.000Z' });
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['buffered-capture']);
+    expect(harness.getProjection().state.settings.theme).toBe('dark');
+    await vi.advanceTimersByTimeAsync(29);
+    expect(harness.sendMutations).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(harness.sendMutations).toHaveBeenCalledTimes(1);
+    expect(harness.getProjection().state.groups[0].id).toBe('buffered-capture');
+    publication.reconcileCaptureCommit({ ...buffered, groups: [group('newer-clock')], updatedAt: '2027-01-01T00:00:00.000Z' });
+    expect(harness.getProjection().state.groups[0].id).toBe('newer-clock');
+    publication.dispose();
+  });
+
+  it('does not duplicate stable group or ledger identities when canonical already reflects an outstanding drop', async () => {
+    vi.useFakeTimers();
+    const initial = { ...createEmptyState(), groups: [group('existing')] };
+    const harness = createHarness(initial);
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const drop = dropMutation('same-drop', 'existing');
+    const waiter = publication.commitDrop(drop);
+    let settled = false;
+    void waiter.then(() => { settled = true; });
+    const canonical = applyStateMutations(initial, [drop]);
+    harness.setAuthoritative(canonical);
+    publication.reconcileCaptureCommit(canonical);
+    publication.reconcileCaptureCommit(canonical);
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['existing']);
+    expect(harness.getProjection().state.dropOperationLedger).toEqual(canonical.dropOperationLedger);
+    expect(harness.getProjection().state.mutationRevision).toBe(canonical.mutationRevision);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(100);
+    await waiter;
+    expect(harness.sentBatches[0][0]).toBe(drop);
+    expect(harness.getProjection().state.dropOperationLedger).toHaveLength(1);
+    publication.dispose();
+  });
+
+  it('preserves retry deadline and real drop revision after capture previews a response-lost drop', async () => {
+    vi.useFakeTimers();
+    const initial = { ...createEmptyState(), groups: [group('existing')] };
+    const harness = createHarness(initial);
+    const send = vi.fn(async (_: readonly StateMutation[]) => {
+      if (send.mock.calls.length === 1) throw new Error('response lost');
+      throw new InvalidDropMutationError('actual stale revision', [0]);
+    });
+    harness.dependencies.sendMutations = send;
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const drop = dropMutation('response-lost', 'existing');
+    const waiter = publication.commitDrop(drop);
+    let settled = false;
+    void waiter.then(() => { settled = true; }, () => { settled = true; });
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(100);
+    const timerCount = vi.getTimerCount();
+    const canonical = { ...initial, groups: [group('capture'), ...initial.groups], mutationRevision: 8 };
+    publication.reconcileCaptureCommit(canonical);
+    expect(vi.getTimerCount()).toBe(timerCount);
+    expect(drop.expectedRevision).toBe(0);
+    expect(harness.getProjection().state.groups.find(({ id }) => id === 'existing')?.starred).toBe(true);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(149);
+    expect(send).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(waiter).rejects.toThrow('actual stale revision');
+    expect(send.mock.calls[1][0][0]).toBe(drop);
+    expect(harness.getProjection().state.groups[0].id).toBe('capture');
+    publication.dispose();
+  });
+
+  it('keeps category additional unpublished during terminal isolation and preserves capture through isolated replies', async () => {
+    vi.useFakeTimers();
+    const initial = { ...createEmptyState(), groups: [group('existing')] };
+    const harness = createHarness(initial);
+    const category = folder('checked-category');
+    let resolveIsolated!: (state: TabBoardState) => void;
+    const send = vi.fn((mutations: readonly StateMutation[]): Promise<TabBoardState> => {
+      if (send.mock.calls.length === 1) return Promise.reject(Object.assign(new Error('terminal batch'), { code: 'REFERENCE_VALIDATION' }));
+      if (send.mock.calls.length === 2) return new Promise((resolve) => { resolveIsolated = resolve; });
+      return Promise.resolve(applyStateMutations(initial, mutations));
+    });
+    harness.dependencies.sendMutations = send;
+    const publication = createAuthoritativePublication(harness.dependencies);
+    const edit: StateMutation = { type: 'update-group', id: 'existing', updates: { title: 'edit' }, updatedAt: timestamp };
+    publication.commit(edit);
+    const waiter = publication.commitCategory({ type: 'add-folder', folder: category });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(send).toHaveBeenCalledTimes(2);
+    let settled = false;
+    void waiter.then(() => { settled = true; });
+    publication.reconcileCaptureCommit({ ...initial, groups: [group('capture'), ...initial.groups], mutationRevision: 8 });
+    expect(harness.getProjection().state.groups[1].title).toBe('edit');
+    expect(harness.getProjection().state.folders).toEqual([]);
+    expect(settled).toBe(false);
+    resolveIsolated(applyStateMutations(initial, [edit]));
+    await waiter;
+    expect(harness.getProjection().state.groups[0].id).toBe('capture');
+    expect(harness.getProjection().state.folders.map(({ id }) => id)).toEqual([category.id]);
+    expect(harness.dependencies.onMutationCommitted).toHaveBeenCalledWith(edit);
+    publication.dispose();
+  });
+});
+
+describe('capture canonical context lifecycle', () => {
+  it.each([false, true])('rechecks dataset after rejected recovery, preserving the old success and B observation during wait=%s', async (observeDuringWait) => {
+    const file = { ...createEmptyState(), mutationRevision: 50 };
+    const harness = createHarness(file);
+    let dataset = 'file';
+    harness.dependencies.currentDataset = () => dataset;
+    const publication = createAuthoritativePublication(harness.dependencies);
+    await publication.hydrate();
+    let finish!: (state: TabBoardState) => void;
+    harness.sendMutations.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const edit: StateMutation = { type: 'update-settings', updates: { theme: 'dark' }, updatedAt: timestamp };
+    const waiter = publication.commitChecked(edit);
+    await Promise.resolve();
+    dataset = 'browser-a';
+    const browserA = { ...createEmptyState(), mutationRevision: 100 };
+    browserA.settings = { ...browserA.settings, theme: 'light' };
+    publication.reconcileCaptureCommit(browserA);
+    let entered!: () => void;
+    const reading = new Promise<void>(resolve => { entered = resolve; });
+    let rejectRead!: (error: unknown) => void;
+    harness.dependencies.initializeAuthoritativeState = () => new Promise((_, reject) => {
+      rejectRead = reject;
+      entered();
+    });
+    finish(applyStateMutations(file, [edit]));
+    await reading;
+    dataset = 'browser-b';
+    const browserB = { ...createEmptyState(), mutationRevision: 1 };
+    if (observeDuringWait) publication.reconcileCaptureCommit(browserB);
+    rejectRead(new Error('read invalidated by authority reset'));
+    await expect(waiter).resolves.toBeUndefined();
+    if (!observeDuringWait) publication.reconcileCaptureCommit(browserB);
+    expect(harness.getProjection().state.mutationRevision).toBe(1);
+    expect(harness.getProjection().state.settings.theme).toBe('system');
+    publication.dispose();
+  });
+
+  it.each(['success', 'partial', 'read-failed'])('does not admit a delayed prior-dataset %s reply after explicit selection while preserving its waiter outcome', async (reply) => {
+    const initial = { ...createEmptyState(), groups: [group('file')], mutationRevision: 50 };
+    const harness = createHarness(initial);
+    let dataset = 'file';
+    harness.dependencies.currentDataset = () => dataset;
+    const publication = createAuthoritativePublication(harness.dependencies);
+    await publication.hydrate();
+    let finish!: (state: TabBoardState) => void;
+    let fail!: (error: unknown) => void;
+    harness.sendMutations.mockImplementationOnce(() => new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+    const edit: StateMutation = { type: 'update-settings', updates: { theme: 'dark' }, updatedAt: timestamp };
+    const waiter = publication.commitChecked(edit);
+    await Promise.resolve();
+    const oldCommitted = applyStateMutations(initial, [edit]);
+    dataset = 'browser';
+    const browser = { ...createEmptyState(), groups: [group('browser-capture')], mutationRevision: 2 };
+    harness.setAuthoritative(browser);
+    publication.reconcileCaptureCommit(browser);
+    if (reply === 'read-failed') harness.dependencies.initializeAuthoritativeState = async () => { throw new Error('selected authority temporarily unavailable'); };
+    if (reply !== 'partial') finish(oldCommitted);
+    else fail(new InvalidDropMutationError('old partial', [], [0], oldCommitted));
+    await waiter;
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['browser-capture']);
+    expect(harness.getProjection().state.mutationRevision).toBe(2);
+    expect(harness.getProjection().state.settings.theme).toBe(browser.settings.theme);
+    publication.dispose();
+  });
+
+  it('does not carry capture high-water into hydration for a replacement context', async () => {
+    const initial = createEmptyState();
+    const harness = createHarness(initial);
+    let context = 'first';
+    harness.dependencies.currentContext = () => context;
+    const publication = createAuthoritativePublication(harness.dependencies);
+    await publication.hydrate();
+    publication.reconcileCaptureCommit({ ...initial, groups: [group('old-context-capture')], mutationRevision: 50 });
+    publication.releaseHydration();
+    context = 'replacement';
+    const replacement = { ...initial, groups: [group('replacement')], mutationRevision: 1 };
+    harness.setAuthoritative(replacement);
+    await publication.hydrate();
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['replacement']);
+    publication.dispose();
+  });
+});
+
+describe('capture high-water after a consumed buffer', () => {
+  it('keeps confirmed ordinary siblings from a later older partial reply after an earlier success consumes the capture buffer', async () => {
+    const initial = { ...createEmptyState(), groups: [group('existing')] };
+    initial.settings = { ...initial.settings, theme: 'dark' };
+    const harness = createHarness(initial);
+    const replies: Array<{
+      batch: readonly StateMutation[];
+      resolve: (state: TabBoardState) => void;
+      reject: (error: unknown) => void;
+    }> = [];
+    harness.dependencies.sendMutations = vi.fn((batch: readonly StateMutation[]) =>
+      new Promise<TabBoardState>((resolve, reject) => {
+        replies.push({ batch, resolve, reject });
+      }),
+    );
+    const publication = createAuthoritativePublication(harness.dependencies);
+    publication.commit({ type: 'update-settings', updates: { theme: 'dark' }, updatedAt: timestamp });
+    const firstWaiter = publication.commitChecked({
+      type: 'update-settings', updates: { closeTabsAfterSave: false }, updatedAt: timestamp,
+    });
+    let firstSettled = false;
+    void firstWaiter.then(() => { firstSettled = true; });
+    await Promise.resolve();
+    const capture = { ...initial, groups: [group('capture'), ...initial.groups], mutationRevision: 8 };
+    publication.reconcileCaptureCommit(capture);
+    expect(firstSettled).toBe(false);
+    replies[0].resolve(applyStateMutations(initial, replies[0].batch));
+    await firstWaiter;
+    await Promise.resolve();
+    expect(harness.getProjection().state.groups[0].id).toBe('capture');
+    expect(harness.getProjection().state.mutationRevision).toBe(8);
+    expect(firstSettled).toBe(true);
+
+    const confirmed: StateMutation = { type: 'update-settings', updates: { theme: 'light' }, updatedAt: timestamp };
+    publication.commit(confirmed);
+    const invalidDrop = dropMutation('later-rejected-drop', 'existing', 9);
+    const dropWaiter = publication.commitChecked(invalidDrop);
+    let dropSettled = false;
+    const dropOutcome = dropWaiter.then(
+      () => { dropSettled = true; return 'resolved'; },
+      (error: unknown) => { dropSettled = true; return error; },
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(replies).toHaveLength(2);
+    expect(harness.getProjection().state.settings.theme).toBe('light');
+    expect(harness.getProjection().state.mutationRevision).toBe(9);
+    expect(dropSettled).toBe(false);
+    expect(replies[1].batch).toEqual([confirmed, invalidDrop]);
+    const partialError = new InvalidDropMutationError(
+      'Actual drop rejected.', [1], [0], applyStateMutations(initial, [confirmed]),
+    );
+    replies[1].reject(partialError);
+    await expect(dropOutcome).resolves.toBe(partialError);
+    expect(dropSettled).toBe(true);
+    expect(harness.getProjection().state.groups.map(({ id }) => id)).toEqual(['capture', 'existing']);
+    expect(harness.getProjection().state.settings.theme).toBe('light');
+    expect(harness.getProjection().state.settings.closeTabsAfterSave).toBe(false);
+    expect(harness.getProjection().state.mutationRevision).toBeGreaterThanOrEqual(8);
+    expect(harness.dependencies.onMutationCommitted).toHaveBeenCalledWith(confirmed);
+    expect(harness.getProjection().state.dropOperationLedger).toEqual([]);
+    expect(replies[1].batch[1]).toBe(invalidDrop);
+    publication.dispose();
   });
 });

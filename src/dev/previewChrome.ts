@@ -1,5 +1,6 @@
 import {
   STATE_KEY,
+  createBookmarkSessions,
   createEmptyState,
   createFolder,
   createGroupFromTabRecords,
@@ -20,7 +21,11 @@ import {
 import type { BrowserGroup, Group, TabBoardState, TabItem } from '../shared/model';
 import type { OpenTabsCaptureResult } from '../shared/openTabs';
 import { getCaptureCandidateReason, isExtensionPageUrl, matchesCustomUrlFilter } from '../shared/model/capture-policy';
-import { applyStateMutations } from '../shared/store/stateMutations';
+import { restoreError, type RestoreOutcome, type RestoreRequest, type OriginScope } from '../shared/store/restoreCommit';
+import { getActiveBoundState, setActiveState } from '../shared/store/activeAdapter';
+import { createMutationBatch, applyStateMutations } from '../shared/store/stateMutations';
+import { createStatePersistence } from '../background/statePersistence';
+import type { StateWriteOptions } from '../shared/store/storageAdapter';
 
 export type PreviewTab = chrome.tabs.Tab & {
   id: number;
@@ -37,6 +42,8 @@ type StoredPreviewWindow = Omit<PreviewWindow, 'tabs'> & {
   tabs: PreviewTab[];
 };
 
+type PreviewBookmarkNode = chrome.bookmarks.BookmarkTreeNode;
+
 export type PreviewWindowOptions = Omit<Partial<PreviewWindow>, 'tabs'> & {
   tabs?: readonly Partial<PreviewTab>[];
 };
@@ -50,6 +57,7 @@ export interface PreviewChromeOptions {
   state?: unknown;
   tabs?: readonly Partial<PreviewTab>[];
   windows?: readonly PreviewWindowOptions[];
+  bookmarks?: readonly PreviewBookmarkNode[];
   extensionBaseUrl?: string;
   storagePersistence?: PreviewStoragePersistence;
 }
@@ -62,6 +70,9 @@ export interface PreviewResponse<T = unknown> {
   invalidMutationIndexes?: number[];
   committedMutationIndexes?: number[];
   state?: TabBoardState;
+  restoreOutcome?: RestoreOutcome;
+  confirmedByReceipt?: boolean;
+  origin?: OriginScope;
 }
 
 export interface PreviewEventHub {
@@ -80,6 +91,7 @@ export interface PreviewChromeApi {
   runtime: {
     id: string;
     sendMessage<T = unknown>(message: unknown): Promise<PreviewResponse<T>>;
+    onMessage: PreviewEventHub;
     openOptionsPage(): Promise<void>;
     getURL(path?: string): string;
   };
@@ -108,6 +120,14 @@ export interface PreviewChromeApi {
     onRemoved: PreviewEventHub;
     onFocusChanged: PreviewEventHub;
   };
+  bookmarks: {
+    getTree(): Promise<PreviewBookmarkNode[]>;
+    onCreated: PreviewEventHub;
+    onChanged: PreviewEventHub;
+    onMoved: PreviewEventHub;
+    onRemoved: PreviewEventHub;
+    onImportEnded: PreviewEventHub;
+  };
 }
 
 export interface PreviewChromeHarness {
@@ -127,6 +147,7 @@ export interface PreviewChromeHarness {
 type Listener = (...args: never[]) => unknown;
 type EventName =
   | 'storage.onChanged'
+  | 'runtime.onMessage'
   | 'tabs.onActivated'
   | 'tabs.onCreated'
   | 'tabs.onRemoved'
@@ -137,10 +158,16 @@ type EventName =
   | 'tabs.onUpdated'
   | 'windows.onCreated'
   | 'windows.onRemoved'
-  | 'windows.onFocusChanged';
+  | 'windows.onFocusChanged'
+  | 'bookmarks.onCreated'
+  | 'bookmarks.onChanged'
+  | 'bookmarks.onMoved'
+  | 'bookmarks.onRemoved'
+  | 'bookmarks.onImportEnded';
 
 const EVENT_NAMES: readonly EventName[] = [
   'storage.onChanged',
+  'runtime.onMessage',
   'tabs.onActivated',
   'tabs.onCreated',
   'tabs.onRemoved',
@@ -152,6 +179,11 @@ const EVENT_NAMES: readonly EventName[] = [
   'windows.onCreated',
   'windows.onRemoved',
   'windows.onFocusChanged',
+  'bookmarks.onCreated',
+  'bookmarks.onChanged',
+  'bookmarks.onMoved',
+  'bookmarks.onRemoved',
+  'bookmarks.onImportEnded',
 ];
 
 class EventHub implements PreviewEventHub {
@@ -329,6 +361,32 @@ function fixtureTabs(): PreviewTab[] {
       favIconUrl: 'http://second-window.example/favicon.ico',
     }),
   ];
+}
+
+function fixtureBookmarks(): PreviewBookmarkNode[] {
+  return [{
+    id: '0',
+    title: '',
+    children: [{
+      id: '10',
+      title: 'Preview Bookmarks',
+      children: [{
+        id: '11',
+        title: 'Bookmark preview link',
+        url: 'https://bookmark-preview.example/',
+        dateAdded: Date.parse('2026-08-05T00:00:00.000Z'),
+      }, {
+        id: '12',
+        title: 'Nested',
+        children: [{
+          id: '13',
+          title: 'Nested bookmark link',
+          url: 'https://nested-bookmark.example/',
+          dateAdded: Date.parse('2026-08-05T00:01:00.000Z'),
+        }],
+      }],
+    }],
+  }] as PreviewBookmarkNode[];
 }
 
 function fixtureWindows(tabs: readonly PreviewTab[]): StoredPreviewWindow[] {
@@ -574,6 +632,7 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
   );
   let tabs: PreviewTab[];
   let windows: StoredPreviewWindow[];
+  const bookmarks: PreviewBookmarkNode[] = clone([...options.bookmarks ?? fixtureBookmarks()]);
   if (options.windows) {
     const custom = makeCustomWindows(options.windows, options.tabs);
     tabs = custom.tabs;
@@ -588,6 +647,7 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
   let nextTabId = Math.max(0, ...tabs.map((tab) => tab.id)) + 1;
   let nextWindowId = Math.max(0, ...windows.map((window) => window.id)) + 1;
   let openedOptionsCount = 0;
+  let nextTitleRefreshOperationId = 0;
   let storageData: Record<string, unknown> = persistedStorage
     ? clone(persistedStorage)
     : { [STATE_KEY]: clone(state) };
@@ -630,9 +690,11 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
     return candidateTabs.map((tab) => tab.windowId === windowId ? byId.get(tab.id)! : { ...tab });
   };
 
-  const setStoredState = async (nextState: TabBoardState): Promise<void> => {
-    state = normalizeState(nextState);
-    await storageLocal.set({ [STATE_KEY]: clone(state) });
+  const setStoredState = async (nextState: TabBoardState, options?: StateWriteOptions): Promise<void> => {
+    await storageLocal.set({
+      ...(options?.backupBeforeRestore ? { tabboardBackupBeforeRestore: normalizeState(options.backupBeforeRestore) } : {}),
+      [STATE_KEY]: clone(normalizeState(nextState)),
+    });
   };
 
   const storageLocal = {
@@ -669,6 +731,9 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
       if (Object.keys(changes).length) getHub('storage.onChanged').emit(changes, 'local');
     },
   };
+
+  const statePersistence = createStatePersistence({ getState: async () => clone(state), getBoundState: getActiveBoundState,
+    setState: (next, options) => options?.restoreMetadata ? setActiveState(next, options) : setStoredState(next, options) });
 
   const listOpenTabs = (): { windows: Array<{
     id: number;
@@ -921,6 +986,17 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
     onFocusChanged: getHub('windows.onFocusChanged'),
   };
 
+  const bookmarksApi = {
+    async getTree(): Promise<PreviewBookmarkNode[]> {
+      return clone(bookmarks);
+    },
+    onCreated: getHub('bookmarks.onCreated'),
+    onChanged: getHub('bookmarks.onChanged'),
+    onMoved: getHub('bookmarks.onMoved'),
+    onRemoved: getHub('bookmarks.onRemoved'),
+    onImportEnded: getHub('bookmarks.onImportEnded'),
+  };
+
   const api: PreviewChromeApi = {
     storage: { local: storageLocal, onChanged: getHub('storage.onChanged') },
     runtime: {
@@ -933,10 +1009,12 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
       async openOptionsPage(): Promise<void> {
         openedOptionsCount += 1;
       },
+      onMessage: getHub('runtime.onMessage'),
       getURL: extensionUrl,
     },
     tabs: tabsApi,
     windows: windowsApi,
+    bookmarks: bookmarksApi,
   };
 
   const removeRestoredRefs = async (refs: readonly { source: string; groupId: string; tabId: string }[]) => {
@@ -983,6 +1061,52 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
       created.push({ tab, record });
     }
     return created;
+  };
+
+  const syncRestoredTabTitles = async (
+    created: readonly { tab: PreviewTab; record: TabItem }[],
+    refs: readonly RestoreRef[],
+  ): Promise<void> => {
+    const refByTabId = new Map(refs.map((ref) => [ref.tabId, ref]));
+    const updates = [];
+    for (const { tab, record } of created) {
+      const ref = refByTabId.get(record.id);
+      const group = ref
+        ? state.groups.find(({ id }) => id === ref.groupId)
+        : undefined;
+      const saved = group?.tabs.find(({ id }) => id === ref?.tabId);
+      if (!ref
+        || !group
+        || !saved
+        || saved.itemType !== 'link'
+        || saved.url !== record.url) {
+        continue;
+      }
+      const title = await withTitleRefreshActivity(
+        ref.groupId,
+        ref.tabId,
+        async () => {
+          const finalTitle = new URL(record.url).hostname || record.url;
+          await tabsApi.update(tab.id, {
+            status: 'complete',
+            title: finalTitle,
+          });
+          return finalTitle;
+        },
+      );
+      if (title !== saved.title) {
+        updates.push({
+          type: 'update-tab' as const,
+          groupId: group.id,
+          tabId: saved.id,
+          updates: { title },
+          updatedAt: nowIso(),
+        });
+      }
+    }
+    if (updates.length) {
+      await setStoredState(normalizeState(applyStateMutations(state, updates)));
+    }
   };
 
   let restoreQueue: Promise<unknown> = Promise.resolve();
@@ -1070,6 +1194,57 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
     return { removedTabs: duplicateIds.length };
   };
 
+  const refreshSavedTabTitle = async (rawUrl: unknown): Promise<string> => {
+    if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
+      throw new Error('A valid saved tab URL is required.');
+    }
+    const openTab = tabs.find((tab) => tab.url === rawUrl);
+    if (openTab?.title) return openTab.title;
+
+    let windowId: number | undefined;
+    try {
+      const created = await windowsApi.create({
+        url: rawUrl,
+        focused: false,
+        state: 'minimized',
+        type: 'popup',
+      });
+      windowId = created.id;
+      const tab = created.tabs?.[0];
+      if (!tab) throw new Error('Unable to open the saved tab.');
+      const title = new URL(rawUrl).hostname || rawUrl;
+      await tabsApi.update(tab.id, { status: 'complete', title });
+      return title;
+    } finally {
+      if (windowId !== undefined) await windowsApi.remove(windowId);
+    }
+  };
+
+  const withTitleRefreshActivity = async <T,>(
+    groupId: string,
+    tabId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    const operationId = `preview-title-refresh-${++nextTitleRefreshOperationId}`;
+    const publish = (status: 'start' | 'finish') => {
+      const message = {
+        type: 'tabboard-title-refresh-activity',
+        groupId,
+        tabId,
+        operationId,
+        status,
+      };
+      sentMessages.push(clone(message));
+      getHub('runtime.onMessage').emit(clone(message), {}, () => undefined);
+    };
+    publish('start');
+    try {
+      return await operation();
+    } finally {
+      publish('finish');
+    }
+  };
+
   const handleMessage = async (rawMessage: unknown): Promise<unknown> => {
     const message = isRecord(rawMessage) ? rawMessage : {};
     const action = message.type || message.action;
@@ -1077,13 +1252,96 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
       case 'tabboard-ensure-state':
         return clone(state);
       case 'tabboard-state-mutations': {
+        if (message.restoreRequest) {
+          const request = message.restoreRequest as unknown as RestoreRequest;
+          return statePersistence.applyRestoreRequest(request, current => createMutationBatch(request.mutations).verify(current, async live => {
+            const window = findWindow(live.windowId);
+            if (!window || window.type !== 'normal') throw new Error('Open Tabs window is unavailable.');
+            return listOpenTabs().windows.find(w => w.id === live.windowId)?.tabs.filter(tab => live.tabIds.includes(tab.id)) ?? [];
+          }));
+        }
+        if (Array.isArray(message.mutations) && message.mutations.some(m => isRecord(m) && m.type === 'restore-backup')) throw restoreError('RESTORE_PREVIEW_REQUIRED', 'A complete restore requires a captured storage preview and request identity.');
         if (!Array.isArray(message.mutations)) throw new Error('A mutations array is required.');
-        const next = normalizeState(applyStateMutations(state, message.mutations));
-        await setStoredState(next);
-        return clone(next);
+        return statePersistence.applyMutations(message.mutations);
       }
       case 'list-open-tabs':
         return listOpenTabs();
+      case 'refresh-saved-tab-title':
+        return typeof message.groupId === 'string'
+          && typeof message.tabId === 'string'
+          ? withTitleRefreshActivity(
+            message.groupId,
+            message.tabId,
+            () => refreshSavedTabTitle(message.url),
+          )
+          : refreshSavedTabTitle(message.url);
+      case 'refresh-saved-group-titles': {
+        const groupId = String(message.groupId || '');
+        const group = state.groups.find(({ id }) => id === groupId);
+        if (!group) throw new Error('Saved group not found');
+        const links = group.tabs.filter(
+          (tab) => tab.itemType === 'link' && Boolean(tab.url),
+        );
+        const results: Array<PromiseSettledResult<string> | undefined> =
+          Array(links.length);
+        let nextIndex = 0;
+        const worker = async (): Promise<void> => {
+          while (nextIndex < links.length) {
+            const index = nextIndex++;
+            try {
+              results[index] = {
+                status: 'fulfilled',
+                value: await withTitleRefreshActivity(
+                  groupId,
+                  links[index].id,
+                  () => refreshSavedTabTitle(links[index].url),
+                ),
+              };
+            } catch (reason: unknown) {
+              results[index] = { status: 'rejected', reason };
+            }
+          }
+        };
+        await Promise.all(
+          Array.from({ length: Math.min(3, links.length) }, worker),
+        );
+        const latest = state.groups.find(({ id }) => id === groupId);
+        let refreshed = 0;
+        let failed = 0;
+        const updates = results.flatMap((result, index) => {
+          const original = links[index];
+          const current = latest?.tabs.find(({ id }) => id === original.id);
+          if (result?.status !== 'fulfilled'
+            || current?.itemType !== 'link'
+            || current.url !== original.url) {
+            failed += 1;
+            return [];
+          }
+          refreshed += 1;
+          return current.title === result.value
+            ? []
+            : [{
+              type: 'update-tab' as const,
+              groupId,
+              tabId: current.id,
+              updates: { title: result.value },
+              updatedAt: nowIso(),
+            }];
+        });
+        if (updates.length) {
+          await setStoredState(normalizeState(applyStateMutations(state, updates)));
+        }
+        return { refreshed, failed };
+      }
+      case 'list-bookmarks':
+        return {
+          groups: createBookmarkSessions(bookmarks, {
+            timestamp: nowIso(),
+            workspaceId: typeof message.workspaceId === 'string' && message.workspaceId.trim()
+              ? message.workspaceId
+              : state.activeWorkspaceId,
+          }),
+        };
       case 'saveSelectedTabs':
         return saveSelectedTabs(message);
       case 'dedupe-window':
@@ -1134,6 +1392,14 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
           if (state.settings.deleteRestoredTabs && !group.locked && created.length) {
             await removeRestoredRefs(created.map(({ record }) => ({ source: 'group', groupId, tabId: record.id })));
           }
+          await syncRestoredTabTitles(
+            created,
+            group.tabs.map((tab) => ({
+              source: 'group',
+              groupId,
+              tabId: tab.id,
+            })),
+          );
           return { restoredTabs: created.length };
         });
       case 'restore-tab':
@@ -1147,6 +1413,11 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
           if (state.settings.deleteRestoredTabs && !group.locked && created.length) {
             await removeRestoredRefs([{ source: 'group', groupId, tabId }]);
           }
+          await syncRestoredTabTitles(created, [{
+            source: 'group',
+            groupId,
+            tabId,
+          }]);
           return { restoredTabs: created.length };
         });
       case 'restore-refs':
@@ -1195,11 +1466,46 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
           if (state.settings.deleteRestoredTabs && removableRefs.length) {
             await removeRestoredRefs(removableRefs);
           }
+          await syncRestoredTabTitles(
+            created,
+            restorable.map(({ ref }) => ref),
+          );
           return {
             restoredTabs: outcomes.filter(({ status }) =>
               status === 'restored').length,
             outcomes,
           };
+        });
+      case 'restore-all':
+        return enqueueRestore(async () => {
+          const restorable = state.groups.flatMap((group) =>
+            group.tabs
+              .filter((record) => record.itemType === 'link' && Boolean(record.url))
+              .map((record) => ({ group, record })));
+          const created = await createRestoredTabs(
+            restorable.map(({ record }) => record),
+            state.settings.restoreGroupsInNewWindow,
+          );
+          if (state.settings.deleteRestoredTabs && created.length) {
+            const createdIds = new Set(created.map(({ record }) => record.id));
+            await removeRestoredRefs(restorable
+              .filter(({ group, record }) =>
+                createdIds.has(record.id) && !group.locked)
+              .map(({ group, record }) => ({
+                source: 'group',
+                groupId: group.id,
+                tabId: record.id,
+              })));
+          }
+          await syncRestoredTabTitles(
+            created,
+            restorable.map(({ group, record }) => ({
+              source: 'group',
+              groupId: group.id,
+              tabId: record.id,
+            })),
+          );
+          return { restoredTabs: created.length };
         });
       default:
         throw new Error(`Unknown message type: ${String(action)}`);
@@ -1239,9 +1545,11 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
         const committedState = structured.committedState && typeof structured.committedState === 'object'
           ? normalizeState(structured.committedState)
           : undefined;
-        if (committedState) await setStoredState(committedState);
+        if (committedState && !(isRecord(message) && message.type === 'tabboard-state-mutations')) await setStoredState(committedState);
         return {
           ok: false,
+          ...(structured.restoreOutcome === 'proof-unavailable' || structured.restoreOutcome === 'not-committed' ? { restoreOutcome: structured.restoreOutcome } : {}),
+          ...(structured.confirmedByReceipt === true ? { confirmedByReceipt: true, origin: structured.committedOrigin as OriginScope } : {}),
           error: errorMessage(error),
           ...(typeof structured.code === 'string' ? { code: structured.code } : {}),
           ...(Array.isArray(structured.invalidMutationIndexes)

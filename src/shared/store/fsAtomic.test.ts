@@ -55,6 +55,40 @@ describe('atomicWriteFile', () => {
     expect(names).toEqual(['clean.txt']);
   });
 
+  it('replaces existing content without relying on a file handle move', async () => {
+    await atomicWriteFile(dir, 'state.json', 'committed');
+    const getFile = dir.getFileHandle.bind(dir);
+    vi.spyOn(dir, 'getFileHandle').mockImplementation(async (name, options) => {
+      const file = await getFile(name, options);
+      file.move = async () => { throw new Error('Move is not supported for this folder'); };
+      return file;
+    });
+
+    await atomicWriteFile(dir, 'state.json', 'updated');
+    expect(await readTextFile(await getFile('state.json'))).toBe('updated');
+  });
+
+  it('retains committed content when closing the replacement stream fails', async () => {
+    await atomicWriteFile(dir, 'state.json', 'committed');
+    const getFile = dir.getFileHandle.bind(dir);
+    vi.spyOn(dir, 'getFileHandle').mockImplementation(async (name, options) => {
+      const file = await getFile(name, options);
+      Object.defineProperty(file, 'move', { value: undefined, configurable: true });
+      if (name === 'state.json') {
+        const createWritable = file.createWritable.bind(file);
+        file.createWritable = async () => {
+          const stream = await createWritable();
+          stream.close = async () => { throw new Error('Disk write failed'); };
+          return stream;
+        };
+      }
+      return file;
+    });
+
+    await expect(atomicWriteFile(dir, 'state.json', 'uncommitted')).rejects.toThrow('Disk write failed');
+    expect(await readTextFile(await getFile('state.json'))).toBe('committed');
+  });
+
   it('cleans up tmp file and rethrows on write failure', async () => {
     // Force write failure by passing an object that writable.write rejects.
     // We simulate by spying on createWritable to return a rejecting stream.

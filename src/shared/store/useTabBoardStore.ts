@@ -1,3 +1,4 @@
+import type { RestorePreview } from './restoreCommit';
 import { create } from 'zustand';
 import type { TabBoardState, Folder, Group, TabItem, Settings, BinEntry } from '../model';
 import {
@@ -14,6 +15,8 @@ import { sendStateMutations } from './chromeStorage';
 import {
   ensureActiveState,
   getActiveState,
+  getActiveDatasetIdentity,
+  getActiveRestoreSnapshot,
   onFallback,
   subscribeActiveState,
 } from './activeAdapter';
@@ -24,6 +27,7 @@ import {
 } from './stateMutations';
 import {
   importText,
+  parseCompleteBackup,
   restoreGroupFromBin,
 } from '../model/session-operations';
 import type { DropIntent, SavedTabRef } from '../model/drop-intent';
@@ -56,6 +60,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 interface TabBoardStore extends TabBoardState {
   hydrated: boolean;
   persistenceError: string | null;
+  reconcileCaptureCommit: (canonical: TabBoardState) => void;
   hydrate: () => Promise<void>;
   releaseHydration: () => void;
   setActiveWorkspace: (workspaceId: string) => void;
@@ -100,7 +105,9 @@ interface TabBoardStore extends TabBoardState {
     categoryOrder: readonly string[],
     options: { expectedCategoryOrder: readonly string[] },
   ) => Promise<void>;
-  importGroups: (text: string, options?: { workspaceId?: string; folderId?: string | null }) => void;
+  importGroups: (text: string, options?: { workspaceId?: string; folderId?: string | null }) => Promise<void>;
+  captureRestorePreview: () => Promise<RestorePreview>;
+  restoreBackup: (text: string, expectedRevision: number | RestorePreview) => Promise<void>;
   exportAll: () => string;
   toggleFolderCollapsed: (folderId: string) => void;
 }
@@ -189,9 +196,11 @@ const publication = createAuthoritativePublication({
     useTabBoardStore.setState(status);
   },
   initializeAuthoritativeState: ensureActiveState,
+  readRestoreSnapshot: getActiveRestoreSnapshot,
   subscribeAuthoritativeState: subscribeActiveState,
   sendMutations: sendStateMutations,
   currentContext: () => globalThis.chrome,
+  currentDataset: getActiveDatasetIdentity,
   onPersistenceError: reportPersistenceError,
   onMutationCommitted: (mutation) => {
     const feedback = feedbackForCommittedMutation(mutation);
@@ -243,6 +252,7 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
   hydrated: false,
   persistenceError: null,
 
+  reconcileCaptureCommit: (canonical) => publication.reconcileCaptureCommit(canonical),
   hydrate: () => publication.hydrate(),
   releaseHydration: () => publication.releaseHydration(),
 
@@ -627,12 +637,19 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
       const existingIds = new Set(state.groups.map((group) => group.id));
       const newGroups = importedState.groups.filter((group) => !existingIds.has(group.id));
       const updatedAt = importedState.updatedAt;
-      commitMutation({ type: 'import-groups', groups: newGroups, updatedAt });
+      const pending = publication.commitChecked({ type: 'import-groups', groups: newGroups, updatedAt });
+      pending.catch((error: unknown) => reportPersistenceError(error));
+      return pending;
     } catch (error: unknown) {
       reportError(error, 'import');
       throw error;
     }
   },
+
+  captureRestorePreview: () => publication.captureRestorePreview(),
+  restoreBackup: (text, preview) => publication.commitCompleteRestore({
+    type: 'restore-backup', backup: parseCompleteBackup(text), expectedRevision: typeof preview === 'number' ? preview : preview.expectedRevision, updatedAt: nowIso(),
+  }, preview as RestorePreview),
 
   exportAll: () => exportToJson(persistedSnapshot(get())),
 

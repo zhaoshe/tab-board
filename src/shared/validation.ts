@@ -5,7 +5,7 @@ export const MAX_LIVE_RECORDS = 128;
 export const MAX_MUTATIONS = 128;
 export const MAX_URL_BYTES = 4096;
 export const MAX_TITLE_BYTES = 512;
-export const MAX_FAVICON_URL_BYTES = 2048;
+export const MAX_FAVICON_URL_BYTES = 4096;
 export const MAX_TIMESTAMP_BYTES = 64;
 export const MAX_CANONICAL_DIGEST_BYTES = 16 * 1024;
 
