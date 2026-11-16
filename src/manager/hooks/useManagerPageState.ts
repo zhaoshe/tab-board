@@ -1,3 +1,4 @@
+import type { RestorePreview } from '../../shared/store/restoreCommit';
 import {
   useCallback,
   useEffect,
@@ -31,7 +32,7 @@ export interface ManagerPageStateController {
   state: ManagerPageState;
   navigate(update: NavigationUpdate): void;
   replace(update: NavigationUpdate): void;
-  restoreBackup(text: string, expectedRevision: number): Promise<void>;
+  restoreBackup(text: string, expectedRevision: number | RestorePreview): Promise<void>;
   setQuery(query: string): void;
 }
 
@@ -166,7 +167,7 @@ export function useManagerPageState(): ManagerPageStateController {
     }
   }, []);
 
-  const restoreBackup = useCallback(async (text: string, expectedRevision: number) => {
+  const restoreBackup = useCallback(async (text: string, expectedRevision: number | RestorePreview) => {
     restorePendingRef.current = true;
     try {
       await useTabBoardStore.getState().restoreBackup(text, expectedRevision);

@@ -515,7 +515,7 @@ describe('createFileStorageAdapter', () => {
     let blocked = false;
     vi.spyOn(root, 'getFileHandle').mockImplementation(async (name, options) => {
       const file = await getFile(name, options);
-      if (name.startsWith('.tabboard-recovery') && !blocked) {
+      if (name.startsWith('.tabboard-recovery') && options?.create && !blocked) {
         blocked = true;
         const createWritable = file.createWritable.bind(file);
         file.createWritable = async () => {

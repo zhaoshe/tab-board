@@ -161,6 +161,7 @@ interface FakeReq<T> {
 }
 
 interface FakeTx {
+  oncomplete: ((ev: Event) => void) | null;
   objectStore(name: string): {
     put(value: unknown, key?: IDBValidKey): FakeReq<IDBValidKey>;
     get(key: IDBValidKey): FakeReq<unknown>;
@@ -259,10 +260,12 @@ class FakeIDBFactoryInstance {
               },
             };
           },
+          oncomplete: null,
           onabort: null,
           onerror: null,
           error: null,
         };
+        queueMicrotask(() => queueMicrotask(() => tx.oncomplete?.(new Event('complete'))));
         return tx;
       },
       close() {},
@@ -1328,7 +1331,7 @@ describe('activeAdapter', () => {
     expect(fallbackCb).toHaveBeenCalledTimes(1);
     expect((await authority.getState()).mutationRevision).toBe(10);
     expect((chromeMock.storage.local.data[STATE_KEY] as TabBoardState).mutationRevision).toBe(10);
-    expect(await getStorageStatus()).toEqual({
+    expect(await getStorageStatus()).toMatchObject({
       configuredTarget: 'file',
       activeBackend: 'browser',
       folderName: 'root',
@@ -1489,7 +1492,7 @@ describe('activeAdapter', () => {
     await switchToFileMode(root, initialState);
 
     // Bootstrap is now 'file'
-    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toEqual({
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toMatchObject({
       configuredTarget: 'file',
       activeBackend: 'file',
       folderName: 'root',
@@ -1619,7 +1622,7 @@ describe('activeAdapter', () => {
     await switchToBrowserMode(true);
 
     // Bootstrap is now 'browser'
-    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toEqual({
+    expect(chromeMock.storage.local.data[BOOTSTRAP_KEY]).toMatchObject({
       configuredTarget: 'browser',
       activeBackend: 'browser',
       folderName: null,
@@ -1885,7 +1888,7 @@ describe('activeAdapter', () => {
     await reconnectFolder(root);
 
     expect(await isFileModeActive()).toBe(true);
-    expect(await getStorageStatus()).toEqual({
+    expect(await getStorageStatus()).toMatchObject({
       configuredTarget: 'file',
       activeBackend: 'file',
       folderName: 'reconnect',

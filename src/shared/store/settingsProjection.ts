@@ -1,3 +1,4 @@
+import { isOrigin, type OriginScope } from './restoreCommit';
 import {
   DEFAULT_SETTINGS,
   SETTINGS_PROJECTION_KEY,
@@ -12,6 +13,7 @@ export interface SettingsProjection {
 }
 
 export interface StorageStatusProjection {
+  activeOrigin?: OriginScope;
   configuredTarget: 'browser' | 'file';
   activeBackend: 'browser' | 'file';
   folderName: string | null;
@@ -76,6 +78,7 @@ export function parseStorageStatusProjection(
   return {
     configuredTarget,
     activeBackend,
+    ...(isOrigin(candidate.activeOrigin) ? { activeOrigin: candidate.activeOrigin } : {}),
     folderName: candidate.folderName,
     fallbackReason: candidate.fallbackReason,
     fileUpdatedAt: candidate.fileUpdatedAt,
@@ -87,14 +90,17 @@ export function fileStorageStatus({
   folderName,
   fileUpdatedAt,
   unreadSessionCount = 0,
+  activeOrigin,
 }: {
   folderName: string | null;
   fileUpdatedAt: string | null;
   unreadSessionCount?: number;
+  activeOrigin?: OriginScope;
 }): StorageStatusProjection {
   return {
     configuredTarget: 'file',
     activeBackend: 'file',
+    ...(activeOrigin ? { activeOrigin } : {}),
     folderName,
     fallbackReason: null,
     fileUpdatedAt,

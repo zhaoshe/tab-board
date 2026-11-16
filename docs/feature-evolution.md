@@ -2010,3 +2010,19 @@ production build/check 再打包。
 - icon-only 动作在新用户第一次使用时是否足够清晰。
 - `Inbox` 是否比 `Unfiled` 更符合用户对“没有 category”的直觉。
 - 2026-07-19：收敛 Open Tabs URL policy 为单一自定义过滤规则。pinned、`chrome://` 与 `file://` 不再因内建规则不可选；命中自定义规则的 tab 直接从列表隐藏。
+
+
+## 2026-11-16: Confirm complete Restore after lost commit replies
+
+- Problem: a successful Restore whose worker reply was lost retried its old revision and surfaced CAS failure, leaving the normal modal/navigation completion unfinished.
+- Decision: preserve a frozen Restore-bearing request and atomic durable receipt; replay confirms the original outcome and uses fresh current state without another Restore or before snapshot write.
+- Scope: bind the explicit full Restore preview to its actual Browser/File selection, keep strict CAS for unwitnessed requests, preserve mixed/raw-gap/partial and last-before multi-Restore semantics. Ordinary Import/hydration, canonical schema and File v1 layout stay intact.
+- Status: implemented with real worker, Persistence, adapters, Publication, Modal/navigation and restart/rollback regression coverage; native acceptance is recorded separately.
+
+
+### Task 2 review correction, round 1
+
+- Isolated complete Restore requests now retain their actual sent envelope after an unknown reply; receipt confirmation precedes recovery pruning and preserves the original waiter/feedback identity.
+- Bound source/proof failures from File, IDB or permissions carry an explicit unavailable outcome and reject the whole uncertain request. Only same-source pre-write semantic rejection permits isolation; later pending work remains separate.
+- Authority follows the origin of a refreshed File snapshot before comparing high-water clocks, preserving lower-clock newly selected content and retaining the older-snapshot guard within one scope.
+- Status: regression repair verified through real worker/Persistence/Authority paths; review/native revalidation is recorded in Task 2 fix artifacts.

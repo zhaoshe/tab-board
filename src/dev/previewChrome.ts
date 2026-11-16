@@ -21,7 +21,9 @@ import {
 import type { BrowserGroup, Group, TabBoardState, TabItem } from '../shared/model';
 import type { OpenTabsCaptureResult } from '../shared/openTabs';
 import { getCaptureCandidateReason, isExtensionPageUrl, matchesCustomUrlFilter } from '../shared/model/capture-policy';
-import { applyStateMutations } from '../shared/store/stateMutations';
+import { restoreError, type RestoreOutcome, type RestoreRequest, type OriginScope } from '../shared/store/restoreCommit';
+import { getActiveBoundState, setActiveState } from '../shared/store/activeAdapter';
+import { createMutationBatch, applyStateMutations } from '../shared/store/stateMutations';
 import { createStatePersistence } from '../background/statePersistence';
 import type { StateWriteOptions } from '../shared/store/storageAdapter';
 
@@ -68,6 +70,9 @@ export interface PreviewResponse<T = unknown> {
   invalidMutationIndexes?: number[];
   committedMutationIndexes?: number[];
   state?: TabBoardState;
+  restoreOutcome?: RestoreOutcome;
+  confirmedByReceipt?: boolean;
+  origin?: OriginScope;
 }
 
 export interface PreviewEventHub {
@@ -687,7 +692,7 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
 
   const setStoredState = async (nextState: TabBoardState, options?: StateWriteOptions): Promise<void> => {
     await storageLocal.set({
-      ...(options ? { tabboardBackupBeforeRestore: normalizeState(options.backupBeforeRestore) } : {}),
+      ...(options?.backupBeforeRestore ? { tabboardBackupBeforeRestore: normalizeState(options.backupBeforeRestore) } : {}),
       [STATE_KEY]: clone(normalizeState(nextState)),
     });
   };
@@ -727,7 +732,8 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
     },
   };
 
-  const statePersistence = createStatePersistence({ getState: async () => clone(state), setState: setStoredState });
+  const statePersistence = createStatePersistence({ getState: async () => clone(state), getBoundState: getActiveBoundState,
+    setState: (next, options) => options?.restoreMetadata ? setActiveState(next, options) : setStoredState(next, options) });
 
   const listOpenTabs = (): { windows: Array<{
     id: number;
@@ -1246,6 +1252,15 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
       case 'tabboard-ensure-state':
         return clone(state);
       case 'tabboard-state-mutations': {
+        if (message.restoreRequest) {
+          const request = message.restoreRequest as unknown as RestoreRequest;
+          return statePersistence.applyRestoreRequest(request, current => createMutationBatch(request.mutations).verify(current, async live => {
+            const window = findWindow(live.windowId);
+            if (!window || window.type !== 'normal') throw new Error('Open Tabs window is unavailable.');
+            return listOpenTabs().windows.find(w => w.id === live.windowId)?.tabs.filter(tab => live.tabIds.includes(tab.id)) ?? [];
+          }));
+        }
+        if (Array.isArray(message.mutations) && message.mutations.some(m => isRecord(m) && m.type === 'restore-backup')) throw restoreError('RESTORE_PREVIEW_REQUIRED', 'A complete restore requires a captured storage preview and request identity.');
         if (!Array.isArray(message.mutations)) throw new Error('A mutations array is required.');
         return statePersistence.applyMutations(message.mutations);
       }
@@ -1530,9 +1545,11 @@ export function installPreviewChrome(options: PreviewChromeOptions = {}): Previe
         const committedState = structured.committedState && typeof structured.committedState === 'object'
           ? normalizeState(structured.committedState)
           : undefined;
-        if (committedState) await setStoredState(committedState);
+        if (committedState && !(isRecord(message) && message.type === 'tabboard-state-mutations')) await setStoredState(committedState);
         return {
           ok: false,
+          ...(structured.restoreOutcome === 'proof-unavailable' || structured.restoreOutcome === 'not-committed' ? { restoreOutcome: structured.restoreOutcome } : {}),
+          ...(structured.confirmedByReceipt === true ? { confirmedByReceipt: true, origin: structured.committedOrigin as OriginScope } : {}),
           error: errorMessage(error),
           ...(typeof structured.code === 'string' ? { code: structured.code } : {}),
           ...(Array.isArray(structured.invalidMutationIndexes)

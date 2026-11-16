@@ -40,6 +40,7 @@ import {
   nowIso,
   type TabBoardState,
 } from '../model';
+import { sameOrigin, type OriginScope, newOrigin, readRestoreMetadata, restoreError, type BoundSnapshot, type RestoreMetadata } from './restoreCommit';
 import type { Group } from '../model/types';
 import { logBreadcrumb, logWarning } from '../utils/diagnostics';
 import {
@@ -95,6 +96,7 @@ const SESSIONS_DIR = 'sessions';
 const RECOVERY_FILE = '.tabboard-recovery.json';
 
 interface StoredMeta {
+  restoreMetadata?: RestoreMetadata;
   version: number;
   mutationRevision: number;
   activeWorkspaceId: string;
@@ -110,6 +112,7 @@ interface StoredMeta {
 }
 
 interface RecoverySnapshot {
+  restoreMetadata?: RestoreMetadata;
   commitId: string;
   state: TabBoardState | null;
   unreadSessionFiles?: string[];
@@ -176,6 +179,7 @@ async function pooledMap<T, R>(
 // ---------- init: reading from disk ----------
 
 export interface FileStorageInitInfo {
+  restoreMetadata?: RestoreMetadata;
   state: TabBoardState | null;
   hasExistingData: boolean;
   fileUpdatedAt: string | null;
@@ -381,6 +385,7 @@ async function readCommittedDirectory(
     logBreadcrumb('file-storage: recovery', `restored complete revision=${state?.mutationRevision ?? 'empty'}`);
     return {
       state,
+      restoreMetadata: readRestoreMetadata(snapshot.restoreMetadata, 'file'),
       hasExistingData: state !== null,
       fileUpdatedAt: state?.updatedAt ?? null,
       requiresRepair: true,
@@ -439,6 +444,7 @@ async function readCommittedDirectory(
   logBreadcrumb('file-storage: read', `revision=${state.mutationRevision} sessions=${sessions.size}${recoveryActions.length ? ` recovery=${recoveryActions.join(',')}` : ''}`);
   return {
     state,
+    restoreMetadata: readRestoreMetadata(meta.restoreMetadata, 'file'),
     hasExistingData: true,
     fileUpdatedAt: parts.meta.updatedAt,
     ...(unreadSessionFiles.length ? { unreadSessionFiles } : {}),
@@ -460,6 +466,7 @@ interface FileStorageAdapterDeps {
 const STATE_CHANGED_EVENT = 'state-changed';
 
 class FileStorageAdapterImpl implements FileStorageAdapter {
+  private restoreMetadata?: RestoreMetadata;
   private root: FileSystemDirectoryHandle;
   private cachedState: TabBoardState | null = null;
   private fileUpdatedAt: string | null = null;
@@ -484,6 +491,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     }
     this.initPromise = (async () => {
       const info = await initFileStorageDirectory(this.root);
+      this.restoreMetadata = info.restoreMetadata;
       this.cachedState = info.state ? clone(info.state) : null;
       this.fileUpdatedAt = info.fileUpdatedAt;
       this.requiresFullWrite = !!info.requiresRepair;
@@ -493,8 +501,39 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     await this.initPromise;
   }
 
+  async getBoundState(expectedOrigin?: OriginScope, initializeLegacy = true): Promise<BoundSnapshot> {
+    await this.writeQueue.catch(() => undefined);
+    const info = await initFileStorageDirectory(this.root);
+    this.cachedState = info.state ? clone(info.state) : null;
+    this.restoreMetadata = info.restoreMetadata;
+    this.fileUpdatedAt = info.fileUpdatedAt;
+    this.requiresFullWrite = !!info.requiresRepair;
+    this.unreadSessionFiles = info.unreadSessionFiles ?? [];
+    this.initialized = true;
+    if (expectedOrigin && !sameOrigin(expectedOrigin, this.restoreMetadata?.origin)) throw restoreError('RESTORE_ORIGIN_CHANGED', 'Folder storage origin does not match its binding.');
+    if (!this.restoreMetadata) {
+      if (!initializeLegacy) throw restoreError('RESTORE_ORIGIN_UNAVAILABLE', 'The folder has no registered restore origin.');
+      if (info.requiresRepair) throw restoreError('RESTORE_ORIGIN_UNAVAILABLE', 'The interrupted folder has no committed restore origin. Reconnect it first.');
+      await this.setRestoreMetadata({ origin: newOrigin('file'), receipts: [] });
+    }
+    return { state: normalizeState(this.cachedState), metadata: clone(this.restoreMetadata!) };
+  }
+
+  async setRestoreMetadata(metadata: RestoreMetadata | undefined): Promise<void> {
+    await this.writeQueue.catch(() => undefined);
+    const meta = (await readJsonFile<StoredMeta>(this.root, META_FILE)).value;
+    if (!meta || meta.writeInProgress || meta.migrationInProgress) throw restoreError('RESTORE_ORIGIN_UNAVAILABLE', 'Reconnect the folder after its interrupted write has been repaired.');
+    await atomicWriteFile(this.root, META_FILE, serializeJson({ ...meta, restoreMetadata: metadata }));
+    this.restoreMetadata = metadata ? clone(metadata) : undefined;
+  }
+
+  getStateOrigin(): OriginScope | undefined {
+    return this.restoreMetadata ? { ...this.restoreMetadata.origin } : undefined;
+  }
+
   async getState(): Promise<TabBoardState> {
     await this.ensureInitialized();
+    await this.refreshCommittedSnapshot();
     if (!this.cachedState) {
       // Shouldn't normally happen because ensureState seeds default first,
       // but fall back to an empty normalized state to stay safe.
@@ -514,6 +553,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     await this.writeQueue.catch(() => undefined);
     // Bypass ensureInitialized's cached-state fast path by forcing a fresh read.
     const info = await initFileStorageDirectory(this.root);
+    this.restoreMetadata = info.restoreMetadata;
     const next = info.state ? clone(info.state) : null;
     this.fileUpdatedAt = info.fileUpdatedAt;
     this.requiresFullWrite = !!info.requiresRepair;
@@ -532,6 +572,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
         await writeStorageStatusProjection(fileStorageStatus({
           folderName: this.root.name, fileUpdatedAt: this.fileUpdatedAt,
           unreadSessionCount: this.unreadSessionFiles.length,
+          activeOrigin: this.restoreMetadata?.origin,
         }));
       }
     }
@@ -552,12 +593,33 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     await done;
   }
 
+  private async refreshCommittedSnapshot(): Promise<void> {
+    // A peer can publish auxiliary receipts even when canonical clocks tie.
+    // Read the commit point on every write; reload data only if it advanced or
+    // requires recovery, retaining the ordinary equal-file write optimization.
+    const publishedMeta = (await readJsonFile<StoredMeta>(this.root, META_FILE)).value;
+    const publishedMetadata = readRestoreMetadata(publishedMeta?.restoreMetadata, 'file');
+    const originChanged = (!!this.restoreMetadata || !!publishedMetadata) && !sameOrigin(this.restoreMetadata?.origin, publishedMetadata?.origin);
+    if (publishedMeta && (originChanged || publishedMeta.writeInProgress || publishedMeta.migrationInProgress
+      || publishedMeta.mutationRevision !== this.cachedState?.mutationRevision
+      || publishedMeta.updatedAt !== this.cachedState?.updatedAt)) {
+      const info = await readCommittedDirectory(this.root);
+      this.cachedState = info.state ? clone(info.state) : null;
+      this.restoreMetadata = info.restoreMetadata;
+      this.requiresFullWrite = !!info.requiresRepair;
+      this.unreadSessionFiles = info.unreadSessionFiles ?? [];
+    } else {
+      this.restoreMetadata = publishedMetadata;
+    }
+  }
+
   private async writeCommit(nextState: TabBoardState, options?: StateWriteOptions): Promise<void> {
     const start = Date.now();
+    await this.refreshCommittedSnapshot();
     const cached = this.cachedState;
     const parts = splitState(nextState);
     const previousParts = cached ? splitState(cached) : null;
-    const fullWrite = !!options || this.requiresFullWrite || !previousParts;
+    const fullWrite = !!options?.backupBeforeRestore || this.requiresFullWrite || !previousParts;
 
     // Session diff: which sessions to write vs delete.
     const toWrite: Array<{ id: string; group: Group }> = [];
@@ -570,7 +632,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
       }
     }
     const toDelete: string[] = [];
-    if (options || this.requiresFullWrite) {
+    if (options?.backupBeforeRestore || this.requiresFullWrite) {
       const sessionsDir = await this.root.getDirectoryHandle(SESSIONS_DIR, { create: true });
       for await (const [name, handle] of asPermissionable(sessionsDir).entries()) {
         if (handle.kind !== 'file' || !name.endsWith('.json') || nextGroupIds.has(name.slice(0, -5))) continue;
@@ -588,11 +650,11 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     // Ensure sessions/ directory exists.
     await this.root.getDirectoryHandle(SESSIONS_DIR, { create: true });
 
-    if (options) {
+    if (options?.backupBeforeRestore) {
       await atomicWriteFile(this.root, '.tabboard-before-restore.json', serializeJson(normalizeState(options.backupBeforeRestore)));
     }
     // Preserve unread bytes before any same-ID replacement, including reconnect.
-    const unreadToPreserve = options
+    const unreadToPreserve = options?.backupBeforeRestore
       ? this.unreadSessionFiles
       : this.unreadSessionFiles.filter(name => toWrite.some(({ id }) => name === `${id}.json`));
     if (unreadToPreserve.length) {
@@ -617,12 +679,13 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     // Persist the previous snapshot before any file can be replaced or removed.
     const commitId = createId('file-commit');
     const recoveryFile = `.tabboard-recovery-${commitId}.json`;
-    await atomicWriteFile(this.root, recoveryFile, serializeJson({ commitId, state: cached, unreadSessionFiles: this.unreadSessionFiles }));
+    await atomicWriteFile(this.root, recoveryFile, serializeJson({ commitId, state: cached, restoreMetadata: this.restoreMetadata, unreadSessionFiles: this.unreadSessionFiles }));
     const previous = splitState(cached ?? createEmptyState()).meta;
 
     // Phase 1 keeps the committed revision; pendingRevision names the candidate.
     const inProgressMeta: StoredMeta = {
       ...previous,
+      restoreMetadata: this.restoreMetadata,
       writeInProgress: true,
       pendingRevision: parts.meta.mutationRevision,
       commitId,
@@ -672,6 +735,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
       fileLayoutVersion: parts.meta.fileLayoutVersion,
       sessionOrder: parts.meta.sessionOrder,
       writeInProgress: false,
+      restoreMetadata: options?.restoreMetadata ?? this.restoreMetadata,
       commitId,
       recoveryFile,
     };
@@ -680,6 +744,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     // Update cache.
     const committedState: TabBoardState = clone(nextState);
     this.cachedState = committedState;
+    this.restoreMetadata = finalMeta.restoreMetadata;
     this.fileUpdatedAt = nextState.updatedAt;
     this.requiresFullWrite = false;
     this.unreadSessionFiles = this.unreadSessionFiles.filter(name => !nextGroupIds.has(name.slice(0, -5)));
@@ -698,6 +763,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
             folderName: this.root.name || null,
             fileUpdatedAt: nextState.updatedAt,
             unreadSessionCount: this.unreadSessionFiles.length,
+            activeOrigin: this.restoreMetadata?.origin,
           }),
           [SETTINGS_PROJECTION_KEY]: projectionFromState(nextState),
           [FILE_PING_KEY]: {
@@ -729,7 +795,7 @@ class FileStorageAdapterImpl implements FileStorageAdapter {
     // We use a CustomEvent so subscribers get the state in event.detail.
     const ev = new CustomEvent<{ state: TabBoardState; observation?: StorageObservation }>(
       STATE_CHANGED_EVENT,
-      { detail: { state, ...(observation ? { observation } : {}) } },
+      { detail: { state, observation: { ...observation, ...(this.restoreMetadata ? { origin: this.restoreMetadata.origin } : {}) } } },
     );
     this.eventTarget.dispatchEvent(ev);
   }

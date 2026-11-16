@@ -1,3 +1,4 @@
+import { RESTORE_METADATA_KEY, newOrigin, sameOrigin, restoreError, type BoundSnapshot, type OriginScope } from './restoreCommit';
 /**
  * Active adapter factory.
  *
@@ -161,6 +162,7 @@ function fallbackReason(error: unknown): string {
 }
 
 interface AuthorityBackend {
+  root?: FileSystemDirectoryHandle;
   mode: StorageMode;
   adapter: StorageAdapter;
 }
@@ -179,6 +181,7 @@ class StorageAuthority implements StorageAdapter {
   private readonly handledFallbackEvents = new Set<string>();
   private readonly handledFilePingEvents = new Set<string>();
   private readonly handledFilePingEventOrder: string[] = [];
+  private lastKnownOrigin?: OriginScope;
   private lastKnownState: TabBoardState | null = null;
   private lastSeenRevision = -1;
   private operationQueue: Promise<unknown> = Promise.resolve();
@@ -304,9 +307,10 @@ class StorageAuthority implements StorageAdapter {
         folderName: root.name || storageStatus.folderName,
         fileUpdatedAt: fileAdapter.getFileUpdatedAt() ?? storageStatus.fileUpdatedAt,
         unreadSessionCount: fileAdapter.getUnreadSessionCount(),
+        activeOrigin: storageStatus.activeOrigin,
       }));
       this.assertLifecycle(lifecycle);
-      const backend = this.installBackend({ mode: 'file', adapter });
+      const backend = this.installBackend({ mode: 'file', adapter, root });
       logBreadcrumb('file-storage: init', 'file adapter active');
       return backend;
     } catch (error: unknown) {
@@ -333,10 +337,11 @@ class StorageAuthority implements StorageAdapter {
     return this.initPromise;
   }
 
-  private installBackend(backend: AuthorityBackend, state?: TabBoardState): AuthorityBackend {
+  private installBackend(backend: AuthorityBackend, state?: TabBoardState, origin?: OriginScope): AuthorityBackend {
     if (this.backend) this.datasetIdentity = {};
     this.backendUnsubscribe?.();
     this.backend = backend;
+    this.lastKnownOrigin = origin ?? backend.adapter.getStateOrigin?.();
     if (backend.mode === 'file') {
       this.bindFileEvents(backend);
     } else {
@@ -350,13 +355,22 @@ class StorageAuthority implements StorageAdapter {
     }
     this.backendUnsubscribe = backend.adapter.subscribeState((nextState, observation) => {
       if (this.backend !== backend) return;
-      this.recordState(nextState);
+      this.recordState(nextState, observation?.origin ?? backend.adapter.getStateOrigin?.());
       this.notifyState(nextState, observation);
     });
     return backend;
   }
 
-  private recordState(state: TabBoardState): void {
+  private recordState(state: TabBoardState, origin?: OriginScope): void {
+    if (origin) {
+      if (this.lastKnownOrigin && !sameOrigin(this.lastKnownOrigin, origin)) {
+        // High-water clocks are comparable only inside the actual source scope.
+        this.datasetIdentity = {};
+        this.lastKnownState = null;
+        this.lastSeenRevision = -1;
+      }
+      this.lastKnownOrigin = origin;
+    }
     if (this.lastKnownState) {
       if (state.mutationRevision < this.lastKnownState.mutationRevision) return;
       if (state.mutationRevision === this.lastKnownState.mutationRevision
@@ -387,10 +401,12 @@ class StorageAuthority implements StorageAdapter {
     const status = currentStatus ?? await readStorageStatusProjection();
     this.assertLifecycle(lifecycle);
     if (status.configuredTarget === 'file') {
-      await writeStorageStatusProjection({
-        ...status,
-        activeBackend: 'browser',
-        fallbackReason: reason,
+      const metadata = (await this.backend?.adapter.getBoundState?.())?.metadata;
+      const origin = newOrigin('browser');
+      this.assertLifecycle(lifecycle);
+      await chrome.storage.local.set({
+        ...(metadata ? { [RESTORE_METADATA_KEY]: { ...metadata, origin } } : {}),
+        [BOOTSTRAP_KEY]: { ...status, activeBackend: 'browser', fallbackReason: reason, activeOrigin: origin },
       });
     }
     this.assertLifecycle(lifecycle);
@@ -426,9 +442,14 @@ class StorageAuthority implements StorageAdapter {
       }
     }
     if (this.backend !== current) return;
+    const metadata = (await adapter.getBoundState!()).metadata;
+    const origin = newOrigin('browser');
+    await adapter.setRestoreMetadata!({ ...metadata, origin });
+    const status = await readStorageStatusProjection();
+    await writeStorageStatusProjection({ ...status, activeBackend: 'browser', activeOrigin: origin, fallbackReason: reason });
     const state = await adapter.getState();
     if (this.backend !== current) return;
-    this.installBackend({ mode: 'browser', adapter }, state);
+    this.installBackend({ mode: 'browser', adapter }, state, origin);
     const installed = this.backend;
     this.notifyState(state);
     if (this.backend !== installed) return;
@@ -449,6 +470,48 @@ class StorageAuthority implements StorageAdapter {
     }
   }
 
+  getBoundState(): Promise<BoundSnapshot> {
+    // The caller owns the state write lock; this is only the Authority queue.
+    return this.enqueueOperation(async () => {
+      const backend = await this.ensureBackend();
+      this.assertBackend(backend);
+      if (!backend.adapter.getBoundState) throw restoreError('RESTORE_ORIGIN_UNAVAILABLE', 'The selected storage has no bound restore snapshot.');
+      const status = await readStorageStatusProjection();
+      if (status.activeBackend !== backend.mode) throw restoreError('RESTORE_ORIGIN_CHANGED', 'The selected storage changed. Reload the manager.');
+      let snapshot: BoundSnapshot;
+      if (backend.mode === 'file') {
+        const { loadRootHandle, loadRootBinding, saveRootHandle } = await loadFsDirectoryModule();
+        const handle = await loadRootHandle(testIdbFactory);
+        const binding = await loadRootBinding(testIdbFactory);
+        this.assertBackend(backend);
+        if (!handle || !backend.root || !await handle.isSameEntry(backend.root)
+          || (binding && (!sameOrigin(binding.origin, status.activeOrigin) || !await binding.handle.isSameEntry(handle)))) {
+          throw restoreError('RESTORE_ORIGIN_CHANGED', 'The folder handle does not match its committed storage binding. Reconnect it.');
+        }
+        if (!!binding !== !!status.activeOrigin) throw restoreError('RESTORE_ORIGIN_UNAVAILABLE', 'Folder binding registration was interrupted. Reconnect it.');
+        if (binding) snapshot = await backend.adapter.getBoundState(status.activeOrigin, false);
+        else {
+          let legacy = false;
+          try { await backend.adapter.getBoundState(undefined, false); }
+          catch (error) { if ((error as { code?: string }).code === 'RESTORE_ORIGIN_UNAVAILABLE') legacy = true; else throw error; }
+          if (!legacy) throw restoreError('RESTORE_ORIGIN_UNAVAILABLE', 'Folder origin registration was interrupted. Reconnect it.');
+          snapshot = await backend.adapter.getBoundState();
+          await saveRootHandle(handle, testIdbFactory, snapshot.metadata.origin);
+          await writeStorageStatusProjection({ ...status, activeOrigin: snapshot.metadata.origin });
+        }
+      } else {
+        snapshot = await backend.adapter.getBoundState(status.activeOrigin);
+        if (!status.activeOrigin) {
+          const registered = await readStorageStatusProjection();
+          if (!sameOrigin(registered.activeOrigin, snapshot.metadata.origin)) throw restoreError('RESTORE_ORIGIN_UNAVAILABLE', 'Browser origin registration was interrupted. Reload the storage source.');
+        }
+      }
+      this.assertBackend(backend);
+      this.recordState(snapshot.state, snapshot.metadata.origin);
+      return snapshot;
+    });
+  }
+
   getState(): Promise<TabBoardState> {
     return this.enqueueOperation(async () => {
       const lifecycle = this.lifecycle;
@@ -458,7 +521,7 @@ class StorageAuthority implements StorageAdapter {
       try {
         const state = await backend.adapter.getState();
         this.assertBackend(backend);
-        this.recordState(state);
+        this.recordState(state, backend.adapter.getStateOrigin?.());
         return this.lastKnownState || state;
       } catch (error: unknown) {
         if (backend.mode !== 'file' || this.backend !== backend) throw error;
@@ -468,7 +531,7 @@ class StorageAuthority implements StorageAdapter {
         this.assertBackend(current);
         const state = await current.adapter.getState();
         this.assertBackend(current);
-        this.recordState(state);
+        this.recordState(state, current.adapter.getStateOrigin?.());
         return this.lastKnownState || state;
       }
     });
@@ -482,7 +545,7 @@ class StorageAuthority implements StorageAdapter {
       this.assertBackend(backend);
       try {
         await backend.adapter.setState(state, options);
-        if (this.backend === backend) this.recordState(state);
+        if (this.backend === backend) this.recordState(state, backend.adapter.getStateOrigin?.());
       } catch (error: unknown) {
         if (backend.mode === 'file' && this.backend === backend) {
           await this.degradeToBrowser(error, true);
@@ -501,7 +564,7 @@ class StorageAuthority implements StorageAdapter {
       try {
         const state = await backend.adapter.ensureState();
         this.assertBackend(backend);
-        this.recordState(state);
+        this.recordState(state, backend.adapter.getStateOrigin?.());
         return this.lastKnownState || state;
       } catch (error: unknown) {
         if (backend.mode !== 'file' || this.backend !== backend) throw error;
@@ -511,7 +574,7 @@ class StorageAuthority implements StorageAdapter {
         this.assertBackend(current);
         const state = await current.adapter.ensureState();
         this.assertBackend(current);
-        this.recordState(state);
+        this.recordState(state, current.adapter.getStateOrigin?.());
         return this.lastKnownState || state;
       }
     });
@@ -553,14 +616,17 @@ class StorageAuthority implements StorageAdapter {
         shouldPublishPing: () => lifecycle === this.lifecycle && this.backend?.adapter === adapter,
       });
       this.assertLifecycle(lifecycle);
-      await adapter.setState(initialState);
+      const metadata = (await adapter.getBoundState!(undefined, false).catch(error => { if (error.code === 'RESTORE_ORIGIN_UNAVAILABLE') return undefined; throw error; }))?.metadata;
+      const origin = newOrigin('file');
+      await adapter.setState(initialState, { restoreMetadata: { origin, receipts: metadata?.receipts ?? [] } });
       this.assertLifecycle(lifecycle);
-      await commitFileHandleAndBootstrap(root, {
+      try { await commitFileHandleAndBootstrap(root, {
         fileUpdatedAt: initialState.updatedAt,
         unreadSessionCount: adapter.getUnreadSessionCount(),
-      }, undefined, () => this.assertLifecycle(lifecycle));
+      }, undefined, () => this.assertLifecycle(lifecycle), origin); }
+      catch (error) { await adapter.setRestoreMetadata!(metadata); throw error; }
       this.assertLifecycle(lifecycle);
-      this.installBackend({ mode: 'file', adapter }, initialState);
+      this.installBackend({ mode: 'file', adapter, root }, initialState, origin);
       await writeFilePing(initialState.mutationRevision, initialState.updatedAt);
     });
   }
@@ -584,8 +650,13 @@ class StorageAuthority implements StorageAdapter {
         await chromeAdapter.setState(fileStateToCopy);
       }
       const state = await chromeAdapter.getState();
+      const metadata = (await chromeAdapter.getBoundState!()).metadata;
+      const origin = newOrigin('browser');
       this.assertLifecycle(lifecycle);
-      await writeStorageStatusProjection({ ...BROWSER_STORAGE_STATUS });
+      await chrome.storage.local.set({
+        [RESTORE_METADATA_KEY]: { ...metadata, origin },
+        [BOOTSTRAP_KEY]: { ...BROWSER_STORAGE_STATUS, activeOrigin: origin },
+      });
       try {
         const { clearRootHandle } = await loadFsDirectoryModule();
         this.assertLifecycle(lifecycle);
@@ -594,7 +665,7 @@ class StorageAuthority implements StorageAdapter {
         logWarning('activeAdapter', 'Failed to clear root handle during switch to browser mode', err);
       }
       this.assertLifecycle(lifecycle);
-      this.installBackend({ mode: 'browser', adapter: chromeAdapter }, state);
+      this.installBackend({ mode: 'browser', adapter: chromeAdapter }, state, origin);
     });
   }
 
@@ -625,12 +696,16 @@ class StorageAuthority implements StorageAdapter {
         await adapter.setState(state);
       }
       this.assertLifecycle(lifecycle);
-      await commitFileHandleAndBootstrap(root, {
+      const oldMetadata = (await adapter.getBoundState!(undefined, false).catch(error => { if (error.code === 'RESTORE_ORIGIN_UNAVAILABLE') return undefined; throw error; }))?.metadata;
+      const origin = newOrigin('file');
+      await adapter.setRestoreMetadata!({ receipts: oldMetadata?.receipts ?? [], origin });
+      try { await commitFileHandleAndBootstrap(root, {
         fileUpdatedAt: adapter.getFileUpdatedAt(),
         unreadSessionCount: adapter.getUnreadSessionCount(),
-      }, state, () => this.assertLifecycle(lifecycle));
+      }, state, () => this.assertLifecycle(lifecycle), origin); }
+      catch (error) { await adapter.setRestoreMetadata!(oldMetadata); throw error; }
       this.assertLifecycle(lifecycle);
-      this.installBackend({ mode: 'file', adapter }, state);
+      this.installBackend({ mode: 'file', adapter, root }, state, origin);
     });
   }
 
@@ -648,7 +723,7 @@ class StorageAuthority implements StorageAdapter {
       this.assertBackend(backend);
       const state = await backend.adapter.getState();
       this.assertBackend(backend);
-      this.recordState(state);
+      this.recordState(state, backend.adapter.getStateOrigin?.());
       await writeFilePing(state.mutationRevision, state.updatedAt, {
         kind: 'explicit-reread',
         eventId,
@@ -667,6 +742,7 @@ class StorageAuthority implements StorageAdapter {
     this.backend = null;
     this.initPromise = null;
     this.lastKnownState = null;
+    this.lastKnownOrigin = undefined;
     this.lastSeenRevision = -1;
   }
 
@@ -707,22 +783,26 @@ async function commitFileHandleAndBootstrap(
   },
   selectedState: TabBoardState | undefined,
   assertCurrent: () => void,
+  origin?: OriginScope,
 ): Promise<void> {
   const {
     clearRootHandle,
     loadRootHandle,
     saveRootHandle,
+    loadRootBinding,
   } = await loadFsDirectoryModule();
   assertCurrent();
   const previousRoot = await loadRootHandle(testIdbFactory);
+  const previousBinding = loadRootBinding ? await loadRootBinding(testIdbFactory) : null;
   assertCurrent();
-  await saveRootHandle(root, testIdbFactory);
+  await saveRootHandle(root, testIdbFactory, origin);
   try {
     assertCurrent();
     const status = fileStorageStatus({
       folderName: root.name || null,
       fileUpdatedAt: health.fileUpdatedAt,
       unreadSessionCount: health.unreadSessionCount,
+      activeOrigin: origin,
     });
     if (selectedState) {
       await chrome.storage.local.set({
@@ -738,7 +818,7 @@ async function commitFileHandleAndBootstrap(
     }
   } catch (error: unknown) {
     if (previousRoot) {
-      await saveRootHandle(previousRoot, testIdbFactory);
+      await saveRootHandle(previousRoot, testIdbFactory, previousBinding?.origin);
     } else {
       await clearRootHandle(testIdbFactory);
     }
@@ -757,6 +837,18 @@ export async function getActiveAdapter(): Promise<StorageAdapter> {
   const activeAuthority = getAuthority();
   await activeAuthority.ready();
   return activeAuthority;
+}
+
+export async function getActiveBoundState(): Promise<BoundSnapshot> {
+  return getAuthority().getBoundState();
+}
+
+export async function getActiveRestoreSnapshot(): Promise<BoundSnapshot> {
+  const operation = () => getAuthority().getBoundState();
+  const locks = globalThis.navigator?.locks;
+  return typeof locks?.request === 'function'
+    ? locks.request('tabboard-state-write', { mode: 'exclusive' }, operation)
+    : operation();
 }
 
 export async function getActiveState(): Promise<TabBoardState> {

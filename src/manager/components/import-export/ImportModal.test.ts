@@ -9,13 +9,13 @@ import * as importParsers from '../../../shared/model/session-operations';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const actions = vi.hoisted(() => ({ importGroups: vi.fn(), restoreBackup: vi.fn(), currentRevision: 3 }));
+const actions = vi.hoisted(() => ({ importGroups: vi.fn(), restoreBackup: vi.fn(), currentRevision: 3, captureRestorePreview: vi.fn(async () => ({ expectedRevision: actions.currentRevision, origin: { mode: 'browser', scopeId: 'preview-source' } })) }));
 vi.mock('../../../shared/store/useTabBoardStore', () => ({
   useTabBoardStore: Object.assign((selector: (state: unknown) => unknown) => selector({
     activeWorkspaceId: 'workspace',
     mutationRevision: 3,
     ...actions,
-  }), { getState: () => ({ mutationRevision: actions.currentRevision }) }),
+  }), { getState: () => ({ mutationRevision: actions.currentRevision, captureRestorePreview: actions.captureRestorePreview }) }),
 }));
 
 let root: Root | null = null;
@@ -107,7 +107,7 @@ describe('ImportModal authority confirmation', () => {
     let resolve: (() => void) | undefined;
     actions.restoreBackup.mockImplementation(() => new Promise<void>(done => { resolve = done; }));
     await act(async () => button('Restore Backup').click());
-    expect(actions.restoreBackup).toHaveBeenCalledWith(text, 3);
+    expect(actions.restoreBackup).toHaveBeenCalledWith(text, { expectedRevision: 3, origin: { mode: 'browser', scopeId: 'preview-source' } });
     expect(onClose).not.toHaveBeenCalled();
     expect(document.querySelector('textarea')?.value).toBe(text);
     await act(async () => resolve?.());
@@ -129,7 +129,7 @@ it('retains restore mode and retries against the reconciled current revision aft
   expect(document.querySelector('textarea')?.value).toBe(text);
   expect(document.querySelector<HTMLInputElement>('input[value="restore"]')?.checked).toBe(true);
   await act(async () => button('Restore Backup').click());
-  expect(actions.restoreBackup.mock.calls.map(call => call[1])).toEqual([3, 4]);
+  expect(actions.restoreBackup.mock.calls.map(call => call[1].expectedRevision)).toEqual([3, 4]);
   expect(onClose).toHaveBeenCalledOnce();
 });
 

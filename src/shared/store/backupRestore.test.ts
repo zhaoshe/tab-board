@@ -123,7 +123,7 @@ describe('complete backup restore', () => {
       : new Promise(resolve => { complete = resolve; }) } });
     const { useTabBoardStore } = await import('./useTabBoardStore');
     useTabBoardStore.setState({ ...old, hydrated: true });
-    const pending = useTabBoardStore.getState().restoreBackup(exportToJson(source), 0);
+    const pending = useTabBoardStore.getState().restoreBackup(exportToJson(source), { expectedRevision: 0, origin: { mode: 'browser', scopeId: 'confirmed-preview' } });
     await vi.waitFor(() => expect(complete).toBeDefined());
     expect(useTabBoardStore.getState().activeWorkspaceId).toBe('workspace_default');
     const persistence = createStatePersistence({ getState: async () => old, setState: async () => undefined });

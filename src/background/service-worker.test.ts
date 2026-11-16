@@ -1,3 +1,4 @@
+import { restoreMemoryIdb } from '../shared/testing/restoreMemoryIdb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createEmptyState,
@@ -450,12 +451,7 @@ describe('tabboard-storage-switched message', () => {
       await write(value);
     });
     const root = createMemoryDirectory('selected-folder');
-    let savedRoot: FileSystemDirectoryHandle | null = null;
-    vi.doMock('../shared/store/fsDirectory', () => ({
-      loadRootHandle: async () => savedRoot,
-      saveRootHandle: async (handle: FileSystemDirectoryHandle) => { savedRoot = handle; },
-      clearRootHandle: async () => { savedRoot = null; },
-    }));
+    vi.stubGlobal('indexedDB', restoreMemoryIdb().factory);
     vi.stubGlobal('chrome', harness.chromeMock);
     await import('./service-worker');
     const authority = await import('../shared/store/activeAdapter');
@@ -493,7 +489,6 @@ describe('tabboard-storage-switched message', () => {
     } finally {
       store.getState().releaseHydration();
       authority.resetActiveAdapterForTests();
-      vi.doUnmock('../shared/store/fsDirectory');
     }
   });
 

@@ -1,3 +1,4 @@
+import type { RestorePreview } from './restoreCommit';
 import { create } from 'zustand';
 import type { TabBoardState, Folder, Group, TabItem, Settings, BinEntry } from '../model';
 import {
@@ -15,6 +16,7 @@ import {
   ensureActiveState,
   getActiveState,
   getActiveDatasetIdentity,
+  getActiveRestoreSnapshot,
   onFallback,
   subscribeActiveState,
 } from './activeAdapter';
@@ -104,7 +106,8 @@ interface TabBoardStore extends TabBoardState {
     options: { expectedCategoryOrder: readonly string[] },
   ) => Promise<void>;
   importGroups: (text: string, options?: { workspaceId?: string; folderId?: string | null }) => Promise<void>;
-  restoreBackup: (text: string, expectedRevision: number) => Promise<void>;
+  captureRestorePreview: () => Promise<RestorePreview>;
+  restoreBackup: (text: string, expectedRevision: number | RestorePreview) => Promise<void>;
   exportAll: () => string;
   toggleFolderCollapsed: (folderId: string) => void;
 }
@@ -193,6 +196,7 @@ const publication = createAuthoritativePublication({
     useTabBoardStore.setState(status);
   },
   initializeAuthoritativeState: ensureActiveState,
+  readRestoreSnapshot: getActiveRestoreSnapshot,
   subscribeAuthoritativeState: subscribeActiveState,
   sendMutations: sendStateMutations,
   currentContext: () => globalThis.chrome,
@@ -642,9 +646,10 @@ export const useTabBoardStore = create<TabBoardStore>((set, get) => ({
     }
   },
 
-  restoreBackup: (text, expectedRevision) => publication.commitChecked({
-    type: 'restore-backup', backup: parseCompleteBackup(text), expectedRevision, updatedAt: nowIso(),
-  }),
+  captureRestorePreview: () => publication.captureRestorePreview(),
+  restoreBackup: (text, preview) => publication.commitCompleteRestore({
+    type: 'restore-backup', backup: parseCompleteBackup(text), expectedRevision: typeof preview === 'number' ? preview : preview.expectedRevision, updatedAt: nowIso(),
+  }, preview as RestorePreview),
 
   exportAll: () => exportToJson(persistedSnapshot(get())),
 

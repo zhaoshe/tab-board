@@ -128,9 +128,13 @@ describe('ManagerApp hydration', () => {
       return get(keys);
     });
     const dispatchSpy = vi.spyOn(harness!, 'dispatchMessage').mockImplementation(async message => {
-      if (!recoveryPending && typeof message === 'object' && message !== null && 'type' in message && message.type === 'tabboard-state-mutations') {
+      if (!recoveryPending && typeof message === 'object' && message !== null && 'type' in message && message.type === 'tabboard-state-mutations' && 'restoreRequest' in message) {
+        // Advance only the external storage boundary; the real preview worker
+        // and Persistence then produce the definite no-commit CAS outcome.
+        await harness!.chrome.storage.local.set({ [STATE_KEY]: normalizeState({ ...before, mutationRevision: before.mutationRevision + 1 }) });
+        const response = await dispatch(message);
         recoveryPending = true;
-        return { ok: false, error: 'Review and retry', code: 'BACKUP_REVISION_CONFLICT' };
+        return response;
       }
       return dispatch(message);
     });
@@ -146,7 +150,7 @@ describe('ManagerApp hydration', () => {
     expect(document.body.textContent).not.toContain('Import failed:');
     expect(replace).not.toHaveBeenCalled();
     await act(async () => { recoveryPending = false; release(); });
-    await vi.waitFor(() => expect(document.body.textContent).toContain('Import failed: Review and retry'));
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Import failed: Data changed'));
     expect(textarea.value).toBe(text);
     expect(document.querySelector<HTMLInputElement>('input[value="restore"]')?.checked).toBe(true);
     expect(useTabBoardStore.getState().activeWorkspaceId).toBe('workspace_default');

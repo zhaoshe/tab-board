@@ -2207,3 +2207,15 @@ Proposed / Accepted / Rejected / Revisit
 - Reason: this preserves stale snapshot protection while letting the existing Authority/File notification path publish a user-confirmed repaired folder to current and peer Manager contexts.
 - Tradeoff: the ping payload gains optional metadata and Authority keeps a small event-id dedupe cache. Failed or retired rereads must reject or no-op before writing the explicit ping, so native acceptance still needs real OPFS and multi-Manager proof.
 - Status: implemented with File adapter, Authority, peer publication and deferred old-RPC regressions; native browser proof is recorded separately by the parent task.
+
+
+## D083: Confirm complete Restore from a durable request receipt
+
+- Problem: losing the success reply after a destructive Restore made its retry indistinguishable from a stale new replacement.
+- Decision: keep a Restore-bearing frozen request with independent request/attempt IDs and source scope. Commit its whole-batch receipt with Browser state/backup or File final-meta, retain prior receipts in recovery, and confirm historical full/partial outcomes before live validation. New unwitnessed requests retain strict CAS and must match their captured preview origin.
+- Reason: confirm an actual commit across worker restart without repeating committed ordinary siblings, overwriting later edits, replacing the original backup, or inferring success from equal content.
+- Tradeoff: auxiliary receipts grow with complete Restore count. File/IDB/status selection cannot share a platform transaction, so inconsistent intermediate bindings fail closed and require explicit reconnect. Unverifiable old-source requests reject as a whole instead of resending potentially committed siblings in the new source. UI attempts are not persisted across page destruction; pre-phase-1 File backup preparation retains its existing limits.
+- Status: implemented; native lost-reply confirmation remains a separate recorded acceptance gate.
+
+
+D083 review correction: retry identity also applies to isolated Restore-bearing requests. Actual proof-read failures are classified at the Persistence read boundary, preserving their causes instead of inferring availability from specific error codes. Authority high-water clocks are compared only after following the refreshed source origin. This closes committed-sibling replay and retired-scope overwrite gaps without changing the approved durable metadata or ordinary same-source rules.

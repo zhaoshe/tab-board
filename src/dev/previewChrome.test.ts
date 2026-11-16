@@ -436,17 +436,20 @@ describe('preview Chrome fixture', () => {
     const incoming = normalizeState({ ...incomingBase, mutationRevision: 90, workspaces: [second], activeWorkspaceId: second.id,
       settings: { ...incomingBase.settings, theme: 'dark', storageMode: 'file', storageFolderName: 'Other folder' } });
     const harness = install({ state: before, storagePersistence: { read: () => persisted || null, write: value => { persisted = value; } } });
+    const { getActiveRestoreSnapshot } = await import('../shared/store/activeAdapter');
+    const origin = (await getActiveRestoreSnapshot()).metadata.origin;
     const changes: unknown[] = [];
     harness.chrome.storage.onChanged.addListener(change => changes.push(change));
     const mutation = { type: 'restore-backup', backup: incoming, expectedRevision: 4, updatedAt: incoming.updatedAt };
-    const restored = await harness.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations: [mutation] });
-    expect(restored).toMatchObject({ ok: true, result: { mutationRevision: 5, activeWorkspaceId: 'workspace-second', settings: { theme: 'dark', storageMode: 'browser', storageFolderName: '' } } });
+    const restoreRequest = { requestId: crypto.randomUUID(), origin, mutations: [mutation], restoreAttempts: [{ originalIndex: 0, attemptId: crypto.randomUUID() }] };
+    const restored = await harness.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations: [mutation], restoreRequest });
+    expect(restored).toMatchObject({ ok: true, result: { state: { mutationRevision: 5, activeWorkspaceId: 'workspace-second', settings: { theme: 'dark', storageMode: 'browser', storageFolderName: '' } } } });
     const stored = await harness.chrome.storage.local.get(['tabboardState', 'tabboardBackupBeforeRestore']);
     expect(stored.tabboardBackupBeforeRestore).toEqual(before);
     expect(changes).toHaveLength(1);
     expect(changes[0]).toMatchObject({ tabboardState: { newValue: harness.state }, tabboardBackupBeforeRestore: { newValue: before } });
     expect(JSON.parse(persisted).tabboardBackupBeforeRestore).toEqual(before);
-    await expect(harness.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations: [mutation] })).resolves.toMatchObject({ ok: false, code: 'BACKUP_REVISION_CONFLICT' });
+    await expect(harness.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations: [mutation], restoreRequest: { ...restoreRequest, requestId: crypto.randomUUID(), restoreAttempts: [{ originalIndex: 0, attemptId: crypto.randomUUID() }] } })).resolves.toMatchObject({ ok: false, code: 'BACKUP_REVISION_CONFLICT' });
     expect(await harness.chrome.storage.local.get(['tabboardState', 'tabboardBackupBeforeRestore'])).toEqual(stored);
     expect(changes).toHaveLength(1);
   });
@@ -455,12 +458,15 @@ describe('preview Chrome fixture', () => {
     const before = createEmptyState();
     const incoming = normalizeState({ ...before, settings: { ...before.settings, theme: 'dark' } });
     const harness = install({ state: before });
+    const { getActiveRestoreSnapshot } = await import('../shared/store/activeAdapter');
+    const origin = (await getActiveRestoreSnapshot()).metadata.origin;
     vi.spyOn(harness.chrome.storage.local, 'set').mockRejectedValueOnce(new Error('Preview publication failed'));
-    const request = { type: 'tabboard-state-mutations', mutations: [{ type: 'restore-backup', backup: incoming, expectedRevision: 0, updatedAt: incoming.updatedAt }] };
+    const mutations = [{ type: 'restore-backup', backup: incoming, expectedRevision: 0, updatedAt: incoming.updatedAt }];
+    const request = { type: 'tabboard-state-mutations', mutations, restoreRequest: { requestId: crypto.randomUUID(), origin, mutations, restoreAttempts: [{ originalIndex: 0, attemptId: crypto.randomUUID() }] } };
     await expect(harness.chrome.runtime.sendMessage(request)).resolves.toMatchObject({ ok: false, error: 'Preview publication failed' });
     expect(harness.state).toEqual(before);
     expect(await harness.chrome.storage.local.get('tabboardBackupBeforeRestore')).toEqual({});
-    await expect(harness.chrome.runtime.sendMessage(request)).resolves.toMatchObject({ ok: true, result: { mutationRevision: 1, settings: { theme: 'dark' } } });
+    await expect(harness.chrome.runtime.sendMessage(request)).resolves.toMatchObject({ ok: true, result: { state: { mutationRevision: 1, settings: { theme: 'dark' } } } });
     expect((await harness.chrome.storage.local.get('tabboardBackupBeforeRestore')).tabboardBackupBeforeRestore).toEqual(before);
   });
 
@@ -1110,4 +1116,54 @@ describe('preview Chrome fixture', () => {
     expect(harness.listenerCount('tabs.onCreated')).toBe(0);
     expect(harness.listenerCount('windows.onFocusChanged')).toBe(0);
   });
+});
+
+it('preview worker confirms a committed complete Restore receipt after restart without another write', async () => {
+  let bytes = '';
+  const before = normalizeState({ ...createEmptyState(), mutationRevision: 7 });
+  const persistence = { read: () => bytes || null, write: (value: string) => { bytes = value; } };
+  const first = install({ state: before, storagePersistence: persistence });
+  const origin = { mode: 'browser' as const, scopeId: 'durable-preview-origin' };
+  await first.chrome.storage.local.set({ tabboardRestoreMetadata: { origin, receipts: [] }, tabboardStorageConfig: { configuredTarget: 'browser', activeBackend: 'browser', folderName: null, fallbackReason: null, fileUpdatedAt: null, activeOrigin: origin } });
+  const backup = normalizeState({ ...before, settings: { ...before.settings, theme: 'dark' } });
+  const mutations = [{ type: 'restore-backup', backup, expectedRevision: 7, updatedAt: before.updatedAt }];
+  const restoreRequest = { requestId: crypto.randomUUID(), origin, mutations, restoreAttempts: [{ originalIndex: 0, attemptId: crypto.randomUUID() }] };
+  await first.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations, restoreRequest });
+  uninstallInstalledHarnesses();
+  const second = install({ storagePersistence: persistence });
+  const beforeReplay = bytes;
+  expect(await second.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations, restoreRequest })).toMatchObject({ ok: true, result: { confirmedByReceipt: true, state: { mutationRevision: 8 } } });
+  expect(bytes).toBe(beforeReplay);
+  expect((await second.chrome.storage.local.get('tabboardBackupBeforeRestore')).tabboardBackupBeforeRestore).toEqual(before);
+});
+
+it('preview complete Restore uses the actual bound File Authority and persists its receipt outside browser mirrors', async () => {
+  const { restoreMemoryIdb } = await import('../shared/testing/restoreMemoryIdb');
+  const { createMemoryDirectory } = await import('../shared/testing/memoryFs');
+  const { switchToFileMode, getActiveRestoreSnapshot, resetActiveAdapter } = await import('../shared/store/activeAdapter');
+  const { initFileStorageDirectory } = await import('../shared/store/fileStorage');
+  const { readTextFile } = await import('../shared/store/fsAtomic');
+  const previousIdb = globalThis.indexedDB;
+  Object.defineProperty(globalThis, 'indexedDB', { value: restoreMemoryIdb().factory, configurable: true });
+  try {
+    let bytes = '';
+    const storagePersistence = { read: () => bytes || null, write: (value: string) => { bytes = value; } };
+    const browser = normalizeState({ ...createEmptyState(), mutationRevision: 7 });
+    const fileWorkspace = { ...browser.workspaces[0], id: 'file-source', name: 'File source' };
+    const file = normalizeState({ ...browser, workspaces: [fileWorkspace], activeWorkspaceId: fileWorkspace.id });
+    const harness = install({ state: browser, storagePersistence });
+    const root = createMemoryDirectory('actual-file');
+    await switchToFileMode(root, file);
+    const origin = (await getActiveRestoreSnapshot()).metadata.origin;
+    const backup = normalizeState({ ...file, settings: { ...file.settings, theme: 'dark' } });
+    const mutations = [{ type: 'restore-backup', backup, expectedRevision: 7, updatedAt: backup.updatedAt }];
+    const restoreRequest = { requestId: crypto.randomUUID(), origin, mutations, restoreAttempts: [{ originalIndex: 0, attemptId: crypto.randomUUID() }] };
+    expect(await harness.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations, restoreRequest })).toMatchObject({ ok: true, result: { state: { mutationRevision: 8, activeWorkspaceId: 'file-source', settings: { theme: 'dark' } } } });
+    expect(JSON.parse(await readTextFile(await root.getFileHandle('.tabboard-before-restore.json')))).toEqual(file);
+    expect((await initFileStorageDirectory(root)).restoreMetadata?.receipts).toHaveLength(1);
+    expect(await harness.chrome.storage.local.get('tabboardBackupBeforeRestore')).toEqual({});
+    uninstallInstalledHarnesses(); resetActiveAdapter();
+    const restarted = install({ storagePersistence });
+    expect(await restarted.chrome.runtime.sendMessage({ type: 'tabboard-state-mutations', mutations, restoreRequest })).toMatchObject({ ok: true, result: { confirmedByReceipt: true, origin, state: { mutationRevision: 8, activeWorkspaceId: 'file-source' } } });
+  } finally { Object.defineProperty(globalThis, 'indexedDB', { value: previousIdb, configurable: true }); }
 });

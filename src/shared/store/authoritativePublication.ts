@@ -1,3 +1,4 @@
+import { restoreOutcome, isOrigin, restoreError, sameOrigin, type BoundSnapshot, type OriginScope, type RestorePreview, type RestoreRequest, type MutationCommitAck } from './restoreCommit';
 import { DROP_OPERATION_LEDGER_LIMIT, type TabBoardState } from '../model';
 import type { StorageObservation } from './storageAdapter';
 import {
@@ -35,8 +36,9 @@ export interface AuthoritativePublicationDependencies {
   publishProjection(state: TabBoardState, status?: PublicationStatus): void;
   patchStatus(status: PublicationStatus): void;
   initializeAuthoritativeState(): Promise<TabBoardState>;
+  readRestoreSnapshot?(): Promise<BoundSnapshot>;
   subscribeAuthoritativeState(callback: (state: TabBoardState, observation?: StorageObservation) => void): () => void;
-  sendMutations(mutations: readonly StateMutation[]): Promise<TabBoardState>;
+  sendMutations(mutations: readonly StateMutation[], request?: RestoreRequest): Promise<TabBoardState | MutationCommitAck>;
   currentContext(): unknown;
   currentDataset(): unknown;
   onPersistenceError(error: unknown, notify: boolean): void;
@@ -44,6 +46,8 @@ export interface AuthoritativePublicationDependencies {
 }
 
 export interface AuthoritativePublication {
+  captureRestorePreview(): Promise<RestorePreview>;
+  commitCompleteRestore(mutation: Extract<StateMutation, { type: 'restore-backup' }>, preview: RestorePreview): Promise<void>;
   reconcileCaptureCommit(canonical: TabBoardState): void;
   commit(mutation: StateMutation): void;
   commitChecked(mutation: StateMutation): Promise<void>;
@@ -379,6 +383,15 @@ export function createAuthoritativePublication(
   let retryTimeout: ReturnType<typeof setTimeout> | null = null;
   let persistenceRetryAttempt = 0;
   let suppressRetrySchedule = false;
+  let canonicalOrigin: OriginScope | undefined;
+  const restorePreviews = new WeakMap<StateMutation, RestorePreview>();
+  const restoreAttempts = new WeakMap<StateMutation, string>();
+  let frozenRestore: { batch: StateMutation[]; request: RestoreRequest } | null = null;
+  const unwrap = (value: TabBoardState | BoundSnapshot | MutationCommitAck): TabBoardState => {
+    if ('metadata' in value) { canonicalOrigin = value.metadata.origin; return value.state; }
+    if ('confirmedByReceipt' in value) { canonicalOrigin = value.origin; return value.state; }
+    return value;
+  };
   let pendingMutations: StateMutation[] = [];
   let inFlightMutations: StateMutation[] | null = null;
   let projectedMutations = new Set<StateMutation>();
@@ -506,6 +519,8 @@ export function createAuthoritativePublication(
         );
       }
       pendingMutations = [];
+      frozenRestore = null;
+      canonicalOrigin = undefined;
       inFlightMutations = null;
       projectedMutations.clear();
       pendingRemoteState = null;
@@ -573,7 +588,7 @@ export function createAuthoritativePublication(
     syncCanonicalDataset();
     let recovered: TabBoardState | null = null;
     try {
-      recovered = await dependencies.initializeAuthoritativeState();
+      recovered = unwrap(await dependencies.initializeAuthoritativeState());
     } catch {
       recovered = null;
     }
@@ -616,6 +631,13 @@ export function createAuthoritativePublication(
   };
 
   const acceptRemoteState = (state: TabBoardState, observation?: StorageObservation): void => {
+    if (observation?.origin) {
+      if (canonicalOrigin && !sameOrigin(canonicalOrigin, observation.origin)) {
+        lastAuthoritativeState = null;
+        pendingRemoteState = null;
+      }
+      canonicalOrigin = observation.origin;
+    }
     if (disposed) return;
     syncCanonicalDataset();
     const incoming = remoteObservation(state, observation);
@@ -720,8 +742,18 @@ export function createAuthoritativePublication(
       pendingMutations = [...remaining, ...queuedOutsideBatch];
       inFlightMutations = [mutation];
       const requestDataset = dependencies.currentDataset();
+      let request: RestoreRequest | undefined;
+      let receivedOutcome = false;
       try {
-        let persisted: TabBoardState | null = await dependencies.sendMutations([mutation]);
+        const preview = restorePreviews.get(mutation);
+        request = mutation.type === 'restore-backup' && preview ? {
+          requestId: crypto.randomUUID(), origin: preview.origin, mutations: JSON.parse(JSON.stringify([mutation])),
+          restoreAttempts: [{ originalIndex: 0, attemptId: restoreAttempts.get(mutation) ?? crypto.randomUUID() }],
+        } : undefined;
+        const response = await (request ? dependencies.sendMutations([mutation], request) : dependencies.sendMutations([mutation]));
+        receivedOutcome = true;
+        const historical = 'confirmedByReceipt' in response && response.confirmedByReceipt;
+        let persisted: TabBoardState | null = unwrap(response);
         const sameDataset = requestDataset === dependencies.currentDataset();
         if (!sameDataset) persisted = await recoverAuthoritativeState();
         if (generation !== publicationGeneration || disposed) {
@@ -740,7 +772,7 @@ export function createAuthoritativePublication(
         pendingMutations = [...remaining, ...queuedOutsideBatch];
         const reconciliationFailures = persisted ? reconcileAuthoritativeState(
           persisted,
-          sameDataset ? [mutation] : [],
+          sameDataset && !historical ? [mutation] : [],
         ) : [];
         if (persisted) rebasePendingDropRevisions(lastAuthoritativeState || persisted);
         if (reconciliationFailures.length) {
@@ -756,7 +788,26 @@ export function createAuthoritativePublication(
         );
       } catch (error: unknown) {
         inFlightMutations = null;
-        const terminalFailure = isTerminalSemanticError(error)
+        if (request && !receivedOutcome && !restoreOutcome(error)
+          && !committedMutationIndexes(error, [mutation]).size) {
+          frozenRestore = { batch: [mutation], request };
+          captureQueuedMutations();
+          remaining = [mutation, ...remaining];
+          pendingMutations = [...remaining, ...queuedOutsideBatch];
+          canRetry = true;
+          // Only the exact receipt retry can settle this uncertain commit.
+          // Recovery replay would prune this original mutation as CAS-stale.
+          break;
+        }
+        if (request && restoreOutcome(error) === 'proof-unavailable') {
+          captureQueuedMutations();
+          pendingMutations = [...remaining, ...queuedOutsideBatch];
+          failures.push({ mutation, error });
+          firstError = error;
+          break;
+        }
+        const terminalFailure = (isTerminalSemanticError(error)
+          || (request && restoreOutcome(error) === 'not-committed'))
           && !isRestoreCollisionError(error);
         captureQueuedMutations();
         remaining = terminalFailure ? remaining : [mutation, ...remaining];
@@ -837,15 +888,50 @@ export function createAuthoritativePublication(
     const generation = publicationGeneration;
     return enqueue(async () => {
       if (generation !== publicationGeneration || disposed) return null;
-      const batch = [...takePendingMutations(), ...additional];
+      let batch: StateMutation[];
+      let request: RestoreRequest | undefined;
+      if (frozenRestore) {
+        pendingMutations = [...pendingMutations, ...additional];
+        batch = frozenRestore.batch;
+        pendingMutations = pendingMutations.filter(m => !batch.includes(m));
+        request = frozenRestore.request;
+      } else {
+        batch = [...takePendingMutations(), ...additional];
+        const restores = batch.flatMap((m, originalIndex) => m.type === 'restore-backup' ? [{ m, originalIndex }] : []);
+        if (restores.length) {
+          const preview = restorePreviews.get(restores[0].m);
+          if (!preview || restores.some(({ m }) => !sameOrigin(restorePreviews.get(m)?.origin, preview.origin))) {
+            // No request has been sent. Keep ordinary siblings for their normal batch.
+            pendingMutations = [...batch.filter(m => m.type !== 'restore-backup'), ...pendingMutations];
+            const error = restoreError('RESTORE_PREVIEW_REQUIRED', 'Review the complete backup in the current storage source before restoring it.');
+            const missing = takePersistenceWaiters(batch.filter(m => m.type === 'restore-backup'));
+            settlePersistenceWaiters(missing, batch.filter(m => m.type === 'restore-backup'), error, new Set());
+            throw error;
+          }
+          request = {
+            requestId: crypto.randomUUID(), origin: preview.origin,
+            mutations: JSON.parse(JSON.stringify(batch)),
+            restoreAttempts: restores.map(({ m, originalIndex }) => {
+              let attemptId = restoreAttempts.get(m);
+              if (!attemptId) { attemptId = crypto.randomUUID(); restoreAttempts.set(m, attemptId); }
+              return { originalIndex, attemptId };
+            }),
+          };
+        }
+      }
       if (additional.length > 0) suppressRetrySchedule = false;
       const waiters = takePersistenceWaiters(batch);
       inFlightPersistenceWaiters = waiters;
       if (!batch.length || disposed) return null;
       inFlightMutations = batch;
       const requestDataset = dependencies.currentDataset();
+      let receivedOutcome = false;
       try {
-        let authoritative: TabBoardState | null = await dependencies.sendMutations(batch);
+        const response = await (request ? dependencies.sendMutations(batch, request) : dependencies.sendMutations(batch));
+        receivedOutcome = true;
+        const historical = 'confirmedByReceipt' in response && response.confirmedByReceipt;
+        let authoritative: TabBoardState | null = unwrap(response);
+        frozenRestore = null;
         const sameDataset = requestDataset === dependencies.currentDataset();
         // An old request may finish after selection; its outcome remains real, its snapshot belongs to the retired dataset.
         if (!sameDataset) authoritative = await recoverAuthoritativeState();
@@ -853,7 +939,7 @@ export function createAuthoritativePublication(
         inFlightMutations = null;
         settlePersistenceWaiters(waiters, batch);
         inFlightPersistenceWaiters = [];
-        const failures = authoritative ? reconcileAuthoritativeState(authoritative, sameDataset ? batch : []) : [];
+        const failures = authoritative ? reconcileAuthoritativeState(authoritative, sameDataset && !historical ? batch : []) : [];
         batch.forEach(dependencies.onMutationCommitted);
         persistenceRetryAttempt = 0;
         suppressRetrySchedule = false;
@@ -867,16 +953,41 @@ export function createAuthoritativePublication(
         if (dependencies.readProjection().persistenceError) {
           dependencies.patchStatus({ persistenceError: null });
         }
+        if (pendingMutations.length) scheduleSave();
         return authoritative;
       } catch (error: unknown) {
         if (generation !== publicationGeneration || disposed) return null;
         inFlightMutations = null;
+        const historical = !!(error && typeof error === 'object' && 'confirmedByReceipt' in error && error.confirmedByReceipt);
+        if (historical && error && typeof error === 'object' && 'committedOrigin' in error && isOrigin(error.committedOrigin)) canonicalOrigin = error.committedOrigin;
+        const unknownRestoreOutcome = !!request && !receivedOutcome && !restoreOutcome(error)
+          && !historical && !committedMutationIndexes(error, batch).size;
+        frozenRestore = unknownRestoreOutcome ? { batch, request: request! } : null;
+        const restoreProofFailure = !!request && restoreOutcome(error) === 'proof-unavailable';
+        if (restoreProofFailure) {
+          // A retired/inconsistent source cannot prove which siblings committed.
+          // Reject this whole request; ordinary semantic isolation is safe only
+          // when this source proves the transaction never committed.
+          const recovered = await recoverAuthoritativeState();
+          if (generation !== publicationGeneration || disposed) return null;
+          if (recovered) reconcileAuthoritativeState(recovered);
+          settlePersistenceWaiters(waiters, batch, error, new Set());
+          inFlightPersistenceWaiters = [];
+          if (retryTimeout) clearTimeout(retryTimeout);
+          retryTimeout = null;
+          persistenceRetryAttempt = 0;
+          const owned = new Set(waiters.map(w => w.mutation));
+          dependencies.onPersistenceError(error, batch.some(m => !owned.has(m)));
+          if (pendingMutations.length) scheduleSave();
+          throw error;
+        }
         const validationFailure = isCategoryValidationError(error);
         const restoreCollision = isRestoreCollisionError(error);
         const invalidIndexes = invalidDropIndexes(error, batch);
         const committedIndexes = committedMutationIndexes(error, batch);
         const invalidDrop = invalidIndexes.size > 0;
-        const terminalOrdinaryFailure = isTerminalSemanticError(error)
+        const terminalOrdinaryFailure = !unknownRestoreOutcome
+          && (isTerminalSemanticError(error) || (!!request && restoreOutcome(error) === 'not-committed'))
           && !validationFailure
           && !restoreCollision
           && !invalidDrop;
@@ -1022,7 +1133,7 @@ export function createAuthoritativePublication(
         }
         let reconciliationFailures: ReconciliationFailure[] = [];
         if (reconciliationState) {
-          const committedMutations = sameDataset ? batch.filter(
+          const committedMutations = sameDataset && !historical ? batch.filter(
             (_, index) => committedIndexes.has(index),
           ) : [];
           reconciliationFailures = reconcileAuthoritativeState(
@@ -1187,6 +1298,23 @@ export function createAuthoritativePublication(
   };
 
   return {
+    captureRestorePreview: async () => {
+      const dataset = dependencies.currentDataset();
+      const context = dependencies.currentContext();
+      if (!dependencies.readRestoreSnapshot) throw restoreError('RESTORE_ORIGIN_UNAVAILABLE', 'A bound complete backup preview is unavailable.');
+      const snapshot = await dependencies.readRestoreSnapshot();
+      if (context !== dependencies.currentContext() || dataset !== dependencies.currentDataset()) throw restoreError('RESTORE_ORIGIN_CHANGED', 'The storage source changed while previewing the backup. Review it again.');
+      const changed = canonicalOrigin && !sameOrigin(canonicalOrigin, snapshot.metadata.origin);
+      if (changed) { lastAuthoritativeState = null; pendingRemoteState = null; }
+      canonicalOrigin = snapshot.metadata.origin;
+      reconcileCaptureCommit(snapshot.state);
+      return { expectedRevision: dependencies.readProjection().state.mutationRevision, origin: { ...snapshot.metadata.origin } };
+    },
+    commitCompleteRestore: (mutation, preview) => {
+      if (!preview || typeof preview !== 'object' || !preview.origin || preview.expectedRevision !== mutation.expectedRevision) return Promise.reject(restoreError('RESTORE_PREVIEW_REQUIRED', 'A captured complete backup preview is required.'));
+      restorePreviews.set(mutation, { expectedRevision: preview.expectedRevision, origin: { ...preview.origin } });
+      return commitChecked(mutation);
+    },
     reconcileCaptureCommit,
     commit,
     commitChecked,
@@ -1217,7 +1345,7 @@ export function createAuthoritativePublication(
               acceptRemoteState(state, observation);
             },
           );
-          const authoritative = await dependencies.initializeAuthoritativeState();
+          const authoritative = unwrap(await dependencies.initializeAuthoritativeState());
           if (disposed || generation !== hydrationGeneration) return;
           if (syncCanonicalDataset()) pendingHydrationState = null;
           const projection = dependencies.readProjection();
@@ -1264,6 +1392,8 @@ export function createAuthoritativePublication(
       saveTimeout = null;
       retryTimeout = null;
       pendingMutations = [];
+      frozenRestore = null;
+      canonicalOrigin = undefined;
       inFlightMutations = null;
       projectedMutations.clear();
       pendingRemoteState = null;

@@ -1,3 +1,4 @@
+import type { RestorePreview } from '../../../shared/store/restoreCommit';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Textarea,
@@ -28,7 +29,7 @@ interface ImportModalProps {
   opened: boolean;
   onClose: () => void;
   category?: CategoryFilter;
-  onRestoreBackup?: (text: string, expectedRevision: number) => Promise<void>;
+  onRestoreBackup?: (text: string, preview: RestorePreview) => Promise<void>;
 }
 
 export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBackup }: ImportModalProps) {
@@ -37,10 +38,16 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
   const [isDragging, setIsDragging] = useState(false);
   const [previewText, setPreviewText] = useState('');
   const [mode, setMode] = useState<'sessions' | 'restore'>('sessions');
-  const [expectedRevision, setExpectedRevision] = useState(0);
+  const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const fileReadGeneration = useRef(0);
-  const mutationRevision = useTabBoardStore((state) => state.mutationRevision);
+  const capturePreview = () => {
+    const generation = fileReadGeneration.current;
+    setRestorePreview(null);
+    void useTabBoardStore.getState().captureRestorePreview().then(preview => {
+      if (generation === fileReadGeneration.current) setRestorePreview(preview);
+    }).catch(() => { /* The Restore action explains missing provenance on submit. */ });
+  };
   const restoreBackup = useTabBoardStore((state) => state.restoreBackup);
   const importGroups = useTabBoardStore((state) => state.importGroups);
   const activeWorkspaceId = useTabBoardStore((state) => state.activeWorkspaceId);
@@ -90,7 +97,7 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
     setImportText(value);
     if (!value) setPreviewText('');
     setError(null);
-    setExpectedRevision(mutationRevision);
+    if (mode === 'restore') capturePreview();
   };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -140,7 +147,8 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
     setIsImporting(true);
     try {
       if (mode === 'restore') {
-        await (onRestoreBackup ?? restoreBackup)(importText, expectedRevision);
+        if (!restorePreview) throw new Error('Wait for the current storage source to load, then review the backup again.');
+        await (onRestoreBackup ?? restoreBackup)(importText, restorePreview);
       } else {
         await importGroups(importText, { workspaceId: activeWorkspaceId, folderId });
       }
@@ -151,7 +159,7 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
       onClose();
     } catch (e) {
       setError(`Import failed: ${e instanceof Error ? e.message : 'unknown error'}. Check the format and try again.`);
-      setExpectedRevision(useTabBoardStore.getState().mutationRevision);
+      if (mode === 'restore') capturePreview();
     } finally {
       setIsImporting(false);
     }
@@ -239,7 +247,7 @@ export function ImportModal({ opened, onClose, category = 'inbox', onRestoreBack
           <Radio.Group
             label="Import mode"
             value={mode}
-            onChange={(value) => { setMode(value === 'restore' ? 'restore' : 'sessions'); setError(null); setExpectedRevision(mutationRevision); }}
+            onChange={(value) => { setMode(value === 'restore' ? 'restore' : 'sessions'); setError(null); if (value === 'restore') capturePreview(); }}
           >
             <Stack gap="xs" mt="xs">
               <Radio value="sessions" label="Add sessions to this workspace" disabled={isImporting} />

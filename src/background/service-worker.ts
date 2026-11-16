@@ -45,6 +45,7 @@ import {
   _setActiveAdapterModuleLoadersForWorker,
   ensureActiveState as ensureState,
   getActiveState as getState,
+  getActiveBoundState as getBoundState,
   resetActiveAdapter,
   setActiveState as setState,
 } from '../shared/store/activeAdapter';
@@ -58,6 +59,7 @@ import {
   type StateMutation,
 } from '../shared/store/stateMutations';
 import { readSettingsProjection } from '../shared/store/settingsProjection';
+import { restoreError, type RestoreRequest } from '../shared/store/restoreCommit';
 import { logWarning } from '../shared/utils/diagnostics';
 import {
   isBoundedString,
@@ -85,7 +87,7 @@ let persistencePromise: Promise<StatePersistence> | null = null;
 
 function getPersistence(): Promise<StatePersistence> {
   if (!persistencePromise) {
-    persistencePromise = Promise.resolve(createStatePersistence({ getState, setState, ensureState }));
+    persistencePromise = Promise.resolve(createStatePersistence({ getState, getBoundState, setState, ensureState }));
   }
   return persistencePromise;
 }
@@ -262,6 +264,7 @@ async function getVerifiedLiveOpenTabs(
 }
 
 async function applyWorkerMutations(input: unknown): Promise<TabBoardState> {
+  if (Array.isArray(input) && input.some(m => m?.type === 'restore-backup')) throw restoreError('RESTORE_PREVIEW_REQUIRED', 'A complete restore requires a captured storage preview and request identity.');
   const batch = createMutationBatch(input);
   const state = await getState();
   const verified = await batch.verify(
@@ -310,9 +313,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         invalidMutationIndexes?: unknown;
         committedMutationIndexes?: unknown;
         committedState?: unknown;
+        confirmedByReceipt?: unknown;
+        committedOrigin?: unknown;
+        restoreOutcome?: unknown;
       } : {};
       sendResponse({
         ok: false,
+        ...(structured.restoreOutcome === 'proof-unavailable' || structured.restoreOutcome === 'not-committed' ? { restoreOutcome: structured.restoreOutcome } : {}),
+        ...(structured.confirmedByReceipt === true ? { confirmedByReceipt: true, origin: structured.committedOrigin } : {}),
         error: error instanceof Error ? error.message : String(error),
         ...(typeof structured.code === 'string' ? { code: structured.code } : {}),
         ...(Array.isArray(structured.invalidMutationIndexes)
@@ -333,7 +341,13 @@ async function handleMessage(message: { type?: string; action?: string; [key: st
   const action = message?.type || message?.action;
   switch (action) {
     case 'tabboard-state-mutations':
-      return enqueueRestore(() => applyWorkerMutations(message.mutations));
+      return enqueueRestore(async () => {
+        if (message.restoreRequest) {
+          const request = message.restoreRequest as RestoreRequest;
+          return (await getPersistence()).applyRestoreRequest(request, state => createMutationBatch(request.mutations).verify(state, getVerifiedLiveOpenTabs));
+        }
+        return applyWorkerMutations(message.mutations);
+      });
     case 'tabboard-ensure-state':
       return enqueueRestore(async () => (await getPersistence()).ensureState());
     case 'tabboard-storage-switched':

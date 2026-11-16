@@ -1,3 +1,4 @@
+import { isOrigin, restoreError } from './restoreCommit';
 /**
  * Bootstrap key management.
  *
@@ -22,6 +23,8 @@ export async function readBootstrapMode(): Promise<StorageMode> {
 
 export async function readStorageStatusProjection(): Promise<StorageStatusProjection> {
   const result = await chrome.storage.local.get(BOOTSTRAP_KEY);
+  const raw = result[BOOTSTRAP_KEY] as { activeOrigin?: unknown } | undefined;
+  if (raw?.activeOrigin !== undefined && !isOrigin(raw.activeOrigin)) throw restoreError('RESTORE_METADATA_INVALID', 'Storage origin metadata is invalid. Reconnect the storage source.');
   return parseStorageStatusProjection(result[BOOTSTRAP_KEY])
     ?? { ...BROWSER_STORAGE_STATUS };
 }
